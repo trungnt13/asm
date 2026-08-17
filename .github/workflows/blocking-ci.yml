@@ -1,72 +1,118 @@
 name: blocking-ci
 
-# This is the single entrypoint for checks that block a PR merge. It also runs
-# after pushes to main so the same check family stays grouped in the Actions UI.
 on:
   pull_request: {}
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}::${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
 jobs:
-  # Keep reusable workflow calls alphabetized. The `required` job below is the
-  # version-controlled list that the main-branch ruleset should require.
-  bazel:
-    name: Bazel
-    uses: ./.github/workflows/bazel.yml
-    secrets: inherit
-
-  blob-size-policy:
-    name: Blob size policy
-    uses: ./.github/workflows/blob-size-policy.yml
-    secrets: inherit
-
-  cargo-deny:
-    name: cargo-deny
-    uses: ./.github/workflows/cargo-deny.yml
-    secrets: inherit
-
-  codespell:
-    name: Codespell
-    uses: ./.github/workflows/codespell.yml
-    secrets: inherit
-
-  repo-checks:
-    name: repo-checks
-    uses: ./.github/workflows/repo-checks.yml
-    secrets: inherit
-
-  rust-ci:
-    name: rust-ci
-    uses: ./.github/workflows/rust-ci.yml
-    secrets: inherit
-
-  sdk:
-    name: sdk
-    uses: ./.github/workflows/sdk.yml
-    secrets: inherit
-
-  required:
-    name: CI required
-    # Without `always()`, GitHub skips this job after a failed dependency and a
-    # required check can appear successful instead of reporting the failure.
-    if: ${{ always() }}
-    needs:
-      - bazel
-      - blob-size-policy
-      - cargo-deny
-      - codespell
-      - repo-checks
-      - rust-ci
-      - sdk
+  general:
+    name: Format and dependency checks
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
     steps:
-      # Keep the helper on the same combined revision as the child workflows so
-      # the merge gate evaluates the exact candidate they validated.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt -- --config imports_granularity=Item --check
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: cargo-shear@1.11.2
+      - name: Check unused dependencies
+        run: cargo shear --deny-warnings
 
-      - name: Require successful dependencies
+  build:
+    name: Clippy ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Use hermetic Cargo home
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
+          mkdir -p "${cargo_home}/bin"
+          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
+          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
+          : > "${cargo_home}/config.toml"
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Install musl build tools
         env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: python3 .github/scripts/check_ci_results.py
+          TARGET: ${{ matrix.target }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Disable aws-lc jitter entropy
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${{ matrix.target }}"
+          target_no_jitter="${target_no_jitter//-/_}"
+          echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+      - name: Configure rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+      - name: Run Clippy
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo clippy --target "$TARGET" --tests -- -D warnings
+
+  results:
+    name: Fork CI results (required)
+    if: ${{ always() }}
+    needs: [general, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require successful checks
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          GENERAL_RESULT: ${{ needs.general.result }}
+        run: |
+          [[ "$GENERAL_RESULT" == success ]] || exit 1
+          [[ "$BUILD_RESULT" == success ]] || exit 1
