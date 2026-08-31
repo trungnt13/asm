@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `7093e8c480715667a5a75b602fd8c9ca2cad1780`
-- **Date:** 2026-08-12
-- **Upstream subject:** `Start required cached MCP servers lazily for subagents (#38217)`
+- **Commit:** `a9519cbcdd2d664530edb2469224ee03c1056799`
+- **Date:** 2026-08-31
+- **Upstream subject:** `Make the update_plan tool opt-in (#41744)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
@@ -69,9 +69,9 @@ Inspect the range from the recorded marker:
 
 ```bash
 git log --oneline --decorate \
-  7093e8c480715667a5a75b602fd8c9ca2cad1780..upstream/main
+  a9519cbcdd2d664530edb2469224ee03c1056799..upstream/main
 git diff --stat \
-  7093e8c480715667a5a75b602fd8c9ca2cad1780..upstream/main
+  a9519cbcdd2d664530edb2469224ee03c1056799..upstream/main
 ```
 
 Do not import a large range blindly. Review upstream changes to the conflict hotspots in section 6 first.
