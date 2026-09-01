@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `633ab199cfd724aa78013c006b27a2b3d049fc3b`
+- **Commit:** `3c6bb8b3ebfe3462e781047d00bd6aae11a54c83`
 - **Date:** 2026-09-01
-- **Upstream subject:** `Enforce marketplace source policy for curated plugins (#41953)`
+- **Upstream subject:** `Detect standalone installs from the macOS CLI bundle (#42068)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
