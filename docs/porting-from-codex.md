@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `98a8425e223106d6e20fb31881fd693e9c56cf63`
-- **Date:** 2026-08-31
-- **Upstream subject:** `Preserve Guardian user answers from current history (#41857)`
+- **Commit:** `633ab199cfd724aa78013c006b27a2b3d049fc3b`
+- **Date:** 2026-09-01
+- **Upstream subject:** `Enforce marketplace source policy for curated plugins (#41953)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
