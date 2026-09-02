@@ -6,7 +6,7 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `ddf8a67ab0e5b2f6a0f06ac5ac0d4e4d6cc75ad3`
+- **Commit:** `ddf8a67ab09cd76b8adc0969f11ee1271179aba7`
 - **Date:** 2026-09-02
 - **Upstream subject:** `Fix punctuation in npm packaging documentation (#42188)`
 
