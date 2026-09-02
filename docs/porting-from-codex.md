@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `ddf8a67ab09cd76b8adc0969f11ee1271179aba7`
+- **Commit:** `389dd5645944891b65e4ca584125bbb0c852d352`
 - **Date:** 2026-09-02
-- **Upstream subject:** `Fix punctuation in npm packaging documentation (#42188)`
+- **Upstream subject:** `Expand Guardian history coverage across resume and rollback (#42290)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
