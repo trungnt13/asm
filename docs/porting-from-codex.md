@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `6d7f6dcd2285de70a3892d4f05b2a8ff44aa3350`
+- **Commit:** `1f7b99922a285f748ef323a53d421fd67ef8438d`
 - **Date:** 2026-09-03
-- **Upstream subject:** `Register the Guardian thread context feature flag (#42529)`
+- **Upstream subject:** `Add GPT-6-Astra to Amazon Bedrock catalogs (#42619)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
