@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `a7ab2d66d781b903cb060288a89e26e8d2b9a05f`
+- **Commit:** `b3f5e45cc1de8bcb09d320f3211378db285aa201`
 - **Date:** 2026-09-04
-- **Upstream subject:** `Use a generic fallback model name in status tests (#42657)`
+- **Upstream subject:** `Add direct SigV4 transport to exec-server (#42781)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
