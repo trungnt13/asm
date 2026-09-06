@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `588b781ab4924ce7352488394028e63d74cf807f`
-- **Date:** 2026-09-05
-- **Upstream subject:** `Add Guardian V2 failure reasons and connection timing metrics (#43005)`
+- **Commit:** `6af345407d9c2a568da9d01b6c4b81a9e61495c0`
+- **Date:** 2026-09-06
+- **Upstream subject:** `Gate experimental context by model capability at session startup (#43147)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
