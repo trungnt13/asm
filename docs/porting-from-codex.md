@@ -135,7 +135,7 @@ Watch repository-specific generated or locked outputs:
 
 - A Rust dependency change requires `just bazel-lock-update` from the repository root and the resulting `MODULE.bazel.lock` update.
 - A `ConfigToml` shape change requires `just write-config-schema`.
-- App-server protocol changes require the matching schema generation and app-server documentation updates.
+- App-server protocol changes require the matching schema generation.
 - New compile-time file reads such as `include_str!` also require the crate's Bazel data declarations.
 - User-visible TUI changes require reviewed `insta` snapshot coverage.
 
