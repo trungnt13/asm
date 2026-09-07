@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `6af345407d9c2a568da9d01b6c4b81a9e61495c0`
-- **Date:** 2026-09-06
-- **Upstream subject:** `Gate experimental context by model capability at session startup (#43147)`
+- **Commit:** `333c41eef6b9ba3697fe913973fd58afe32d1ef5`
+- **Date:** 2026-09-07
+- **Upstream subject:** `Show completion timestamps after successful TUI turns (#43558)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
