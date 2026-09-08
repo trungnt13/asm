@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `4e93cf9b4e4e86f49473478c8288426cb6d6b119`
+- **Commit:** `2cbbf0c9b542a36a1c3284b5e804917635b6f666`
 - **Date:** 2026-09-08
-- **Upstream subject:** `Animate live voice transcripts with split-flap tiles (#43656)`
+- **Upstream subject:** `Add memory dual writing and v2 readiness reporting (#43827)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
