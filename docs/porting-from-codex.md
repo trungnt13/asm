@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `0d46c252b3f29f10bacf0ef58a17a1aa5d17ead3`
+- **Commit:** `17e64839eb1e30632eef4a0147862345fccb61cc`
 - **Date:** 2026-09-09
-- **Upstream subject:** `Encapsulate executed tool call metadata recording (#44002)`
+- **Upstream subject:** `Add aggregate budget enforcement for Guardian context (#44166)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
