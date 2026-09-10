@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `5a9eb145c4c05fcfc7158d7c25b80e1322eccae1`
+- **Commit:** `94697375cb9d2aa8ae74d61957c6b396819bec94`
 - **Date:** 2026-09-10
-- **Upstream subject:** ``Update the forked-thread hook test to use `StartThreadOptions` (#44377)``
+- **Upstream subject:** `Add MIME-filtered resource listing for Codex Apps (#44548)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
