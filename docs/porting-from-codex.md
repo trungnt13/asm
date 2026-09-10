@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `17e64839eb1e30632eef4a0147862345fccb61cc`
-- **Date:** 2026-09-09
-- **Upstream subject:** `Add aggregate budget enforcement for Guardian context (#44166)`
+- **Commit:** `5a9eb145c4c05fcfc7158d7c25b80e1322eccae1`
+- **Date:** 2026-09-10
+- **Upstream subject:** `Update the forked-thread hook test to use \`StartThreadOptions\` (#44377)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
