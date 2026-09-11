@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `fc948f8c473e5d11e780ffcf1fd7f812a2020932`
+- **Commit:** `654b0a77d0d2f81aa21f61caf7af4be88fe550bb`
 - **Date:** 2026-09-11
-- **Upstream subject:** `Add a provider for thread-scoped instructions (#44701)`
+- **Upstream subject:** `Add trusted enterprise MCP auth configuration (#44832)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
