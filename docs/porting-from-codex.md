@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `53ff712a48379ce8df605e292afd6046ca88ae9b`
+- **Commit:** `ee6814bfa4889fe9b2b3dcc9cc8bdd91effa8ab8`
 - **Date:** 2026-09-12
-- **Upstream subject:** `Add model grouping to the agent command center (#44957)`
+- **Upstream subject:** `Consolidate Rust release artifact downloads (#45051)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
