@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `654b0a77d0d2f81aa21f61caf7af4be88fe550bb`
-- **Date:** 2026-09-11
-- **Upstream subject:** `Add trusted enterprise MCP auth configuration (#44832)`
+- **Commit:** `53ff712a48379ce8df605e292afd6046ca88ae9b`
+- **Date:** 2026-09-12
+- **Upstream subject:** `Add model grouping to the agent command center (#44957)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
