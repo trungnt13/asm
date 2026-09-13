@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `a592c38c16cdd7623dacc9168926ebccedfb67d3`
+- **Commit:** `36f0dbe796d9bb1a18a0fc0640ed08b3e1d54564`
 - **Date:** 2026-09-13
-- **Upstream subject:** `Use OpenSSL 3.6.4 for musl builds (#45149)`
+- **Upstream subject:** `Register Windows desktop uninstall ownership before sandbox setup (#45224)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
