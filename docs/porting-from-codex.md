@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `ee6814bfa4889fe9b2b3dcc9cc8bdd91effa8ab8`
-- **Date:** 2026-09-12
-- **Upstream subject:** `Consolidate Rust release artifact downloads (#45051)`
+- **Commit:** `a592c38c16cdd7623dacc9168926ebccedfb67d3`
+- **Date:** 2026-09-13
+- **Upstream subject:** `Use OpenSSL 3.6.4 for musl builds (#45149)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
