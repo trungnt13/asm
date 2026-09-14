@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `3abbf9fe2c6b6910e9de61f6a0c5bb468f74b5c8`
+- **Commit:** `e9633d7a0226eac91c7a791dc4f92cf8f25df2ae`
 - **Date:** 2026-09-14
-- **Upstream subject:** `Extract Windows sandbox configuration preparation into a helper (#45312)`
+- **Upstream subject:** `Avoid cloning MCP server status snapshot data (#45428)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
