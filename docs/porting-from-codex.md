@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `e9633d7a0226eac91c7a791dc4f92cf8f25df2ae`
-- **Date:** 2026-09-14
-- **Upstream subject:** `Avoid cloning MCP server status snapshot data (#45428)`
+- **Commit:** `fc269b66adc37f3c855df222ad80b02733355c46`
+- **Date:** 2026-09-15
+- **Upstream subject:** `Add explicit daemon package replacement from the CLI (#45580)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
