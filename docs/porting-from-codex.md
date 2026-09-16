@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `2fdcdeaf0e219eea34c710e01de2ee0571ddeeb5`
-- **Date:** 2026-09-15
-- **Upstream subject:** `Add startup tool allowlists for threads (#45711)`
+- **Commit:** `ffae979216bfbe94070bd21868d1695277105a63`
+- **Date:** 2026-09-16
+- **Upstream subject:** `Revert the current thread when editing an earlier TUI prompt (#45845)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
