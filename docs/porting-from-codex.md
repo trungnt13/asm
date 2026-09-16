@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `ffae979216bfbe94070bd21868d1695277105a63`
+- **Commit:** `7275afc5c7fd2c01e0a3442ead09f44bad52422a`
 - **Date:** 2026-09-16
-- **Upstream subject:** `Revert the current thread when editing an earlier TUI prompt (#45845)`
+- **Upstream subject:** `Centralize Guardian policy resolution in config and protocol (#45957)`
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
