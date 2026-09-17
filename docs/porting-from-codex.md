@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `787823cf957709b314276646024ec54e1761c089`
+- **Commit:** `7abf2a3b5cbe08ca875d677dcd027528f9556152`
 - **Date:** 2026-09-17
-- **Upstream subject:** Add `--no-daemon` to bypass the shared background server (#46088)
+- **Upstream subject:** Preserve configured Flex tiers without catalog or fast-mode support (#46230)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
