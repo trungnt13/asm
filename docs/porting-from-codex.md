@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `7275afc5c7fd2c01e0a3442ead09f44bad52422a`
-- **Date:** 2026-09-16
-- **Upstream subject:** `Centralize Guardian policy resolution in config and protocol (#45957)`
+- **Commit:** `787823cf957709b314276646024ec54e1761c089`
+- **Date:** 2026-09-17
+- **Upstream subject:** Add `--no-daemon` to bypass the shared background server (#46088)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
