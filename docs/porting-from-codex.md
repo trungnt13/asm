@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `7abf2a3b5cbe08ca875d677dcd027528f9556152`
-- **Date:** 2026-09-17
-- **Upstream subject:** Preserve configured Flex tiers without catalog or fast-mode support (#46230)
+- **Commit:** `7498521d288b9b3b96ffba4eedf089d8d6e06a84`
+- **Date:** 2026-09-18
+- **Upstream subject:** Keep MCP policy evaluation consistent with turn environments (#46335)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
