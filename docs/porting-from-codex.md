@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `ed12cc75d34f7cb5e3b08c8ac0c14e6bc7f67c4f`
+- **Commit:** `78245b47af2a7aafcabe025828ceecca69db4df1`
 - **Date:** 2026-09-19
-- **Upstream subject:** Keep Guardian reviews on the applied instruction snapshot (#46580)
+- **Upstream subject:** Deny XPC service lookups in macOS Seatbelt profiles (#46583)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
