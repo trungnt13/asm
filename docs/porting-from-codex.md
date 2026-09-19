@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `7498521d288b9b3b96ffba4eedf089d8d6e06a84`
-- **Date:** 2026-09-18
-- **Upstream subject:** Keep MCP policy evaluation consistent with turn environments (#46335)
+- **Commit:** `ed12cc75d34f7cb5e3b08c8ac0c14e6bc7f67c4f`
+- **Date:** 2026-09-19
+- **Upstream subject:** Keep Guardian reviews on the applied instruction snapshot (#46580)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
