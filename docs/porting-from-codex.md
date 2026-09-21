@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `05f39d7346e6b6e1f9c7908ebf96a4353dea87a6`
+- **Commit:** `40eeb6e8a89ef421c25d4c40e06fa1d40ce66b4f`
 - **Date:** 2026-09-21
-- **Upstream subject:** Remove the `Error` prefix from TUI `config.toml` load errors (#46929)
+- **Upstream subject:** Recover corrupt message-board storage during thread deletion (#47042)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
