@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `5c5308fc9a9ee789049d646ef11e5400384b9c6f`
-- **Date:** 2026-09-20
-- **Upstream subject:** Add an animated Codex logo to fresh conversations and onboarding (#46752)
+- **Commit:** `05f39d7346e6b6e1f9c7908ebf96a4353dea87a6`
+- **Date:** 2026-09-21
+- **Upstream subject:** Remove the `Error` prefix from TUI `config.toml` load errors (#46929)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
