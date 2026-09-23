@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `8a3c4ea3b5a7c0e92cf24dae46ec87629a26bb7f`
+- **Commit:** `d6c4c6aea404128bbd467e843a874c702838b084`
 - **Date:** 2026-09-23
-- **Upstream subject:** Apply inherited environment settings at turn boundaries (#47428)
+- **Upstream subject:** Classify rollout read failures by reason and progress (#47565)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
