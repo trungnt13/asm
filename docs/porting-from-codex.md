@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `d93909a939e40c3c1031f5a713bacad8c0d9afe6`
-- **Date:** 2026-09-22
-- **Upstream subject:** Skip stored title lookups for ephemeral forks (#47342)
+- **Commit:** `8a3c4ea3b5a7c0e92cf24dae46ec87629a26bb7f`
+- **Date:** 2026-09-23
+- **Upstream subject:** Apply inherited environment settings at turn boundaries (#47428)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
