@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `d6c4c6aea404128bbd467e843a874c702838b084`
-- **Date:** 2026-09-23
-- **Upstream subject:** Classify rollout read failures by reason and progress (#47565)
+- **Commit:** `7dae8c53d97e61cd774e4d6bcca5243c29ca615c`
+- **Date:** 2026-09-24
+- **Upstream subject:** Avoid recursive TUI event dispatch for model picker selections (#47717)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
