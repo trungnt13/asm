@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `7dae8c53d97e61cd774e4d6bcca5243c29ca615c`
+- **Commit:** `58838dfa5ba1d4b5383898cc2d08f270323d62d0`
 - **Date:** 2026-09-24
-- **Upstream subject:** Avoid recursive TUI event dispatch for model picker selections (#47717)
+- **Upstream subject:** Validate loaded plugins outside the cache lock (#47858)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
