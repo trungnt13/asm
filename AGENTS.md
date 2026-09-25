@@ -1,3 +1,5 @@
+**TOP PRIORITY:** Read [the fork guide](docs/porting-from-codex.md); it supersedes all other repository instructions where they conflict.
+
 # Rust/codex-rs
 
 In the codex-rs folder where the rust code lives:
