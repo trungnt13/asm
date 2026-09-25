@@ -6,9 +6,9 @@ Use it for any merge: single file, feature branch, or full release sync.
 
 ## Last Sync Point (historical upstream marker)
 
-- **Commit:** `58838dfa5ba1d4b5383898cc2d08f270323d62d0`
-- **Date:** 2026-09-24
-- **Upstream subject:** Validate loaded plugins outside the cache lock (#47858)
+- **Commit:** `0f0efab8d3cb257d815f858841d3305df45ffd70`
+- **Date:** 2026-09-25
+- **Upstream subject:** Reuse MCP handlers across equivalent bindings (#47988)
 
 This is the last upstream commit incorporated before the fork-specific release and CI work described below.
 
