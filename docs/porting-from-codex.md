@@ -12,9 +12,9 @@ The sections below record current intent. Update the relevant section when inten
 
 - Fork (`origin`): [`trungnt13/codex`](https://github.com/trungnt13/codex).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `0f0efab8d3cb257d815f858841d3305df45ffd70`.
+- Last incorporated upstream commit: `58670eeac4b0bdb9fcb86929d8631c14aee0d9f6`.
 - Commit date: 2026-09-25.
-- Subject: Reuse MCP handlers across equivalent bindings (#47988).
+- Subject: Isolate executable fixture copies in CLI tests on Linux (#48213).
 
 After a full sync, replace this marker with the exact upstream commit incorporated. A targeted cherry-pick does not advance the full-sync baseline. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`.
 
