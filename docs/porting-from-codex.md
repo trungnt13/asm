@@ -1,317 +1,105 @@
-# Porting From Codex: A Practical Upstream Sync Guide
+# Fork purpose and upstream sync
 
-This guide is a repeatable checklist for porting changes from [`openai/codex`](https://github.com/openai/codex) into this repo.
+## Principles
 
-Use it for any merge: single file, feature branch, or full release sync.
+1. **Personal use only.** This fork exists solely for Trung Ngo's personal use.
+2. **Keep changes minimal, safe, and minor.** Assume unchanged upstream code has already been tested upstream. Run only narrow, fast checks for fork changes and conflict resolutions. Do not repeat upstream testing or run full suites by default. This assumption is not proof that a particular upstream commit passed CI. If a change needs broad testing to establish safety, stop and clarify its scope with the owner.
+3. **Keep the owner's current intent in this file.** Whenever changing the fork, record the purpose and constraints here. If a proposed change conflicts with recorded intent, ask the owner before proceeding. Once accepted, replace the old intent rather than keeping contradictory rules or a change log. With intent clear, agents may triage changes, choose a sync method, and resolve merge or rebase conflicts within that scope without asking about each conflict.
 
-## Last Sync Point (historical upstream marker)
+The sections below record current intent. Update the relevant section when intent changes; do not add a duplicate policy. Resolving a conflict does not authorize changing requirements, discarding user work, rewriting published history, or publishing a release.
 
-- **Commit:** `0f0efab8d3cb257d815f858841d3305df45ffd70`
-- **Date:** 2026-09-25
-- **Upstream subject:** Reuse MCP handlers across equivalent bindings (#47988)
+## Upstream baseline
 
-This is the last upstream commit incorporated before the fork-specific release and CI work described below.
+- Fork (`origin`): [`trungnt13/codex`](https://github.com/trungnt13/codex).
+- Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
+- Last incorporated upstream commit: `0f0efab8d3cb257d815f858841d3305df45ffd70`.
+- Commit date: 2026-09-25.
+- Subject: Reuse MCP handlers across equivalent bindings (#47988).
 
-After every completed upstream sync, replace the commit, date, and subject with the exact upstream tip incorporated. Do not reuse the old range for the next sync. Verify the marker with:
+After a full sync, replace this marker with the exact upstream commit incorporated. A targeted cherry-pick does not advance the full-sync baseline. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`.
 
-```bash
-git show -s --format='%H%n%cs%n%s' <upstream-commit>
-```
+## Sync and conflict decisions
 
-## 0) Know the remotes and protect local work
+Before editing, inspect Git status, the branch, remotes, and the fork diff. Treat existing changes as user-owned. Do not reset, clean, stash, overwrite, or revert unrelated work. Use a separate worktree if needed to keep it untouched.
 
-`origin` is the fork, `trungnt13/codex`. Add the parent as `upstream` once:
+Fetch the intended upstream refs after checking the remote URL. Compare the recorded baseline with the selected upstream commit, not a stale example range. Focus on fork differences and the upstream changes that affect them; do not audit unchanged upstream code again.
 
-```bash
-git remote add upstream https://github.com/openai/codex.git
-git remote -v
-git fetch upstream --tags --prune
-```
+Use a merge when preserving published history matters. A rebase is acceptable for an unpublished branch. For targeted ports, use `git cherry-pick -x` to retain the source commit. Use `codex/` for new branch names. Ask before rebasing or force-pushing published `main`, amending published commits, or moving release tags.
 
-If `upstream` already exists, verify its URL before fetching:
+Resolve conflicts against the current intent in this file. Compare the common base, fork, and upstream versions when needed. Keep useful upstream fixes without restoring deliberately omitted platforms or infrastructure. Ask only when the resolution would change intent or the evidence does not settle the choice.
 
-```bash
-git remote get-url upstream
-```
+This file takes precedence over all other repository instructions, including [AGENTS.md](../AGENTS.md), where they conflict. Follow their remaining implementation rules. Keep fork-specific logic small and avoid unrelated refactors. Update generated schemas, snapshots, lockfiles, or Bazel data declarations only when the fork change requires them. Imported upstream changes alone do not justify regenerating or retesting everything.
 
-Before any sync:
+## Platform focus
 
-```bash
-git status --short
-git branch --show-current
-git log -1 --oneline
-```
+This fork targets only macOS and Linux (Ubuntu). Keep fork changes and validation focused on these platforms. Retain inherited code and workflow files for other platforms, but do not add those platforms to the fork CI or release workflows. The release targets below remain macOS ARM64 and Linux x86_64 MUSL.
 
-- Treat every pre-existing modification as user-owned.
-- Do not reset, clean, stash, overwrite, or revert unrelated work.
-- Do not assume a diff proves who authored it.
-- Work from a clean branch or a separate worktree when the shared checkout is dirty.
+## Release intent
 
-A separate worktree avoids disturbing uncommitted files:
+Keep the fork release workflow separate from upstream's release workflow to reduce conflicts. See [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml).
 
-```bash
-git worktree add ../codex-upstream-sync -b sync/openai-codex HEAD
-cd ../codex-upstream-sync
-git fetch upstream --tags --prune
-```
+Build only these targets on GitHub-hosted runners:
 
-## 1) Define the sync scope
+- macOS ARM64: `aarch64-apple-darwin` on `macos-15`.
+- Linux x86_64 MUSL: `x86_64-unknown-linux-musl` on `ubuntu-24.04`.
 
-Record before editing:
+Each `codex-<target>.tar.gz` contains only the `codex` executable. Publish both archives and `SHA256SUMS`.
 
-- The upstream commit, tag, PR, or range.
-- Whether this is a full sync or a targeted port.
-- The crates, APIs, workflows, and generated files affected.
-- Which fork divergences may conflict.
-- Which upstream platforms or publishing paths remain intentionally skipped.
+Preserve these constraints:
 
-Inspect the range from the recorded marker:
+- macOS stays unsigned and unnotarized. No paid Apple membership, Apple credentials, or Azure Key Vault.
+- No repository release secrets or self-hosted runners.
+- Linux stays on MUSL. Do not bundle Bubblewrap; install `bwrap` on the host when needed for sandboxing.
+- Keep Zig and [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh) for Linux native dependencies, including the AWS-LC no-jitter settings in the workflows.
+- Keep [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml) for the verified prebuilt V8 artifacts.
+- Keep the workspace version at `0.0.0` in [`Cargo.toml`](../codex-rs/Cargo.toml). Release tags do not rewrite Cargo files.
 
-```bash
-git log --oneline --decorate \
-  a9519cbcdd2d664530edb2469224ee03c1056799..upstream/main
-git diff --stat \
-  a9519cbcdd2d664530edb2469224ee03c1056799..upstream/main
-```
+Do not add other platforms, DMGs, bundled resources, npm, R2, WinGet, website publishing, signing, or OpenAI-only publishing infrastructure without an agreed change of intent.
 
-Do not import a large range blindly. Review upstream changes to the conflict hotspots in section 6 first.
+### Tags and publication
 
-## 2) Choose the integration method
+Fork releases use `v*`; upstream Rust releases use `rust-v*.*.*`.
 
-### Full upstream sync
+- A manual dispatch from a branch builds artifacts without publishing a GitHub Release.
+- A `v*` tag publishes both archives and checksums.
+- Tags with a hyphenated suffix are prereleases and are not Latest.
+- Plain tags are normal releases and are marked Latest.
 
-Prefer merging into a dedicated sync branch when preserving published fork history matters:
+The release job checks the ref, not the event name. A manual dispatch on a `v*` tag can publish too. Do not push a release tag or dispatch on one without publication approval.
 
-```bash
-git switch -c sync/openai-codex
-git merge --no-ff upstream/main
-```
+When release validation is requested, check the relevant existing run and artifacts first. Do not repeat builds merely to recheck unchanged packaging. After an authorized release, verify both archives and `SHA256SUMS` are present.
 
-Resolve conflicts semantically, validate, then merge the reviewed sync branch.
+## CI intent
 
-Rebase is acceptable for an unpublished sync branch:
+Keep the inherited [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml) and [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml) customized in place, rather than adding parallel fork CI files.
 
-```bash
-git switch -c sync/openai-codex
-git rebase upstream/main
-```
+Blocking CI keeps formatting, `cargo shear --deny-warnings`, and `cargo clippy --target <target> --tests -- -D warnings` for the two release targets, plus a result collector. Clippy checks test code; it does not run the test suite.
 
-Do not rebase or force-push shared `main` without explicit approval. It rewrites the fork commit and release-tag ancestry.
+Postmerge CI keeps `cargo build --release --target <target> --bin codex` for those same targets, plus a result collector. Both workflows use the release workflow's runners and target setup.
 
-### Targeted commit or PR
+These retained CI checks do not require agents to repeat them locally for every change. Do not expand the custom workflows to upstream-wide testing, other platforms, Bazel, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure. Other inherited workflow files may still exist; their presence does not make them required fork checks.
 
-Use cherry-pick and retain upstream provenance:
+When syncing, port relevant action-version, toolchain, security, and build fixes. Do not replace the custom workflows wholesale with upstream versions.
 
-```bash
-git switch -c port/<short-description>
-git cherry-pick -x <upstream-commit>
-```
+## Narrow validation
 
-For a multi-commit change, preserve order. Do not squash first if intermediate commits explain migrations or generated-file changes.
+Choose checks from the fork-specific diff and conflict resolutions, not the size of the imported upstream range:
 
-After either method, inspect all resolutions:
+- **Documentation:** inspect the wording and local links; run `git diff --check`. No builds or tests.
+- **Workflows:** lint only changed workflow files with `actionlint`; inspect affected triggers, permissions, targets, and packaging. Do not run release builds for unrelated edits.
+- **Rust:** use `just test -p <crate> <test-filter>` for the changed behavior. Use `just test`, not direct `cargo test`. Keep required formatting and affected generated outputs current. Do not run whole-crate or workspace suites by default.
+- **Conflict resolutions:** check the behavior or build setup that the resolution changed. A clean merge alone does not prove correctness, but it does not call for full upstream validation either.
 
-```bash
-git status --short
-git diff --check
-git diff --name-status upstream/main...HEAD
-```
+For affected release logic, check only the relevant constraints above: tag handling, target setup, archive contents, checksums, credentials, and version preservation. For affected runtime logic, target the changed API, CLI, configuration, session, context, or cross-OS behavior rather than testing all of them.
 
-## 3) Apply Codex Rust rules, not generic Rust assumptions
+If a fast, narrow check cannot establish safety, explain the gap and ask before expanding the change or validation. Report exact checks and results, skipped or blocked checks, and remaining uncertainty. Do not claim upstream CI passed unless verified.
 
-Read [the repository instructions](../AGENTS.md) before every port. In particular:
+## Commit attribution
 
-- Rust lives under `codex-rs`; crate names use the `codex-` prefix.
-- Reuse existing code and crates before adding abstractions or growing `codex-core`.
-- Keep public crate APIs small and modules focused.
-- Preserve exhaustive matches where practical.
-- Inline `format!` arguments, collapse nested `if` statements, and prefer method references over redundant closures.
-- Avoid opaque Boolean or `Option` positional arguments; follow the repository's exact argument-comment convention when an API cannot be improved.
-- New traits need role and implementation guidance in doc comments. Prefer native RPITIT methods with explicit `Send` futures over `async_trait`.
-- Never add or alter logic related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
-- Preserve cross-platform behavior unless a feature is explicitly platform-specific.
-
-Watch repository-specific generated or locked outputs:
-
-- A Rust dependency change requires `just bazel-lock-update` from the repository root and the resulting `MODULE.bazel.lock` update.
-- A `ConfigToml` shape change requires `just write-config-schema`.
-- App-server protocol changes require the matching schema generation.
-- New compile-time file reads such as `include_str!` also require the crate's Bazel data declarations.
-- User-visible TUI changes require reviewed `insta` snapshot coverage.
-
-Do not run `cargo test` directly. Use the validation rules in section 8.
-
-## 4) Preserve the fork release contract
-
-The committed fork workflow is [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml). It is deliberately separate from upstream's [`rust-release.yml`](../.github/workflows/rust-release.yml) to minimize sync conflicts.
-
-The supported release matrix is exactly:
-
-| Platform | Rust target | GitHub-hosted runner | Asset |
-| --- | --- | --- | --- |
-| macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | `codex-aarch64-apple-darwin.tar.gz` |
-| Linux x86_64 MUSL | `x86_64-unknown-linux-musl` | `ubuntu-24.04` | `codex-x86_64-unknown-linux-musl.tar.gz` |
-
-Each archive contains only the raw `codex` executable. The release also contains `SHA256SUMS` for both archives.
-
-Preserve these decisions:
-
-- macOS is unsigned and unnotarized.
-- No paid Apple Developer membership or Apple credentials are used.
-- Azure Key Vault is not used.
-- No repository release secrets or self-hosted runners are required.
-- Linux targets MUSL for portability.
-- Linux archives do not bundle Bubblewrap; install `bwrap` on the host when sandboxing requires it.
-- Zig and [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh) provide the Linux C/C++ MUSL toolchain.
-- [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml) supplies the verified prebuilt `rusty_v8` artifact for each target.
-- The workspace package version remains `0.0.0` in [`codex-rs/Cargo.toml`](../codex-rs/Cargo.toml); a release tag does not rewrite Cargo files.
-
-Do not silently add Windows, macOS x86_64, Linux ARM64, Linux GNU, DMGs, bundled resources, npm, R2, WinGet, website publication, Apple signing, or OpenAI-only publishing infrastructure.
-
-## 5) Preserve tag and release behavior
-
-Fork releases use `v*`; upstream Rust releases use `rust-v*.*.*`. The distinct prefixes avoid a direct trigger collision.
-
-- A manual dispatch from a branch builds both archives and uploads workflow-run artifacts; it does not create a GitHub Release.
-- Pushing a `v*` tag builds both targets, then publishes all archives and `SHA256SUMS` on the GitHub Releases page.
-- A tag with a hyphenated suffix, such as `v0.0.1-alpha.0`, is a prerelease and is not marked Latest.
-- A plain tag, such as `v0.0.1`, is a normal release and is marked Latest.
-
-Do not select a `v*` tag as the ref for a manual dispatch unless publication is intended: the release job tests the ref, not the event name.
-
-The first verified fork release is [`v0.0.1-alpha.0`](https://github.com/trungnt13/codex/releases/tag/v0.0.1-alpha.0), published as a prerelease with exactly:
-
-- `codex-aarch64-apple-darwin.tar.gz`
-- `codex-x86_64-unknown-linux-musl.tar.gz`
-- `SHA256SUMS`
-
-## 6) Treat fork CI workflows as conflict hotspots
-
-The owner chose to modify the inherited workflows in place rather than add parallel fork CI files:
-
-- [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml)
-- [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml)
-
-At the time this guide was created, those two changes were selected and present locally but were not part of the already committed release-workflow change. Check their actual commit status before every sync; do not assume this historical state is still current.
-
-The intended minimal blocking CI is:
-
-- Rust formatting.
-- `cargo shear --deny-warnings`.
-- `cargo clippy --tests -- -D warnings` for macOS ARM64.
-- The same Clippy check for Linux x86_64 MUSL.
-- One required result collector.
-
-The intended minimal postmerge CI is:
-
-- `cargo build --release --bin codex` for macOS ARM64.
-- The same release build for Linux x86_64 MUSL.
-- One result collector.
-
-Both target jobs use the same standard runners and target setup as the release workflow. Preserve `setup-rusty-v8`; preserve Zig, the MUSL setup script, and the AWS-LC no-jitter environment for the MUSL target.
-
-The fork intentionally omits upstream CI for Windows, macOS x86_64, Linux ARM64, Linux GNU, Bazel, SDKs, remote executors, V8 source-build canaries, and OpenAI-specific runner groups, environments, credentials, and result collectors.
-
-When upstream changes either workflow, compare and port useful action-version, toolchain, security, or build fixes into the minimal jobs. Do not replace the fork files wholesale with upstream matrices.
-
-## 7) Check divergence and regression traps
-
-Before resolving a conflict, compare all three relevant versions:
-
-```bash
-git show upstream/main:.github/workflows/blocking-ci.yml > /tmp/upstream-blocking.yml
-git diff upstream/main -- .github/workflows/blocking-ci.yml
-git diff upstream/main -- .github/workflows/postmerge-ci.yml
-git diff upstream/main -- .github/workflows/fork-rust-release.yml
-```
-
-Check for these common regressions:
-
-- `v*` accidentally changed back to `fork-v*` or upstream `rust-v*.*.*`.
-- The release job runs during an ordinary branch dispatch.
-- Stable tags are marked prerelease, or suffixed tags become Latest.
-- One target is omitted from the checksum or release file list.
-- An archive contains a package tree instead of only `codex`.
-- macOS signing, notarization, Azure, or secret references return.
-- Linux changes from MUSL to GNU or loses Zig/native dependency setup.
-- OpenAI self-hosted runner labels or protected environments return.
-- Cargo versions are rewritten from `0.0.0` during release.
-- Blocking CI expands into unrelated platforms or upstream-wide validation.
-- Postmerge builds stop matching the two release targets.
-
-For Rust code, also inspect external behavior that upstream changes can break:
-
-- App-server v2 API and generated TypeScript schemas.
-- CLI flags and configuration loading.
-- Raw response item events.
-- Session resume compatibility.
-- Model-visible context size, boundedness, and incremental construction.
-- Connected app-server and exec-server operation across different OSes.
-
-## 8) Validate the port
-
-Run only checks relevant to the files changed, and report exact failures.
-
-For workflow or documentation-only changes:
-
-```bash
-actionlint .github/workflows/fork-rust-release.yml \
-  .github/workflows/blocking-ci.yml \
-  .github/workflows/postmerge-ci.yml
-git diff --check
-```
-
-After Rust changes, from `codex-rs`:
-
-```bash
-just fmt
-just test -p <changed-crate>
-```
-
-- Never substitute direct `cargo test` for `just test`.
-- For a large Rust change, run `just fix -p <changed-crate>` before finalizing.
-- If `common`, `core`, or `protocol` changed, ask before running the complete `just test` suite.
-- Follow any crate-specific schema, snapshot, remote-test, or Bazel-lock rules triggered by the diff.
-- Per repository convention, do not rerun tests after the final `just fix` or `just fmt` pass.
-
-For a live release check, first dispatch the workflow from `main` and inspect its two run artifacts. Only then create and push the intended `v*` tag. Verify the Releases page contains both archives and `SHA256SUMS`.
-
-## 9) Verify Git attribution before committing
-
-The correct GitHub no-reply identity for this fork owner is:
+Before committing, verify the author and committer identities with `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. The owner's GitHub no-reply email is:
 
 ```text
 1390402+trungnt13@users.noreply.github.com
 ```
 
-Configure and verify it before committing:
-
-```bash
-git config user.email "1390402+trungnt13@users.noreply.github.com"
-git var GIT_AUTHOR_IDENT
-git var GIT_COMMITTER_IDENT
-```
-
-The numeric prefix controls GitHub account attribution. The incorrect prefix `390402+trungnt13@users.noreply.github.com` is associated with another account; the username text after `+` does not correct that attribution.
-
-Do not amend published commits, force-push `main`, or move release tags merely to fix attribution without explicit approval.
-
-## 10) Quick audit checklist
-
-- [ ] The upstream remote URL and intended commit range were verified.
-- [ ] User-owned working-tree changes remained untouched.
-- [ ] The recorded sync marker was updated to the exact incorporated upstream tip.
-- [ ] Rust changes follow `AGENTS.md` and affected crate boundaries.
-- [ ] Only macOS ARM64 and Linux x86_64 MUSL are release targets.
-- [ ] CI uses `macos-15` and `ubuntu-24.04`, not self-hosted runners.
-- [ ] Linux still uses Zig, the MUSL setup script, and `setup-rusty-v8`.
-- [ ] macOS remains unsigned and unnotarized; no Apple or Azure credentials exist.
-- [ ] Each archive contains only `codex`; Linux does not bundle `bwrap`.
-- [ ] `v*` tags publish; upstream `rust-v*.*.*` behavior remains separate.
-- [ ] Suffixed tags are prereleases; plain tags are normal Latest releases.
-- [ ] Both archives and `SHA256SUMS` are uploaded.
-- [ ] The Cargo workspace version remains `0.0.0`.
-- [ ] Minimal blocking and postmerge coverage was preserved intentionally.
-- [ ] No skipped platform, Bazel, SDK, canary, or OpenAI publishing jobs returned.
-- [ ] Relevant validation ran, or each blocked check is stated exactly.
-- [ ] Git author and committer identities use the correct numeric no-reply prefix.
+Do not use `390402+trungnt13@users.noreply.github.com`. Do not rewrite published history merely to fix attribution without approval.
