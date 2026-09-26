@@ -3,7 +3,6 @@ source: tui/src/markdown_render_tests.rs
 expression: rendered
 ---
 # H1: Markdown Streaming Test
-
 Intro paragraph with bold text, italic text, and inline code x=1.
 Combined bold-italic both and escaped asterisks *literal*.
 Auto-link: https://example.com (https://example.com) and reference link [ref][r1].
@@ -13,21 +12,16 @@ Image: alt text
 > Blockquote level 1
 > 
 > > Blockquote level 2 with inline code
-
 • Unordered list item 1
     • Nested bullet with italics inner
-
 • Unordered list item 2 with strikethrough
-
 1. Ordered item one
 2. Ordered item two with sublist:
     1. Alt-numbered subitem
-
 ☐ Task: unchecked
 ☑ Task: checked with link home (https://example.org)
 
 ———
-
 Table below (alignment test):
 
  Left    Center    Right
