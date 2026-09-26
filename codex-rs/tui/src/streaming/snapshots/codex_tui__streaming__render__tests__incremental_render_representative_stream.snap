@@ -12,10 +12,6 @@ expression: render.lines
         hyperlinks: [],
     },
     HyperlinkLine {
-        line: Line::default(),
-        hyperlinks: [],
-    },
-    HyperlinkLine {
         line: Line::from_iter([
             Span::from("First paragraph with a "),
             Span::from("link").fg(Color::Rgb(99, 168, 248)).underlined(),
@@ -48,10 +44,6 @@ expression: render.lines
         hyperlinks: [],
     },
     HyperlinkLine {
-        line: Line::default(),
-        hyperlinks: [],
-    },
-    HyperlinkLine {
         line: Line::from_iter([
             Span::from("1. ").fg(Color::Rgb(99, 168, 248)),
             Span::from("First item"),
@@ -74,10 +66,6 @@ expression: render.lines
             Span::from("> "),
             Span::from("Quoted paragraph"),
         ]).green(),
-        hyperlinks: [],
-    },
-    HyperlinkLine {
-        line: Line::default(),
         hyperlinks: [],
     },
     HyperlinkLine {

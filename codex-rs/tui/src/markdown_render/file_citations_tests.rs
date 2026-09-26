@@ -131,7 +131,7 @@ fn file_citations_preserve_escaped_nested_and_reference_directives() {
             &format!("`{citation}`\n\n[report][file]\n\n[file]: {citation}\n\n{citation}"),
             /*cwd*/ None,
         ),
-        format!("{citation}\n\nreport ({citation})\n\n/tmp/report.xlsx"),
+        format!("{citation}\nreport ({citation})\n/tmp/report.xlsx"),
     );
 }
 
