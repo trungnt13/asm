@@ -41,7 +41,7 @@ pub(super) struct StreamingRender {
 impl StreamingRender {
     pub(super) fn new() -> Self {
         Self {
-            list_spacing: ListSpacing::AfterMultiline,
+            list_spacing: ListSpacing::Compact,
             lines: Vec::with_capacity(64),
             pending_math_start: None,
             mutable_fence_start: None,
@@ -224,7 +224,7 @@ impl StreamingRender {
         self.lines.truncate(self.stable_rendered_len);
         if !self.lines.is_empty()
             && (!pending.lines.is_empty() || !pending_source.trim().is_empty())
-            && !pending.first_top_level_block_is_html
+            && !pending.first_top_level_block_joins_without_separator
         {
             self.lines.push(HyperlinkLine::new(Line::default()));
         }
@@ -249,7 +249,7 @@ pub(super) fn render_source(
         cwd,
         render_mode,
         inline_visualization_context,
-        ListSpacing::AfterMultiline,
+        ListSpacing::Compact,
     )
 }
 
