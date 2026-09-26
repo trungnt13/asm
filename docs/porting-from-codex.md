@@ -58,12 +58,13 @@ Do not add other platforms, DMGs, bundled resources, npm, R2, WinGet, website pu
 
 ### Tags and publication
 
-Fork releases use `v*`; upstream Rust releases use `rust-v*.*.*`.
+Fork releases use stable `v<major>.<minor>.<patch>` tags only. Do not create prereleases or suffixed tags. Upstream Rust releases use `rust-v*.*.*` and do not determine fork version numbers.
+
+When the owner requests a release, choose the version automatically without asking for a number. Check the current tags on `trungnt13/codex`, compare versions numerically, and increment the patch number of the highest fork version: `v0.0.1` → `v0.0.2` → `v0.0.3`. Count a historical prerelease by its base version when choosing the next number. If no fork version exists, start at `v0.0.1`. Never reuse or move an existing tag; if another release takes the chosen number, check again and select the next patch version.
 
 - A manual dispatch from a branch builds artifacts without publishing a GitHub Release.
 - A `v*` tag publishes both archives and checksums.
-- Tags with a hyphenated suffix are prereleases and are not Latest.
-- Plain tags are normal releases and are marked Latest.
+- Every new fork release is a normal release and is marked Latest.
 
 The release job checks the ref, not the event name. A manual dispatch on a `v*` tag can publish too. Do not push a release tag or dispatch on one without publication approval.
 
@@ -80,6 +81,25 @@ Postmerge CI keeps `cargo build --release --target <target> --bin codex` for tho
 These retained CI checks do not require agents to repeat them locally for every change. Do not expand the custom workflows to upstream-wide testing, other platforms, Bazel, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure. Other inherited workflow files may still exist; their presence does not make them required fork checks.
 
 When syncing, port relevant action-version, toolchain, security, and build fixes. Do not replace the custom workflows wholesale with upstream versions.
+
+## Local development: binary first
+
+For runtime or UI changes, deliver a runnable development binary before automated testing is complete. Build speed takes priority over runtime performance for local testing.
+
+Inspect affected paths, including streaming and completed output where relevant. Make the smallest coherent change, then build only the CLI from `codex-rs`:
+
+```bash
+cargo build -p codex-cli --bin codex --profile dev-small
+```
+
+- Use the native host target and the existing warm development cache. Keep the toolchain, profile, target directory, and compiler flags consistent. Do not clean caches or switch profiles merely to try to speed up one build.
+- Use `dev-small` consistently for local CLI builds: no optimization or debug info. The first build may need to rebuild dependencies; later builds should reuse this profile's cache. Do not switch back to `dev` merely to reuse a different cache. Do not use release builds, cross-compilation, or packaging unless requested or needed to reproduce the behavior.
+- Prioritize the CLI build over competing Cargo jobs. Test builds may reuse some dependencies, but they do not deliver the CLI binary or eliminate compilation and linking. Do not promise instant builds.
+- As soon as the build succeeds, report the verified absolute binary path, build duration, a short manual check, and pending automated checks. Do not overwrite the installed `codex` or present an older executable as the new build.
+- Hand off the binary before updating test expectations or running tests when those can safely follow. Then update affected assertions and snapshots together, verify test filters, and run the narrow checks below. Do not disable tests to hide changed behavior.
+- If runtime code changes after handoff, rebuild and identify the replacement binary. Distinguish ready for manual testing from validated complete.
+
+Documentation-only changes need no binary build. Authorized disk cleanup may remove the build cache; expect a slower next build rather than changing profiles to compensate.
 
 ## Narrow validation
 
