@@ -140,7 +140,7 @@ fn paragraph_soft_break() {
 fn paragraph_multiple() {
     assert_eq!(
         render_markdown_text("Paragraph 1\n\nParagraph 2"),
-        Text::from_iter(["Paragraph 1", "", "Paragraph 2"])
+        Text::from_iter(["Paragraph 1", "Paragraph 2"])
     );
 }
 
@@ -211,9 +211,7 @@ fn blockquote_three_paragraphs_short_lines() {
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
         Line::from_iter(["> ", "one"]).green(),
-        Line::from_iter(["> "]).green(),
         Line::from_iter(["> ", "two"]).green(),
-        Line::from_iter(["> "]).green(),
         Line::from_iter(["> ", "three"]).green(),
     ]);
     assert_eq!(text, expected);
@@ -305,7 +303,6 @@ fn blockquote_surrounded_by_blank_lines() {
             "foo".to_string(),
             "".to_string(),
             "> bar".to_string(),
-            "".to_string(),
             "baz".to_string(),
         ]
     );
@@ -350,8 +347,8 @@ fn blockquote_in_unordered_list_on_next_line() {
 }
 
 #[test]
-fn blockquote_two_paragraphs_inside_ordered_list_has_blank_line() {
-    // Two blockquote paragraphs inside a list item should be separated by a blank line.
+fn blockquote_two_paragraphs_inside_ordered_list_stay_compact() {
+    // Paragraphs retain quote indentation without adding a spacer row.
     let md = "1.\n   > para 1\n   >\n   > para 2\n";
     let text = render_markdown_text(md);
     let lines: Vec<String> = text
@@ -368,7 +365,6 @@ fn blockquote_two_paragraphs_inside_ordered_list_has_blank_line() {
         lines,
         vec![
             "1. > para 1".to_string(),
-            "   > ".to_string(),
             "   > para 2".to_string(),
         ],
         "expected blockquote content to stay aligned after list marker"
@@ -462,7 +458,6 @@ fn blockquote_with_heading_and_paragraph() {
         lines,
         vec![
             "> # Heading".to_string(),
-            "> ".to_string(),
             "> paragraph text".to_string(),
         ]
     );
@@ -480,7 +475,6 @@ fn blockquote_heading_inherits_heading_style() {
                 "test header".bold().underlined(),
             ])
             .green(),
-            Line::from_iter(["> "]).green(),
             Line::from_iter(["> ", "in blockquote"]).green(),
         ]
     );
@@ -556,7 +550,6 @@ fn nested_blockquote_with_inline_and_fenced_code() {
             "> Nested quote with code:".to_string(),
             "> ".to_string(),
             "> > Inner quote and inline code".to_string(),
-            "> > ".to_string(),
             "> > # fenced code inside a quote".to_string(),
             "> > echo \"hello from a quote\"".to_string(),
         ]
@@ -618,7 +611,6 @@ fn nested_unordered_in_ordered() {
         Line::from_iter(["1. ".fg(accent_color()), "Outer".into()]),
         Line::from_iter(["    • ", "Inner A"]),
         Line::from_iter(["    • ", "Inner B"]),
-        Line::default(),
         Line::from_iter(["2. ".fg(accent_color()), "Next".into()]),
     ]);
     assert_eq!(text, expected);
@@ -632,7 +624,6 @@ fn nested_ordered_in_unordered() {
         Line::from_iter(["• ", "Outer"]),
         Line::from_iter(["    1. ".fg(accent_color()), "One".into()]),
         Line::from_iter(["    2. ".fg(accent_color()), "Two".into()]),
-        Line::default(),
         Line::from_iter(["• ", "Last"]),
     ]);
     assert_eq!(text, expected);
@@ -644,9 +635,7 @@ fn loose_list_item_multiple_paragraphs() {
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
         Line::from_iter(["1. ".fg(accent_color()), "First paragraph".into()]),
-        Line::default(),
         Line::from_iter(["   ", "Second paragraph of same item"]),
-        Line::default(),
         Line::from_iter(["2. ".fg(accent_color()), "Next item".into()]),
     ]);
     assert_eq!(text, expected);
@@ -671,7 +660,6 @@ fn deeply_nested_mixed_three_levels() {
         Line::from_iter(["1. ".fg(accent_color()), "A".into()]),
         Line::from_iter(["    • ", "B"]),
         Line::from_iter(["        1. ".fg(accent_color()), "C".into()]),
-        Line::default(),
         Line::from_iter(["2. ".fg(accent_color()), "D".into()]),
     ]);
     assert_eq!(text, expected);
@@ -1421,7 +1409,7 @@ fn horizontal_rule_renders_em_dashes() {
                 .collect::<String>()
         })
         .collect();
-    assert_eq!(lines, vec!["Before", "", "———", "", "After"]);
+    assert_eq!(lines, vec!["Before", "", "———", "After"]);
 }
 
 #[test]
@@ -1484,7 +1472,7 @@ fn code_block_inside_unordered_list_item_is_indented() {
                 .collect::<String>()
         })
         .collect();
-    assert_eq!(lines, vec!["• Item", "", "  code line"]);
+    assert_eq!(lines, vec!["• Item", "  code line"]);
 }
 
 #[test]
@@ -1501,7 +1489,7 @@ fn code_block_multiple_lines_inside_unordered_list() {
                 .collect::<String>()
         })
         .collect();
-    assert_eq!(lines, vec!["• Item", "", "  first", "  second"]);
+    assert_eq!(lines, vec!["• Item", "  first", "  second"]);
 }
 
 #[test]
@@ -1518,17 +1506,17 @@ fn code_block_inside_unordered_list_item_multiple_lines() {
                 .collect::<String>()
         })
         .collect();
-    assert_eq!(lines, vec!["• Item", "", "  first", "  second"]);
+    assert_eq!(lines, vec!["• Item", "  first", "  second"]);
 }
 
 #[test]
-fn list_item_after_code_block_keeps_blank_separator() {
+fn list_item_after_code_block_stays_compact() {
     let md = "1. First:\n\n   ```rust\n   fn first() {}\n   ```\n\n2. Second:\n";
     let text = render_markdown_text(md);
     let lines = plain_lines(&text);
     assert_eq!(
         lines,
-        vec!["1. First:", "", "   fn first() {}", "", "2. Second:"]
+        vec!["1. First:", "   fn first() {}", "2. Second:"]
     );
     assert_snapshot!(
         "list_item_after_code_block_keeps_blank_separator",
@@ -1537,7 +1525,7 @@ fn list_item_after_code_block_keeps_blank_separator() {
 }
 
 #[test]
-fn outer_list_item_after_nested_code_block_keeps_blank_separator() {
+fn outer_list_item_after_nested_code_block_stays_compact() {
     let md =
         "1. First:\n   - Nested:\n\n     ```rust\n     fn first() {}\n     ```\n\n2. Second:\n";
     let text = render_markdown_text(md);
@@ -1547,9 +1535,7 @@ fn outer_list_item_after_nested_code_block_keeps_blank_separator() {
         vec![
             "1. First:",
             "    • Nested:",
-            "",
             "      fn first() {}",
-            "",
             "2. Second:",
         ]
     );
@@ -1583,7 +1569,7 @@ fn multiline_finding_items_are_separated_snapshot() {
 }
 
 #[test]
-fn wrapped_list_item_is_separated_from_next_sibling() {
+fn wrapped_list_item_stays_adjacent_to_next_sibling() {
     let md = "1. This item wraps onto another visible rendered line\n2. Next item\n";
     let text = render_markdown_text_with_width(md, Some(/*width*/ 24));
     assert_eq!(
@@ -1592,7 +1578,6 @@ fn wrapped_list_item_is_separated_from_next_sibling() {
             "1. This item wraps onto",
             "   another visible",
             "   rendered line",
-            "",
             "2. Next item",
         ]
     );
@@ -1695,7 +1680,6 @@ fn ordered_item_with_code_block_and_nested_bullet() {
         vec![
             "1. item 1".to_string(),
             "2. item 2".to_string(),
-            String::new(),
             "   code".to_string(),
             "    • PROCESS_START (a OnceLock<Instant>) keeps the start time for the entire process.".to_string(),
         ]
@@ -1759,7 +1743,6 @@ fn html_continuation_paragraph_in_unordered_item_indented() {
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
         Line::from_iter(["• ", "Item"]),
-        Line::default(),
         Line::from_iter(["  ", "<em>", "continued", "</em>"]),
     ]);
     assert_eq!(text, expected);
@@ -1783,7 +1766,6 @@ fn unordered_item_continuation_paragraph_is_indented() {
         lines,
         vec![
             "• Intro".to_string(),
-            String::new(),
             "  Continuation paragraph line 1".to_string(),
             "  Continuation paragraph line 2".to_string(),
         ]
@@ -1796,7 +1778,6 @@ fn ordered_item_continuation_paragraph_is_indented() {
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
         Line::from_iter(["1. ".fg(accent_color()), "Intro".into()]),
-        Line::default(),
         Line::from_iter(["   ", "More details about intro"]),
     ]);
     assert_eq!(text, expected);
@@ -1809,9 +1790,7 @@ fn nested_item_continuation_paragraph_is_indented() {
     let expected = Text::from_iter([
         Line::from_iter(["1. ".fg(accent_color()), "A".into()]),
         Line::from_iter(["    • ", "B"]),
-        Line::default(),
         Line::from_iter(["      ", "Continuation for B"]),
-        Line::default(),
         Line::from_iter(["2. ".fg(accent_color()), "C".into()]),
     ]);
     assert_eq!(text, expected);
