@@ -215,6 +215,9 @@ fn compact_list_spacing_keeps_incremental_and_full_renders_aligned() {
             "- A sibling with enough words to wrap across rows\n",
             "- Last\n",
             "\nAfter the list.\n\n",
+            "Another paragraph.\n\n```text\n",
+            "first\n\nsecond\n```\n\n",
+            "After the code.\n\n",
             "| Name | Value |\n| --- | --- |\n| A | B |\n",
             "\n- Nested\n  - One\n  - Two\n- End\n",
         ] {
@@ -465,7 +468,7 @@ fn incremental_render_does_not_add_blank_line_before_html_block() {
         let (_, render) = assert_rich_stream_matches_full_render(chunks, Some(80));
         assert_eq!(
             lines_to_plain_strings(&render.lines),
-            vec!["Paragraph.", "<div>x</div>", "", "Following paragraph.",],
+            vec!["Paragraph.", "<div>x</div>", "Following paragraph.",],
         );
     }
 }
