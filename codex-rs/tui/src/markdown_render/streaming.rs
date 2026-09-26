@@ -26,8 +26,8 @@ pub(crate) struct StreamingMarkdownRender {
     pub(crate) last_top_level_block_start: Option<usize>,
     /// Whether a reference definition can retroactively change another block's rendering.
     pub(crate) has_reference_link_definition: bool,
-    /// Whether the first block is raw HTML, which joins a retained prefix without a separator.
-    pub(crate) first_top_level_block_is_html: bool,
+    /// Whether the first block joins a retained prefix without a visual separator.
+    pub(crate) first_top_level_block_joins_without_separator: bool,
     /// Transformable fences in the final block stay mutable, including within a list or quote.
     pub(crate) mutable_fence_start: Option<usize>,
 }
@@ -62,7 +62,7 @@ pub(crate) fn render_streaming_markdown_lines_with_width_and_cwd(
         depth: 0,
         block_count: 0,
         last_start: 0,
-        first_is_html: false,
+        first_joins_without_separator: false,
         mutable_fence_start: None,
     };
     let mut writer = Writer::new(input, width, cwd, is_hidden_link_destination);
@@ -83,7 +83,7 @@ pub(crate) fn render_streaming_markdown_lines_with_width_and_cwd(
                     .any(|range| range.start < *start && *start < range.end)
             }),
         has_reference_link_definition,
-        first_top_level_block_is_html: parser.first_is_html,
+        first_top_level_block_joins_without_separator: parser.first_joins_without_separator,
         mutable_fence_start: parser.mutable_fence_start,
     }
 }
@@ -94,7 +94,7 @@ struct TopLevelBlockTracker<I> {
     depth: usize,
     block_count: usize,
     last_start: usize,
-    first_is_html: bool,
+    first_joins_without_separator: bool,
     mutable_fence_start: Option<usize>,
 }
 
@@ -111,8 +111,12 @@ where
             self.block_count += 1;
             self.last_start = range.start;
             if self.block_count == 1 {
-                self.first_is_html =
-                    matches!(&event, Event::Start(Tag::HtmlBlock) | Event::Html(_));
+                self.first_joins_without_separator = matches!(
+                    &event,
+                    Event::Start(
+                        Tag::HtmlBlock | Tag::Paragraph | Tag::CodeBlock(_) | Tag::List(_)
+                    ) | Event::Html(_)
+                );
             }
         }
         if let Event::Start(Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(info))) = &event

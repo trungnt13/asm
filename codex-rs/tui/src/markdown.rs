@@ -85,7 +85,7 @@ pub(crate) fn render_markdown_agent_with_links_and_cwd(
         width,
         cwd,
         /*inline_visualization_context*/ None,
-        ListSpacing::AfterMultiline,
+        ListSpacing::Compact,
     )
 }
 
@@ -576,7 +576,7 @@ mod tests {
         let mut out = Vec::new();
         append_markdown(src, /*width*/ None, /*cwd*/ None, &mut out);
         let lines = lines_to_strings(&out);
-        assert_eq!(lines, vec!["Before", "", "    code 1", "", "After"]);
+        assert_eq!(lines, vec!["Before", "    code 1", "After"]);
     }
 
     #[test]
