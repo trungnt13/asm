@@ -3813,10 +3813,16 @@ impl Session {
             turn_context.session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
         ) {
-            let root_service_tier = self.services.agent_control.service_tier();
-            if settings.selected().service_tier != root_service_tier {
+            let child_service_tier = crate::agent::child_config::select_subagent_service_tier(
+                &turn_context.config,
+                &settings.model_info,
+                settings.effective_reasoning_effort().as_ref(),
+                self.services.agent_control.service_tier(),
+            )
+            .map_err(CodexErr::InvalidRequest)?;
+            if settings.selected().service_tier != child_service_tier {
                 let mut selected = settings.selected().clone();
-                selected.service_tier = root_service_tier;
+                selected.service_tier = child_service_tier;
                 let mut inherited_settings = ResolvedStepSettings::new(
                     Arc::new(selected),
                     Arc::clone(&settings.model_info),
