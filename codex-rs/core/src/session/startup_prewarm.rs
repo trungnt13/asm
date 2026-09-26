@@ -316,17 +316,25 @@ async fn schedule_startup_prewarm_inner(session: Arc<Session>) -> CodexResult<Mo
     );
     let startup_cancellation_token = CancellationToken::new();
     let preconnect_model_info = Arc::clone(startup_turn_context.model_info());
-    // Spawned subagents inherit the root's selection, with the same feature and model filtering
-    // that capture applies to the actual request.
+    // Warmup uses the same child routing rule as request capture.
     let preconnect_service_tier = if matches!(
         startup_turn_context.session_source,
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
     ) {
-        crate::session::get_service_tier(
-            session.services.agent_control.service_tier(),
-            session.features().enabled(Feature::FastMode),
+        crate::agent::child_config::select_subagent_service_tier(
+            &startup_turn_context.config,
             &preconnect_model_info,
+            startup_turn_context
+                .initial_settings
+                .effective_reasoning_effort()
+                .as_ref(),
+            crate::session::get_service_tier(
+                session.services.agent_control.service_tier(),
+                session.features().enabled(Feature::FastMode),
+                &preconnect_model_info,
+            ),
         )
+        .map_err(codex_protocol::error::CodexErr::InvalidRequest)?
     } else {
         startup_turn_context.initial_settings.service_tier.clone()
     };
