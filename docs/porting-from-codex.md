@@ -103,3 +103,7 @@ Before committing, verify the author and committer identities with `git var GIT_
 ```
 
 Do not use `390402+trungnt13@users.noreply.github.com`. Do not rewrite published history merely to fix attribution without approval.
+
+## Transcript spacing
+
+Keep Markdown paragraphs, code blocks, and bullet or numbered list items adjacent without renderer-added blank rows, both while streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
