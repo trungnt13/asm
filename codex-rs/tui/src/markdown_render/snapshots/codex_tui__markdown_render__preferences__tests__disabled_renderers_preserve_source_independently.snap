@@ -10,7 +10,6 @@ A[Request] --> B[Reply]
 
 TuiRendering { mermaid: true, math: false, tables: true, lists: true }
 Inline $\alpha_1$ and \(x^{2}\).
-
 \[
 \frac{a}{b}
 \]
