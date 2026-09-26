@@ -626,11 +626,11 @@ impl HistoryCell for AgentMarkdownCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_lines(width, crate::markdown_render::ListSpacing::AfterMultiline)
+        self.render_lines(width, crate::markdown_render::ListSpacing::Compact)
     }
 
     fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
-        self.render_lines(width, crate::markdown_render::ListSpacing::Uniform)
+        self.render_lines(width, crate::markdown_render::ListSpacing::Compact)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
