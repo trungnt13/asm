@@ -630,6 +630,9 @@ pub struct Config {
     /// `default` means the user explicitly selected standard routing.
     pub service_tier: Option<String>,
 
+    /// Child-only routing overrides, keyed by model and reasoning effort.
+    pub subagent_service_tiers: HashMap<String, HashMap<ReasoningEffort, String>>,
+
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
 
@@ -4287,6 +4290,7 @@ impl Config {
             model,
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
             service_tier,
+            subagent_service_tiers: cfg.subagent_service_tiers,
             review_model,
             model_context_window: cfg.model_context_window,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
