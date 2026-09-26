@@ -38,12 +38,14 @@ This fork targets only macOS and Linux (Ubuntu). Keep fork changes and validatio
 
 Keep the fork release workflow separate from upstream's release workflow to reduce conflicts. See [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml).
 
+Published binaries always use `--release` for runtime performance. Local testing uses `dev-small`, with the runnable binary delivered before automated testing is complete. Give macOS release builds 180 minutes, keep Linux at 90 minutes, and retain Cargo timing and resource diagnostics. Do not switch published binaries to a development profile.
+
 Build only these targets on GitHub-hosted runners:
 
 - macOS ARM64: `aarch64-apple-darwin` on `macos-15`.
 - Linux x86_64 MUSL: `x86_64-unknown-linux-musl` on `ubuntu-24.04`.
 
-Each `codex-<target>.tar.gz` contains only the `codex` executable. Publish both archives and `SHA256SUMS`.
+Each `codex-<target>.tar.gz` contains only the `codex` executable. Publish both archives and `SHA256SUMS`. Postmerge builds save these archives. A tag release reuses both only from a successful same-repository push-to-main run at the exact tagged commit; it waits for a matching active run, then builds itself if none succeeded or either archive expired. Do not treat API errors as cache misses. Validate archive names and contents before publication. Diagnostic artifacts are not release assets.
 
 Preserve these constraints:
 
@@ -58,13 +60,13 @@ Do not add other platforms, DMGs, bundled resources, npm, R2, WinGet, website pu
 
 ### Tags and publication
 
-Fork releases use stable `v<major>.<minor>.<patch>` tags only. Do not create prereleases or suffixed tags. Upstream Rust releases use `rust-v*.*.*` and do not determine fork version numbers.
+Derive each fork release version from the latest published upstream Codex prerelease on `openai/codex`, ordered by publication time. Remove the `rust-v` prefix, increment only the numeric patch component by one, and preserve the prerelease suffix exactly. Prefix the fork tag with `v`: `rust-v0.159.0-alpha.6` becomes `v0.159.1-alpha.6`.
 
-When the owner requests a release, choose the version automatically without asking for a number. Check the current tags on `trungnt13/codex`, compare versions numerically, and increment the patch number of the highest fork version: `v0.0.1` → `v0.0.2` → `v0.0.3`. Count a historical prerelease by its base version when choosing the next number. If no fork version exists, start at `v0.0.1`. Never reuse or move an existing tag; if another release takes the chosen number, check again and select the next patch version.
+When the owner requests a release, resolve that upstream version and choose the fork version automatically. Do not increment the previous fork version or the suffix number. Check `trungnt13/codex` for the derived tag before creating it. If it already exists or no upstream prerelease can be determined, stop and report the blocker rather than inventing another version or moving an existing tag.
 
 - A manual dispatch from a branch builds artifacts without publishing a GitHub Release.
 - A `v*` tag publishes both archives and checksums.
-- Every new fork release is a normal release and is marked Latest.
+- Every new fork release is a normal GitHub release and is marked Latest, even though its version retains the upstream prerelease suffix. The suffix does not set the GitHub prerelease flag.
 
 The release job checks the ref, not the event name. A manual dispatch on a `v*` tag can publish too. Do not push a release tag or dispatch on one without publication approval.
 
@@ -74,9 +76,9 @@ When release validation is requested, check the relevant existing run and artifa
 
 Keep the inherited [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml) and [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml) customized in place, rather than adding parallel fork CI files.
 
-Blocking CI keeps formatting, `cargo shear --deny-warnings`, and `cargo clippy --target <target> --tests -- -D warnings` for the two release targets, plus a result collector. Clippy checks test code; it does not run the test suite.
+Blocking CI keeps workspace formatting and scoped production Clippy (`cargo clippy -p codex-cli -p codex-tui -p codex-core -p codex-config --target <target> --lib --bin codex -- -D warnings`) for the two release targets, plus a result collector. It checks the shipped CLI plus fork-owned TUI, core, and config code, not unrelated workspace test targets or unused dependencies in inherited upstream files. Keep real warnings fatal; do not silence assertions or warnings. For future fork code outside these packages, add a narrow affected-package check.
 
-Postmerge CI keeps `cargo build --release --target <target> --bin codex` for those same targets, plus a result collector. Both workflows use the release workflow's runners and target setup.
+Postmerge CI keeps `cargo build --release --target <target> --bin codex` for those same targets, archives the binaries, and retains a result collector. Both workflows use the release workflow's runners and target setup.
 
 These retained CI checks do not require agents to repeat them locally for every change. Do not expand the custom workflows to upstream-wide testing, other platforms, Bazel, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure. Other inherited workflow files may still exist; their presence does not make them required fork checks.
 
@@ -127,3 +129,7 @@ Do not use `390402+trungnt13@users.noreply.github.com`. Do not rewrite published
 ## Transcript spacing
 
 Keep Markdown paragraphs, code blocks, and bullet or numbered list items adjacent without renderer-added blank rows, both while streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
+
+## Subagent service tiers
+
+Allow per-model, per-reasoning-effort service tiers for spawned subagents through `[subagent_service_tiers]`, for example `gpt-6-sol = { high = "fast" }`. Match the child's final model and effective effort after overrides and role settings. A matching rule overrides the root tier throughout the child's lifetime, including root tier changes; unmatched children keep upstream inheritance. Root requests are unchanged. Reject unsupported matched tiers and fast overrides when fast mode is disabled. Keep this policy out of the spawn tool arguments.
