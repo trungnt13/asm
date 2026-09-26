@@ -4,6 +4,8 @@ use super::spawn_telemetry::SpawnMeasurements;
 use super::spawn_telemetry::record_spawn_success;
 use super::*;
 use crate::agent::child_config::build_agent_resume_config;
+use crate::agent::child_config::matching_subagent_service_tier;
+use crate::agent::child_config::select_subagent_service_tier;
 use crate::agent::role::apply_role_to_config;
 use crate::agent::types::AgentMetadata;
 use crate::agent::types::LiveAgent;
@@ -459,6 +461,32 @@ impl LocalAgentControl {
                     ))
                 })?;
             config.model_provider_id = stored_model_provider;
+        }
+        if !config.subagent_service_tiers.is_empty() {
+            let model = config.model.as_deref().ok_or_else(|| {
+                CodexErr::InvalidRequest(
+                    "could not resolve the reloaded child model for service tier selection"
+                        .to_string(),
+                )
+            })?;
+            let model_info = state
+                .models_manager
+                .get_model_info(model, &config.to_models_manager_config())
+                .await;
+            let reasoning_effort = config
+                .model_reasoning_effort
+                .as_ref()
+                .or(model_info.default_reasoning_level.as_ref());
+            if matching_subagent_service_tier(&config, &model_info.slug, reasoning_effort).is_some()
+            {
+                config.service_tier = select_subagent_service_tier(
+                    &config,
+                    &model_info,
+                    reasoning_effort,
+                    self.root_service_tier(),
+                )
+                .map_err(CodexErr::InvalidRequest)?;
+            }
         }
         let parent_thread_id = owner_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id())
