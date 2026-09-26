@@ -9,9 +9,12 @@ use crate::config::Config;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
+use codex_features::Feature;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::BaseInstructions;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
@@ -256,15 +259,6 @@ pub(crate) async fn apply_spawn_agent_service_tier(
     session: &Session,
     config: &mut Config,
 ) -> Result<(), String> {
-    let Some(service_tier) = session.services.agent_control.service_tier() else {
-        config.service_tier = None;
-        return Ok(());
-    };
-    if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE {
-        config.service_tier = Some(service_tier);
-        return Ok(());
-    }
-
     let model = config.model.clone().ok_or_else(|| {
         "spawn_agent could not resolve the child model for service tier validation".to_string()
     })?;
@@ -274,10 +268,64 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .get_model_info(model.as_str(), &config.to_models_manager_config())
         .await;
 
-    config.service_tier = model_info
-        .supports_service_tier(service_tier.as_str())
-        .then_some(service_tier);
+    let effort = config
+        .model_reasoning_effort
+        .as_ref()
+        .or(model_info.default_reasoning_level.as_ref());
+    let inherited_tier = session
+        .services
+        .agent_control
+        .service_tier()
+        .filter(|tier| {
+            tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE || model_info.supports_service_tier(tier)
+        });
+    config.service_tier =
+        select_subagent_service_tier(config, &model_info, effort, inherited_tier)?;
     Ok(())
+}
+
+/// Applies a matching child rule before the live root preference; unmatched children inherit it.
+pub(crate) fn select_subagent_service_tier(
+    config: &Config,
+    model_info: &ModelInfo,
+    reasoning_effort: Option<&ReasoningEffort>,
+    inherited_service_tier: Option<String>,
+) -> Result<Option<String>, String> {
+    let configured_tier =
+        matching_subagent_service_tier(config, &model_info.slug, reasoning_effort);
+    let Some(configured_tier) = configured_tier else {
+        return Ok(inherited_service_tier);
+    };
+    if configured_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE {
+        return Ok(Some(configured_tier.clone()));
+    }
+    let normalized_tier = match ServiceTier::from_request_value(configured_tier) {
+        Some(tier) => tier.request_value(),
+        None => configured_tier,
+    };
+    if normalized_tier != ServiceTier::Flex.request_value()
+        && !config.features.enabled(Feature::FastMode)
+    {
+        return Err(format!(
+            "Subagent service tier `{configured_tier}` for model `{}` requires features.fast_mode",
+            model_info.slug
+        ));
+    }
+    if !model_info.supports_service_tier(normalized_tier) {
+        return Err(format!(
+            "Subagent service tier `{configured_tier}` is not supported for model `{}`",
+            model_info.slug
+        ));
+    }
+    Ok(Some(normalized_tier.to_string()))
+}
+
+pub(crate) fn matching_subagent_service_tier<'a>(
+    config: &'a Config,
+    model: &str,
+    reasoning_effort: Option<&ReasoningEffort>,
+) -> Option<&'a String> {
+    reasoning_effort.and_then(|effort| config.subagent_service_tiers.get(model)?.get(effort))
 }
 
 async fn apply_spawn_agent_role(
