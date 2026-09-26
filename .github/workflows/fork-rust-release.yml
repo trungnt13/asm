@@ -14,9 +14,11 @@ permissions: {}
 
 jobs:
   build:
+    if: ${{ always() && !cancelled() && (needs.find_postmerge.result == 'skipped' || (needs.find_postmerge.result == 'success' && needs.find_postmerge.outputs.reuse != 'true')) }}
+    needs: find_postmerge
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
     defaults:
@@ -30,8 +32,10 @@ jobs:
       matrix:
         include:
           - runner: macos-15
+            timeout: 180
             target: aarch64-apple-darwin
           - runner: ubuntu-24.04
+            timeout: 90
             target: x86_64-unknown-linux-musl
 
     steps:
@@ -82,10 +86,30 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
-      - name: Build codex
+      - name: Build codex with resource sampling
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo build --release --target "$TARGET" --bin codex
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/diagnostics"
+          (while true; do
+            echo "Resource sample $(date -u)"
+            df -h "${GITHUB_WORKSPACE}" || echo 'Filesystem sample unavailable'
+            if [[ "$RUNNER_OS" == macOS ]]; then
+              memory_pressure | sed -n '1,8p' || echo 'Memory-pressure sample unavailable'
+              sysctl vm.swapusage || echo 'Swap sample unavailable'
+              top -l 1 -n 0 | sed -n '1,12p' || echo 'System sample unavailable'
+              ps -Ao pid,ppid,%cpu,rss,comm | sort -k4,4nr | sed -n '1,15p' || echo 'Process sample unavailable'
+            else
+              free -h || echo 'Memory sample unavailable'
+              ps -eo pid,comm,%cpu,%mem,rss --sort=-rss | sed -n '1,12p' || echo 'Process sample unavailable'
+            fi
+            sleep 60
+          done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
+          sampler_pid=$!
+          trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
+          cargo build --release --target "$TARGET" --bin codex --timings
 
       - name: Create archive
         env:
@@ -107,36 +131,90 @@ jobs:
           path: dist/codex-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
+      - name: Upload build diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: diagnostics-${{ matrix.target }}
+          path: |
+            diagnostics/resources-${{ matrix.target }}.log
+            codex-rs/target/cargo-timings/cargo-timing*.html
+          if-no-files-found: warn
+
+  find_postmerge:
+    name: Find matching postmerge archives
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 190
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      reuse: ${{ steps.find.outputs.reuse }}
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Find exact-commit postmerge archives
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/find-postmerge-artifacts.sh
+
   release:
     name: Publish GitHub release
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: build
+    needs: [find_postmerge, build]
+    if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.find_postmerge.result == 'success' && (needs.find_postmerge.outputs.reuse == 'true' || needs.build.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
 
     steps:
-      - name: Download archives
+      - name: Download macOS archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: codex-*
+          name: codex-aarch64-apple-darwin
           path: dist
-          merge-multiple: true
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.find_postmerge.outputs.reuse == 'true' && needs.find_postmerge.outputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download Linux archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codex-x86_64-unknown-linux-musl
+          path: dist
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.find_postmerge.outputs.reuse == 'true' && needs.find_postmerge.outputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Create checksum manifest
         shell: bash
         run: |
           set -euo pipefail
           cd dist
-          mapfile -t archives < <(find . -maxdepth 1 -type f -name 'codex-*.tar.gz' -printf '%f\n' | sort)
-          [[ "${#archives[@]}" -eq 2 ]] || { echo "Expected two archives, found ${#archives[@]}" >&2; exit 1; }
+          archives=(codex-aarch64-apple-darwin.tar.gz codex-x86_64-unknown-linux-musl.tar.gz)
+          [[ $(find . -maxdepth 1 -type f | wc -l) -eq 2 ]] || { echo 'Unexpected release files' >&2; exit 1; }
+          for archive in "${archives[@]}"; do
+            [[ -s "$archive" ]] || { echo "Missing $archive" >&2; exit 1; }
+            python3 - "$archive" <<'PYARCHIVE'
+          import sys
+          import tarfile
+          with tarfile.open(sys.argv[1], 'r:gz') as archive:
+              members = archive.getmembers()
+              if len(members) != 1 or members[0].name != 'codex' or not members[0].isfile() or members[0].size == 0 or not members[0].mode & 0o111:
+                  raise SystemExit(f'Invalid CLI archive: {sys.argv[1]}')
+          PYARCHIVE
+          done
           sha256sum "${archives[@]}" > SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          make_latest: ${{ !contains(github.ref_name, '-') }}
+          prerelease: false
+          make_latest: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
