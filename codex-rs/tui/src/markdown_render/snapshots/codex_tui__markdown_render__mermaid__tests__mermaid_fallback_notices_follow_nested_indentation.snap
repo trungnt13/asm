@@ -6,9 +6,7 @@ expression: "markdown_text(source, 40)"
 > terminal renderer doesn't support.
 > pie
 > "Cats": 2
-
 • Diagram:
-
   This Mermaid diagram uses features the
   terminal renderer doesn't support.
   pie
