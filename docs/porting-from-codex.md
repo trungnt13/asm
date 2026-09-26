@@ -12,9 +12,9 @@ The sections below record current intent. Update the relevant section when inten
 
 - Fork (`origin`): [`trungnt13/codex`](https://github.com/trungnt13/codex).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `e72da2b53805894878023d01949a25a082e0a5cb`.
+- Last incorporated upstream commit: `b334d5b3f2d9441b95286a8c2af8c2152737d977`.
 - Commit date: 2026-09-26.
-- Subject: Stabilize skill catalogs across executor availability changes (#48353).
+- Subject: Default to copying transcript selections in more terminals (#48469).
 
 After a full sync, replace this marker with the exact upstream commit incorporated. A targeted cherry-pick does not advance the full-sync baseline. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`.
 
