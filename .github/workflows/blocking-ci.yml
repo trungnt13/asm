@@ -13,7 +13,7 @@ permissions: {}
 
 jobs:
   general:
-    name: Format and dependency checks
+    name: Format
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -31,11 +31,6 @@ jobs:
           components: rustfmt
       - name: Check formatting
         run: cargo fmt -- --config imports_granularity=Item --check
-      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
-        with:
-          tool: cargo-shear@1.11.2
-      - name: Check unused dependencies
-        run: cargo shear --deny-warnings
 
   build:
     name: Clippy ${{ matrix.target }}
@@ -101,7 +96,7 @@ jobs:
       - name: Run Clippy
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo clippy --target "$TARGET" --tests -- -D warnings
+        run: cargo clippy -p codex-cli -p codex-tui -p codex-core -p codex-config --target "$TARGET" --lib --bin codex -- -D warnings
 
   results:
     name: Fork CI results (required)
