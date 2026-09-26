@@ -6,8 +6,7 @@
 //! `markdown.rs`. Launch-time `tui.rendering` preferences preserve disabled features as source.
 //!
 //! Local file-link parsing and display policy live in [`local_links`].
-//! List spacing stays a renderer policy: compact while streaming in an owned viewport, uniform
-//! after source-backed consolidation, and historical spacing for native scrollback.
+//! Transcript lists use compact spacing during streaming and after consolidation.
 //!
 //! ## Table rendering pipeline
 //!
@@ -732,9 +731,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         if self.in_table_cell() {
             return;
         }
-        if self.needs_newline {
-            self.push_blank_line();
-        }
         self.push_line(Line::default());
         self.needs_newline = false;
         self.in_paragraph = true;
@@ -961,9 +957,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
     }
 
     fn start_list(&mut self, index: Option<u64>) {
-        if self.list_indices.is_empty() && self.needs_newline {
-            self.push_line(Line::default());
-        }
+        self.flush_current_line();
         self.list_indices.push(index);
         self.list_needs_blank_before_next_item.push(false);
         if self.list_spacing == ListSpacing::Uniform {
@@ -1061,16 +1055,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn start_codeblock(&mut self, lang: Option<String>, indent: Option<Span<'static>>) {
         self.flush_current_line();
-        let first_item_block = self.pending_marker_line
-            && self
-                .indent_stack
-                .last()
-                .is_some_and(|context| context.is_list);
-        if !self.text.is_empty()
-            && (self.list_spacing == ListSpacing::AfterMultiline || !first_item_block)
-        {
-            self.push_blank_line();
-        }
         self.in_code_block = true;
 
         // Extract the language token from the info string.  CommonMark info
