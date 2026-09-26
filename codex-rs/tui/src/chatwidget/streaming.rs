@@ -221,13 +221,7 @@ impl ChatWidget {
                     &self.config.cwd,
                     self.history_render_mode(),
                 )
-                .with_list_spacing(
-                    if self.local_settings.transcript_mode.is_owned() {
-                        ListSpacing::Compact
-                    } else {
-                        ListSpacing::AfterMultiline
-                    },
-                ),
+                .with_list_spacing(ListSpacing::Compact),
             );
         }
         let changed = self
@@ -589,13 +583,7 @@ impl ChatWidget {
                     self.history_render_mode(),
                     inline_visualization_context,
                 )
-                .with_list_spacing(
-                    if self.local_settings.transcript_mode.is_owned() {
-                        ListSpacing::Compact
-                    } else {
-                        ListSpacing::AfterMultiline
-                    },
-                ),
+                .with_list_spacing(ListSpacing::Compact),
             );
         }
         let changed = self

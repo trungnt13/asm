@@ -350,7 +350,7 @@ fn unicode_math_pending_source_and_pid_boundaries() {
         let source = format!("{open}\nx\n{close} trailing\n{close}\n\nAfter $\\alpha$.");
         assert_eq!(
             plain(&source, /*width*/ 80),
-            format!("{open}\nx\n{close} trailing\n{close}\n\nAfter α.")
+            format!("{open}\nx\n{close} trailing\n{close}\nAfter α.")
         );
     }
     for source in ["$$\n# x\n", "$$\n- x\n", "\\[\n# x\n", "\\[\n- x\n"] {
@@ -365,13 +365,13 @@ fn unicode_math_pending_source_and_pid_boundaries() {
             "echo $$\n\n$$\nx^2\n$$\n\nAfter $\\alpha$.",
             /*width*/ 80
         ),
-        "echo $$\n\nx²\n\nAfter α."
+        "echo $$\nx²\nAfter α."
     );
     assert_eq!(
         plain(
             "$$\nprice=\\$$$\n\nAfter $\\alpha$.\n\n$$\\beta$$",
             /*width*/ 80
         ),
-        "$$\nprice=\\$$$\n\nAfter α.\n\nβ"
+        "$$\nprice=\\$$$\nAfter α.\nβ"
     );
 }
