@@ -15,7 +15,7 @@ jobs:
   build:
     name: Release build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
     defaults:
@@ -29,8 +29,10 @@ jobs:
       matrix:
         include:
           - runner: macos-15
+            timeout: 180
             target: aarch64-apple-darwin
           - runner: ubuntu-24.04
+            timeout: 90
             target: x86_64-unknown-linux-musl
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -73,10 +75,60 @@ jobs:
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
-      - name: Build codex
+      - name: Build codex with resource sampling
+        shell: bash
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo build --release --target "$TARGET" --bin codex
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/diagnostics"
+          (while true; do
+            echo "Resource sample $(date -u)"
+            df -h "${GITHUB_WORKSPACE}" || echo 'Filesystem sample unavailable'
+            if [[ "$RUNNER_OS" == macOS ]]; then
+              memory_pressure | sed -n '1,8p' || echo 'Memory-pressure sample unavailable'
+              sysctl vm.swapusage || echo 'Swap sample unavailable'
+              top -l 1 -n 0 | sed -n '1,12p' || echo 'System sample unavailable'
+              ps -Ao pid,ppid,%cpu,rss,comm | sort -k4,4nr | sed -n '1,15p' || echo 'Process sample unavailable'
+            else
+              free -h || echo 'Memory sample unavailable'
+              ps -eo pid,comm,%cpu,%mem,rss --sort=-rss | sed -n '1,12p' || echo 'Process sample unavailable'
+            fi
+            sleep 60
+          done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
+          sampler_pid=$!
+          trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
+          cargo build --release --target "$TARGET" --bin codex --timings
+
+      - name: Create archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          release_dir="target/${TARGET}/release"
+          binary="${release_dir}/codex"
+          archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
+
+          [[ -x "$binary" ]] || { echo "Missing executable: $binary" >&2; exit 1; }
+          mkdir -p "$(dirname "$archive")"
+          tar -C "$release_dir" -czf "$archive" codex
+
+      - name: Upload archive
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-${{ matrix.target }}
+          path: dist/codex-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload build diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: diagnostics-${{ matrix.target }}
+          path: |
+            diagnostics/resources-${{ matrix.target }}.log
+            codex-rs/target/cargo-timings/cargo-timing*.html
+          if-no-files-found: warn
 
   results:
     name: Fork postmerge results
