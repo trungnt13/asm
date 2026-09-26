@@ -41,6 +41,8 @@ use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use codex_rollout_trace::InferenceTraceContext;
@@ -752,6 +754,23 @@ async fn drain_to_completed(
     prompt: &Prompt,
     phase: CompactionPhase,
 ) -> CodexResult<CompactionResponse> {
+    let service_tier = if matches!(
+        turn_context.session_source,
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+    ) {
+        crate::agent::child_config::select_subagent_service_tier(
+            &turn_context.config,
+            turn_context.model_info(),
+            turn_context
+                .initial_settings
+                .effective_reasoning_effort()
+                .as_ref(),
+            turn_context.config.service_tier.clone(),
+        )
+        .map_err(CodexErr::InvalidRequest)?
+    } else {
+        turn_context.config.service_tier.clone()
+    };
     let mut stream = client_session
         .stream(
             prompt,
@@ -763,7 +782,7 @@ async fn drain_to_completed(
             )
             .await,
             turn_context.reasoning_summary(),
-            turn_context.config.service_tier.clone(),
+            service_tier,
             responses_metadata,
             // Rollout tracing currently models remote compaction only; local compaction streams
             // are left untraced until the reducer has a first-class local compaction lifecycle.

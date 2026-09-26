@@ -405,6 +405,10 @@ pub struct ConfigToml {
     /// `default`, `priority`, or `flex`; legacy `fast` also works).
     pub service_tier: Option<String>,
 
+    /// Child-only routing overrides, keyed by model and reasoning effort.
+    #[serde(default)]
+    pub subagent_service_tiers: HashMap<String, HashMap<ReasoningEffort, String>>,
+
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
 
@@ -972,6 +976,32 @@ mod tests {
 
     const WORKSPACE_ID_A: &str = "123e4567-e89b-42d3-a456-426614174000";
     const WORKSPACE_ID_B: &str = "123e4567-e89b-42d3-a456-426614174001";
+
+    #[test]
+    fn subagent_service_tiers_parse_by_model_and_reasoning_effort() {
+        let config: ConfigToml = toml::from_str(
+            r#"
+[subagent_service_tiers]
+gpt-6-sol = { high = "fast" }
+gpt-6-luna = { max = "fast" }
+"#,
+        )
+        .expect("subagent service tiers should deserialize");
+
+        assert_eq!(
+            config.subagent_service_tiers,
+            HashMap::from([
+                (
+                    "gpt-6-sol".to_string(),
+                    HashMap::from([(ReasoningEffort::High, "fast".to_string())]),
+                ),
+                (
+                    "gpt-6-luna".to_string(),
+                    HashMap::from([(ReasoningEffort::Max, "fast".to_string())]),
+                ),
+            ])
+        );
+    }
 
     #[test]
     fn sandbox_mode_uses_executor_platform_and_sandbox_level() {
