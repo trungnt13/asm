@@ -12,9 +12,9 @@ This file takes precedence over other repository instructions, including [AGENTS
 
 - Fork (`origin`): [`trungnt13/codex`](https://github.com/trungnt13/codex).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `985cf47a4eb6084b2ff6b30ebdb1216acda85bb4`.
+- Last incorporated upstream commit: `274d41a39850eaaf4b60d0cfa66ea52dc917b274`.
 - Commit date: 2026-09-27.
-- Subject: Allow provisioned executors more time to come online (#48575).
+- Subject: Prevent Linux ETXTBSY races in MCP stdio tests (#48724).
 
 A full sync incorporates a selected upstream `main` commit and all its ancestors. Capture the old baseline and selected upstream commit before syncing; use that fixed range for the report. After success, update the marker to the incorporated commit. A targeted cherry-pick does not advance it. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and check that it is an ancestor of the fork branch.
 
