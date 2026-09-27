@@ -40,14 +40,14 @@ Leave other inherited workflows unchanged unless the task authorizes changes. Ch
 
 Keep these release targets and GitHub-hosted runners:
 
-- macOS ARM64: `aarch64-apple-darwin` on `macos-15`; build timeout 180 minutes.
+- macOS ARM64: `aarch64-apple-darwin` on `macos-15`; build timeout 180 minutes. The installer treats an x86_64 process under Rosetta on Apple Silicon as ARM64, but rejects an actual Intel Mac.
 - Linux x86_64 MUSL: `x86_64-unknown-linux-musl` on `ubuntu-24.04`; build timeout 90 minutes.
 
 Local iteration uses `dev-small` for build speed. Published binaries always use optimized `--release`. Fix release build timeouts in the pipeline, not by switching to a development profile. In release workflows, use `CARGO_PROFILE_RELEASE_STRIP=debuginfo` to remove debug information while retaining function symbols and existing optimization settings. Do not remove runtime dependencies or additional symbols merely because upstream tests passed.
 
 ## Local development: binary first
 
-For runtime or UI changes, make the smallest coherent change and deliver a runnable development binary before automated testing is complete. Inspect all affected paths, including streaming and completed output where relevant. From `codex-rs`, build only the CLI:
+For runtime or UI changes, make the smallest coherent change and deliver a runnable development binary before automated testing is complete. Inspect all affected paths, including streaming and completed output where relevant. From `codex-rs`, build the affected binaries; include `codex-code-mode-host` when changing its behavior:
 
 ```bash
 cargo build -p codex-cli --bin codex --profile dev-small
@@ -73,14 +73,14 @@ A tag or release-title change cannot update an existing binary. Reuse artifacts 
 
 ## Release packaging and publication
 
-Keep [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) separate from upstream's release workflow. Each `codex-<target>.tar.gz` must contain exactly one regular executable file named `codex`. Upload both target archives and `SHA256SUMS`, not source trees or diagnostic artifacts.
+Keep [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) separate from upstream's release workflow. Build `codex` and `codex-code-mode-host` together from the same commit, target, and optimized release profile. Each `codex-<target>.tar.gz` contains exactly these two regular executable siblings. Upload both target archives, `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh), not source trees or diagnostic artifacts. The release job checks out the exact tag before adding the installer to the checksum manifest, including when it reuses postmerge archives.
 
-Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on the packaged binary on its native runner. Its `--version` must match Cargo and its `--help` must succeed and print usage. Record binary and archive sizes. These checks validate our packaging; they do not replace functional tests of changed code.
+Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on both packaged binaries on their native runner. The CLI's `--version` must match Cargo; both executables' `--help` must succeed and print usage. Do not demand `--version` from the helper. Record binary and archive sizes. These checks validate our packaging; they do not replace functional tests of changed code.
 
 Preserve these build constraints:
 
 - No Apple Developer signing or notarization, paid Apple membership, Azure Key Vault, repository release secrets, or self-hosted runners.
-- Linux stays on MUSL. Do not bundle Bubblewrap; install `bwrap` on the host when sandboxing needs it.
+- Linux stays on MUSL. Do not bundle Bubblewrap; install `bwrap` on the host when sandboxing needs it. Rely on the host's `rg` and system shell where relevant; do not bundle voice, patched zsh, or other auxiliary binaries. Do not silently disable sandboxing.
 - Keep Zig, [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), and `AWS_LC_SYS_NO_JITTER_ENTROPY` settings for Linux native dependencies.
 - Keep [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml) for verified prebuilt V8 artifacts.
 - Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, website publishing, or OpenAI-only publishing infrastructure without an agreed change of intent.
@@ -94,7 +94,11 @@ Publication requires owner authorization and both archives:
 - Every new fork release is a normal GitHub release marked Latest. Retaining an upstream `alpha` suffix in the version does not set the GitHub prerelease flag.
 - The concurrency experiment described below never publishes, including when dispatched on a tag.
 
-Use explicit repository selection for GitHub operations, such as `gh ... -R trungnt13/asm`; do not rely on inferred upstream defaults. After publication, verify the tag's commit, release flags, both assets, and downloaded checksums. Confirm version/help checks passed for the published artifacts. Report failures and limits instead of treating a pushed tag as a completed release.
+Use explicit repository selection for GitHub operations, such as `gh ... -R trungnt13/asm`; do not rely on inferred upstream defaults. After publication, verify the tag's commit, release flags, both archives, the installer asset, and downloaded checksums. Confirm version/help checks passed for the published artifacts. Report failures and limits instead of treating a pushed tag as a completed release.
+
+### Installer boundaries
+
+The published `install.sh` installs only from `trungnt13/asm` GitHub releases (`v*`) on macOS ARM64 and Linux x86_64 MUSL. It verifies the release assets against GitHub's SHA-256 digests and `SHA256SUMS` before installing the flat two-binary archive. Keep `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, install locking, and safe `current` selection. Its `packages/asm-standalone` directory leaves upstream standalone packages and their update markers untouched without changing the shared Codex config/state home or the `codex` command. Reject unsupported targets before touching install state. Do not fetch OpenAI/CDN or legacy npm packages. Keep daemon-only installer mode unsupported; manual updates only. Do not write `auto-update-version`, because the inherited daemon updater fetches OpenAI's installer. The inherited in-app update action also points upstream; use this fork's installer for ASM updates until explicitly redesigned. Do not alter runtime sandbox/security defaults to accommodate packaging.
 
 ## CI and build experiments
 
