@@ -99,7 +99,7 @@ jobs:
           done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
-          cargo build --release --target "$TARGET" --bin codex --timings
+          cargo build --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings
 
       - name: Create archive
         env:
@@ -108,11 +108,13 @@ jobs:
           set -euo pipefail
           release_dir="target/${TARGET}/release"
           binary="${release_dir}/codex"
+          helper="${release_dir}/codex-code-mode-host"
           archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
 
           [[ -x "$binary" ]] || { echo "Missing executable: $binary" >&2; exit 1; }
+          [[ -x "$helper" ]] || { echo "Missing executable: $helper" >&2; exit 1; }
           mkdir -p "$(dirname "$archive")"
-          tar -C "$release_dir" -czf "$archive" codex
+          tar -C "$release_dir" -czf "$archive" codex codex-code-mode-host
 
       - name: Smoke packaged ASM
         env:
