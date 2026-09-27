@@ -3,10 +3,10 @@
 ## Principles
 
 1. **Personal use only.** This fork exists solely for Trung Ngo's personal use.
-2. **Keep changes minimal, safe, and minor.** Assume unchanged upstream code has already been tested upstream. Run only narrow, fast checks for fork changes and conflict resolutions. Do not repeat upstream testing or run full suites by default. This assumption is not proof that a particular upstream commit passed CI. If a change needs broad testing to establish safety, stop and clarify its scope with the owner.
-3. **Keep the owner's current intent in this file.** Whenever changing the fork, record the purpose and constraints here. If a proposed change conflicts with recorded intent, ask the owner before proceeding. Once accepted, replace the old intent rather than keeping contradictory rules or a change log. With intent clear, agents may triage changes, choose a sync method, and resolve merge or rebase conflicts within that scope without asking about each conflict.
+2. **Keep changes minimal, safe, and minor.** Assume unchanged upstream code has already been tested upstream. Validate fork changes, conflict resolutions, and packaging with narrow, fast checks. Do not repeat full upstream suites by default. Upstream testing does not establish that our changes or packages work.
+3. **Record the owner's current intent here.** Ensure each fork change's purpose and constraints are covered in the relevant section; update missing or changed intent, not a log of work already covered. If a proposed change conflicts with recorded intent, ask the owner first. Once accepted, replace the old intent rather than keeping contradictory rules. With intent clear, agents may triage changes and resolve merge or rebase conflicts within the authorized scope without asking about each conflict.
 
-The sections below record current intent. Update the relevant section when intent changes; do not add a duplicate policy. Resolving a conflict does not authorize changing requirements, discarding user work, rewriting published history, or publishing a release.
+This file takes precedence over other repository instructions, including [AGENTS.md](../AGENTS.md), where they conflict. Its narrow validation policy replaces whole-crate and full-suite defaults; other implementation rules still apply. This file records intended behavior, not proof that a change has been committed, deployed, or included in a published binary.
 
 ## Upstream baseline
 
@@ -16,115 +16,108 @@ The sections below record current intent. Update the relevant section when inten
 - Commit date: 2026-09-27.
 - Subject: Allow provisioned executors more time to come online (#48575).
 
-After a full sync, replace this marker with the exact upstream commit incorporated. A targeted cherry-pick does not advance the full-sync baseline. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`.
+A full sync incorporates a selected upstream `main` commit and all its ancestors. Capture the old baseline and selected upstream commit before syncing; use that fixed range for the report. After success, update the marker to the incorporated commit. A targeted cherry-pick does not advance it. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and check that it is an ancestor of the fork branch.
 
-## Sync and conflict decisions
+## Sync and local work
 
-Before editing, inspect Git status, the branch, remotes, and the fork diff. Treat existing changes as user-owned. Do not reset, clean, stash, overwrite, or revert unrelated work. Use a separate worktree if needed to keep it untouched.
+Inspect Git status, the branch, remotes, and fork differences before editing. Preserve existing work. If local changes would block a sync, use a separate worktree unless the task authorizes committing or stashing them. When stashing is authorized, keep the named stash until restoration is verified; keep unfinished work out of published commits.
 
-Fetch the intended upstream refs after checking the remote URL. Compare the recorded baseline with the selected upstream commit, not a stale example range. Focus on fork differences and the upstream changes that affect them; do not audit unchanged upstream code again.
+Follow the requested sync method. Without a specified method, merge to preserve published history; rebase unpublished branches when useful. A requested rebase permits local history rewriting, not a force push unless that is also authorized. Use `git cherry-pick -x` for targeted ports and `codex/` for new branch names. Do not discard work, rewrite remote history, move existing release tags, or publish releases without explicit authorization.
 
-Use a merge when preserving published history matters. A rebase is acceptable for an unpublished branch. For targeted ports, use `git cherry-pick -x` to retain the source commit. Use `codex/` for new branch names. Ask before rebasing or force-pushing published `main`, amending published commits, or moving release tags.
+Verify the upstream URL before fetching. Focus on fork differences and the upstream changes that affect them, not unchanged upstream code. Resolve conflicts against this guide's intent, comparing the base, fork, and upstream versions when needed. Inspect all currently exposed conflicts before asking one consolidated question with recommended resolutions. Later rebase commits may expose more conflicts.
 
-Resolve conflicts against the current intent in this file. Compare the common base, fork, and upstream versions when needed. Keep useful upstream fixes without restoring deliberately omitted platforms or infrastructure. Ask only when the resolution would change intent or the evidence does not settle the choice.
+Keep related generated files correct when fork changes require them: schemas, snapshots, dependency lockfiles, and Bazel data declarations. Not running Bazel CI does not authorize breaking its files. Reuse already-correct upstream outputs rather than regenerating everything after a sync.
 
-This file takes precedence over all other repository instructions, including [AGENTS.md](../AGENTS.md), where they conflict. Follow their remaining implementation rules. Keep fork-specific logic small and avoid unrelated refactors. Update generated schemas, snapshots, lockfiles, or Bazel data declarations only when the fork change requires them. Imported upstream changes alone do not justify regenerating or retesting everything.
+## Platforms and build profiles
 
-## Platform focus
+Focus only on macOS and Linux (Ubuntu). Keep inherited code and workflow files for other platforms unless their removal is explicitly requested. Do not wire them into the custom fork CI or release workflows. Their presence does not mean they are disabled or required fork checks.
 
-This fork targets only macOS and Linux (Ubuntu). Keep fork changes and validation focused on these platforms. Retain inherited code and workflow files for other platforms, but do not add those platforms to the fork CI or release workflows. The release targets below remain macOS ARM64 and Linux x86_64 MUSL.
+Leave other inherited workflows unchanged unless the task authorizes changes. Check their own triggers and repository guards: [V8 canary](../.github/workflows/v8-canary.yml) still triggers on pull requests, with expensive builds conditional on relevant changes; [CLA](../.github/workflows/cla.yml) restricts its job to the `openai` owner. The custom CI scope does not disable these workflows.
 
-## Release intent
+Keep these release targets and GitHub-hosted runners:
 
-Keep the fork release workflow separate from upstream's release workflow to reduce conflicts. See [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml).
+- macOS ARM64: `aarch64-apple-darwin` on `macos-15`; build timeout 180 minutes.
+- Linux x86_64 MUSL: `x86_64-unknown-linux-musl` on `ubuntu-24.04`; build timeout 90 minutes.
 
-Published binaries always use `--release` for runtime performance. Local testing uses `dev-small`, with the runnable binary delivered before automated testing is complete. Give macOS release builds 180 minutes, keep Linux at 90 minutes, and retain Cargo timing and resource diagnostics. Do not switch published binaries to a development profile.
-
-Build only these targets on GitHub-hosted runners:
-
-- macOS ARM64: `aarch64-apple-darwin` on `macos-15`.
-- Linux x86_64 MUSL: `x86_64-unknown-linux-musl` on `ubuntu-24.04`.
-
-Each `codex-<target>.tar.gz` contains only the `codex` executable. Publish both archives and `SHA256SUMS`. Postmerge builds save these archives. A tag release reuses both only from a successful same-repository push-to-main run at the exact tagged commit; it waits for a matching active run, then builds itself if none succeeded or either archive expired. Do not treat API errors as cache misses. Validate archive names and contents before publication. Diagnostic artifacts are not release assets.
-
-Preserve these constraints:
-
-- macOS stays unsigned and unnotarized. No paid Apple membership, Apple credentials, or Azure Key Vault.
-- No repository release secrets or self-hosted runners.
-- Linux stays on MUSL. Do not bundle Bubblewrap; install `bwrap` on the host when needed for sandboxing.
-- Keep Zig and [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh) for Linux native dependencies, including the AWS-LC no-jitter settings in the workflows.
-- Keep [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml) for the verified prebuilt V8 artifacts.
-- Keep the workspace version at `0.0.0` in [`Cargo.toml`](../codex-rs/Cargo.toml). Release tags do not rewrite Cargo files.
-
-Do not add other platforms, DMGs, bundled resources, npm, R2, WinGet, website publishing, signing, or OpenAI-only publishing infrastructure without an agreed change of intent.
-
-### Tags and publication
-
-Derive each fork release version from the latest published upstream Codex prerelease on `openai/codex`, ordered by publication time. Remove the `rust-v` prefix, increment only the numeric patch component by one, and preserve the prerelease suffix exactly. Prefix the fork tag with `v`: `rust-v0.159.0-alpha.6` becomes `v0.159.1-alpha.6`.
-
-When the owner requests a release, resolve that upstream version and choose the fork version automatically. Do not increment the previous fork version or the suffix number. Check `trungnt13/codex` for the derived tag before creating it. If it already exists or no upstream prerelease can be determined, stop and report the blocker rather than inventing another version or moving an existing tag.
-
-- A manual dispatch from a branch builds artifacts without publishing a GitHub Release.
-- A `v*` tag publishes both archives and checksums.
-- Every new fork release is a normal GitHub release and is marked Latest, even though its version retains the upstream prerelease suffix. The suffix does not set the GitHub prerelease flag.
-
-The release job checks the ref, not the event name. A manual dispatch on a `v*` tag can publish too. Do not push a release tag or dispatch on one without publication approval.
-
-When release validation is requested, check the relevant existing run and artifacts first. Do not repeat builds merely to recheck unchanged packaging. After an authorized release, verify both archives and `SHA256SUMS` are present.
-
-## CI intent
-
-Keep the inherited [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml) and [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml) customized in place, rather than adding parallel fork CI files.
-
-Blocking CI keeps workspace formatting and scoped production Clippy (`cargo clippy -p codex-cli -p codex-tui -p codex-core -p codex-config --target <target> --lib --bin codex -- -D warnings`) for the two release targets, plus a result collector. It checks the shipped CLI plus fork-owned TUI, core, and config code, not unrelated workspace test targets or unused dependencies in inherited upstream files. Keep real warnings fatal; do not silence assertions or warnings. For future fork code outside these packages, add a narrow affected-package check.
-
-Postmerge CI keeps `cargo build --release --target <target> --bin codex` for those same targets, archives the binaries, and retains a result collector. Both workflows use the release workflow's runners and target setup.
-
-These retained CI checks do not require agents to repeat them locally for every change. Do not expand the custom workflows to upstream-wide testing, other platforms, Bazel, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure. Other inherited workflow files may still exist; their presence does not make them required fork checks.
-
-When syncing, port relevant action-version, toolchain, security, and build fixes. Do not replace the custom workflows wholesale with upstream versions.
+Local iteration uses `dev-small` for build speed. Published binaries always use optimized `--release`. Fix release build timeouts in the pipeline, not by switching to a development profile. In release workflows, use `CARGO_PROFILE_RELEASE_STRIP=debuginfo` to remove debug information while retaining function symbols and existing optimization settings. Do not remove runtime dependencies or additional symbols merely because upstream tests passed.
 
 ## Local development: binary first
 
-For runtime or UI changes, deliver a runnable development binary before automated testing is complete. Build speed takes priority over runtime performance for local testing.
-
-Inspect affected paths, including streaming and completed output where relevant. Make the smallest coherent change, then build only the CLI from `codex-rs`:
+For runtime or UI changes, make the smallest coherent change and deliver a runnable development binary before automated testing is complete. Inspect all affected paths, including streaming and completed output where relevant. From `codex-rs`, build only the CLI:
 
 ```bash
 cargo build -p codex-cli --bin codex --profile dev-small
 ```
 
-- Use the native host target and the existing warm development cache. Keep the toolchain, profile, target directory, and compiler flags consistent. Do not clean caches or switch profiles merely to try to speed up one build.
-- Use `dev-small` consistently for local CLI builds: no optimization or debug info. The first build may need to rebuild dependencies; later builds should reuse this profile's cache. Do not switch back to `dev` merely to reuse a different cache. Do not use release builds, cross-compilation, or packaging unless requested or needed to reproduce the behavior.
-- Prioritize the CLI build over competing Cargo jobs. Test builds may reuse some dependencies, but they do not deliver the CLI binary or eliminate compilation and linking. Do not promise instant builds.
-- As soon as the build succeeds, report the verified absolute binary path, build duration, a short manual check, and pending automated checks. Do not overwrite the installed `codex` or present an older executable as the new build.
-- Hand off the binary before updating test expectations or running tests when those can safely follow. Then update affected assertions and snapshots together, verify test filters, and run the narrow checks below. Do not disable tests to hide changed behavior.
+- Keep the native target, toolchain, `dev-small` profile, compiler flags, and target directory consistent. Do not clean caches or switch profiles to try to speed up one build. Authorized cache cleanup makes the next build slower.
+- Prioritize the CLI build over competing Cargo jobs. Tests may reuse some dependencies, but test executables are not the CLI. Do not promise instant builds.
+- After a successful build, report the verified absolute binary path, build duration, a short manual check, and pending automated checks. Do not overwrite the installed `codex` unless asked, or present an old executable as the new build.
+- When safe, hand off the binary before updating test expectations or running focused tests. Group related assertion and snapshot updates; do not disable tests to hide changed behavior.
 - If runtime code changes after handoff, rebuild and identify the replacement binary. Distinguish ready for manual testing from validated complete.
 
-Documentation-only changes need no binary build. Authorized disk cleanup may remove the build cache; expect a slower next build rather than changing profiles to compensate.
+Documentation-only changes need no binary build. Use release builds, cross-compilation, or packaging during local work only when requested or needed to reproduce the affected behavior.
+
+## Release versions
+
+When the owner requests a release, select the latest published, non-draft upstream Codex prerelease with a `rust-v` tag on `openai/codex`, ordered by publication time. Increment only its numeric patch component by one and preserve its suffix. For example, `rust-v0.159.0-alpha.6` gives fork version `0.159.1-alpha.6` and tag `v0.159.1-alpha.6`.
+
+Choose this version automatically; do not increment the previous fork version or the suffix number. Check the fork's remote tags before changing versions. If the derived tag already exists or no upstream prerelease can be determined, stop and ask for a decision. Do not invent another number or move an existing tag. The current rule therefore requires a decision for another release based on the same upstream prerelease.
+
+For a requested release, set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) to the selected fork version and refresh [`Cargo.lock`](../codex-rs/Cargo.lock). Commit both before the release build or tag. Keep that version on `main` until the next release bump. The tag, Cargo version, and packaged binary's `--version` must agree, apart from the tag's `v` prefix and the CLI's name prefix.
+
+A tag or release-title change cannot update an existing binary. Reuse artifacts only from the exact version-bumped commit. Report the source commit and upstream baseline separately; the version label does not prove which upstream code was incorporated.
+
+## Release packaging and publication
+
+Keep [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) separate from upstream's release workflow. Each `codex-<target>.tar.gz` must contain exactly one regular executable file named `codex`. Upload both target archives and `SHA256SUMS`, not source trees or diagnostic artifacts.
+
+Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on the packaged binary on its native runner. Its `--version` must match Cargo and its `--help` must succeed and print usage. Record binary and archive sizes. These checks validate our packaging; they do not replace functional tests of changed code.
+
+Preserve these build constraints:
+
+- No Apple Developer signing or notarization, paid Apple membership, Azure Key Vault, repository release secrets, or self-hosted runners.
+- Linux stays on MUSL. Do not bundle Bubblewrap; install `bwrap` on the host when sandboxing needs it.
+- Keep Zig, [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), and `AWS_LC_SYS_NO_JITTER_ENTROPY` settings for Linux native dependencies.
+- Keep [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml) for verified prebuilt V8 artifacts.
+- Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, website publishing, or OpenAI-only publishing infrastructure without an agreed change of intent.
+
+[Postmerge CI](../.github/workflows/postmerge-ci.yml) saves release archives. A tag release uses [the artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) to reuse both unexpired archives from a successful same-repository push-to-`main` run at the exact tagged commit. It waits for a matching active run. If that run stays active beyond the wait limit, stop rather than build concurrently. If no usable completed run remains, build the archives in the release workflow. API errors are failures, not cache misses.
+
+Publication requires owner authorization and both archives:
+
+- Pushing a `v*` tag starts the release workflow; pushing `main` alone does not publish.
+- Normal manual dispatch from a branch builds artifacts only. Normal dispatch on a `v*` tag can publish too, because publication checks the ref.
+- Every new fork release is a normal GitHub release marked Latest. Retaining an upstream `alpha` suffix in the version does not set the GitHub prerelease flag.
+- The concurrency experiment described below never publishes, including when dispatched on a tag.
+
+Use explicit repository selection for GitHub operations, such as `gh ... -R trungnt13/codex`; do not rely on inferred upstream defaults. After publication, verify the tag's commit, release flags, both assets, and downloaded checksums. Confirm version/help checks passed for the published artifacts. Report failures and limits instead of treating a pushed tag as a completed release.
+
+## CI and build experiments
+
+Keep [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml) and [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml) customized in place. Port useful upstream action, toolchain, security, and build fixes without restoring upstream-wide matrices.
+
+Blocking CI runs workspace formatting and production Clippy for `codex-cli`, `codex-tui`, `codex-core`, and `codex-config`, on both release targets, plus a result collector. It uses `--lib --bin codex -- -D warnings`, not workspace test targets or `cargo shear`. Keep warnings fatal. Add narrow checks if future fork changes affect other packages.
+
+Postmerge CI builds optimized binaries with the release target setup, packages and smoke-checks them, uploads archives and diagnostics, and collects results. The tag-release workflow does not depend on blocking CI; report its status separately rather than claiming publication proves all CI passed.
+
+Do not repeat these checks locally for every edit or expand the custom workflows to unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure.
+
+The optional `macos_concurrency_experiment` dispatch compares cold builds of the same commit on `macos-15` with Cargo job limits 2 and 3. Keep every other build setting equal. Save separate timing, resource, size, and smoke-check results. It does not reuse postmerge artifacts or publish. Compare results before changing the default job count; treat one comparison as evidence, not proof of a general speedup.
 
 ## Narrow validation
 
-Choose checks from the fork-specific diff and conflict resolutions, not the size of the imported upstream range:
+Choose checks from fork changes and conflict resolutions, not the size of the imported upstream range:
 
-- **Documentation:** inspect the wording and local links; run `git diff --check`. No builds or tests.
-- **Workflows:** lint only changed workflow files with `actionlint`; inspect affected triggers, permissions, targets, and packaging. Do not run release builds for unrelated edits.
-- **Rust:** use `just test -p <crate> <test-filter>` for the changed behavior. Use `just test`, not direct `cargo test`. Keep required formatting and affected generated outputs current. Do not run whole-crate or workspace suites by default.
-- **Conflict resolutions:** check the behavior or build setup that the resolution changed. A clean merge alone does not prove correctness, but it does not call for full upstream validation either.
+- **Documentation:** read the changed guidance, check local links, and run `git diff --check`. No builds or tests.
+- **Workflows and scripts:** lint changed workflows with `actionlint` and check affected script logic with small fixtures. Run native builds only when needed to validate changed packaging or an authorized experiment.
+- **Rust:** use `just test -p <crate> <test-filter>` for changed behavior, not direct `cargo test`. Keep formatting and affected generated outputs current. Do not run whole-crate or workspace suites by default.
+- **Conflicts:** check the behavior or build setup changed by the resolution. A clean merge alone proves neither correctness nor a need for full upstream testing.
 
-For affected release logic, check only the relevant constraints above: tag handling, target setup, archive contents, checksums, credentials, and version preservation. For affected runtime logic, target the changed API, CLI, configuration, session, context, or cross-OS behavior rather than testing all of them.
-
-If a fast, narrow check cannot establish safety, explain the gap and ask before expanding the change or validation. Report exact checks and results, skipped or blocked checks, and remaining uncertainty. Do not claim upstream CI passed unless verified.
+If narrow checks cannot establish safety, explain the gap and ask before expanding scope. Report exact checks, results, skipped or blocked work, and remaining uncertainty. Do not claim upstream CI passed unless verified.
 
 ## Commit attribution
 
-Before committing, verify the author and committer identities with `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. The owner's GitHub no-reply email is:
-
-```text
-1390402+trungnt13@users.noreply.github.com
-```
-
-Do not use `390402+trungnt13@users.noreply.github.com`. Do not rewrite published history merely to fix attribution without approval.
+Use the configured owner identity: `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify both identities with `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` before committing. Correct local configuration when needed; do not rewrite published commits merely to fix attribution without approval.
 
 ## Transcript spacing
 
