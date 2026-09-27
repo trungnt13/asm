@@ -24,6 +24,7 @@ jobs:
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "off"
+      CARGO_PROFILE_RELEASE_STRIP: "debuginfo"
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +114,13 @@ jobs:
           mkdir -p "$(dirname "$archive")"
           tar -C "$release_dir" -czf "$archive" codex
 
+      - name: Smoke packaged codex
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-${TARGET}.log"
+
       - name: Upload archive
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -127,6 +135,7 @@ jobs:
           name: diagnostics-${{ matrix.target }}
           path: |
             diagnostics/resources-${{ matrix.target }}.log
+            diagnostics/smoke-${{ matrix.target }}.log
             codex-rs/target/cargo-timings/cargo-timing*.html
           if-no-files-found: warn
 
