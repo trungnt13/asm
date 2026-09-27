@@ -85,7 +85,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
-      - name: Build codex with resource sampling
+      - name: Build ASM with resource sampling
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -134,7 +134,7 @@ jobs:
           mkdir -p "$(dirname "$archive")"
           tar -C "$release_dir" -czf "$archive" codex
 
-      - name: Smoke packaged codex
+      - name: Smoke packaged ASM
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -241,15 +241,16 @@ jobs:
           done
           sha256sum "${archives[@]}" > SHA256SUMS
 
-      - name: Create GitHub release
+      - name: Create ASM GitHub release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
+          name: ASM ${{ github.ref_name }}
           prerelease: false
           make_latest: true
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
-            Minimal fork build containing only the Codex CLI executable.
+            ASM is a personal fork of OpenAI Codex. This release contains only the CLI executable, still named `codex`.
 
             The macOS ARM64 binary is unsigned and unnotarized. The Linux x86_64
             archive does not include bundled Bubblewrap; install `bwrap` on the
