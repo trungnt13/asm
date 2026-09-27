@@ -2,6 +2,11 @@ name: fork-rust-release
 
 on:
   workflow_dispatch:
+    inputs:
+      macos_concurrency_experiment:
+        description: 'Build macOS with 2 and 3 Cargo jobs; never publish'
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -16,7 +21,7 @@ jobs:
   build:
     if: ${{ always() && !cancelled() && (needs.find_postmerge.result == 'skipped' || (needs.find_postmerge.result == 'success' && needs.find_postmerge.outputs.reuse != 'true')) }}
     needs: find_postmerge
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.target }} (jobs ${{ matrix.jobs }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     permissions:
@@ -27,17 +32,11 @@ jobs:
     env:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "off"
+      CARGO_PROFILE_RELEASE_STRIP: "debuginfo"
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-15
-            timeout: 180
-            target: aarch64-apple-darwin
-          - runner: ubuntu-24.04
-            timeout: 90
-            target: x86_64-unknown-linux-musl
-
+        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","timeout":180,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","timeout":180,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","timeout":180,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-24.04","timeout":90,"target":"x86_64-unknown-linux-musl","jobs":0}]') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -90,9 +89,18 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
+          BUILD_JOBS: ${{ matrix.jobs }}
         run: |
           set -euo pipefail
           mkdir -p "${GITHUB_WORKSPACE}/diagnostics"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            logical_cpus=$(sysctl -n hw.logicalcpu)
+            ram_bytes=$(sysctl -n hw.memsize)
+          else
+            logical_cpus=$(nproc)
+            ram_bytes=$(awk '/MemTotal:/ { print $2 * 1024 }' /proc/meminfo)
+          fi
+          printf 'build_jobs=%s logical_cpus=%s ram_bytes=%s\n' "$BUILD_JOBS" "$logical_cpus" "$ram_bytes" > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log"
           (while true; do
             echo "Resource sample $(date -u)"
             df -h "${GITHUB_WORKSPACE}" || echo 'Filesystem sample unavailable'
@@ -106,10 +114,12 @@ jobs:
               ps -eo pid,comm,%cpu,%mem,rss --sort=-rss | sed -n '1,12p' || echo 'Process sample unavailable'
             fi
             sleep 60
-          done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
+          done) >> "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
-          cargo build --release --target "$TARGET" --bin codex --timings
+          build_args=(--release --target "$TARGET" --bin codex --timings)
+          if [[ "$BUILD_JOBS" != 0 ]]; then build_args+=(--jobs "$BUILD_JOBS"); fi
+          cargo build "${build_args[@]}"
 
       - name: Create archive
         env:
@@ -124,10 +134,17 @@ jobs:
           mkdir -p "$(dirname "$archive")"
           tar -C "$release_dir" -czf "$archive" codex
 
+      - name: Smoke packaged codex
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-${TARGET}.log"
+
       - name: Upload archive
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: codex-${{ matrix.target }}
+          name: ${{ matrix.jobs == 0 && format('codex-{0}', matrix.target) || format('experiment-codex-{0}-jobs-{1}', matrix.target, matrix.jobs) }}
           path: dist/codex-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 
@@ -135,15 +152,16 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: diagnostics-${{ matrix.target }}
+          name: diagnostics-${{ matrix.target }}-jobs-${{ matrix.jobs }}
           path: |
             diagnostics/resources-${{ matrix.target }}.log
+            diagnostics/smoke-${{ matrix.target }}.log
             codex-rs/target/cargo-timings/cargo-timing*.html
           if-no-files-found: warn
 
   find_postmerge:
     name: Find matching postmerge archives
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && inputs.macos_concurrency_experiment != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 190
     permissions:
@@ -156,6 +174,19 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("codex-rs/Cargo.toml").read_text())["workspace"]["package"]["version"]
+          tag = os.environ["RELEASE_TAG"]
+          if tag != f"v{version}":
+              raise SystemExit(f"Release tag {tag} does not match Cargo version {version}")
+          PY
       - name: Find exact-commit postmerge archives
         id: find
         env:
@@ -165,7 +196,7 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [find_postmerge, build]
-    if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.find_postmerge.result == 'success' && (needs.find_postmerge.outputs.reuse == 'true' || needs.build.result == 'success') }}
+    if: ${{ always() && !cancelled() && startsWith(github.ref, 'refs/tags/v') && inputs.macos_concurrency_experiment != true && needs.find_postmerge.result == 'success' && (needs.find_postmerge.outputs.reuse == 'true' || needs.build.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
       actions: read
