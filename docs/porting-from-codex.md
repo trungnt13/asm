@@ -8,9 +8,13 @@
 
 This file takes precedence over other repository instructions, including [AGENTS.md](../AGENTS.md), where they conflict. Its narrow validation policy replaces whole-crate and full-suite defaults; other implementation rules still apply. This file records intended behavior, not proof that a change has been committed, deployed, or included in a published binary.
 
+## ASM branding
+
+Use ASM in the README heading, GitHub repository description and release titles, introductory release prose, and descriptive workflow step labels, while clearly attributing the fork to OpenAI Codex. Keep the existing `codex` executable, crate, state and config names, archive filenames, tags, workflow names, job IDs, and CI check identities unchanged. Branding does not change what upstream links or installers provide.
+
 ## Upstream baseline
 
-- Fork (`origin`): [`trungnt13/codex`](https://github.com/trungnt13/codex).
+- Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 - Last incorporated upstream commit: `274d41a39850eaaf4b60d0cfa66ea52dc917b274`.
 - Commit date: 2026-09-27.
@@ -90,7 +94,7 @@ Publication requires owner authorization and both archives:
 - Every new fork release is a normal GitHub release marked Latest. Retaining an upstream `alpha` suffix in the version does not set the GitHub prerelease flag.
 - The concurrency experiment described below never publishes, including when dispatched on a tag.
 
-Use explicit repository selection for GitHub operations, such as `gh ... -R trungnt13/codex`; do not rely on inferred upstream defaults. After publication, verify the tag's commit, release flags, both assets, and downloaded checksums. Confirm version/help checks passed for the published artifacts. Report failures and limits instead of treating a pushed tag as a completed release.
+Use explicit repository selection for GitHub operations, such as `gh ... -R trungnt13/asm`; do not rely on inferred upstream defaults. After publication, verify the tag's commit, release flags, both assets, and downloaded checksums. Confirm version/help checks passed for the published artifacts. Report failures and limits instead of treating a pushed tag as a completed release.
 
 ## CI and build experiments
 
