@@ -76,7 +76,7 @@ jobs:
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
-      - name: Build codex with resource sampling
+      - name: Build ASM with resource sampling
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -114,7 +114,7 @@ jobs:
           mkdir -p "$(dirname "$archive")"
           tar -C "$release_dir" -czf "$archive" codex
 
-      - name: Smoke packaged codex
+      - name: Smoke packaged ASM
         env:
           TARGET: ${{ matrix.target }}
         run: |
