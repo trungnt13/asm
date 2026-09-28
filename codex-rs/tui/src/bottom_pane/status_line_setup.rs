@@ -125,6 +125,9 @@ pub(crate) enum StatusLineItem {
     /// Total input tokens consumed.
     TotalInputTokens,
 
+    /// Percentage of this thread's cumulative input tokens served from cache.
+    CacheHitRate,
+
     /// Total output tokens generated.
     TotalOutputTokens,
 
@@ -195,6 +198,9 @@ impl StatusLineItem {
             }
             StatusLineItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             StatusLineItem::TotalInputTokens => "Total input tokens used in session",
+            StatusLineItem::CacheHitRate => {
+                "Cached share of this thread's total input tokens (omitted until available)"
+            }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
             StatusLineItem::ThreadCredits => {
                 "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
@@ -240,6 +246,7 @@ impl StatusLineItem {
             StatusLineItem::ContextWindowSize => StatusSurfacePreviewItem::ContextWindowSize,
             StatusLineItem::UsedTokens => StatusSurfacePreviewItem::UsedTokens,
             StatusLineItem::TotalInputTokens => StatusSurfacePreviewItem::TotalInputTokens,
+            StatusLineItem::CacheHitRate => StatusSurfacePreviewItem::CacheHitRate,
             StatusLineItem::TotalOutputTokens => StatusSurfacePreviewItem::TotalOutputTokens,
             StatusLineItem::ThreadCredits => StatusSurfacePreviewItem::ThreadCredits,
             StatusLineItem::EstimatedThreadCost => StatusSurfacePreviewItem::EstimatedThreadCost,
@@ -590,7 +597,7 @@ mod tests {
                     /*use_theme_colors*/ true,
                 )
             ),
-            Some("gpt-5 · /repo".to_string())
+            Some("gpt-5·/repo".to_string())
         );
     }
 
@@ -628,7 +635,7 @@ mod tests {
                     /*use_theme_colors*/ true,
                 )
             ),
-            Some("gpt-5 · feat/awesome-feature".to_string())
+            Some("gpt-5·feat/awesome-feature".to_string())
         );
     }
 
@@ -672,7 +679,7 @@ mod tests {
                     /*use_theme_colors*/ true,
                 )
             ),
-            Some("gpt-5 · Roadmap cleanup".to_string())
+            Some("gpt-5·Roadmap cleanup".to_string())
         );
     }
 
@@ -718,6 +725,7 @@ mod tests {
             Some(&[
                 StatusLineItem::ThreadCredits.to_string(),
                 StatusLineItem::EstimatedThreadCost.to_string(),
+                StatusLineItem::CacheHitRate.to_string(),
             ]),
             /*use_theme_colors*/ true,
             StatusSurfacePreviewData::from_iter([
@@ -728,6 +736,10 @@ mod tests {
                 (
                     StatusLineItem::EstimatedThreadCost.preview_item(),
                     "~$1.82".to_string(),
+                ),
+                (
+                    StatusLineItem::CacheHitRate.preview_item(),
+                    "Cch89.6%".to_string(),
                 ),
             ]),
             AppEventSender::new(tx_raw),
