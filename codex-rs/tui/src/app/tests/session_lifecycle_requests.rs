@@ -4702,7 +4702,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                     .expect("opening the agent picker waited for the app server");
                 drop(child_store_guard);
                 insta::assert_snapshot!(
-                    render_bottom_popup(&app.chat_widget, /*width*/ 80)
+                    render_bottom_popup(&app.chat_widget, /*width*/ 100)
                         .replace(&root_thread_id.to_string(), "[root]")
                         .replace(&child_thread_id.to_string(), "[child]"),
                     @r###"
@@ -4710,8 +4710,8 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                       Select an agent to watch. ⌥← previous, ⌥→ next.
 
 
-                    › 1. • Main [default] (current)  [root]
-                      2. • /root/worker              [child]
+                    › 1. • Main [default] gpt-6-astra-low (current)  [root]
+                      2. • /root/worker gpt-6-astra-low              [child]
 
                       enter select · esc back
                     "###
