@@ -6975,7 +6975,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_runtime,
         mcp_handler_cache: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
-            config.background_terminal_max_timeout,
+            config.background_terminal_timeout_bounds(),
         ),
         elicitations: crate::elicitation::ElicitationService::new(),
         shell_zsh_path: None,
@@ -9243,7 +9243,7 @@ where
         mcp_runtime,
         mcp_handler_cache: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
-            config.background_terminal_max_timeout,
+            config.background_terminal_timeout_bounds(),
         ),
         elicitations: crate::elicitation::ElicitationService::new(),
         shell_zsh_path: None,
