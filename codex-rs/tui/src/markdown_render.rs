@@ -72,7 +72,7 @@ use std::ops::Range;
 use std::path::Path;
 use std::path::PathBuf;
 
-mod file_citations;
+mod inline_directives;
 mod list_spacing;
 mod local_links;
 mod math;
@@ -80,11 +80,13 @@ mod mermaid;
 pub(crate) mod preferences;
 mod source_tables;
 mod streaming;
+pub(crate) use streaming::render_with_copy_sources;
 mod table_key_value;
 mod task_lists;
 mod web_links;
 
-use file_citations::FileCitations;
+use inline_directives::InlineDirectives;
+pub(crate) use inline_directives::followup_labels;
 pub(crate) use list_spacing::ListSpacing;
 use list_spacing::UniformList;
 use local_links::is_local_path_like_link;
@@ -149,7 +151,7 @@ impl MarkdownStyles {
             emphasis: Style::new().italic(),
             strong: Style::new().bold(),
             strikethrough: Style::new().crossed_out(),
-            ordered_list_marker: Style::new().fg(accent_color()),
+            ordered_list_marker: Style::new().light_blue(),
             unordered_list_marker: Style::new(),
             link: Style::new().fg(accent_color()).underlined(),
             blockquote: Style::new().green(),
@@ -445,6 +447,9 @@ struct Writer<'a, 'policy> {
     inline_styles: Vec<Style>,
     copy_inline: Vec<crate::markdown_copy::Inline>,
     copy_line: crate::markdown_copy::CopyLine,
+    quote_sources: Vec<std::sync::Arc<str>>,
+    code_sources: Vec<crate::markdown_copy::SourceBlock>,
+    transformed_code_source: Option<std::sync::Arc<str>>,
     indent_stack: Vec<IndentContext>,
     list_indices: Vec<Option<u64>>,
     list_needs_blank_before_next_item: Vec<bool>,
@@ -487,6 +492,9 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             inline_styles: Vec::new(),
             copy_inline: Vec::new(),
             copy_line: Default::default(),
+            quote_sources: Vec::new(),
+            code_sources: Vec::new(),
+            transformed_code_source: None,
             indent_stack: Vec::new(),
             list_indices: Vec::new(),
             list_needs_blank_before_next_item: Vec::new(),
@@ -530,6 +538,20 @@ impl<'a, 'policy> Writer<'a, 'policy> {
     where
         I: Iterator<Item = (Event<'a>, Range<usize>)>,
     {
+        let source = self
+            .code_sources
+            .iter()
+            .find(|source| source.range.contains(&range.start))
+            .map(|source| std::sync::Arc::clone(&source.content));
+        let same_source = match (&source, &self.transformed_code_source) {
+            (Some(source), Some(current)) => std::sync::Arc::ptr_eq(source, current),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same_source {
+            self.flush_current_line();
+            self.transformed_code_source = source;
+        }
         self.prepare_for_event(&event);
         let copy_inline = crate::markdown_copy::Inline::from_event(&event);
         if let Some(inline) = &copy_inline {
@@ -606,7 +628,13 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         match tag {
             Tag::Paragraph => self.start_paragraph(),
             Tag::Heading { level, .. } => self.start_heading(level),
-            Tag::BlockQuote => self.start_blockquote(),
+            Tag::BlockQuote => {
+                self.start_blockquote();
+                let source = self.quote_sources.first().cloned().unwrap_or_else(|| {
+                    crate::markdown_copy::quote_content(&self.input[range]).into()
+                });
+                self.quote_sources.push(source);
+            }
             Tag::CodeBlock(kind) => {
                 self.code_block_content_end = range.end;
                 let indent = match kind {
@@ -690,7 +718,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                 self.end_paragraph();
             }
             TagEnd::Heading(_) => self.end_heading(),
-            TagEnd::BlockQuote => self.end_blockquote(),
+            TagEnd::BlockQuote => {
+                self.flush_current_line();
+                self.end_blockquote();
+                self.quote_sources.pop();
+            }
             TagEnd::CodeBlock => self.end_codeblock(range),
             TagEnd::List(_) => self.end_list(),
             TagEnd::Item => {
@@ -990,8 +1022,9 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             let index = self.text.len();
             self.push_blank_line();
             if let Some(line) = self.text.get_mut(index) {
-                let mut source =
-                    crate::terminal_hyperlinks::LogicalLineSource::from_line(&line.line);
+                let mut source = line.source.clone().unwrap_or_else(|| {
+                    crate::terminal_hyperlinks::LogicalLineSource::from_line(&line.line)
+                });
                 let mut copy = crate::markdown_copy::CopyLine::default();
                 copy.omit = true;
                 source.copy = Some(std::sync::Arc::new(copy));
@@ -1098,8 +1131,10 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                     Some(diagram) => diagram,
                     None => highlight_code_to_lines(&code, &lang),
                 };
+                let source: std::sync::Arc<str> = code.into();
                 for hl_line in highlighted {
                     self.push_line(Line::default());
+                    self.copy_line.code_source = Some(std::sync::Arc::clone(&source));
                     for span in hl_line.spans {
                         self.push_span(span);
                     }
@@ -2193,7 +2228,9 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                         }
                         self.push_span_to_table_cell(" (".into());
                     }
+                    self.copy_inline.push(crate::markdown_copy::Inline::Literal);
                     self.push_span_to_table_cell(span);
+                    self.copy_inline.pop();
                     if show_label {
                         self.push_span_to_table_cell(")".into());
                     }
@@ -2213,7 +2250,9 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                         }
                         self.push_span(" (".into());
                     }
+                    self.copy_inline.push(crate::markdown_copy::Inline::Literal);
                     self.push_span(span);
+                    self.copy_inline.pop();
                     if show_label {
                         self.push_span(")".into());
                     }
@@ -2325,6 +2364,8 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             .and_then(|source| source.copy.as_deref())
             .cloned()
             .unwrap_or_default();
+        copy.code_source = self.transformed_code_source.clone();
+        copy.quote_source = self.quote_sources.first().cloned();
         copy.prefix = self.copy_prefix(pending_marker_line);
         copy.continuation = self.copy_prefix(/*pending_marker_line*/ false);
         copy.item_prefix = self.copy_prefix(/*pending_marker_line*/ true);
@@ -2359,6 +2400,8 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         self.copy_line.continuation = self.copy_prefix(/*pending_marker_line*/ false);
         self.copy_line.item_prefix = self.copy_prefix(/*pending_marker_line*/ true);
         self.copy_line.code = self.in_code_block;
+        self.copy_line.code_source = self.transformed_code_source.clone();
+        self.copy_line.quote_source = self.quote_sources.first().cloned();
         // Heading markers are already visible; retain them as Markdown syntax.
         self.copy_line
             .push(line.spans.iter().map(|span| span.content.len()).sum(), &[]);
