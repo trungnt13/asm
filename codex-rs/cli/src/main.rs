@@ -773,6 +773,9 @@ fn run_update_action(
     action: UpdateAction,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        anyhow::bail!(codex_install_context::EXTERNAL_UPDATE_MESSAGE);
+    }
     if let UpdateAction::Daemon(source) = action {
         let executable = cli_executable
             .ok_or_else(|| anyhow::anyhow!("Cannot locate the launching Codex CLI"))?;
@@ -854,6 +857,9 @@ fn resolve_windows_update_command_from_path(
 }
 
 fn run_update_command() -> anyhow::Result<()> {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        anyhow::bail!(codex_install_context::EXTERNAL_UPDATE_MESSAGE);
+    }
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
