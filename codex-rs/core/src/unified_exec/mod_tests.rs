@@ -392,6 +392,44 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn empty_stdin_polls_use_configured_bounds_below_interactive_floor() -> anyhow::Result<()> {
+    skip_if_sandbox!(Ok(()));
+
+    let (mut session, turn) = test_session_and_turn().await;
+    Arc::get_mut(&mut session)
+        .expect("test session must be unshared")
+        .services
+        .unified_exec_manager = UnifiedExecProcessManager::new(BackgroundTerminalTimeoutBounds {
+        min_ms: 40,
+        max_ms: 80,
+    });
+    let opened = exec_command(
+        &session, &turn, "sleep 60", /*yield_time_ms*/ 250, /*workdir*/ None,
+    )
+    .await?;
+    let process_id = opened.process_id.expect("running terminal");
+
+    let lower = tokio::time::timeout(
+        Duration::from_secs(2),
+        write_stdin(&session, &turn, process_id, "", /*yield_time_ms*/ 1),
+    )
+    .await??;
+    let upper = tokio::time::timeout(
+        Duration::from_secs(2),
+        write_stdin(
+            &session, &turn, process_id, "", /*yield_time_ms*/ 1_000,
+        ),
+    )
+    .await??;
+    assert!(lower.wall_time >= Duration::from_millis(40));
+    assert!(upper.wall_time >= Duration::from_millis(80));
+    assert!(lower.wall_time < Duration::from_millis(200));
+    assert!(upper.wall_time < Duration::from_millis(200));
+    assert!(session.terminate_background_terminal(process_id).await);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     skip_if_sandbox!(Ok(()));
 
