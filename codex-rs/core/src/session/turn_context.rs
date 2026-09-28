@@ -956,7 +956,7 @@ impl Session {
         );
         if per_turn_config
             .features
-            .persistent_mode_enabled(step_settings.reasoning_effort())
+            .persistent_execution_enabled(step_settings.reasoning_effort())
         {
             super::time_reminder::apply_persistent_defaults(&mut per_turn_config);
         }
@@ -1205,6 +1205,7 @@ impl Session {
             per_turn_config.codex_home.as_path(),
         );
         let skills_snapshot = if matches!(build_mode, TurnContextBuildMode::InjectItems)
+            || crate::guardian::is_basic_session_source(&session_configuration.session_source)
             || (per_turn_config
                 .features
                 .enabled(Feature::SkipHostSkillDiscovery)

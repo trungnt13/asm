@@ -547,6 +547,7 @@ class CodexErrorInfoValue(Enum):
     server_overloaded = "serverOverloaded"
     cyber_policy = "cyberPolicy"
     misalignment_policy_violation = "misalignmentPolicyViolation"
+    too_many_denials = "tooManyDenials"
     internal_server_error = "internalServerError"
     unauthorized = "unauthorized"
     bad_request = "badRequest"
@@ -2583,6 +2584,13 @@ class McpServerOauthLoginCompletedNotification(BaseModel):
         populate_by_name=True,
     )
     error: str | None = None
+    login_id: Annotated[
+        str | None,
+        Field(
+            alias="loginId",
+            description="Identifies the explicit login attempt. Older servers omit this field.",
+        ),
+    ] = None
     name: str
     success: bool
     thread_id: Annotated[str | None, Field(alias="threadId")] = None
@@ -2610,6 +2618,13 @@ class McpServerOauthLoginResponse(BaseModel):
         populate_by_name=True,
     )
     authorization_url: Annotated[str, Field(alias="authorizationUrl")]
+    login_id: Annotated[
+        str | None,
+        Field(
+            alias="loginId",
+            description="Identifies this login attempt across the response and completion notification. Older servers omit this field; current servers always return it.",
+        ),
+    ] = None
 
 
 class McpServerRefreshResponse(BaseModel):
@@ -5232,13 +5247,6 @@ class ThreadExtra(BaseModel):
     )
 
 
-class ThreadGoalClearParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    thread_id: Annotated[str, Field(alias="threadId")]
-
-
 class ThreadGoalClearResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5258,6 +5266,11 @@ class ThreadGoalGetParams(BaseModel):
         populate_by_name=True,
     )
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadGoalMutationOrigin(Enum):
+    user = "user"
+    automatic = "automatic"
 
 
 class ThreadGoalStatus(Enum):
@@ -5596,6 +5609,39 @@ class ThreadNameUpdatedNotification(BaseModel):
     )
     thread_id: Annotated[str, Field(alias="threadId")]
     thread_name: Annotated[str | None, Field(alias="threadName")] = None
+
+
+class CompletedThreadPredictionResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    text: str | None = None
+    type: Annotated[Literal["completed"], Field(title="CompletedThreadPredictionResultType")]
+
+
+class FailedThreadPredictionResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["failed"], Field(title="FailedThreadPredictionResultType")]
+
+
+class ThreadPredictionResult(
+    RootModel[CompletedThreadPredictionResult | FailedThreadPredictionResult]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: CompletedThreadPredictionResult | FailedThreadPredictionResult
+
+
+class ThreadPredictionUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    result: ThreadPredictionResult
+    source_turn_id: Annotated[str, Field(alias="sourceTurnId")]
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class ThreadProjectUpdatedNotification(BaseModel):
@@ -6817,15 +6863,6 @@ class ThreadGoalGetRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/goal/get"], Field(title="Thread/goal/getRequestMethod")]
     params: ThreadGoalGetParams
-
-
-class ThreadGoalClearRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[Literal["thread/goal/clear"], Field(title="Thread/goal/clearRequestMethod")]
-    params: ThreadGoalClearParams
 
 
 class ThreadMetadataUpdateRequest(BaseModel):
@@ -8469,6 +8506,13 @@ class ListMcpServerStatusParams(BaseModel):
         int | None,
         Field(description="Optional page size; defaults to a server-defined value.", ge=0),
     ] = None
+    server_name: Annotated[
+        str | None,
+        Field(
+            alias="serverName",
+            description="Limit discovery to one server. With a thread ID, reuse that thread's MCP connection.",
+        ),
+    ] = None
     thread_id: Annotated[str | None, Field(alias="threadId")] = None
 
 
@@ -9156,6 +9200,24 @@ class ThreadAttachmentUpdatedServerNotification(BaseModel):
     params: ThreadAttachmentUpdatedNotification
 
 
+class ThreadPredictionUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/prediction/updated"],
+        Field(title="Thread/prediction/updatedNotificationMethod"),
+    ]
+    params: ThreadPredictionUpdatedNotification
+
+
 class ThreadGoalClearedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9739,6 +9801,17 @@ class ThreadGoal(BaseModel):
     updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
+class ThreadGoalClearParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    origin: Annotated[
+        ThreadGoalMutationOrigin | None,
+        Field(description="Missing provenance does not supply user authorization."),
+    ] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadGoalGetResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9751,6 +9824,10 @@ class ThreadGoalSetParams(BaseModel):
         populate_by_name=True,
     )
     objective: str | None = None
+    origin: Annotated[
+        ThreadGoalMutationOrigin | None,
+        Field(description="Missing provenance does not supply user authorization."),
+    ] = None
     status: ThreadGoalStatus | None = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_budget: Annotated[int | None, Field(alias="tokenBudget")] = None
@@ -10449,6 +10526,15 @@ class ThreadGoalSetRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/goal/set"], Field(title="Thread/goal/setRequestMethod")]
     params: ThreadGoalSetParams
+
+
+class ThreadGoalClearRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/goal/clear"], Field(title="Thread/goal/clearRequestMethod")]
+    params: ThreadGoalClearParams
 
 
 class ThreadListRequest(BaseModel):
@@ -11466,7 +11552,7 @@ class Turn(BaseModel):
         ),
     ] = None
     error: Annotated[
-        TurnError | None, Field(description="Only populated when the Turn's status is failed.")
+        TurnError | None, Field(description="Error associated with a failed or interrupted turn.")
     ] = None
     id: Annotated[
         str, Field(description="Identifier for this turn. Codex-generated turn IDs are UUIDv7.")
@@ -12837,6 +12923,7 @@ class ServerNotification(
         | ThreadNameUpdatedServerNotification
         | ThreadAttachmentUpdatedServerNotification
         | ThreadGoalUpdatedServerNotification
+        | ThreadPredictionUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification
@@ -12926,6 +13013,7 @@ class ServerNotification(
         | ThreadNameUpdatedServerNotification
         | ThreadAttachmentUpdatedServerNotification
         | ThreadGoalUpdatedServerNotification
+        | ThreadPredictionUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification

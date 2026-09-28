@@ -1492,6 +1492,7 @@ impl ThreadManager {
         prepared: PreparedFork,
     ) -> CodexResult<NewThread> {
         let history = InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: prepared.source_thread_id,
             history: Arc::clone(&prepared.model_context),
             rollout_path: None,
@@ -1969,16 +1970,11 @@ impl ThreadManagerState {
             None => self.client_mcp_extensions_for_child(parent_thread_id).await,
         };
         let thread_source = initial_history.get_resumed_thread_source();
-        let environments = environment_selections.or_else(|| {
-            inherited_environments
-                .as_ref()
-                .map(TurnEnvironmentSnapshot::to_selections)
-        });
         let options = StartThreadOptions {
             initial_history,
             session_source: Some(session_source),
             thread_source,
-            environments,
+            environments: environment_selections,
             client_mcp_extensions,
             ..StartThreadOptions::new(config)
         };
@@ -2092,13 +2088,23 @@ impl ThreadManagerState {
                 }
             });
         thread_extension_init.insert(isolation);
-        let environments = environments.unwrap_or_else(|| {
-            default_thread_environment_selections(
-                self.environment_manager.as_ref(),
-                &config.cwd,
-                &config.workspace_roots,
-            )
-        });
+        let environments = environments
+            .or_else(|| {
+                let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. }) = &session_source
+                else {
+                    return None;
+                };
+                inherited_environments
+                    .as_ref()
+                    .map(TurnEnvironmentSnapshot::inheritable_selections)
+            })
+            .unwrap_or_else(|| {
+                default_thread_environment_selections(
+                    self.environment_manager.as_ref(),
+                    &config.cwd,
+                    &config.workspace_roots,
+                )
+            });
         let is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
         if reserved_thread_id.is_some() && matches!(&initial_history, InitialHistory::Resumed(_)) {
             return Err(CodexErr::InvalidRequest(
@@ -2181,11 +2187,20 @@ impl ThreadManagerState {
         }
         let (instructions, inherited_exec_policy, extensions, mcp_manager, multi_agent_version) =
             if isolation == codex_extension_api::SessionIsolation::Isolated {
+                let extensions = thread_extension_init
+                    .get::<codex_extension_api::IsolatedSessionExtensions<Config>>()
+                    .map(|extensions| Arc::clone(&extensions.0))
+                    .unwrap_or_else(empty_extension_registry);
+                let mcp_manager = McpManager::new_with_extensions(
+                    Arc::clone(&self.plugins_manager),
+                    Arc::clone(&extensions),
+                    CodexAppsToolsCache::default(),
+                );
                 (
                     inherited_instructions.unwrap_or_default(),
                     None,
-                    empty_extension_registry(),
-                    Arc::new(McpManager::new(Arc::clone(&self.plugins_manager))),
+                    extensions,
+                    Arc::new(mcp_manager),
                     Some(MultiAgentVersion::Disabled),
                 )
             } else {
@@ -2452,6 +2467,7 @@ fn stored_thread_to_initial_history(
         ))
     })?;
     Ok(InitialHistory::Resumed(ResumedHistory {
+        history_revision: history.revision,
         conversation_id: thread_id,
         history: Arc::new(history.items),
         rollout_path: rollout_path.or(stored_thread.rollout_path),
@@ -2627,6 +2643,7 @@ fn append_interrupted_boundary(
     let aborted_event = RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
         turn_id,
         reason: TurnAbortReason::Interrupted,
+        error: None,
         started_at,
         completed_at: None,
         duration_ms: None,
