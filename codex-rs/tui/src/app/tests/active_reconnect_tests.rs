@@ -386,7 +386,7 @@ async fn reconnect_restores_history_permissions_and_keeps_old_input_paused() -> 
         if deferred_notice {
             assert_snapshot!(notices, @r###"
 • Reconnected. No input was resent. Review uncertain submissions before retrying; recovered queues remain paused.
-⚠ A background Codex service is running v2.0.0, older than your Codex CLI
+⚠ A background Codex service is running v2.0.0, older than your ASM CLI
 "###);
         } else {
             insta::allow_duplicates! {
