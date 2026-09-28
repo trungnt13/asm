@@ -204,7 +204,9 @@ pub(crate) async fn telemetry_tags(path: &Path) -> Result<[(&'static str, &'stat
     Ok([
         (
             "auto_update",
-            if settings.updater.auto_update_enabled {
+            if codex_install_context::BUILT_IN_UPDATES_ENABLED
+                && settings.updater.auto_update_enabled
+            {
                 "enabled"
             } else {
                 "disabled"
