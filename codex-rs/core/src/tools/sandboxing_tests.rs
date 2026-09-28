@@ -8,6 +8,7 @@ use codex_protocol::permissions::FileSystemSandboxEntry;
 use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::GranularApprovalConfig;
+use codex_protocol::sandbox::SandboxOverride;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxType;
@@ -163,6 +164,7 @@ fn additional_permissions_allow_bypass_sandbox_first_attempt_when_execpolicy_ski
                 proposed_execpolicy_amendment: None,
             },
             &FileSystemSandboxPolicy::default(),
+            /*already_approved*/ false,
         ),
         SandboxOverride::BypassSandboxFirstAttempt
     );
@@ -178,13 +180,14 @@ fn guardian_bypasses_sandbox_for_explicit_escalation_on_first_attempt() {
                 proposed_execpolicy_amendment: None,
             },
             &FileSystemSandboxPolicy::default(),
+            /*already_approved*/ true,
         ),
         SandboxOverride::BypassSandboxFirstAttempt
     );
 }
 
 #[test]
-fn deny_read_blocks_explicit_escalation_and_policy_bypass() {
+fn deny_read_preserves_the_sandbox_for_explicit_escalation_and_blocks_policy_bypass() {
     let file_system_policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
         path: FileSystemPath::GlobPattern {
             pattern: "**/*.env".to_string(),
@@ -201,11 +204,16 @@ fn deny_read_blocks_explicit_escalation_and_policy_bypass() {
                 proposed_execpolicy_amendment: None,
             },
             &file_system_policy,
+            /*already_approved*/ true,
         ),
-        SandboxOverride::NoOverride,
-        "explicit escalation would drop deny-read filesystem policy, so keep the first attempt sandboxed",
+        SandboxOverride::EscalatedSandboxWithRestrictions,
+        "explicit escalation must widen the first attempt without dropping the sandbox",
     );
     assert!(!unsandboxed_execution_allowed(&file_system_policy));
+    assert!(matches!(
+        ensure_native_sandbox(SandboxOverride::EscalatedSandboxWithRestrictions, SandboxType::None),
+        Err(ToolError::Rejected(reason)) if reason.contains("requires an available filesystem sandbox"),
+    ));
     assert_eq!(
         sandbox_permissions_preserving_denied_reads(
             SandboxPermissions::RequireEscalated,
@@ -235,6 +243,7 @@ fn deny_read_blocks_explicit_escalation_and_policy_bypass() {
                 proposed_execpolicy_amendment: None,
             },
             &file_system_policy,
+            /*already_approved*/ true,
         ),
         SandboxOverride::NoOverride,
         "exec-policy allow rules would drop deny-read filesystem policy, so keep the first attempt sandboxed",
@@ -284,6 +293,7 @@ fn windows_sandbox_env_preserves_denied_reads_or_rejects_unsupported_backend() {
     let cwd_uri = PathUri::from_abs_path(&cwd);
     let manager = SandboxManager::new();
     let mut attempt = SandboxAttempt {
+        sandbox_override: SandboxOverride::NoOverride,
         sandbox: SandboxType::WindowsRestrictedToken,
         sandbox_requested: true,
         permissions: &permissions,
@@ -355,6 +365,7 @@ fn exec_server_env_keeps_command_native_and_carries_sandbox_context() {
         .materialize_project_roots_with_workspace_roots(std::slice::from_ref(&cwd));
     let manager = SandboxManager::new();
     let mut attempt = SandboxAttempt {
+        sandbox_override: SandboxOverride::NoOverride,
         sandbox: SandboxType::None,
         sandbox_requested: true,
         permissions: &permissions,
@@ -405,6 +416,7 @@ fn exec_server_env_keeps_command_native_and_carries_sandbox_context() {
     assert_eq!(
         request.exec_server_sandbox,
         Some(codex_exec_server::FileSystemSandboxContext {
+            sandbox_override: SandboxOverride::NoOverride,
             permissions: exec_server_permissions.clone(),
             cwd: cwd_uri.clone(),
             workspace_roots: vec![cwd_uri.clone()],
@@ -423,6 +435,17 @@ fn exec_server_env_keeps_command_native_and_carries_sandbox_context() {
     assert_eq!(
         request.exec_server_managed_network,
         Some(managed_network.clone())
+    );
+
+    attempt.sandbox_override = SandboxOverride::EscalatedSandboxWithRestrictions;
+    let escalated_request = attempt
+        .env_for_exec_server(command(), options())
+        .expect("prepare approved escalation with retained sandbox restrictions");
+    let mut expected_context = request.exec_server_sandbox.expect("sandbox context");
+    expected_context.sandbox_override = SandboxOverride::EscalatedSandboxWithRestrictions;
+    assert_eq!(
+        escalated_request.exec_server_sandbox,
+        Some(expected_context)
     );
 
     attempt.sandbox_requested = false;

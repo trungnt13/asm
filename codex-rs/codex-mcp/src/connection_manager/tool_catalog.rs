@@ -17,6 +17,9 @@ use tracing::trace_span;
 
 use super::McpConnectionSet;
 use super::McpServerMetadata;
+use super::catalog_telemetry::emit_binding_catalog;
+use super::catalog_telemetry::record_binding_catalog_size;
+use super::catalog_telemetry::tool_definition_json_bytes;
 use crate::binding::McpBinding;
 use crate::binding::PreparedMcpCall;
 use crate::binding_clients::McpBindingClients;
@@ -179,49 +182,57 @@ impl McpConnectionSet {
 
     /// Returns all tools with model-visible names normalized.
     pub async fn list_all_tools(&self) -> Vec<ToolInfo> {
-        self.list_tools_with_errors().await.0
+        Box::pin(self.list_tools_with_errors(|_| true)).await.0
     }
 
     #[instrument(level = "trace", skip_all, fields(mcp_server_count = self.servers.len()))]
-    pub(crate) async fn list_tools_with_errors(&self) -> (Vec<ToolInfo>, HashMap<String, String>) {
+    pub(crate) async fn list_tools_with_errors(
+        &self,
+        include_server: impl Fn(&str) -> bool,
+    ) -> (Vec<ToolInfo>, HashMap<String, String>) {
         let mut tools = Vec::new();
         let mut errors = HashMap::new();
         let mut available_server_count = 0;
         let mut unavailable_server_count = 0;
-        let server_results = join_all(self.servers.iter().map(|(server_name, view)| async move {
-            view.connection.client.reconnect_failed_startup().await;
-            let has_cached_tools = view.connection.client.has_cached_tools();
-            let startup_complete = view
-                .connection
-                .client
-                .startup_complete
-                .load(Ordering::Acquire);
-            let server_tools = view
-                .listed_tools(&self.tool_plugin_context)
-                .instrument(trace_span!(
-                    "list_tools_for_server",
-                    server_name = %server_name,
-                    has_cached_tools,
-                    startup_complete
-                ))
-                .await;
-            let result = match server_tools {
-                Ok(server_tools) => Ok(server_tools
-                    .into_iter()
-                    .map(|tool| Self::with_server_metadata(tool, &view.metadata))
-                    .collect::<Vec<_>>()),
-                Err(error) => {
-                    trace!(
-                        server_name = %server_name,
-                        has_cached_tools,
-                        startup_complete,
-                        "MCP server tools unavailable while building tool list"
-                    );
-                    Err(error)
-                }
-            };
-            (server_name, result)
-        }))
+        let server_results = join_all(
+            self.servers
+                .iter()
+                .filter(|(name, _)| include_server(name))
+                .map(|(server_name, view)| async move {
+                    view.connection.client.reconnect_failed_startup().await;
+                    let has_cached_tools = view.connection.client.has_cached_tools();
+                    let startup_complete = view
+                        .connection
+                        .client
+                        .startup_complete
+                        .load(Ordering::Acquire);
+                    let server_tools = view
+                        .listed_tools(&self.tool_plugin_context)
+                        .instrument(trace_span!(
+                            "list_tools_for_server",
+                            server_name = %server_name,
+                            has_cached_tools,
+                            startup_complete
+                        ))
+                        .await;
+                    let result = match server_tools {
+                        Ok(server_tools) => Ok(server_tools
+                            .into_iter()
+                            .map(|tool| Self::with_server_metadata(tool, &view.metadata))
+                            .collect::<Vec<_>>()),
+                        Err(error) => {
+                            trace!(
+                                server_name = %server_name,
+                                has_cached_tools,
+                                startup_complete,
+                                "MCP server tools unavailable while building tool list"
+                            );
+                            Err(error)
+                        }
+                    };
+                    (server_name, result)
+                }),
+        )
         .await;
         for (server_name, server_tools) in server_results {
             match server_tools {
@@ -259,6 +270,19 @@ impl McpConnectionSet {
     ) -> McpBinding {
         let mut listed_tools = Vec::new();
         let mut clients = HashMap::new();
+        let catalog_log_enabled = tracing::enabled!(
+            target: "codex_otel.trace_safe",
+            tracing::Level::INFO
+        );
+        let catalog_metrics = codex_otel::global();
+        let catalog_measurement_enabled = catalog_log_enabled || catalog_metrics.is_some();
+        let product_sku = codex_otel::bounded_product_sku(Some(
+            config
+                .apps_mcp_product_sku
+                .as_deref()
+                .unwrap_or(crate::mcp::DEFAULT_CODEX_APPS_MCP_PRODUCT_SKU),
+        ))
+        .unwrap_or("unknown");
         let optional_mcp_startup_grace = config.optional_mcp_startup_grace;
         let server_snapshots = join_all(self.servers.iter().map(|(server_name, view)| async move {
             if !view
@@ -342,8 +366,8 @@ impl McpConnectionSet {
             } else {
                 None
             };
-            let (client, server_tools) = if let Some(cached_tools) = cached_tools {
-                (None, cached_tools)
+            let (client, server_tools, catalog_source) = if let Some(cached_tools) = cached_tools {
+                (None, cached_tools, "cached")
             } else {
                 // A server may opt out of caching after the first pass. Required catalog
                 // readiness must then wait for discovery rather than silently omit its tools.
@@ -361,8 +385,34 @@ impl McpConnectionSet {
                 client.tool_timeout = view.tool_timeout;
                 let snapshot = client.tool_catalog.read(Arc::new).await;
                 let server_tools = snapshot.tools.to_vec();
-                (Some((Arc::new(client), snapshot)), server_tools)
+                (
+                    Some((Arc::new(client), snapshot)),
+                    server_tools,
+                    "live",
+                )
             };
+            let raw_definition_json_bytes = if catalog_measurement_enabled {
+                tool_definition_json_bytes(server_tools.iter().map(|tool| &tool.tool))
+            } else {
+                0
+            };
+            if catalog_log_enabled {
+                let plugin_id = self.plugin_id_for_mcp_server_name(server_name);
+                emit_binding_catalog(
+                    product_sku,
+                    if server_name == CODEX_APPS_MCP_SERVER_NAME {
+                        "codex_apps"
+                    } else if plugin_id.is_some() {
+                        "plugin"
+                    } else {
+                        "configured"
+                    },
+                    plugin_id,
+                    catalog_source,
+                    server_tools.len(),
+                    raw_definition_json_bytes,
+                );
+            }
             let server_tools = filter_tools(server_tools, &view.tool_filter);
             let server_tools = if server_name == CODEX_APPS_MCP_SERVER_NAME {
                 prepare_codex_apps_tools_for_model(server_tools, &self.tool_plugin_context)
@@ -383,14 +433,27 @@ impl McpConnectionSet {
                     Self::with_server_metadata(tool, &view.metadata)
                 })
                 .collect::<Vec<_>>();
-            Some((server_name.clone(), client, server_tools))
+            Some((
+                server_name.clone(),
+                client,
+                server_tools,
+                raw_definition_json_bytes,
+            ))
         }))
         .await;
-        for (server_name, client, server_tools) in server_results.into_iter().flatten() {
+        let mut raw_definition_json_bytes = 0usize;
+        for (server_name, client, server_tools, server_definition_json_bytes) in
+            server_results.into_iter().flatten()
+        {
+            raw_definition_json_bytes =
+                raw_definition_json_bytes.saturating_add(server_definition_json_bytes);
             if let Some((client, snapshot)) = client {
                 clients.insert(server_name, (client, snapshot));
             }
             listed_tools.extend(server_tools);
+        }
+        if let Some(metrics) = catalog_metrics.as_ref() {
+            record_binding_catalog_size(metrics, product_sku, raw_definition_json_bytes);
         }
         let listed_tools = normalize_tools_for_model_with_prefix(
             listed_tools,
