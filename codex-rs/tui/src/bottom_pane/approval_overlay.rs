@@ -2376,7 +2376,7 @@ mod tests {
             })
             .collect();
         let expected = vec![
-            "✔ You approved codex to run".to_string(),
+            "✔ You approved ASM to run".to_string(),
             "  git add tui/src/render/".to_string(),
             "  mod.rs tui/src/render/".to_string(),
             "  renderable.rs this time".to_string(),
@@ -2447,7 +2447,7 @@ mod tests {
         assert_eq!(
             render_history_cell_lines(decision.as_ref(), /*width*/ 80),
             vec![
-                "✔ You approved codex network access to https://example.com:8443 this time"
+                "✔ You approved ASM network access to https://example.com:8443 this time"
                     .to_string(),
             ]
         );
