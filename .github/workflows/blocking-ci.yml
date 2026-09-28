@@ -91,7 +91,6 @@ jobs:
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
-          repository: trungnt13/asm
       - name: Run Clippy
         env:
           TARGET: ${{ matrix.target }}
