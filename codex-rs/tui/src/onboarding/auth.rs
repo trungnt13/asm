@@ -1563,6 +1563,17 @@ mod tests {
             ));
 
         assert_eq!(widget.should_suppress_animations(), true);
+
+        let area = Rect::new(0, 0, 80, 16);
+        let mut terminal = crate::custom_terminal::Terminal::with_options(
+            crate::test_backend::VT100Backend::new(area.width, area.height),
+        )
+        .expect("terminal");
+        terminal.set_viewport_area(area);
+        terminal
+            .draw(|frame| widget.render_ref(area, frame.buffer_mut()))
+            .expect("draw");
+        insta::assert_snapshot!("device_code_ready_warning", terminal.backend().to_string());
     }
 
     #[test]
