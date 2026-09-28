@@ -76,6 +76,7 @@ jobs:
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
+          repository: trungnt13/asm
       - name: Build ASM with resource sampling
         shell: bash
         env:
