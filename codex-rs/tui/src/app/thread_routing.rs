@@ -1190,6 +1190,11 @@ impl App {
         if let ServerNotification::ThreadSettingsUpdated(notification) = &notification {
             self.apply_thread_settings_to_cached_session(thread_id, &notification.thread_settings)
                 .await;
+            self.agent_navigation.set_model_settings(
+                thread_id,
+                Some(notification.thread_settings.model.clone()),
+                notification.thread_settings.effort.clone(),
+            );
             if self
                 .pending_server_profiles
                 .get(&thread_id)
@@ -1219,6 +1224,11 @@ impl App {
                 started.thread.agent_nickname.clone(),
                 started.thread.agent_role.clone(),
                 /*is_closed*/ false,
+            );
+            self.agent_navigation.set_model_settings(
+                thread_id,
+                started.thread.model.clone(),
+                started.thread.reasoning_effort.clone(),
             );
 
             // Lifecycle responses already contain authoritative session state. Their rollout may
@@ -1567,6 +1577,11 @@ impl App {
         self.upsert_agent_picker_thread(
             thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
             /*is_closed*/ false,
+        );
+        self.agent_navigation.set_model_settings(
+            thread_id,
+            Some(session.model.clone()),
+            session.reasoning_effort.clone(),
         );
         let channel = self.ensure_thread_channel(thread_id);
         {
