@@ -1,0 +1,146 @@
+name: fork-v8-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'asm-v8-v*'
+
+concurrency:
+  group: ${{ github.workflow }}::${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - id: version
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(python3 .github/scripts/rusty_v8_bazel.py resolved-v8-crate-version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$REF" == refs/tags/* ]]; then
+            [[ "$REF_NAME" == "asm-v8-v${version}" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
+            status="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/trungnt13/asm/releases/tags/${REF_NAME}")"
+            case "$status" in
+              404) ;;
+              200) echo "Release $REF_NAME already exists; refusing to replace assets" >&2; exit 1 ;;
+              *) echo "Could not check V8 release $REF_NAME (HTTP $status)" >&2; exit 1 ;;
+            esac
+          fi
+
+  build:
+    needs: metadata
+    name: Build V8 ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            platform: macos_arm64
+            cpu: arm64
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            platform: linux_amd64_musl
+            cpu: x64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bazel-ci
+        with:
+          target: ${{ matrix.target }}
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+      - if: ${{ contains(matrix.target, 'linux-musl') }}
+        name: Install native MUSL linker
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y musl-tools
+          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
+      - name: Build and stage V8 archive and Rust binding
+        env:
+          TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
+          CPU: ${{ matrix.cpu }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/rusty_v8_bazel.py stage-release-pair \
+            --platform "$PLATFORM" --target "$TARGET" --sandbox --compilation-mode opt \
+            --output-dir "dist/$TARGET" --bazel-config fork-v8-local \
+            "--bazel-config=v8-target-${CPU}"
+      - name: Smoke test V8 sandbox and JavaScript execution
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          archive="${GITHUB_WORKSPACE}/dist/${TARGET}/librusty_v8_ptrcomp_sandbox_release_${TARGET}.a.gz"
+          binding="${GITHUB_WORKSPACE}/dist/${TARGET}/src_binding_ptrcomp_sandbox_release_${TARGET}.rs"
+          test -f "$archive" && test -f "$binding"
+          cd codex-rs
+          RUSTY_V8_ARCHIVE="$archive" RUSTY_V8_SRC_BINDING_PATH="$binding" \
+            just test -p codex-v8-poc --target "$TARGET" --features sandbox \
+              -E 'test(sandbox_feature_matches_linked_v8) | test(evaluates_integer_addition)' --locked
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: fork-v8-${{ matrix.target }}
+          path: dist/${{ matrix.target }}/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/asm-v8-v')
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+      - name: Publish only the six expected files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          assets=()
+          for target in aarch64-apple-darwin x86_64-unknown-linux-musl; do
+            dir="dist/fork-v8-${target}"
+            for name in "librusty_v8_ptrcomp_sandbox_release_${target}.a.gz" \
+              "src_binding_ptrcomp_sandbox_release_${target}.rs" \
+              "rusty_v8_ptrcomp_sandbox_release_${target}.sha256"; do
+              test -s "$dir/$name" || { echo "Missing $name" >&2; exit 1; }
+              assets+=("$dir/$name")
+            done
+            (cd "$dir" && sha256sum --check "rusty_v8_ptrcomp_sandbox_release_${target}.sha256")
+          done
+          [[ "$(find dist -type f | wc -l)" -eq 6 ]] || { echo 'Unexpected V8 assets' >&2; exit 1; }
+          gh release create "$TAG" "${assets[@]}" -R trungnt13/asm \
+            --verify-tag --title "$TAG" --notes 'Fork-built V8 dependencies for ASM.' \
+            --latest=false
