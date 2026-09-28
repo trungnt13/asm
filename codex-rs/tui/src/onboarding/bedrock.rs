@@ -480,7 +480,7 @@ impl BedrockState {
             }
             BedrockView::EnvironmentInstructions => {
                 lines.push(
-                    "  Configure AWS credentials in your environment, then restart Codex.".into(),
+                    "  Configure AWS credentials in your environment, then restart ASM.".into(),
                 );
                 lines.push("".into());
                 lines.push(Line::from(vec![
