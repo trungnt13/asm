@@ -148,7 +148,7 @@ async fn telemetry_distinguishes_presence_from_default_values() -> anyhow::Resul
             crate::telemetry::settings_tags(home.path())
                 .await
                 .map(|(_, value)| value),
-            ["enabled", presence, presence, presence]
+            ["disabled", presence, presence, presence]
         );
     }
     Ok(())
