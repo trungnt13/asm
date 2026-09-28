@@ -1863,6 +1863,70 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_background_terminal_bounds_reach_tool_and_poll() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses a POSIX sleep command");
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex().with_config(|config| {
+        config.background_terminal_min_timeout = 40;
+        config.background_terminal_max_timeout = 80;
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    let open_args = json!({"cmd": "sleep 30", "yield_time_ms": 250});
+    let poll_args = json!({"session_id": 1000, "chars": "", "yield_time_ms": 1000});
+    let requests = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call("open", "exec_command", &serde_json::to_string(&open_args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call("poll", "write_stdin", &serde_json::to_string(&poll_args)?),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+    submit_unified_exec_turn(
+        &test,
+        "poll the running command",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+
+    let poll = wait_for_raw_unified_exec_output(&test, "poll").await?;
+    assert!(poll.wall_time_seconds >= 0.08);
+    assert!(poll.wall_time_seconds < 0.2);
+    let request = requests.requests()[0].body_json();
+    let tool = request["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .find(|tool| tool["name"] == "write_stdin")
+        .expect("write_stdin tool");
+    let description = tool["parameters"]["properties"]["yield_time_ms"]["description"]
+        .as_str()
+        .expect("yield time description");
+    assert!(description.contains("empty polls wait 40-80 ms"));
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert!(test.codex.terminate_background_terminal(1000).await);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_command_reports_chunk_and_exit_metadata() -> Result<()> {
     // TODO(anp): Remove after unified-exec fixtures use target-native commands.
     skip_if_target_windows!(Ok(()), "uses a POSIX-only command fixture");
