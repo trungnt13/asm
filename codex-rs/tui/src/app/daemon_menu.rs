@@ -54,6 +54,8 @@ impl App {
             Some(
                 "Manage this server on its host. Local daemon updates are unavailable for remote connections.",
             )
+        } else if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+            Some(codex_install_context::EXTERNAL_UPDATE_MESSAGE)
         } else if self.daemon_cli_executable.is_none() {
             Some("Run the Codex CLI to manage the daemon from this menu.")
         } else {
@@ -157,6 +159,10 @@ impl App {
     }
 
     pub(super) fn confirm_daemon_update(&mut self, source: DaemonUpdateSource) {
+        if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+            self.open_daemon_menu();
+            return;
+        }
         let Some(executable) = &self.daemon_cli_executable else {
             return;
         };
