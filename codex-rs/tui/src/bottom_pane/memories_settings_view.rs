@@ -122,8 +122,7 @@ impl MemoriesSettingsView {
         header.push(Paragraph::new(Line::from("Memories".bold())).wrap(Wrap { trim: false }));
         header.push(
             Paragraph::new(Line::from(
-                "Choose how Codex uses and creates memories. Changes are saved to config.toml"
-                    .dim(),
+                "Choose how ASM uses and creates memories. Changes are saved to config.toml".dim(),
             ))
             .wrap(Wrap { trim: false }),
         );
