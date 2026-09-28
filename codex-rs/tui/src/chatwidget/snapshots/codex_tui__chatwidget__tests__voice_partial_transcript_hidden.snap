@@ -8,6 +8,6 @@ expression: normalized_backend_snapshot(terminal.backend())
 "                                                            "
 " voice ● listening                  ⌃x mute     /voice stop "
 "                                                            "
-"› Ask Codex to do anything                                  "
+"› Ask ASM to do anything                                    "
 "                                                            "
 "  GPT-5.6-Sol default·/tmp/project                          "

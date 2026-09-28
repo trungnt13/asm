@@ -148,7 +148,7 @@ The optional `macos_concurrency_experiment` compares cold builds of one commit o
 
 ### ASM branding
 
-Use ASM in the README heading, repository description, release titles and introductory prose, and workflow step descriptions. Credit OpenAI Codex. Keep `codex` executable, crate, config/state, archive, tag, workflow, job, and check identifiers unchanged; branding does not redirect upstream links or installers.
+Use ASM in the README heading, repository description, release titles and introductory prose, workflow step descriptions, and the fork's own TUI-visible labels and terminal title. Credit OpenAI Codex where origin is described. Keep real upstream service and product names, and keep `codex` executable, CLI version prefix, crate, config/state, archive, tag, workflow, job, and check identifiers unchanged. Branding does not redirect upstream links or installers.
 
 ### Background terminal waits
 
