@@ -135,6 +135,12 @@ Use the configured owner identity: `Trung Ngo <1390402+trungnt13@users.noreply.g
 
 Keep Markdown paragraphs, code blocks, and bullet or numbered list items adjacent without renderer-added blank rows, both while streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
 
+## Compact status line
+
+Join status-line segments with `·` without surrounding spaces. Use `CtxN%` for context used, `CtxN%left` for context remaining, and `F:on` / `F:off` for fast mode. Remove the space before the active agent role, such as `Main[default]`, only in the footer; leave picker labels unchanged. Preserve thread titles, paths, model names, agent roles, colors, item order, and the existing single-row truncation behavior.
+
+Offer an opt-in `cache-hit-rate` item in `/statusline` and `tui.status_line`. Show `CchN.N%`, the current thread's cumulative cached input tokens divided by its total input tokens, rounded to one decimal place. Use the existing backend-reported usage without new requests or API changes. Hide the item while usage is unknown or input tokens are zero; keep existing status-line defaults unchanged. Providers that omit cache details remain indistinguishable from a reported zero.
+
 ## Subagent service tiers
 
 Allow per-model, per-reasoning-effort service tiers for spawned subagents through `[subagent_service_tiers]`, for example `gpt-6-sol = { high = "fast" }`. Match the child's final model and effective effort after overrides and role settings. A matching rule overrides the root tier throughout the child's lifetime, including root tier changes; unmatched children keep upstream inheritance. Root requests are unchanged. Reject unsupported matched tiers and fast overrides when fast mode is disabled. Keep this policy out of the spawn tool arguments.
