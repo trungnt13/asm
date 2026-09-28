@@ -42,7 +42,7 @@ impl App {
         } else if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
             Some(codex_install_context::EXTERNAL_UPDATE_MESSAGE)
         } else if self.daemon_cli_executable.is_none() {
-            Some("Run the Codex CLI to manage the daemon from this menu.")
+            Some("Run the ASM CLI to manage the daemon from this menu.")
         } else {
             None
         };
@@ -107,8 +107,8 @@ impl App {
                 format!("Use this CLI package v{version} from {}. Copy the complete package and pin it against automatic updates.", executable.display())
             }
         };
-        explanation.push_str("\nThis may restart the daemon and interrupt active or queued work.\nCodex exits to update in this terminal. Relaunch it afterward.");
-        let mut header = vec![Line::from("Update daemon and exit Codex?".bold())];
+        explanation.push_str("\nThis may restart the daemon and interrupt active or queued work.\nASM exits to update in this terminal. Relaunch it afterward.");
+        let mut header = vec![Line::from("Update daemon and exit ASM?".bold())];
         header.extend(explanation.lines().map(|line| Line::from(line.to_owned())));
         self.chat_widget.show_selection_view(SelectionViewParams {
             header: Box::new(DaemonMenuHeader(header)),
