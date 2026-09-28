@@ -326,9 +326,9 @@ async fn daemon_ctrl_c_shows_background_exit_menu_and_escape_dismisses_it() -> R
       Choose what happens to the current task.
 
 
-    › 1. Cancel task        Stop the current task and stay in Codex
-      2. Run in background  Exit Codex and leave the task running
-      3. Exit               Stop the current task and exit Codex
+    › 1. Cancel task        Stop the current task and stay in ASM
+      2. Run in background  Exit ASM and leave the task running
+      3. Exit               Stop the current task and exit ASM
 
       enter select · esc back
     ");
@@ -595,8 +595,8 @@ async fn daemon_ctrl_c_hides_background_exit_for_running_background_side_thread(
       Choose what happens to the current task.
 
 
-    › 1. Cancel task  Stop the current task and stay in Codex
-      2. Exit         Stop the current task and exit Codex
+    › 1. Cancel task  Stop the current task and stay in ASM
+      2. Exit         Stop the current task and exit ASM
 
       enter select · esc back
     ");
