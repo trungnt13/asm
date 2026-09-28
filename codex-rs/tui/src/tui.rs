@@ -70,6 +70,7 @@ mod input_boundary;
 #[cfg(unix)]
 mod job_control;
 mod keyboard_modes;
+mod link_pointer;
 #[cfg(test)]
 #[path = "tui/owned_screen_tests.rs"]
 mod owned_screen_tests;
@@ -89,6 +90,8 @@ pub(crate) mod test_support;
 mod tmux;
 #[cfg(any(windows, test))]
 mod windows_console;
+#[cfg(any(windows, test))]
+mod windows_key_sequence;
 
 /// Target frame interval for UI redraw scheduling.
 pub(crate) const TARGET_FRAME_INTERVAL: Duration = frame_rate_limiter::MIN_FRAME_INTERVAL;
@@ -405,6 +408,9 @@ pub fn restore_after_exit() -> Result<()> {
     if let Err(err) = terminal_stderr::finish() {
         first_error.get_or_insert(err);
     }
+    if let Err(err) = crate::iterm_session_status::clear_iterm_session_status() {
+        first_error.get_or_insert(err);
+    }
 
     match first_error {
         Some(err) => Err(err),
@@ -440,7 +446,7 @@ fn flush_terminal_input_buffer() {
     use windows_sys::Win32::System::Console::STD_INPUT_HANDLE;
 
     let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-    if handle == INVALID_HANDLE_VALUE || handle == 0 {
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
         let err = unsafe { GetLastError() };
         tracing::warn!("failed to get stdin handle for flush: error {err}");
         return;
@@ -651,6 +657,7 @@ impl OverlayInput {
 }
 
 pub struct Tui {
+    pub(crate) link_hover: link_pointer::LinkHover,
     frame_requester: FrameRequester,
     draw_tx: broadcast::Sender<()>,
     event_broker: Arc<EventBroker>,
@@ -727,6 +734,7 @@ impl Tui {
         );
 
         Self {
+            link_hover: link_pointer::LinkHover::default(),
             frame_requester,
             draw_tx,
             event_broker: Arc::new(event_broker),
@@ -855,6 +863,7 @@ impl Tui {
 
     // Drop crossterm EventStream to avoid stdin conflicts with other processes.
     pub fn pause_events(&mut self) {
+        self.link_hover.mouse = None;
         self.event_broker.pause_events();
     }
 
@@ -990,6 +999,7 @@ impl Tui {
             let _ = self.enter_alt_screen();
         }
 
+        crate::iterm_session_status::invalidate_iterm_session_status();
         self.resume_events();
         self.schedule_screen_size_recheck(Duration::ZERO);
         output
@@ -1525,7 +1535,7 @@ fn ensure_virtual_terminal_processing() -> Result<()> {
     use windows_sys::Win32::System::Console::SetConsoleMode;
 
     fn enable_for_handle(handle: HANDLE) -> Result<()> {
-        if handle == INVALID_HANDLE_VALUE || handle == 0 {
+        if handle == INVALID_HANDLE_VALUE || handle.is_null() {
             return Ok(());
         }
 
