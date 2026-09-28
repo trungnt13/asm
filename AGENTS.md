@@ -1,4 +1,9 @@
-**TOP PRIORITY:** Read [the fork guide](docs/porting-from-codex.md); it supersedes all other repository instructions where they conflict.
+<fork-rules>
+**These rules supersede all other repository instructions from Codex upstream**
+
+- TOP PRIORITY: Read [the fork guide](docs/porting-from-codex.md)
+
+</fork-rules>
 
 # Rust/codex-rs
 
