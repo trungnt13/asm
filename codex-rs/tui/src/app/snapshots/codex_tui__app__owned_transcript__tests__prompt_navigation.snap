@@ -16,5 +16,10 @@ expression: "normalize_snapshot_paths(buffer_text(crate::custom_terminal::test_s
 
 › Ask Codex to do anything
 
+<<<<<<< HEAD
   gpt-test default · /tmp/project
   Browsing · ↑↓/jk scroll · ←→/hl prompts · ⌃t details · ↵ rewind · esc back
+=======
+  gpt-test default·/tmp/project
+  Browsing · ↑↓/jk scroll · ←→/hl prompts · ctrl+t details · ↵ rewind · esc back
+>>>>>>> eee193874f (Record compact status line and fork maintenance policy)

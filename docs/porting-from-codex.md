@@ -24,9 +24,11 @@ A full sync incorporates a selected upstream `main` commit and all its ancestors
 
 ## Sync and local work
 
+Pushing to `origin/main` with `--force-with-lease` is always allowed.
+
 Inspect Git status, the branch, remotes, and fork differences before editing. Preserve existing work. If local changes would block a sync, use a separate worktree unless the task authorizes committing or stashing them. When stashing is authorized, keep the named stash until restoration is verified; keep unfinished work out of published commits.
 
-Follow the requested sync method. Without a specified method, merge to preserve published history; rebase unpublished branches when useful. A requested rebase permits local history rewriting, not a force push unless that is also authorized. Use `git cherry-pick -x` for targeted ports and `codex/` for new branch names. Do not discard work, rewrite remote history, move existing release tags, or publish releases without explicit authorization.
+Follow the requested sync method. Without a specified method, merge to preserve published history; rebase unpublished branches when useful. A requested rebase permits local history rewriting; force-pushing branches other than `origin/main` still requires explicit authorization. Use `git cherry-pick -x` for targeted ports and `codex/` for new branch names. Do not discard work, move existing release tags, or publish releases without explicit authorization.
 
 Verify the upstream URL before fetching. Focus on fork differences and the upstream changes that affect them, not unchanged upstream code. Resolve conflicts against this guide's intent, comparing the base, fork, and upstream versions when needed. Inspect all currently exposed conflicts before asking one consolidated question with recommended resolutions. Later rebase commits may expose more conflicts.
 
@@ -134,6 +136,12 @@ Allow optional `extract_reasoning_effort` and `consolidation_reasoning_effort` u
 ## Transcript spacing
 
 Keep Markdown paragraphs, code blocks, and bullet or numbered list items adjacent without renderer-added blank rows, both while streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
+
+## Compact status line
+
+Join status-line segments with `·` without surrounding spaces. Use `CtxN%` for context used, `CtxN%left` for context remaining, and `F:on` / `F:off` for fast mode. Remove the space before the active agent role, such as `Main[default]`, only in the footer; leave picker labels unchanged. Preserve thread titles, paths, model names, agent roles, colors, item order, and the existing single-row truncation behavior.
+
+Offer an opt-in `cache-hit-rate` item in `/statusline` and `tui.status_line`. Show `CchN.N%`, the current thread's cumulative cached input tokens divided by its total input tokens, rounded to one decimal place. Use the existing backend-reported usage without new requests or API changes. Hide the item while usage is unknown or input tokens are zero; keep existing status-line defaults unchanged. Providers that omit cache details remain indistinguishable from a reported zero.
 
 ## Subagent service tiers
 
