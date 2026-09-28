@@ -34,7 +34,7 @@ Keep related generated files correct when fork changes require them: schemas, sn
 
 ## Platforms and build profiles
 
-Focus only on macOS and Linux (Ubuntu). Keep inherited code and workflow files for other platforms unless their removal is explicitly requested. Do not wire them into the custom fork CI or release workflows. Their presence does not mean they are disabled or required fork checks.
+Port useful upstream action, toolchain, security, and build fixes without restoring broad matrices. Do not add unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure to fork CI, or repeat CI locally for every edit. The separate two-target V8 dependency build below is not a broad Bazel suite or canary.
 
 Leave other inherited workflows unchanged unless the task authorizes changes. Check their own triggers and repository guards: [V8 canary](../.github/workflows/v8-canary.yml) still triggers on pull requests, with expensive builds conditional on relevant changes; [CLA](../.github/workflows/cla.yml) restricts its job to the `openai` owner. The custom CI scope does not disable these workflows.
 
@@ -67,9 +67,20 @@ When the owner requests a release, select the latest published, non-draft upstre
 
 Choose this version automatically; do not increment the previous fork version or the suffix number. Check the fork's remote tags before changing versions. If the derived tag already exists or no upstream prerelease can be determined, stop and ask for a decision. Do not invent another number or move an existing tag. The current rule therefore requires a decision for another release based on the same upstream prerelease.
 
-For a requested release, set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) to the selected fork version and refresh [`Cargo.lock`](../codex-rs/Cargo.lock). Commit both before the release build or tag. Keep that version on `main` until the next release bump. The tag, Cargo version, and packaged binary's `--version` must agree, apart from the tag's `v` prefix and the CLI's name prefix.
+- No Apple Developer signing or notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners.
+- Use host `bwrap`, `rg`, and the system shell where needed. Do not bundle Bubblewrap, voice, patched zsh, or other helpers, or change runtime sandbox/security defaults for packaging.
+- Retain Zig, [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), `AWS_LC_SYS_NO_JITTER_ENTROPY`, and verified fork-built V8 via [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml).
+- Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, or website/OpenAI-only publishing without an agreed intent change.
 
-A tag or release-title change cannot update an existing binary. Reuse artifacts only from the exact version-bumped commit. Report the source commit and upstream baseline separately; the version label does not prove which upstream code was incorporated.
+### V8 dependency release
+
+Build V8 separately from the CLI only when the resolved `v8` crate version lacks a fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) with tag `asm-v8-v<exact resolved v8 crate version>`. Before the first `main` push that consumes fork V8, or a CLI version push or tag, publish and verify that V8 dependency release; otherwise fork postmerge and CLI release builds fail. Local integration does not require publication. Reuse an existing verified fork V8 release when V8 inputs have not changed. If source, patches, build flags, or bindings change under the same crate version, ask how to version the dependency; never silently reuse or replace its old assets. A manual branch run builds but does not publish.
+
+Build only sandbox + pointer-compression optimized pairs for macOS ARM64 and Linux x86_64 MUSL. Use the existing Bazel source pair and staging helper locally on GitHub-hosted runners, without BuildBuddy, remote execution, paid infrastructure, or broad suites. Keep the static library's required symbols. Run the native `codex-v8-poc` sandbox and JavaScript smoke tests on both targets, including MUSL. Publish only each target's archive, Rust binding, and two-file checksum manifest. The dependency release is normal but **not Latest**; it has no installer and does not affect CLI release discovery. Never move its tag or replace published assets without approval.
+
+Fork CI and releases consume only the matching fork V8 release. Verify the GitHub SHA-256 digest of all three downloaded assets, then verify that the manifest names and hashes exactly match the target archive and binding. Missing or bad assets fail; there is no upstream V8 fallback. The inherited upstream V8 action path remains for inherited workflows outside fork CI.
+
+### Reuse and publish
 
 ## Release packaging and publication
 
