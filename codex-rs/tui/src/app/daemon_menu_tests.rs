@@ -27,7 +27,7 @@ async fn daemon_version_notice_preserves_manual_update_guidance() {
         assert_eq!(
             app.initialize_server_version_notice(client, Some(server)),
             Some(format!(
-                "A background Codex service is running v{server}, {comparison} your Codex CLI v{client}."
+                "A background Codex service is running v{server}, {comparison} your ASM CLI v{client}."
             ))
         );
         let overview = render_bottom_popup(&app.chat_widget, /*width*/ 100);
@@ -56,9 +56,9 @@ async fn daemon_version_notice_preserves_manual_update_guidance() {
         );
     }
     insta::assert_snapshot!(notices.join("\n"), @"
-    Service v0.155.0-alpha.22 < Codex CLI v0.155.0-alpha.23 · /daemon
-    Service v0.156.0 ≠ Codex CLI v0.155.0-alpha.23 · /daemon
-    Service v0.156.0 ≠ Codex CLI v0.0.0 · /daemon
+    Service v0.155.0-alpha.22 < ASM CLI v0.155.0-alpha.23 · /daemon
+    Service v0.156.0 ≠ ASM CLI v0.155.0-alpha.23 · /daemon
+    Service v0.156.0 ≠ ASM CLI v0.0.0 · /daemon
     ");
 }
 
