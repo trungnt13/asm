@@ -162,7 +162,7 @@ async fn load_agent_model_context(
     state: &ThreadManagerState,
     thread_id: ThreadId,
     history_mode: ThreadHistoryMode,
-) -> CodexResult<Option<Vec<RolloutItem>>> {
+) -> CodexResult<Option<codex_thread_store::StoredModelContext>> {
     match history_mode {
         ThreadHistoryMode::Legacy => Ok(state
             .read_stored_thread(ReadThreadParams {
@@ -172,15 +172,18 @@ async fn load_agent_model_context(
             })
             .await?
             .history
-            .map(|history| history.items)),
+            .map(|history| codex_thread_store::StoredModelContext {
+                thread_id,
+                revision: history.revision,
+                items: history.items,
+            })),
         ThreadHistoryMode::Paginated => Ok(Some(
             state
                 .load_latest_model_context(LoadThreadHistoryParams {
                     thread_id,
                     include_archived: true,
                 })
-                .await?
-                .items,
+                .await?,
         )),
     }
 }
@@ -317,6 +320,7 @@ impl LocalAgentControl {
         thread_id: ThreadId,
         parent: Option<Arc<CodexThread>>,
     ) -> CodexResult<()> {
+        let membership = self.runtime.admit_start()?;
         let state = self.runtime.upgrade()?;
         let owner_thread_id = parent.as_ref().map(|parent| parent.session.thread_id);
         if let Some(parent) = &parent {
@@ -367,8 +371,9 @@ impl LocalAgentControl {
             .await?
             .ok_or(CodexErr::ThreadNotFound(thread_id))?;
         let initial_history = InitialHistory::Resumed(ResumedHistory {
+            history_revision: history.revision,
             conversation_id: thread_id,
-            history: Arc::new(history),
+            history: Arc::new(history.items),
             rollout_path: stored_thread.rollout_path,
         });
         if initial_history.get_multi_agent_version() != Some(MultiAgentVersion::V2) {
@@ -613,7 +618,7 @@ impl LocalAgentControl {
         // Reserving a slot can evict an idle nested parent. Capture its instructions
         // alongside its authority so the child does not depend on a later live lookup.
         let residency_slot = self
-            .reserve_v2_residency_slot(&state, &config, Some(thread_id))
+            .reserve_v2_residency_slot(&state, &config, &membership, Some(thread_id))
             .await?;
 
         match state
@@ -662,6 +667,7 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        let membership = self.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
         let state = self.runtime.upgrade()?;
         let multi_agent_version = state
@@ -685,7 +691,12 @@ impl LocalAgentControl {
         let (residency_slot, residency_reservation) = if spawn_uses_v2_residency {
             let residency_reservation_started_at = Instant::now();
             let residency_slot = self
-                .reserve_v2_residency_slot(&state, &config, /*protected_thread_id*/ None)
+                .reserve_v2_residency_slot(
+                    &state,
+                    &config,
+                    &membership,
+                    /*protected_thread_id*/ None,
+                )
                 .await?;
             (
                 Some(residency_slot),
@@ -704,9 +715,13 @@ impl LocalAgentControl {
             .registry
             .reserve_spawn_slot(reservation_max_threads)?;
         let inheritance = SpawnAgentThreadInheritance {
-            environments: self
-                .inherited_environments_for_source(&state, session_source.as_ref())
-                .await,
+            environments: match &options.environments {
+                Some(environments) => Some(environments.clone()),
+                None => {
+                    self.inherited_environments_for_source(&state, session_source.as_ref())
+                        .await
+                }
+            },
             exec_policy: self
                 .inherited_exec_policy_for_source(&state, session_source.as_ref(), &config)
                 .await,
@@ -763,6 +778,10 @@ impl LocalAgentControl {
                 } else {
                     None
                 };
+                let environments = options
+                    .environments
+                    .as_ref()
+                    .map(TurnEnvironmentSnapshot::inheritable_selections);
                 let child_create_started_at = Instant::now();
                 let new_thread = Box::pin(state.spawn_new_thread_with_source(
                     config.clone(),
@@ -775,7 +794,7 @@ impl LocalAgentControl {
                     /*metrics_service_name*/ None,
                     inheritance.environments,
                     inheritance.exec_policy,
-                    options.environments.clone(),
+                    environments,
                 ))
                 .await?;
                 SpawnedThreadResult {
@@ -796,7 +815,8 @@ impl LocalAgentControl {
             }
         };
         agent_metadata.agent_id = Some(new_thread.thread_id);
-        let mut pending_spawn = PendingSpawn::new(Arc::clone(&state), new_thread.thread_id);
+        let mut pending_spawn =
+            PendingSpawn::new(Arc::clone(&state), new_thread.thread_id, membership);
 
         if let Some(SessionSource::SubAgent(
             subagent_source @ SubAgentSource::ThreadSpawn {
@@ -887,7 +907,7 @@ impl LocalAgentControl {
         if let Some(residency_slot) = residency_slot {
             residency_slot.commit(new_thread.thread_id);
         }
-        pending_spawn.disarm();
+        let _membership = pending_spawn.disarm();
 
         // Notify a new thread has been created. This notification will be processed by clients
         // to subscribe or drain this newly created thread.
@@ -1012,7 +1032,8 @@ impl LocalAgentControl {
                     CodexErr::Fatal(format!(
                         "parent thread history unavailable for fork: {parent_thread_id}"
                     ))
-                })?;
+                })?
+                .items;
 
         let selected_capability_roots = forked_rollout_items
             .iter()
@@ -1257,7 +1278,7 @@ impl LocalAgentControl {
                 /*forked_from_thread_id*/ Some(parent_thread_id),
                 inherited_environments,
                 inherited_exec_policy,
-                options.environments.clone(),
+                /*environments*/ None,
                 thread_extension_init,
             )
             .await?;
@@ -1276,6 +1297,7 @@ impl LocalAgentControl {
         thread_id: ThreadId,
         session_source: SessionSource,
     ) -> CodexResult<ThreadId> {
+        let _membership = self.runtime.admit_start()?;
         let root_depth = thread_spawn_depth(&session_source).unwrap_or(0);
         let (resumed_thread_id, resumed_multi_agent_version) = Box::pin(
             self.resume_single_agent_from_rollout(config.clone(), thread_id, session_source),
@@ -1371,8 +1393,9 @@ impl LocalAgentControl {
             .await?
             .ok_or(CodexErr::ThreadNotFound(thread_id))?;
         let initial_history = InitialHistory::Resumed(ResumedHistory {
+            history_revision: history.revision,
             conversation_id: thread_id,
-            history: Arc::new(history),
+            history: Arc::new(history.items),
             rollout_path: stored_thread.rollout_path,
         });
         let parent_thread_id = stored_thread.parent_thread_id;
