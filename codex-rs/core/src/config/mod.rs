@@ -2,6 +2,7 @@ use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::context::world_state::validate_managed_developer_instructions;
 use crate::path_utils::normalize_for_native_workdir;
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
@@ -1115,6 +1116,10 @@ pub struct Config {
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
 
+    /// Minimum poll window for background terminal output (`write_stdin`), in milliseconds.
+    /// Default: `5000` (5 seconds).
+    pub background_terminal_min_timeout: u64,
+
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: u64,
@@ -1612,6 +1617,13 @@ async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<C
 }
 
 impl Config {
+    pub(crate) fn background_terminal_timeout_bounds(&self) -> BackgroundTerminalTimeoutBounds {
+        BackgroundTerminalTimeoutBounds {
+            min_ms: self.background_terminal_min_timeout,
+            max_ms: self.background_terminal_max_timeout,
+        }
+    }
+
     pub fn sqlite_config(&self) -> &codex_state::SqliteConfig {
         &self.sqlite
     }
@@ -3955,10 +3967,23 @@ impl Config {
             .as_ref()
             .and_then(|agents| agents.interrupt_message)
             .unwrap_or(true);
+        let background_terminal_min_timeout = cfg
+            .background_terminal_min_timeout
+            .unwrap_or(MIN_EMPTY_YIELD_TIME_MS);
         let background_terminal_max_timeout = cfg
             .background_terminal_max_timeout
-            .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
-            .max(MIN_EMPTY_YIELD_TIME_MS);
+            .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS);
+        if background_terminal_min_timeout == 0
+            || background_terminal_min_timeout > background_terminal_max_timeout
+            || std::time::Instant::now()
+                .checked_add(Duration::from_millis(background_terminal_max_timeout))
+                .is_none()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "background terminal timeout bounds must be positive, ordered, and representable",
+            ));
+        }
         let thread_unload_delay =
             Duration::from_secs(cfg.thread_unload_delay_secs.unwrap_or(/*default*/ 1800));
         if std::time::Instant::now()
@@ -4524,6 +4549,7 @@ impl Config {
             update_plan_enabled,
             tool_registry,
             code_mode,
+            background_terminal_min_timeout,
             background_terminal_max_timeout,
             thread_unload_delay,
             ghost_snapshot,
