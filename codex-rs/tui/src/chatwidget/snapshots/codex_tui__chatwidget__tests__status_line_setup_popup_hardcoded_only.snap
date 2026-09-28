@@ -16,5 +16,5 @@ expression: status_line_popup_snapshot(&mut chat)
   [ ] model-with-reasoning  Current model name with reasoning level
   [ ] reasoning             Current reasoning level
 ↓
-  my-project · feat/awesome-feature · thread title
+  my-project·feat/awesome-feature·thread title
   space toggle · ←/→ reorder · enter save · esc cancel
