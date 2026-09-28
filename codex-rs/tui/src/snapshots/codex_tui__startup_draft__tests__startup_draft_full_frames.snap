@@ -4,27 +4,27 @@ expression: "snapshots.join(\"\\n---\\n\")"
 ---
 empty (48 columns):
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   ? for shortcuts
 ---
 resuming (48 columns):
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
   Resuming session…
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   ? for shortcuts
 ---
 forking (48 columns):
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
   Forking session…
 
@@ -34,7 +34,7 @@ forking (48 columns):
 ---
 multiline (48 columns):
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
 
@@ -45,7 +45,7 @@ multiline (48 columns):
 ---
 narrow (18 columns):
 
-  >_ OpenAI Codex…
+  >_ ASM (v0.159.…
      loading
 
 
