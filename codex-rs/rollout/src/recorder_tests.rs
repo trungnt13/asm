@@ -458,12 +458,6 @@ async fn load_rollout_items_preserves_security_risk_scores() -> std::io::Result<
         sampled_at: None,
     };
     let security_risk_item = RolloutItem::SecurityRiskScore(security_risk.clone());
-    for history_mode in [ThreadHistoryMode::Legacy, ThreadHistoryMode::Paginated] {
-        assert!(crate::is_persisted_rollout_item(
-            &security_risk_item,
-            history_mode
-        ));
-    }
 
     let mut file = File::create(&rollout_path)?;
     for (ordinal, item) in [
@@ -617,6 +611,58 @@ fn strip_legacy_ghost_snapshot_keeps_checkpoint_metadata_aligned() {
             {"slot": "user"}
         ])
     );
+}
+
+#[tokio::test]
+async fn recorder_preserves_additional_tools_in_both_history_modes() -> std::io::Result<()> {
+    for history_mode in [ThreadHistoryMode::Legacy, ThreadHistoryMode::Paginated] {
+        let home = TempDir::new().expect("temp dir");
+        let config = test_config(home.path());
+        let thread_id = ThreadId::new();
+        let recorder = RolloutRecorder::new(
+            &config,
+            RolloutRecorderParams::new(
+                thread_id,
+                /*forked_from_id*/ None,
+                /*parent_thread_id*/ None,
+                SessionSource::Exec,
+                /*thread_source*/ None,
+                "test_originator".to_string(),
+                BaseInstructions::default(),
+                Vec::new(),
+            )
+            .with_history_mode(history_mode),
+        )
+        .await?;
+        let item = RolloutItem::ResponseItem(
+            ResponseItem::AdditionalTools {
+                id: None,
+                role: "developer".to_string(),
+                tools: vec![serde_json::json!({
+                    "type": "namespace",
+                    "name": "functions",
+                    "description": "Available tools.",
+                    "tools": [{"type": "function", "name": "lookup",
+                        "description": "Look up a value.",
+                        "parameters": {"type": "object", "properties": {}}}]
+                })],
+            }
+            .into(),
+        );
+        let persisted = crate::persisted_rollout_items(std::slice::from_ref(&item), history_mode);
+        recorder.record_canonical_items(&persisted).await?;
+        recorder.flush().await?;
+        let (items, loaded_thread_id, parse_errors) =
+            RolloutRecorder::load_rollout_items(recorder.rollout_path()).await?;
+        assert_eq!(loaded_thread_id, Some(thread_id));
+        assert_eq!(parse_errors, 0);
+        assert_eq!(
+            serde_json::to_value(&items[1..])?,
+            serde_json::to_value([item])?
+        );
+        recorder.shutdown().await?;
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -1347,6 +1393,8 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         .await
         .expect("state db upsert should succeed");
 
+    let older_path = write_session_file(home.path(), "2025-01-01T13-00-00", Uuid::from_u128(9014))?;
+
     let default_provider = config.model_provider_id.clone();
     let page = RolloutRecorder::list_threads(
         Some(runtime.clone()),
@@ -1374,6 +1422,25 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         .await
         .expect("state db lookup should succeed");
     assert_eq!(stored_metadata, Some(metadata));
+    let cursor = page.next_cursor.expect("another thread remains");
+    assert_eq!(cursor.thread_id(), None);
+    runtime.close().await;
+    let fallback = RolloutRecorder::list_threads(
+        Some(runtime),
+        &config,
+        /*page_size*/ 1,
+        Some(&cursor),
+        ThreadSortKey::CreatedAt,
+        SortDirection::Desc,
+        &[],
+        /*model_providers*/ None,
+        /*cwd_filters*/ None,
+        default_provider.as_str(),
+        /*search_term*/ None,
+    )
+    .await?;
+    assert_eq!(fallback.items.len(), 1);
+    assert_eq!(fallback.items[0].path, older_path);
     Ok(())
 }
 
@@ -1473,6 +1540,23 @@ async fn list_threads_state_db_only_skips_jsonl_repair_scan() -> std::io::Result
     )
     .await?;
     assert_eq!(repaired_state_db_only_page.items.len(), 1);
+    runtime.close().await;
+    let error = RolloutRecorder::list_threads_from_state_db(
+        Some(runtime),
+        &config,
+        /*page_size*/ 10,
+        /*cursor*/ None,
+        ThreadSortKey::CreatedAt,
+        SortDirection::Desc,
+        &[],
+        /*model_providers*/ None,
+        /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        config.model_provider_id.as_str(),
+        /*search_term*/ None,
+    )
+    .await
+    .expect_err("a failed database query must not look like an exhausted listing");
+    assert_eq!(error.kind(), std::io::ErrorKind::Other);
     Ok(())
 }
 

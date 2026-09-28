@@ -64,7 +64,8 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         None
     }
 
-    /// Returns lazily cached Code Mode definitions owned by this runtime.
+    /// Returns lazily cached, augmented Code Mode definitions owned by this runtime.
+    /// Input and output schemas must be cleared after rendering their declarations.
     fn cached_code_mode_definitions(
         &self,
         _code_mode_input_schema_max_bytes: Option<usize>,
@@ -75,6 +76,12 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
     /// Returns a readiness wait for this exact tool before taking the execution gate.
     fn wait_until_ready<'a>(&'a self, _session: &'a Arc<Session>) -> Option<BoxFuture<'a, ()>> {
         None
+    }
+
+    /// True for MCP/app and client-supplied dynamic tools.
+    /// A built-in stays false even if a client's tool has the same name.
+    fn is_third_party_tool(&self) -> bool {
+        false
     }
 
     /// Returns the owning server only for MCP-backed tool runtimes.
@@ -816,12 +823,7 @@ async fn handle_any_tool(
         result: output,
         post_tool_use_payload,
     };
-    // Capture confirmed delivery before any further await, including post-tool hooks.
-    if let Some(call_state) = call_state
-        && let Some(text) = result.delivered_assistant_message()
-    {
-        let _ = call_state.delivered_assistant_message.set(text);
-    }
+    super::user_messaging::capture_delivery(&result, call_state);
     if result.result.contains_external_context()
         && invocation.turn.config.memories.disable_on_external_context
     {

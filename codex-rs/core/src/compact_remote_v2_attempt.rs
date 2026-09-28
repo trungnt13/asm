@@ -1,3 +1,6 @@
+use crate::context::UserGoalUpdate;
+use codex_protocol::ResponseItemId;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::RemoteCompactionV2Output;
@@ -11,12 +14,14 @@ use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use codex_history::CodexHarnessMetadata;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TokenUsage;
 use codex_rollout_trace::CompactionTraceContext;
 use tracing::info;
 
 pub(super) struct RemoteCompactV2Attempt {
+    pub(super) input_goal_ids: HashSet<ResponseItemId>,
     pub(super) trace_input_history: Option<Vec<ResponseItem>>,
     pub(super) prompt_input: Vec<ResponseItem>,
     pub(super) prompt_input_metadata: Vec<Option<CodexHarnessMetadata>>,
@@ -37,7 +42,15 @@ pub(super) async fn run_remote_compact_v2_attempt(
 ) -> CodexResult<RemoteCompactV2Attempt> {
     let turn_context = &step_context.turn;
     let mut history = sess.clone_history().await;
-    let base_instructions = sess.get_prompt_base_instructions().await;
+    let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
+    let base_instructions = if step_context.uses_incremental_tools() {
+        BaseInstructions {
+            text: String::new(),
+            provenance: None,
+        }
+    } else {
+        sess.get_prompt_base_instructions().await
+    };
     let (rewritten_outputs, estimated_deleted_tokens) =
         trim_function_call_history_to_fit_context_window(
             &mut history,
@@ -78,7 +91,11 @@ pub(super) async fn run_remote_compact_v2_attempt(
     input.push(ResponseItem::CompactionTrigger {});
     let prompt = Prompt {
         input,
-        tools: tool_router.model_visible_specs(),
+        tools: if step_context.uses_incremental_tools() {
+            Arc::default()
+        } else {
+            tool_router.model_visible_specs()
+        },
         parallel_tool_calls: true,
         base_instructions,
         output_schema: None,
@@ -122,6 +139,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let mut prompt_input = prompt.input;
     prompt_input.pop();
     Ok(RemoteCompactV2Attempt {
+        input_goal_ids,
         trace_input_history,
         prompt_input,
         prompt_input_metadata,
