@@ -9,12 +9,6 @@ concurrency:
 
 permissions: {}
 
-concurrency:
-  group: ${{ github.workflow }}::${{ github.ref }}
-  cancel-in-progress: true
-
-permissions: {}
-
 jobs:
   general:
     name: Format
@@ -97,6 +91,7 @@ jobs:
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
+          repository: trungnt13/asm
       - name: Run Clippy
         env:
           TARGET: ${{ matrix.target }}
