@@ -1,0 +1,18 @@
+---
+source: tui/src/onboarding/auth.rs
+expression: terminal.backend().to_string()
+---
+  Finish signing in via your browser
+
+  1. Open this link in your browser and sign in
+
+  https://chatgpt.com/device
+
+  2. Enter this one-time code after you are signed in (expires in 15 minutes)
+
+  ABCD-EFGH
+
+  Continue only if you started this login in ASM. If a website or another person
+gave you this code, cancel.
+
+  Press esc to cancel
