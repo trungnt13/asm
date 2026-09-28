@@ -104,6 +104,19 @@ fn assert_turn_id(body: &Value, key: &str, expected: Option<&str>) -> Result<()>
 #[derive(Debug, Clone)]
 pub struct ResponsesRequest(wiremock::Request);
 
+pub async fn received_responses_requests(server: &MockServer) -> Vec<ResponsesRequest> {
+    server
+        .received_requests()
+        .await
+        .expect("wiremock request recording is enabled")
+        .into_iter()
+        .filter(|request| {
+            request.method.as_str() == "POST" && request.url.path().ends_with("/responses")
+        })
+        .map(ResponsesRequest)
+        .collect()
+}
+
 fn is_zstd_encoding(value: &str) -> bool {
     value
         .split(',')
@@ -214,10 +227,10 @@ impl ResponsesRequest {
     }
 
     pub fn instructions_text(&self) -> String {
-        self.body_json()["instructions"]
-            .as_str()
-            .unwrap()
-            .to_string()
+        self.message_input_texts("developer")
+            .into_iter()
+            .next()
+            .expect("base instructions developer message")
     }
 
     /// Returns all `input_text` spans from `message` inputs for the provided role.

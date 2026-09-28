@@ -116,6 +116,7 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
             | CodexErrorInfo::CyberPolicy
             | CodexErrorInfo::BioPolicy
             | CodexErrorInfo::MisalignmentPolicyViolation
+            | CodexErrorInfo::TooManyDenials
             | CodexErrorInfo::Unauthorized
             | CodexErrorInfo::BadRequest
             | CodexErrorInfo::InvalidPrompt
@@ -124,7 +125,8 @@ fn should_retry_guardian_review(outcome: &GuardianReviewOutcome) -> bool {
             | CodexErrorInfo::ThreadRollbackFailed
             | CodexErrorInfo::Other => false,
         },
-        GuardianReviewOutcome::Completed(_)
+        GuardianReviewOutcome::CachedApproval
+        | GuardianReviewOutcome::Completed(_)
         | GuardianReviewOutcome::Error(
             GuardianReviewError::InputBudgetExceeded
             | GuardianReviewError::PromptBuild { .. }
