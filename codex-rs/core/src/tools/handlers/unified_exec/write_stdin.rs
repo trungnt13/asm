@@ -11,6 +11,7 @@ use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::sandboxing::ToolError;
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::WriteStdinInteractionEvent;
@@ -34,7 +35,15 @@ struct WriteStdinArgs {
     max_output_tokens: Option<usize>,
 }
 
-pub struct WriteStdinHandler;
+pub struct WriteStdinHandler {
+    bounds: BackgroundTerminalTimeoutBounds,
+}
+
+impl WriteStdinHandler {
+    pub(crate) fn new(bounds: BackgroundTerminalTimeoutBounds) -> Self {
+        Self { bounds }
+    }
+}
 
 impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     fn tool_name(&self) -> ToolName {
@@ -42,7 +51,7 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_write_stdin_tool()
+        create_write_stdin_tool(self.bounds)
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
