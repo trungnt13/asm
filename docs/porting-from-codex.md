@@ -108,6 +108,10 @@ Do not repeat these checks locally for every edit or expand the custom workflows
 
 The optional `macos_concurrency_experiment` dispatch compares cold builds of the same commit on `macos-15` with Cargo job limits 2 and 3. Keep every other build setting equal. Save separate timing, resource, size, and smoke-check results. It does not reuse postmerge artifacts or publish. Compare results before changing the default job count; treat one comparison as evidence, not proof of a general speedup.
 
+## Background terminal waits
+
+Allow top-level `background_terminal_min_timeout` and `background_terminal_max_timeout` in milliseconds. Keep omitted bounds at 5000 and 300000. Reject zero, reversed, or unrepresentable bounds rather than silently changing them. Clamp empty `write_stdin` polls to the configured range and show that range in the model-facing tool description. A poll returns early when the process ends. Do not change initial command waits, nonempty stdin waits, or code-mode's outer `exec`/`wait` limits. A background process exit event alone does not resume an idle model turn.
+
 ## Narrow validation
 
 Choose checks from fork changes and conflict resolutions, not the size of the imported upstream range:
