@@ -16,5 +16,5 @@ expression: status_line_popup_snapshot(&mut chat)
   [ ] model                 Current model name
   [ ] model-with-reasoning  Current model name with reasoning level
 ↓
-  my-project · feature/mixed-preview · Mixed preview thread · Daybreak on
+  my-project·feature/mixed-preview·Mixed preview thread·Daybreak on
   space toggle · ←/→ reorder · enter save · esc cancel
