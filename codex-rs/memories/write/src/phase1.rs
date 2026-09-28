@@ -167,7 +167,15 @@ async fn build_request_context(
             .to_string()
     });
     context
-        .stage_one_request_context(config, &model_name, crate::stage_one::REASONING_EFFORT)
+        .stage_one_request_context(
+            config,
+            &model_name,
+            config
+                .memories
+                .extract_reasoning_effort
+                .clone()
+                .unwrap_or(crate::stage_one::REASONING_EFFORT),
+        )
         .await
 }
 
