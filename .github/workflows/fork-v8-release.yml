@@ -2,6 +2,11 @@ name: fork-v8-release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the V8 dependency after both builds and smoke tests pass
+        type: boolean
+        default: false
   push:
     tags:
       - 'asm-v8-v*'
@@ -27,6 +32,7 @@ jobs:
         env:
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
+          PUBLISH: ${{ inputs.publish || false }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -34,15 +40,32 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$REF" == refs/tags/* ]]; then
             [[ "$REF_NAME" == "asm-v8-v${version}" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
+            [[ "$(git rev-parse "${REF_NAME}^{commit}")" == "$(git rev-parse "${GITHUB_SHA}^{commit}")" ]] || {
+              echo 'V8 tag does not point to this workflow commit' >&2; exit 1;
+            }
+          fi
+          if [[ "$REF" == refs/tags/* || "$PUBLISH" == true ]]; then
+            tag="asm-v8-v${version}"
             status="$(curl -sS -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
-              "https://api.github.com/repos/trungnt13/asm/releases/tags/${REF_NAME}")"
+              "https://api.github.com/repos/trungnt13/asm/releases/tags/${tag}")"
             case "$status" in
               404) ;;
-              200) echo "Release $REF_NAME already exists; refusing to replace assets" >&2; exit 1 ;;
-              *) echo "Could not check V8 release $REF_NAME (HTTP $status)" >&2; exit 1 ;;
+              200) echo "Release $tag already exists; refusing to replace assets" >&2; exit 1 ;;
+              *) echo "Could not check V8 release $tag (HTTP $status)" >&2; exit 1 ;;
             esac
+            if [[ "$REF" != refs/tags/* ]]; then
+              status="$(curl -sS -o /dev/null -w '%{http_code}' \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                "https://api.github.com/repos/trungnt13/asm/git/ref/tags/${tag}")"
+              case "$status" in
+                404) ;;
+                200) echo "V8 tag $tag already exists; refusing to move it" >&2; exit 1 ;;
+                *) echo "Could not check V8 tag $tag (HTTP $status)" >&2; exit 1 ;;
+              esac
+            fi
           fi
 
   build:
@@ -113,7 +136,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/asm-v8-v')
+    if: startsWith(github.ref, 'refs/tags/asm-v8-v') || inputs.publish == true
     needs: [metadata, build]
     runs-on: ubuntu-24.04
     permissions:
@@ -126,7 +149,8 @@ jobs:
       - name: Publish only the six expected files
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: asm-v8-v${{ needs.metadata.outputs.version }}
+          REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           assets=()
@@ -141,6 +165,10 @@ jobs:
             (cd "$dir" && sha256sum --check "rusty_v8_ptrcomp_sandbox_release_${target}.sha256")
           done
           [[ "$(find dist -type f | wc -l)" -eq 6 ]] || { echo 'Unexpected V8 assets' >&2; exit 1; }
+          if [[ "$REF" != refs/tags/* ]]; then
+            gh api --method POST repos/trungnt13/asm/git/refs \
+              -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" >/dev/null
+          fi
           gh release create "$TAG" "${assets[@]}" -R trungnt13/asm \
             --verify-tag --title "$TAG" --notes 'Fork-built V8 dependencies for ASM.' \
             --latest=false
