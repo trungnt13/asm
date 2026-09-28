@@ -116,7 +116,7 @@ async fn resumed_session_hides_unknown_token_usage_until_an_update_arrives() {
     chat.refresh_status_line();
     assert_eq!(
         status_line_text(&chat),
-        Some("Context 30% left · Context 70% used · 0 in · 0 out".to_string())
+        Some("Ctx30%left·Ctx70%·0 in·0 out".to_string())
     );
 }
 
@@ -2980,6 +2980,22 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 }
 
 #[tokio::test]
+async fn status_line_cache_hit_rate_shows_one_decimal_place() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.local_settings.tui.status_line = Some(vec!["cache-hit-rate".to_string()]);
+    let mut info = make_token_info(
+        /*total_tokens*/ 11_000, /*context_window*/ 200_000,
+    );
+    info.total_token_usage.input_tokens = 10_000;
+    info.total_token_usage.cached_input_tokens = 8_960;
+    handle_token_count(&mut chat, Some(info));
+    chat.refresh_status_line();
+
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
+}
+
+#[tokio::test]
 async fn status_line_context_used_renders_labeled_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
@@ -2987,7 +3003,7 @@ async fn status_line_context_used_renders_labeled_percent() {
 
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
+    assert_eq!(status_line_text(&chat), Some("Ctx0%".to_string()));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "context-used should remain a valid status line item"
@@ -3002,10 +3018,7 @@ async fn status_line_context_remaining_renders_labeled_percent() {
 
     chat.refresh_status_line();
 
-    assert_eq!(
-        status_line_text(&chat),
-        Some("Context 100% left".to_string())
-    );
+    assert_eq!(status_line_text(&chat), Some("Ctx100%left".to_string()));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "context-remaining should remain a valid status line item"
@@ -3020,7 +3033,7 @@ async fn status_line_legacy_context_usage_renders_context_used_percent() {
 
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
+    assert_eq!(status_line_text(&chat), Some("Ctx0%".to_string()));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "legacy context-usage should remain a valid status line item"
@@ -3130,7 +3143,7 @@ async fn status_line_thread_credits_and_cost_share_one_backend_request() {
     ));
     assert_eq!(
         status_line_text(&chat),
-        Some("5.2 credits · ~$0.21".to_string())
+        Some("5.2 credits·~$0.21".to_string())
     );
     assert!(rx.try_recv().is_err(), "idle refresh must not poll");
 }
@@ -3972,11 +3985,11 @@ async fn status_line_fast_mode_renders_on_and_off() {
     chat.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
 
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("Fast on".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:on".to_string()));
 }
 
 #[tokio::test]
@@ -3986,18 +3999,18 @@ async fn status_line_fast_mode_updates_visibility_on_model_change() {
     chat.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
 
     chat.set_model("gpt-5.2");
     assert_eq!(status_line_text(&chat), None);
 
     chat.set_model("gpt-5.4");
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
 
     chat.set_model("uncatalogued-model");
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
-    assert_eq!(status_line_text(&chat), Some("Fast on".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:on".to_string()));
 }
 
 #[tokio::test]
@@ -4048,7 +4061,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.4 xhigh fast · Context 0% used · {test_cwd}"))
+        Some(format!("gpt-5.4 xhigh fast·Ctx0%·{test_cwd}"))
     );
 
     chat.set_model("gpt-5.2");
@@ -4056,7 +4069,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.2 xhigh · Context 0% used · {test_cwd}"))
+        Some(format!("gpt-5.2 xhigh·Ctx0%·{test_cwd}"))
     );
 }
 
