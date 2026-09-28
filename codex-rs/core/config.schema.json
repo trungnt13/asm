@@ -6656,6 +6656,12 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "background_terminal_min_timeout": {
+      "description": "Minimum poll window for background terminal output (`write_stdin`), in milliseconds. Default: `5000` (5 seconds).",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "browser_use": {
       "$ref": "#/definitions/BrowserUseConfigToml"
     },
