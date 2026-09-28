@@ -42,6 +42,7 @@ impl App {
         let chat_widget = &self.chat_widget;
         let transcript_width = chat_widget.history_wrap_width(width);
         let view = &mut self.transcript_view;
+        view.primary_selection = self.right_click_paste_environment.primary;
         view.copy_on_select = self
             .local_settings
             .copy_on_select(&codex_terminal_detection::terminal_info());
@@ -52,7 +53,10 @@ impl App {
         let active_ids = chat_widget.active_activity_ids();
         let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
             && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
-        if detailed {
+        let search_changed = view.sync_search_live_tail(transcript_width, active_key, |width| {
+            chat_widget.active_cell_transcript_hyperlink_lines(width)
+        });
+        let changed = if detailed {
             view.sync_live_tail(transcript_width, active_key, |width| {
                 chat_widget.active_cell_transcript_hyperlink_lines(width)
             })
@@ -60,7 +64,8 @@ impl App {
             view.sync_live_activity_tail(transcript_width, active_key, expanded, |width| {
                 chat_widget.active_cell_owned_transcript_lines(width, expanded)
             })
-        }
+        };
+        changed || search_changed
     }
 
     pub(super) fn render_owned_transcript(
@@ -280,10 +285,11 @@ impl App {
             tui.frame_requester()
                 .schedule_frame_in(Duration::from_millis(/*millis*/ 50));
         }
+        self.refresh_link_hover(tui)?;
         Ok(bottom_area)
     }
 
-    /// Consume transcript gestures only when a modal or another overlay does not own input.
+    /// Keep modal input ownership while allowing wheel scrolling over the visible transcript.
     pub(super) fn handle_owned_transcript_event(
         &mut self,
         tui: &mut tui::Tui,
@@ -364,7 +370,19 @@ impl App {
         }
         if !self.chat_widget.no_modal_or_popup_active() {
             self.chat_widget.end_composer_drag();
-            return Ok(false);
+            let is_modal_scroll = self.chat_widget.has_active_modal()
+                && matches!(
+                    event,
+                    TuiEvent::Mouse(mouse)
+                        if matches!(
+                            mouse.kind,
+                            crossterm::event::MouseEventKind::ScrollUp
+                                | crossterm::event::MouseEventKind::ScrollDown
+                        )
+                );
+            if !is_modal_scroll {
+                return Ok(false);
+            }
         }
         if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release) {
             let size = tui.prepare_draw_size()?;
@@ -457,7 +475,7 @@ impl App {
         }
         let action = match event {
             TuiEvent::Key(key)
-                if !self.transcript_view.is_search_active()
+                if !self.transcript_view.is_search_editing()
                     && self.keymap.app.find_transcript.is_pressed(*key) =>
             {
                 self.transcript_view.begin_search();
@@ -516,14 +534,15 @@ impl App {
         let copy_on_select = matches!(action, ViewAction::CopyOnSelect(_));
         match action {
             ViewAction::Changed => {}
+            ViewAction::PrimarySelection(text) => self.transcript_view.publish_primary(tui, &text),
             ViewAction::Copy(text)
             | ViewAction::CopyOnSelect(text)
             | ViewAction::CopyAndFollow(text) => {
-                let result = self.transcript_view.copy_selected_text_with(
+                let result = self.transcript_view.copy_selected_text(
+                    tui,
                     &self.transcript_cells,
                     &text,
                     !copy_on_select,
-                    |text, format| tui.copy_transcript_selection(text, format),
                 );
                 self.transcript_view
                     .show_copy_feedback(&result, text.chars().count());

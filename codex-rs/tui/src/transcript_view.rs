@@ -86,6 +86,7 @@ struct VisibleRow {
 /// Shared scrolling and interaction state for compact and detailed transcript presentations.
 pub(crate) struct TranscriptView {
     pub(crate) copy_on_select: bool,
+    pub(crate) primary_selection: bool,
     position: Position,
     follow_control: follow_control::FollowControl,
     copy_feedback: Option<composer_gap::CopyFeedback>,
@@ -118,6 +119,7 @@ impl Default for TranscriptView {
     fn default() -> Self {
         Self {
             copy_on_select: false,
+            primary_selection: false,
             position: Position::Latest,
             follow_control: follow_control::FollowControl::default(),
             copy_feedback: None,
@@ -287,8 +289,12 @@ impl TranscriptView {
         expanded: bool,
         lines: impl FnOnce(u16) -> Option<ActivityTranscriptLines>,
     ) -> bool {
+        let shortcut = self
+            .disclosure
+            .keymap
+            .primary_hint(crate::keymap::KeymapContext::Global, "open_transcript");
         self.sync_live_layout(width, key, |width| {
-            lines(width).map(|lines| layout::activity_layout(lines, width, expanded))
+            lines(width).map(|lines| layout::activity_layout(lines, width, expanded, shortcut))
         })
     }
 
@@ -330,7 +336,7 @@ impl TranscriptView {
         self.cache.clear();
         self.suppressed_prompt_header = None;
         self.live_key = None;
-        // Search temporarily expands content without changing either presentation's position.
+        // Keep search's origin independent of either presentation's saved position.
         if self.detailed != detailed && !self.search.is_active() {
             let previous = self.position;
             self.position = self.saved_position.take().unwrap_or(previous);
@@ -405,9 +411,10 @@ impl TranscriptView {
         let index = self.next_nonempty(cells, index).unwrap_or(index);
         let bottom = self.bottom_start(cells);
         if rows > 0 && (index, row) >= bottom {
-            if self.selection.is_none() {
+            if self.selection.is_none() && !self.search.is_active() {
                 self.jump_to_latest();
             } else {
+                self.release_live_reading();
                 self.position = Position::Latest;
             }
             return;
@@ -465,7 +472,7 @@ impl TranscriptView {
 
     pub(crate) fn needs_history(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {
         self.search.needs_history(self.history)
-            || (!self.search.is_active() && self.near_start(cells))
+            || (self.search.allows_viewport_paging() && self.near_start(cells))
     }
 
     pub(crate) fn near_start(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {

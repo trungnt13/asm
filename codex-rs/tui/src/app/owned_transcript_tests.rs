@@ -35,6 +35,7 @@ pub(in crate::app) fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
 
 pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
     app.chat_widget.handle_thread_session(ThreadSessionState {
+        daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
         forked_from_id: None,
@@ -52,7 +53,6 @@ pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
         instruction_source_paths: Vec::new(),
         reasoning_effort: None,
         collaboration_mode: None,
-        personality: None,
         message_history: None,
         network_proxy: None,
         rollout_path: None,
@@ -843,7 +843,7 @@ async fn inline_transcript_search_draws_and_escape_precedes_backtrack() -> Resul
         &tui.terminal,
     ));
     assert!(
-        rendered.contains("enter next"),
+        rendered.contains("enter/⌃p older"),
         "search advances on the inline overlay draw path"
     );
     app.handle_backtrack_overlay_event(
@@ -853,8 +853,15 @@ async fn inline_transcript_search_draws_and_escape_precedes_backtrack() -> Resul
     )
     .await?;
     assert!(
-        matches!(&app.overlay, Some(Overlay::Transcript(overlay)) if !overlay.has_active_interaction())
+        matches!(&app.overlay, Some(Overlay::Transcript(overlay)) if overlay.has_active_interaction() && !overlay.is_search_editing())
     );
+    assert!(!app.backtrack.overlay_preview_active);
+    app.handle_backtrack_overlay_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+    )
+    .await?;
     assert!(!app.backtrack.overlay_preview_active);
     app.handle_backtrack_overlay_event(
         &mut tui,
@@ -912,7 +919,7 @@ async fn find_owns_editor_chords_without_changing_the_composer_draft() -> Result
                     crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),
                 );
                 assert!(
-                    rendered.contains("enter next"),
+                    rendered.contains("enter/⌃p older"),
                     "Find must resume after pasting over selection"
                 );
             }
@@ -962,8 +969,8 @@ async fn find_owns_editor_chords_without_changing_the_composer_draft() -> Result
         )
         .await?;
         assert!(!match &app.overlay {
-            Some(Overlay::Transcript(overlay)) => overlay.is_search_active(),
-            _ => app.transcript_view.is_search_active(),
+            Some(Overlay::Transcript(overlay)) => overlay.is_search_editing(),
+            _ => app.transcript_view.is_search_editing(),
         });
         assert_eq!(
             app.chat_widget.composer_text_with_pending(),
@@ -998,14 +1005,14 @@ async fn offline_find_closes_before_the_next_ctrl_c_quits() -> Result<()> {
         rendered.lines().nth(usize::from(cursor.y)).map(str::trim),
         Some("Find: needle")
     );
-    assert!(!rendered.contains("ctrl+c quit"));
+    assert!(!rendered.contains("⌃c quit"));
     let close = TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     assert!(matches!(
         app.handle_tui_event(&mut tui, &mut app_server, close)
             .await?,
         AppRunControl::Continue
     ));
-    assert!(!app.transcript_view.is_search_active());
+    assert!(!app.transcript_view.is_search_editing());
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "offline draft"
@@ -1089,9 +1096,9 @@ async fn offline_backtrack_keeps_the_preview_and_draft_without_reverting() -> Re
         )
         .await?;
         assert!(if owned {
-            app.transcript_view.is_search_active()
+            app.transcript_view.is_search_editing()
         } else {
-            matches!(&app.overlay, Some(Overlay::Transcript(overlay)) if overlay.is_search_active())
+            matches!(&app.overlay, Some(Overlay::Transcript(overlay)) if overlay.is_search_editing())
         });
         for (key, preview_active, draft) in [
             (KeyCode::Esc, true, "offline draft"),
@@ -1320,8 +1327,26 @@ async fn find_refreshes_live_details_before_searching_the_first_query() -> Resul
     let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
         &tui.terminal,
     ));
-    assert!(rendered.contains("enter next"), "{rendered}");
+    assert!(rendered.contains("enter/⌃p older"), "{rendered}");
     tui.set_owned_screen(/*owned*/ false)?;
+    app.open_transcript_overlay(&mut tui);
+    let Some(Overlay::Transcript(overlay)) = &mut app.overlay else {
+        panic!("expected transcript overlay");
+    };
+    overlay.set_presentation(/*detailed*/ false, HistoryRenderMode::Rich);
+    for event in [
+        TuiEvent::Key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE)),
+        TuiEvent::Paste("needle".into()),
+        TuiEvent::Draw,
+    ] {
+        app.handle_tui_event(&mut tui, &mut app_server, event)
+            .await?;
+    }
+    let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+        &tui.terminal,
+    ));
+    assert!(rendered.contains("printf needle"), "{rendered}");
+    insta::assert_snapshot!("compact_overlay_finds_hidden_live_text", rendered);
     app_server.shutdown().await?;
     Ok(())
 }
