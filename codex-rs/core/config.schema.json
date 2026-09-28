@@ -2555,6 +2555,14 @@
           "description": "Model used for memory consolidation.",
           "type": "string"
         },
+        "consolidation_reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "description": "Overrides consolidation reasoning effort; defaults to `medium` when omitted."
+        },
         "dedicated_tools": {
           "description": "When `true`, expose dedicated memory tools through the extension tool surface.",
           "type": "boolean"
@@ -2570,6 +2578,14 @@
         "extract_model": {
           "description": "Model used for thread summarisation.",
           "type": "string"
+        },
+        "extract_reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "description": "Overrides extraction reasoning effort; defaults to `low` when omitted."
         },
         "generate_memories": {
           "description": "When `false`, newly created threads are stored with `memory_mode = \"disabled\"` in the state DB.",
