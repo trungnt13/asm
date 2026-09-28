@@ -130,7 +130,7 @@ The published installer uses only `trungnt13/asm` GitHub `v*` releases for macOS
 
 Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, install locking, and safe `current` selection. Store packages under `packages/asm-standalone`; leave upstream packages and update markers untouched. Keep the shared Codex config/state home and `codex` command.
 
-Updates are manual. Do not fetch OpenAI/CDN or legacy npm packages, support daemon-only installation, or write `auto-update-version`. Inherited daemon and in-app update paths point upstream; use the fork installer until explicitly redesigned.
+Updates are manual. Do not fetch OpenAI/CDN or legacy npm packages, support daemon-only installation, or write `auto-update-version`. Built-in update checks, prompts, commands, and daemon update loops are disabled in ASM, regardless of upstream settings or markers. Updates are installed externally by the owner; the CLI and daemon must not download or install upstream releases. Keep ordinary daemon startup and restart separate from updating.
 
 ### Build experiment
 
