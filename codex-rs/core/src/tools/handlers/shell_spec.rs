@@ -1,3 +1,4 @@
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
@@ -114,7 +115,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     })
 }
 
-pub fn create_write_stdin_tool() -> ToolSpec {
+pub(crate) fn create_write_stdin_tool(bounds: BackgroundTerminalTimeoutBounds) -> ToolSpec {
     let properties = BTreeMap::from([
         (
             "session_id".to_string(),
@@ -131,7 +132,7 @@ pub fn create_write_stdin_tool() -> ToolSpec {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                format!("Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait {}-{} ms. A completed process returns sooner.", bounds.min_ms, bounds.max_ms),
             )),
         ),
         (
