@@ -87,7 +87,7 @@ Preserve these build constraints:
 
 [Postmerge CI](../.github/workflows/postmerge-ci.yml) saves release archives. A tag release uses [the artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) to reuse both unexpired archives from a successful same-repository push-to-`main` run at the exact tagged commit. It waits for a matching active run. If that run stays active beyond the wait limit, stop rather than build concurrently. If no usable completed run remains, build the archives in the release workflow. API errors are failures, not cache misses.
 
-Publication requires owner authorization and both archives:
+Updates are manual. Do not fetch OpenAI/CDN or legacy npm packages, support daemon-only installation, or write `auto-update-version`. Built-in update checks, prompts, commands, and daemon update loops are disabled in ASM, regardless of upstream settings or markers. Updates are installed externally by the owner; the CLI and daemon must not download or install upstream releases. Keep ordinary daemon startup and restart separate from updating.
 
 - Pushing a `v*` tag starts the release workflow; pushing `main` alone does not publish.
 - Normal manual dispatch from a branch builds artifacts only. Normal dispatch on a `v*` tag can publish too, because publication checks the ref.
