@@ -12,10 +12,10 @@ expression: "render_lines(&view, 100)"
   ───────────────────────                                                                           
   [x] thread-credits         Estimated current-thread credits (Enterprise workspaces only; omitted …
   [x] estimated-thread-cost  Estimated current-thread cost in USD (Enterprise workspaces only; omit…
+  [x] cache-hit-rate         Cached share of this thread's total input tokens (omitted until availa…
   [ ] model                  Current model name                                                     
   [ ] model-with-reasoning   Current model name with reasoning level                                
   [ ] reasoning              Current reasoning level                                                
-  [ ] current-dir            Current working directory                                              
 ↓                                                                                                   
-  5.2 credits · ~$1.82                                                                              
+  5.2 credits·~$1.82·Cch89.6%                                                                       
   space toggle · ←/→ reorder · enter save · esc cancel
