@@ -183,7 +183,7 @@ impl App {
                 }
                 let id = thread_id;
                 let is_primary = self.primary_thread_id == Some(thread_id);
-                let name = entry
+                let mut name = entry
                     .agent_path
                     .as_deref()
                     .map(str::trim)
@@ -196,6 +196,10 @@ impl App {
                             is_primary,
                         )
                     });
+                if let Some(model_label) = self.agent_picker_model_label(thread_id, is_primary) {
+                    name.push(' ');
+                    name.push_str(&model_label);
+                }
                 let uuid = thread_id.to_string();
                 SelectionItem {
                     name: name.clone(),
@@ -315,6 +319,11 @@ impl App {
                             .and_then(|entry| entry.agent_role.clone())
                     }),
                     is_closed,
+                );
+                self.agent_navigation.set_model_settings(
+                    thread_id,
+                    thread.model,
+                    thread.reasoning_effort,
                 );
                 if is_parent_owned {
                     self.agent_navigation.mark_parent_owned(thread_id);
@@ -1232,6 +1241,11 @@ impl App {
                 thread.agent_nickname,
                 thread.agent_role,
                 is_closed,
+            );
+            self.agent_navigation.set_model_settings(
+                thread.thread_id,
+                thread.model,
+                thread.reasoning_effort,
             );
             self.agent_navigation
                 .set_agent_path(thread.thread_id, agent_path);
