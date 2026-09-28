@@ -77,6 +77,12 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         None
     }
 
+    /// True for MCP/app and client-supplied dynamic tools.
+    /// A built-in stays false even if a client's tool has the same name.
+    fn is_third_party_tool(&self) -> bool {
+        false
+    }
+
     /// Returns the owning server only for MCP-backed tool runtimes.
     fn mcp_server_name(&self) -> Option<&str> {
         None
@@ -816,12 +822,7 @@ async fn handle_any_tool(
         result: output,
         post_tool_use_payload,
     };
-    // Capture confirmed delivery before any further await, including post-tool hooks.
-    if let Some(call_state) = call_state
-        && let Some(text) = result.delivered_assistant_message()
-    {
-        let _ = call_state.delivered_assistant_message.set(text);
-    }
+    super::user_messaging::capture_delivery(&result, call_state);
     if result.result.contains_external_context()
         && invocation.turn.config.memories.disable_on_external_context
     {

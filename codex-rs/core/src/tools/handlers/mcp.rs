@@ -227,6 +227,7 @@ impl McpHandler {
             cancellation_token,
             call_id,
             tool_name,
+            source,
             payload,
             ..
         } = invocation;
@@ -257,6 +258,7 @@ impl McpHandler {
             prepared_mcp_call,
             self.hook_tool_name(),
             tool_name,
+            &source,
             payload,
         )
         .await;
@@ -304,6 +306,10 @@ impl CoreToolRuntime for McpHandler {
                 .wait_for_mcp_server(&self.tool_info.server_name)
                 .await;
         }))
+    }
+
+    fn is_third_party_tool(&self) -> bool {
+        true
     }
 
     fn mcp_server_name(&self) -> Option<&str> {
