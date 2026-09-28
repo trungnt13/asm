@@ -56,11 +56,11 @@ fn active_dashboard_preserves_live_colors_controls_and_width() {
     assert!(actual.lines().nth(1).unwrap().starts_with("   mic "));
     insta::assert_snapshot!(actual, @r"
     voice ● listening ctrl+x mute     /voice stop
-      mic ▆▅▄▃▂▁  codex ▁▃▄▅▆█
+      mic ▆▅▄▃▂▁  ASM ▁▃▄▅▆█
     ");
     assert_eq!(buffer[(7, 0)].fg, Color::Red);
     assert_eq!(buffer[(7, 1)].fg, Color::Cyan);
-    assert_eq!(buffer[(22, 1)].fg, Color::Magenta);
+    assert_eq!(buffer[(20, 1)].fg, Color::Magenta);
     assert!(actual.contains("/voice stop"));
     let (compact, buffer) = rows(&strip, /*width*/ 37);
     assert!(compact.contains("ctrl+x mute") && compact.contains("/voice stop"));
@@ -68,7 +68,7 @@ fn active_dashboard_preserves_live_colors_controls_and_width() {
     let (narrow, buffer) = rows(&strip, /*width*/ 22);
     assert!(narrow.contains("/voice stop"));
     assert_eq!(buffer[(21, 0)].symbol(), " ");
-    assert!(narrow.contains("mic") && narrow.contains("codex"));
+    assert!(narrow.contains("mic") && narrow.contains("ASM"));
     let started_at = strip.started_at;
     let state = VoiceStripState {
         microphone_history: vec![255],
@@ -111,7 +111,7 @@ fn connecting_and_muted_indicators_follow_actual_capture() {
             .lines()
             .nth(1)
             .unwrap()
-            .starts_with("   mic ▁▁▁▁▁▁  codex ")
+            .starts_with("   mic ▁▁▁▁▁▁  ASM ")
     );
     assert!(muted.lines().nth(1).unwrap().ends_with("▁▃▄▅▆█"));
     assert_eq!(
@@ -119,7 +119,7 @@ fn connecting_and_muted_indicators_follow_actual_capture() {
         stop_column
     );
     assert_eq!(buffer[(7, 1)].fg, Color::DarkGray);
-    assert_eq!(buffer[(22, 1)].fg, Color::Magenta);
+    assert_eq!(buffer[(20, 1)].fg, Color::Magenta);
     assert_ne!(buffer[(7, 0)].fg, Color::Red);
 }
 
@@ -127,14 +127,14 @@ fn connecting_and_muted_indicators_follow_actual_capture() {
 fn waveform_preserves_real_sample_order_width_and_channel_colors() {
     let mut strip = active_strip();
     let (history, _) = rows(&strip, /*width*/ 45);
-    assert!(history.ends_with("mic ▆▅▄▃▂▁  codex ▁▃▄▅▆█"));
+    assert!(history.ends_with("mic ▆▅▄▃▂▁  ASM ▁▃▄▅▆█"));
     let (clipped, _) = rows(&strip, /*width*/ 22);
-    assert!(clipped.ends_with("mic ▃▂▁  codex ▅▆█"));
+    assert!(clipped.ends_with("mic ▃▂▁  ASM ▅▆█"));
     strip.state.microphone_history = vec![0, 0];
     let (silent, buffer) = rows(&strip, /*width*/ 45);
-    assert!(silent.contains("mic ▁▁▁▁▁▁  codex ▁▃▄▅▆█"));
+    assert!(silent.contains("mic ▁▁▁▁▁▁  ASM ▁▃▄▅▆█"));
     assert_eq!(buffer[(7, 1)].fg, Color::DarkGray);
-    assert_eq!(buffer[(22, 1)].fg, Color::Magenta);
+    assert_eq!(buffer[(20, 1)].fg, Color::Magenta);
 }
 
 #[test]

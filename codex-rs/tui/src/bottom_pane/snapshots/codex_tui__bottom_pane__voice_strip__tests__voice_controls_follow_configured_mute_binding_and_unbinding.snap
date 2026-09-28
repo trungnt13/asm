@@ -5,48 +5,48 @@ expression: "layouts.join(\"\\n\\n\")"
 ---
 'f8', muted=false, width=80:
  voice ● listening                                      f8 mute     /voice stop
-   mic ▆▅▄▃▂▁  codex ▁▃▄▅▆█
+   mic ▆▅▄▃▂▁  ASM ▁▃▄▅▆█
 
 'f8', muted=false, width=22:
  voice    /voice stop
-   mic ▃▂▁  codex ▅▆█
+   mic ▃▂▁  ASM ▅▆█
 
 'f8', muted=true, width=80:
  voice ◌ muted                                          f8 unmute   /voice stop
-   mic ▁▁▁▁▁▁  codex ▁▃▄▅▆█
+   mic ▁▁▁▁▁▁  ASM ▁▃▄▅▆█
 
 'f8', muted=true, width=22:
  voice    /voice stop
-   mic ▁▁▁  codex ▅▆█
+   mic ▁▁▁  ASM ▅▆█
 
 'ctrl-x m', muted=false, width=80:
  voice ● listening                                ctrl+x m mute     /voice stop
-   mic ▆▅▄▃▂▁  codex ▁▃▄▅▆█
+   mic ▆▅▄▃▂▁  ASM ▁▃▄▅▆█
 
 'ctrl-x m', muted=false, width=22:
  voice    /voice stop
-   mic ▃▂▁  codex ▅▆█
+   mic ▃▂▁  ASM ▅▆█
 
 'ctrl-x m', muted=true, width=80:
  voice ◌ muted                                    ctrl+x m unmute   /voice stop
-   mic ▁▁▁▁▁▁  codex ▁▃▄▅▆█
+   mic ▁▁▁▁▁▁  ASM ▁▃▄▅▆█
 
 'ctrl-x m', muted=true, width=22:
  voice    /voice stop
-   mic ▁▁▁  codex ▅▆█
+   mic ▁▁▁  ASM ▅▆█
 
 [], muted=false, width=80:
  voice ● listening                                    /voice mute   /voice stop
-   mic ▆▅▄▃▂▁  codex ▁▃▄▅▆█
+   mic ▆▅▄▃▂▁  ASM ▁▃▄▅▆█
 
 [], muted=false, width=22:
  voice    /voice stop
-   mic ▃▂▁  codex ▅▆█
+   mic ▃▂▁  ASM ▅▆█
 
 [], muted=true, width=80:
  voice ◌ muted                                        /voice mute   /voice stop
-   mic ▁▁▁▁▁▁  codex ▁▃▄▅▆█
+   mic ▁▁▁▁▁▁  ASM ▁▃▄▅▆█
 
 [], muted=true, width=22:
  voice    /voice stop
-   mic ▁▁▁  codex ▅▆█
+   mic ▁▁▁  ASM ▅▆█
