@@ -6890,7 +6890,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_runtime,
         mcp_handler_cache: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
-            config.background_terminal_max_timeout,
+            config.background_terminal_timeout_bounds(),
         ),
         elicitations: crate::elicitation::ElicitationService::new(),
         analytics_events_client: AnalyticsEventsClient::new(
@@ -9158,7 +9158,7 @@ where
         mcp_runtime,
         mcp_handler_cache: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
-            config.background_terminal_max_timeout,
+            config.background_terminal_timeout_bounds(),
         ),
         elicitations: crate::elicitation::ElicitationService::new(),
         analytics_events_client: AnalyticsEventsClient::new(
