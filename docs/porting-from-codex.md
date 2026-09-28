@@ -127,6 +127,10 @@ If narrow checks cannot establish safety, explain the gap and ask before expandi
 
 Use the configured owner identity: `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify both identities with `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` before committing. Correct local configuration when needed; do not rewrite published commits merely to fix attribution without approval.
 
+## Memory reasoning effort
+
+Allow optional `extract_reasoning_effort` and `consolidation_reasoning_effort` under `[memories]` to control the respective memory model requests for both V1 and V2. Use the existing reasoning-effort type. Preserve extraction's `low` and consolidation's `medium` when omitted, independently of the parent thread's effort. Do not change model selection or other memory behavior.
+
 ## Transcript spacing
 
 Keep Markdown paragraphs, code blocks, and bullet or numbered list items adjacent without renderer-added blank rows, both while streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
