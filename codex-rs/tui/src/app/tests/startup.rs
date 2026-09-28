@@ -1236,7 +1236,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     app.local_settings.tui.show_server_version_notice = true;
     app.refresh_server_version_overview_notice("2.1.0");
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-    assert!(rendered.contains("Service v2.0.0 < Codex CLI v2.1.0"));
+    assert!(rendered.contains("Service v2.0.0 < ASM CLI v2.1.0"));
     app.pending_server_version_notice =
         Some(crate::status::remote_connection::ServerVersionNotice {
             message: "Older service".to_string(),
