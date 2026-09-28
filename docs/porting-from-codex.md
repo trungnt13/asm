@@ -104,9 +104,9 @@ The published `install.sh` installs only from `trungnt13/asm` GitHub releases (`
 
 Keep [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml) and [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml) customized in place. Port useful upstream action, toolchain, security, and build fixes without restoring upstream-wide matrices.
 
-Blocking CI runs workspace formatting and production Clippy for `codex-cli`, `codex-tui`, `codex-core`, and `codex-config`, on both release targets, plus a result collector. It uses `--lib --bin codex -- -D warnings`, not workspace test targets or `cargo shear`. Keep warnings fatal. Add narrow checks if future fork changes affect other packages.
+Keep `blocking-ci` manual-only (`workflow_dispatch`), not automatic on pushes or pull requests and not a required branch check. Run local formatting and targeted Clippy when fork-owned Rust changes need them. A manual CI run still checks workspace formatting and production Clippy for `codex-cli`, `codex-tui`, `codex-core`, and `codex-config`, on both release targets, plus a result collector. Preserve `--lib --bin codex -- -D warnings`; do not suppress warnings or assertions. Add narrow checks if future fork changes affect other packages.
 
-Postmerge CI builds optimized binaries with the release target setup, packages and smoke-checks them, uploads archives and diagnostics, and collects results. The tag-release workflow does not depend on blocking CI; report its status separately rather than claiming publication proves all CI passed.
+Keep release builds, packaged-binary smoke checks, archive and checksum validation automatic. Postmerge CI builds optimized binaries with the release target setup, packages and smoke-checks them, uploads archives and diagnostics, and collects results. The tag-release workflow does not depend on manual blocking CI; report any existing CI failures separately rather than claiming publication proves all CI passed.
 
 Do not repeat these checks locally for every edit or expand the custom workflows to unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure.
 
