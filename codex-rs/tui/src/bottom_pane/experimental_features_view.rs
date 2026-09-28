@@ -359,7 +359,7 @@ impl BottomPaneView for ExperimentalFeaturesView {
             }
             Err(error) => {
                 tracing::warn!(%error, "experimental feature discovery failed");
-                self.discovery_status = "Server experiments unavailable. Reopen /experimental to retry; restart this Codex client if requests remain unanswered.".to_string();
+                self.discovery_status = "Server experiments unavailable. Reopen /experimental to retry; restart this ASM client if requests remain unanswered.".to_string();
             }
         }
         true
