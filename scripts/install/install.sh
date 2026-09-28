@@ -5,32 +5,14 @@ set -eu
 RELEASE="${CODEX_RELEASE:-latest}"
 NON_INTERACTIVE="${CODEX_NON_INTERACTIVE:-false}"
 DAEMON_ONLY="${CODEX_INSTALL_DAEMON_ONLY:-0}"
-DEFAULT_PREFER_RELEASES_OPENAI_COM="true"
-PREFER_RELEASES_OPENAI_COM="${CODEX_INSTALLER_USE_RELEASES_OPENAI_COM:-$DEFAULT_PREFER_RELEASES_OPENAI_COM}"
-RELEASES_BASE_URL="https://releases.openai.com/codex"
-RELEASES_CONNECT_TIMEOUT=10
-RELEASES_METADATA_TIMEOUT=30
-RELEASES_ASSET_TIMEOUT=300
-release_source="github"
 
 BIN_DIR="${CODEX_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_PATH="$BIN_DIR/codex"
 CODE_MODE_HOST_BIN_PATH="$BIN_DIR/codex-code-mode-host"
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
-STANDALONE_ROOT="$CODEX_HOME_DIR/packages/standalone"
-if [ "$DAEMON_ONLY" = "1" ]; then
-  STANDALONE_ROOT="$CODEX_HOME_DIR/packages/app-server-daemon"
-fi
+STANDALONE_ROOT="$CODEX_HOME_DIR/packages/asm-standalone"
 RELEASES_DIR="$STANDALONE_ROOT/releases"
 CURRENT_LINK="$STANDALONE_ROOT/current"
-if [ "${CODEX_INSTALL_DEFER_SELECTION:-0}" = "1" ]; then
-  if [ "$DAEMON_ONLY" != "1" ]; then
-    echo "Deferred selection requires a daemon-only installation." >&2
-    exit 1
-  fi
-  CURRENT_LINK="$STANDALONE_ROOT/.migration-current"
-fi
-AUTO_UPDATE_VERSION="$STANDALONE_ROOT/auto-update-version"
 LOCK_FILE="$STANDALONE_ROOT/install.lock"
 LOCK_DIR="$STANDALONE_ROOT/install.lock.d"
 LOCK_STALE_AFTER_SECS=600
@@ -38,7 +20,6 @@ LOCK_STALE_AFTER_SECS=600
 path_action="already"
 path_profile=""
 conflict_manager=""
-conflict_path=""
 lock_kind=""
 tmp_dir=""
 
@@ -54,9 +35,6 @@ normalize_version() {
   case "$1" in
     "" | latest)
       printf 'latest\n'
-      ;;
-    rust-v*)
-      printf '%s\n' "${1#rust-v}"
       ;;
     v*)
       printf '%s\n' "${1#v}"
@@ -98,8 +76,8 @@ Usage: install.sh [--release VERSION]
 Environment:
   CODEX_RELEASE          Version to install; overridden by --release.
   CODEX_NON_INTERACTIVE  Set to 1, true, or yes to skip prompts.
-  CODEX_INSTALLER_USE_RELEASES_OPENAI_COM
-                         Set to 0, false, or no to use GitHub Releases.
+  CODEX_HOME             Root for ASM's standalone package state.
+  CODEX_INSTALL_DIR      Directory for the codex and helper command links.
 EOF
         exit 0
         ;;
@@ -115,96 +93,25 @@ EOF
 download_file() {
   url="$1"
   output="$2"
-
   if command -v curl >/dev/null 2>&1; then
-    case "$url" in
-      "$RELEASES_BASE_URL"/*)
-        curl -fsSL --connect-timeout "$RELEASES_CONNECT_TIMEOUT" --max-time "$RELEASES_ASSET_TIMEOUT" "$url" -o "$output"
-        ;;
-      *)
-        curl -fsSL "$url" -o "$output"
-        ;;
-    esac
-    return
+    curl -fsSL "$url" -o "$output"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O "$output" "$url"
+  else
+    echo "curl or wget is required to install ASM." >&2
+    exit 1
   fi
-
-  if command -v wget >/dev/null 2>&1; then
-    case "$url" in
-      "$RELEASES_BASE_URL"/*)
-        wget -q -t 1 -T "$RELEASES_ASSET_TIMEOUT" -O "$output" "$url"
-        ;;
-      *)
-        wget -q -O "$output" "$url"
-        ;;
-    esac
-    return
-  fi
-
-  echo "curl or wget is required to install Codex." >&2
-  exit 1
 }
 
 download_text() {
   url="$1"
-
   if command -v curl >/dev/null 2>&1; then
-    case "$url" in
-      "$RELEASES_BASE_URL"/*)
-        curl -fsSL --connect-timeout "$RELEASES_CONNECT_TIMEOUT" --max-time "$RELEASES_METADATA_TIMEOUT" "$url"
-        ;;
-      *)
-        curl -fsSL "$url"
-        ;;
-    esac
-    return
-  fi
-
-  if command -v wget >/dev/null 2>&1; then
-    case "$url" in
-      "$RELEASES_BASE_URL"/*)
-        wget -q -t 1 -T "$RELEASES_METADATA_TIMEOUT" -O - "$url"
-        ;;
-      *)
-        wget -q -O - "$url"
-        ;;
-    esac
-    return
-  fi
-
-  echo "curl or wget is required to install Codex." >&2
-  exit 1
-}
-
-download_file_with_fallback() {
-  primary_url="$1"
-  fallback_url="$2"
-  output="$3"
-  expected_digest="$4"
-  fallback_asset="$5"
-  required_manifest_asset="${6:-}"
-
-  if download_file "$primary_url" "$output" &&
-    verify_archive_digest "$output" "$expected_digest" &&
-    { [ -z "$required_manifest_asset" ] || package_archive_digest "$required_manifest_asset" "$output" >/dev/null; }; then
-    return
-  fi
-
-  if [ -z "$fallback_url" ]; then
-    return 1
-  fi
-
-  warn "Could not download or verify $primary_url; retrying from GitHub Releases."
-  download_file "$fallback_url" "$output"
-  if verify_archive_digest "$output" "$expected_digest" &&
-    { [ -z "$required_manifest_asset" ] || package_archive_digest "$required_manifest_asset" "$output" >/dev/null; }; then
-    return
-  fi
-
-  resolve_release_from_github "$resolved_version"
-  fallback_digest="$(release_asset_digest "$fallback_asset")"
-  verify_archive_digest "$output" "$fallback_digest"
-  if [ -n "$required_manifest_asset" ]; then
-    package_archive_digest "$required_manifest_asset" "$output" >/dev/null
+    curl -fsSL "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q -O - "$url"
+  else
+    echo "curl or wget is required to install ASM." >&2
+    exit 1
   fi
 }
 
@@ -316,23 +223,11 @@ parse_release_metadata() {
 }
 
 release_url_for_asset() {
-  asset="$1"
-  resolved_version="$2"
-
-  printf 'https://github.com/openai/codex/releases/download/rust-v%s/%s\n' "$resolved_version" "$asset"
-}
-
-releases_url_for_asset() {
-  asset="$1"
-  resolved_version="$2"
-
-  printf '%s/releases/%s/%s\n' "$RELEASES_BASE_URL" "$resolved_version" "$asset"
+  printf 'https://github.com/trungnt13/asm/releases/download/v%s/%s\n' "$2" "$1"
 }
 
 release_metadata_url() {
-  resolved_version="$1"
-
-  printf 'https://api.github.com/repos/openai/codex/releases/tags/rust-v%s\n' "$resolved_version"
+  printf 'https://api.github.com/repos/trungnt13/asm/releases/tags/v%s\n' "$1"
 }
 
 parse_downloaded_release_metadata() {
@@ -347,7 +242,7 @@ parse_downloaded_release_metadata() {
 resolve_metadata_version() {
   release_tag="$(printf '%s\n' "$release_metadata" | awk -F '\t' '$1 == "tag_name" { print $2; exit }')"
   case "$release_tag" in
-    rust-v*) metadata_version="${release_tag#rust-v}" ;;
+    v*) metadata_version="${release_tag#v}" ;;
     *) metadata_version="" ;;
   esac
   if [ -z "$metadata_version" ]; then
@@ -361,7 +256,7 @@ resolve_release_from_github() {
   normalized_version="$1"
   if [ "$normalized_version" = "latest" ]; then
     requested_release="latest"
-    metadata_url="https://api.github.com/repos/openai/codex/releases/latest"
+    metadata_url="https://api.github.com/repos/trungnt13/asm/releases/latest"
   else
     resolved_version="$normalized_version"
     requested_release="$resolved_version"
@@ -380,52 +275,11 @@ resolve_release_from_github() {
     resolved_version="$metadata_version"
   fi
 
-  release_source="github"
-}
-
-resolve_release_from_releases() {
-  normalized_version="$1"
-
-  if [ "$normalized_version" = "latest" ]; then
-    requested_release="latest"
-    metadata_url="$RELEASES_BASE_URL/channels/latest"
-  else
-    requested_release="$normalized_version"
-    metadata_url="$RELEASES_BASE_URL/releases/$normalized_version/release.json"
-  fi
-
-  if ! release_json="$(download_text "$metadata_url")"; then
-    return 1
-  fi
-
-  if ! parse_downloaded_release_metadata "$requested_release" "releases.openai.com"; then
-    return 1
-  fi
-  if ! resolve_metadata_version; then
-    return 1
-  fi
-  if [ "$normalized_version" != "latest" ] && [ "$metadata_version" != "$normalized_version" ]; then
-    echo "Release metadata version did not match requested Codex version $normalized_version." >&2
-    return 1
-  fi
-  resolved_version="$metadata_version"
-  release_source="releases.openai.com"
 }
 
 resolve_release() {
   normalized_version="$(normalize_version "$RELEASE")"
   validate_version "$normalized_version"
-
-  case "$PREFER_RELEASES_OPENAI_COM" in
-    1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss])
-      if resolve_release_from_releases "$normalized_version" &&
-        select_release_assets; then
-        return
-      fi
-      warn "releases.openai.com is unavailable; falling back to GitHub Releases."
-      ;;
-  esac
-
   resolve_release_from_github "$normalized_version"
   select_release_assets
 }
@@ -473,36 +327,16 @@ release_asset_digest() {
 }
 
 select_release_assets() {
-  package_asset="codex-package-$vendor_target.tar.gz"
-  checksum_asset="codex-package_SHA256SUMS"
-  download_fallback_url=""
-  checksum_fallback_url=""
-
-  if release_asset_exists "$package_asset" &&
-    release_asset_exists "$checksum_asset"; then
-    install_layout="package"
-    asset="$package_asset"
-  elif release_asset_exists "codex-npm-$npm_tag-$resolved_version.tgz"; then
-    install_layout="legacy-platform-npm"
-    asset="codex-npm-$npm_tag-$resolved_version.tgz"
-  else
-    echo "Could not find Codex package or platform npm release assets for Codex $resolved_version." >&2
+  package_asset="codex-$vendor_target.tar.gz"
+  checksum_asset="SHA256SUMS"
+  if ! release_asset_exists "$package_asset" || ! release_asset_exists "$checksum_asset"; then
+    echo "Missing ASM release archive or SHA256SUMS for $resolved_version." >&2
     return 1
   fi
-
-  if [ "$release_source" = "releases.openai.com" ]; then
-    download_url="$(releases_url_for_asset "$asset" "$resolved_version")"
-    download_fallback_url="$(release_url_for_asset "$asset" "$resolved_version")"
-    if [ "$install_layout" = "package" ]; then
-      checksum_url="$(releases_url_for_asset "$checksum_asset" "$resolved_version")"
-      checksum_fallback_url="$(release_url_for_asset "$checksum_asset" "$resolved_version")"
-    fi
-  else
-    download_url="$(release_url_for_asset "$asset" "$resolved_version")"
-    if [ "$install_layout" = "package" ]; then
-      checksum_url="$(release_url_for_asset "$checksum_asset" "$resolved_version")"
-    fi
-  fi
+  asset="$package_asset"
+  install_layout="fork"
+  download_url="$(release_url_for_asset "$asset" "$resolved_version")"
+  checksum_url="$(release_url_for_asset "$checksum_asset" "$resolved_version")"
 }
 
 package_archive_digest() {
@@ -523,7 +357,7 @@ package_archive_digest() {
   ' "$manifest_path" 2>/dev/null || true)"
 
   if [ -z "$digest" ]; then
-    echo "Could not find SHA-256 digest for $asset in codex-package_SHA256SUMS." >&2
+    echo "Could not find SHA-256 digest for $asset in SHA256SUMS." >&2
     return 1
   fi
 
@@ -553,14 +387,14 @@ file_sha256() {
 }
 
 verify_archive_digest() {
-  archive_path="$1"
-  expected_digest="$2"
-  actual_digest="$(file_sha256 "$archive_path")"
+  verify_path="$1"
+  verify_expected_digest="$2"
+  verify_actual_digest="$(file_sha256 "$verify_path")"
 
-  if [ "$actual_digest" != "$expected_digest" ]; then
-    echo "Downloaded Codex archive checksum did not match expected digest." >&2
-    echo "expected: $expected_digest" >&2
-    echo "actual:   $actual_digest" >&2
+  if [ "$verify_actual_digest" != "$verify_expected_digest" ]; then
+    echo "Downloaded ASM asset checksum did not match expected digest." >&2
+    echo "expected: $verify_expected_digest" >&2
+    echo "actual:   $verify_actual_digest" >&2
     return 1
   fi
 }
@@ -912,7 +746,6 @@ detect_conflicting_install() {
   fi
 
   conflict_manager="$manager"
-  conflict_path="$existing_path"
   step "Detected existing $manager-managed Codex at $existing_path"
   warn "Multiple managed Codex installs can be ambiguous because PATH order decides which one runs."
 }
@@ -944,51 +777,30 @@ handle_conflicting_install() {
   fi
 }
 
-install_package_release() {
+install_fork_release() {
   release_dir="$1"
   archive_path="$2"
   stage_release="$RELEASES_DIR/.staging.$(basename "$release_dir").$$"
 
+  # Reject unexpected paths before extraction or changing the selected install.
+  members="$(tar -tzf "$archive_path")" || return 1
+  [ "$members" = "codex
+codex-code-mode-host" ] || {
+    echo "ASM archive must contain codex and codex-code-mode-host only." >&2
+    return 1
+  }
   mkdir -p "$RELEASES_DIR"
   rm -rf "$stage_release"
-  mkdir -p "$stage_release"
-  tar -xzf "$archive_path" -C "$stage_release"
-  chmod 0755 \
-    "$stage_release/bin/codex" \
-    "$stage_release/bin/codex-code-mode-host" \
-    "$stage_release/codex-path/rg"
-  if [ -f "$stage_release/codex-resources/bwrap" ]; then
-    chmod 0755 "$stage_release/codex-resources/bwrap"
-  fi
-  ln -sf "bin/codex" "$stage_release/codex"
-
-  if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
-    rm -rf "$release_dir"
-  fi
-  mv "$stage_release" "$release_dir"
-}
-
-install_legacy_platform_npm_release() {
-  release_dir="$1"
-  archive_path="$2"
-  target="$3"
-  stage_release="$RELEASES_DIR/.staging.$(basename "$release_dir").$$"
-  extract_dir="$tmp_dir/extract"
-  vendor_root="$extract_dir/package/vendor/$target"
-
-  mkdir -p "$RELEASES_DIR"
-  rm -rf "$stage_release" "$extract_dir"
-  mkdir -p "$stage_release/codex-resources" "$extract_dir"
-  tar -xzf "$archive_path" -C "$extract_dir"
-
-  cp "$vendor_root/codex/codex" "$stage_release/codex"
-  cp "$vendor_root/path/rg" "$stage_release/codex-resources/rg"
-  chmod 0755 "$stage_release/codex" "$stage_release/codex-resources/rg"
-  if [ -f "$vendor_root/codex-resources/bwrap" ]; then
-    cp "$vendor_root/codex-resources/bwrap" "$stage_release/codex-resources/bwrap"
-    chmod 0755 "$stage_release/codex-resources/bwrap"
-  fi
-
+  mkdir -p "$stage_release/bin"
+  tar -xzf "$archive_path" -C "$stage_release/bin"
+  for binary in codex codex-code-mode-host; do
+    if [ ! -f "$stage_release/bin/$binary" ] || [ -L "$stage_release/bin/$binary" ] ||
+      [ ! -x "$stage_release/bin/$binary" ]; then
+      echo "Invalid ASM executable: $binary" >&2
+      return 1
+    fi
+  done
+  ln -s "bin/codex" "$stage_release/codex"
   if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
     rm -rf "$release_dir"
   fi
@@ -1005,30 +817,12 @@ release_dir_is_complete() {
     [ "$(basename "$release_dir")" = "$expected_version-$expected_target" ] ||
     return 1
 
-  case "$layout" in
-    package)
-      [ -f "$release_dir/codex-package.json" ] &&
-        [ -x "$release_dir/bin/codex" ] &&
-        [ -x "$release_dir/bin/codex-code-mode-host" ] &&
-        [ -x "$release_dir/codex" ] &&
-        [ -x "$release_dir/codex-path/rg" ] ||
-        return 1
-      ;;
-    legacy-platform-npm)
-      [ -x "$release_dir/codex" ] &&
-        [ -x "$release_dir/codex-resources/rg" ] ||
-        return 1
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-
-  case "$layout:$expected_target" in
-    package:*linux* | legacy-platform-npm:*linux*)
-      [ -x "$release_dir/codex-resources/bwrap" ] || return 1
-      ;;
-  esac
+  [ "$layout" = "fork" ] &&
+    [ -f "$release_dir/bin/codex" ] && [ -x "$release_dir/bin/codex" ] &&
+    [ ! -L "$release_dir/bin/codex" ] &&
+    [ -f "$release_dir/bin/codex-code-mode-host" ] &&
+    [ -x "$release_dir/bin/codex-code-mode-host" ] &&
+    [ ! -L "$release_dir/bin/codex-code-mode-host" ] || return 1
 
   installed_version="$(version_from_binary "$release_dir/bin/codex" || version_from_binary "$release_dir/codex" || true)"
   [ "$installed_version" = "$expected_version" ]
@@ -1059,25 +853,23 @@ update_visible_command() {
 
   replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/$codex_relative_path" "$tmp_link"
 
-  if [ "$os" = "darwin" ] && [ -x "$release_dir/bin/codex-code-mode-host" ]; then
-    replace_path_with_symlink \
-      "$CODE_MODE_HOST_BIN_PATH" \
-      "$CURRENT_LINK/bin/codex-code-mode-host" \
-      "$tmp_link"
-  elif [ "$(readlink "$CODE_MODE_HOST_BIN_PATH" 2>/dev/null || true)" = \
-    "$CURRENT_LINK/bin/codex-code-mode-host" ]; then
-    rm -f "$CODE_MODE_HOST_BIN_PATH"
-  fi
+  replace_path_with_symlink \
+    "$CODE_MODE_HOST_BIN_PATH" \
+    "$CURRENT_LINK/bin/codex-code-mode-host" \
+    "$BIN_DIR/.codex-code-mode-host.$$"
 }
 
 verify_visible_command() {
   "$BIN_PATH" --version >/dev/null
-  if [ "$os" = "darwin" ] && [ "$install_layout" = "package" ]; then
-    [ -x "$CODE_MODE_HOST_BIN_PATH" ]
-  fi
+  [ -x "$CODE_MODE_HOST_BIN_PATH" ]
 }
 
 parse_args "$@"
+if [ "$DAEMON_ONLY" = "1" ] || [ "${CODEX_INSTALL_DEFER_SELECTION:-0}" = "1" ] ||
+  [ "${CODEX_INSTALL_IF_LATEST:-0}" = "1" ] || [ "${CODEX_INSTALL_IF_CURRENT:-0}" = "1" ]; then
+  echo "ASM installer does not support daemon-only or automatic updater modes." >&2
+  exit 1
+fi
 
 require_command mktemp
 require_command tar
@@ -1095,46 +887,26 @@ case "$(uname -s)" in
     ;;
 esac
 
-case "$(uname -m)" in
-  x86_64 | amd64)
-    arch="x86_64"
+machine="$(uname -m)"
+if [ "$os" = "darwin" ] && [ "$machine" = "x86_64" ] &&
+  [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = "1" ]; then
+  machine="arm64"
+fi
+
+case "$os:$machine" in
+  darwin:arm64 | darwin:aarch64)
+    vendor_target="aarch64-apple-darwin"
+    platform_label="macOS (Apple Silicon)"
     ;;
-  arm64 | aarch64)
-    arch="aarch64"
+  linux:x86_64 | linux:amd64)
+    vendor_target="x86_64-unknown-linux-musl"
+    platform_label="Linux (x64)"
     ;;
   *)
-    echo "Unsupported architecture: $(uname -m)" >&2
+    echo "Unsupported ASM release target: $(uname -s) $(uname -m)" >&2
     exit 1
     ;;
 esac
-
-if [ "$os" = "darwin" ] && [ "$arch" = "x86_64" ]; then
-  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = "1" ]; then
-    arch="aarch64"
-  fi
-fi
-
-if [ "$os" = "darwin" ]; then
-  if [ "$arch" = "aarch64" ]; then
-    npm_tag="darwin-arm64"
-    vendor_target="aarch64-apple-darwin"
-    platform_label="macOS (Apple Silicon)"
-  else
-    npm_tag="darwin-x64"
-    vendor_target="x86_64-apple-darwin"
-    platform_label="macOS (Intel)"
-  fi
-else
-  if [ "$arch" = "aarch64" ]; then
-    npm_tag="linux-arm64"
-    vendor_target="aarch64-unknown-linux-musl"
-    platform_label="Linux (ARM64)"
-  else
-    npm_tag="linux-x64"
-    vendor_target="x86_64-unknown-linux-musl"
-    platform_label="Linux (x64)"
-  fi
-fi
 
 resolve_release
 release_name="$resolved_version-$vendor_target"
@@ -1167,62 +939,6 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 acquire_install_lock
-if [ "${CODEX_INSTALL_DEFER_SELECTION:-0}" = "1" ] &&
-  { [ -e "$STANDALONE_ROOT/current" ] || [ -L "$STANDALONE_ROOT/current" ]; }; then
-  echo "A dedicated daemon is already selected; retry the update." >&2
-  exit 1
-fi
-updater_record="$CODEX_HOME_DIR/app-server-daemon/app-server-updater.pid"
-if [ "$DAEMON_ONLY" = "1" ]; then
-  updater_record="$CODEX_HOME_DIR/app-server-daemon/daemon-updater.pid"
-fi
-old_updater_parent="false"
-if [ "${CODEX_INSTALL_IF_LATEST:-}" != "1" ] && [ "${CODEX_INSTALL_IF_CURRENT:-}" != "1" ] && [ -f "$updater_record" ]; then
-  updater_pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$updater_record" | head -n 1)"
-  recorded_start="$(sed -n 's/.*"processStartTime"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$updater_record" | head -n 1)"
-  if [ -r "/proc/$$/stat" ]; then
-    parent_pid="$(sed 's/^.*) //' "/proc/$$/stat" | awk '{ print $2 }')"
-  else
-    parent_pid="$(ps -p "$$" -o ppid= 2>/dev/null)" || parent_pid=""
-    parent_pid="$(printf '%s' "$parent_pid" | tr -d ' ')"
-  fi
-  if [ -n "$updater_pid" ] && [ "$updater_pid" = "$parent_pid" ]; then
-    actual_details="$(ps -p "$updater_pid" -o stat= -o lstart= 2>/dev/null)" || actual_details=""
-    actual_start="$(printf '%s' "$actual_details" | sed 's/^[^[:space:]]*[[:space:]]*//; s/[[:space:]]*$//')"
-    if [ -n "$recorded_start" ] && [ "$recorded_start" = "$actual_start" ]; then
-      old_updater_parent="true"
-    fi
-  fi
-  if [ "$RELEASE" = "latest" ] && [ -n "$updater_pid" ] &&
-    { [ -z "$parent_pid" ] || { [ "$updater_pid" = "$parent_pid" ] &&
-      { [ -z "$recorded_start" ] || [ -z "$actual_start" ]; }; }; } &&
-    kill -0 "$updater_pid" 2>/dev/null; then
-    warn "Cannot verify whether an older updater launched this installer; skipping latest update."
-    exit 0
-  fi
-fi
-if [ "${CODEX_INSTALL_IF_LATEST:-}" = "1" ] || [ "${CODEX_INSTALL_IF_CURRENT:-}" = "1" ] || [ "$old_updater_parent" = "true" ]; then
-  guarded_release="${CODEX_UPDATE_FROM_RELEASE:-}"
-  if [ "$old_updater_parent" = "true" ]; then
-    guarded_release="$(cat "$AUTO_UPDATE_VERSION" 2>/dev/null || true)"
-  fi
-  current_release_dir="$(cd -P "$CURRENT_LINK" 2>/dev/null && pwd)" || exit 0
-  releases_dir="$(cd -P "$RELEASES_DIR" 2>/dev/null && pwd)" || exit 0
-  if [ "$RELEASE" != "latest" ] || [ -z "$guarded_release" ] ||
-    [ "$current_release_dir" != "$releases_dir/$guarded_release" ]; then
-    if [ "${CODEX_INSTALL_IF_CURRENT:-}" = "1" ]; then
-      echo "Daemon selection changed; retry the update." >&2
-      exit 1
-    fi
-    exit 0
-  fi
-  # An explicit daemon update may leave a local or pinned release. Scheduled
-  # updates still require the selected release to follow the latest channel.
-  if [ "${CODEX_INSTALL_IF_CURRENT:-}" != "1" ] &&
-    [ "$(cat "$AUTO_UPDATE_VERSION" 2>/dev/null || true)" != "$guarded_release" ]; then
-    exit 0
-  fi
-fi
 cleanup_stale_install_artifacts
 
 if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target" "$install_layout"; then
@@ -1237,48 +953,28 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   archive_path="$tmp_dir/$asset"
   checksum_path="$tmp_dir/$checksum_asset"
 
-  step "Downloading Codex CLI"
-  if [ "$install_layout" = "package" ]; then
-    checksum_digest="$(release_asset_digest "$checksum_asset")"
-    download_file_with_fallback "$checksum_url" "$checksum_fallback_url" "$checksum_path" "$checksum_digest" "$checksum_asset" "$asset"
-    expected_digest="$(package_archive_digest "$asset" "$checksum_path")"
-  else
-    expected_digest="$(release_asset_digest "$asset")"
-  fi
-  download_file_with_fallback "$download_url" "$download_fallback_url" "$archive_path" "$expected_digest" "$asset"
+  step "Downloading ASM CLI and helper"
+  checksum_digest="$(release_asset_digest "$checksum_asset")"
+  download_file "$checksum_url" "$checksum_path"
+  verify_archive_digest "$checksum_path" "$checksum_digest"
+  expected_digest="$(package_archive_digest "$asset" "$checksum_path")"
+  release_digest="$(release_asset_digest "$asset")"
+  [ "$expected_digest" = "$release_digest" ] || {
+    echo "ASM release metadata and SHA256SUMS disagree." >&2
+    exit 1
+  }
+  download_file "$download_url" "$archive_path"
+  verify_archive_digest "$archive_path" "$expected_digest"
 
-  step "Installing standalone package to $release_dir"
-  if [ "$install_layout" = "package" ]; then
-    install_package_release "$release_dir" "$archive_path"
-  else
-    install_legacy_platform_npm_release "$release_dir" "$archive_path" "$vendor_target"
-  fi
+  step "Installing ASM package to $release_dir"
+  install_fork_release "$release_dir" "$archive_path"
 fi
 if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target" "$install_layout"; then
   echo "Installed Codex command did not report expected version $resolved_version." >&2
   exit 1
 fi
-if [ "$DAEMON_ONLY" = "1" ] && [ "${CODEX_INSTALL_DEFER_SELECTION:-0}" != "1" ]; then
-  installed_codex="$release_dir/codex"
-  if [ "$install_layout" = "package" ]; then
-    installed_codex="$release_dir/bin/codex"
-  fi
-  if ! "$installed_codex" app-server daemon pid-update-loop --check-package-ownership >/dev/null 2>&1; then
-    echo "The production release does not support daemon-owned packages; the current selection was left unchanged." >&2
-    exit 1
-  fi
-fi
 update_current_link "$release_dir"
-if [ "$RELEASE" = "latest" ]; then
-  printf '%s' "$release_name" > "$AUTO_UPDATE_VERSION.tmp.$$"
-  mv -f "$AUTO_UPDATE_VERSION.tmp.$$" "$AUTO_UPDATE_VERSION"
-else
-  rm -f "$AUTO_UPDATE_VERSION"
-fi
-if [ "$DAEMON_ONLY" = "1" ]; then
-  release_install_lock
-  exit 0
-fi
+# Do not create auto-update-version: inherited runtime updaters target OpenAI.
 update_visible_command "$release_dir"
 add_to_path
 verify_visible_command
@@ -1301,5 +997,7 @@ case "$path_action" in
     ;;
 esac
 
-printf 'Codex CLI %s installed successfully.\n' "$resolved_version"
+printf 'ASM CLI %s installed successfully.\n' "$resolved_version"
+step "Use this ASM installer for manual updates; the inherited in-app updater targets OpenAI."
+step "Use host-provided rg and a system shell where those features require them."
 maybe_launch_codex_now

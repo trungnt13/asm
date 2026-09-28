@@ -40,7 +40,7 @@ use test_case::test_case;
 use super::image_rollout::RecordingFileAttachmentStore;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_checkpoint_review_preserves_oversized_instruction_order() -> Result<()> {
+async fn independent_review_preserves_oversized_instruction_order() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(
         Ok(()),
@@ -85,7 +85,7 @@ async fn legacy_checkpoint_review_preserves_oversized_instruction_order() -> Res
         GuardianContextMode::from_history(
             test.codex.conversation_history_snapshot().await.as_ref()
         ),
-        GuardianContextMode::Legacy,
+        GuardianContextMode::Independent,
     );
     let command = json!({
         "cmd": "echo complete-instructions",
@@ -216,8 +216,8 @@ enum ReviewerResponse {
 #[test_case(1, ReviewerResponse::Decision; "required_context_fails_closed")]
 #[test_case(4_500, ReviewerResponse::ToolContinuation; "oversized_tool_continuation_compacts")]
 #[test_case(4_500, ReviewerResponse::FileImageContinuation; "uploaded_original_image_history_compacts")]
-#[test_case(4_500, ReviewerResponse::UncompactableContinuation; "ineffective_compaction_fails_closed")]
-#[test_case(4_500, ReviewerResponse::CompactionError; "compaction_service_error_does_not_request_user_approval")]
+#[test_case(5_000, ReviewerResponse::UncompactableContinuation; "ineffective_compaction_fails_closed")]
+#[test_case(5_000, ReviewerResponse::CompactionError; "compaction_service_error_does_not_request_user_approval")]
 #[test_case(6_000, ReviewerResponse::NextReview; "incoming_review_compacts_existing_history")]
 async fn review_respects_complete_context_budget(
     window: i64,

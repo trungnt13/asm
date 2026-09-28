@@ -90,6 +90,7 @@ fn approval_metadata(
         plugin_id: None,
         tool_title: tool_title.map(str::to_string),
         tool_description: tool_description.map(str::to_string),
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -1071,61 +1072,6 @@ fn sanitize_mcp_tool_result_for_model_preserves_supported_media() {
 }
 
 #[test]
-fn truncate_mcp_tool_result_for_event_preserves_small_result() {
-    let original = CallToolResult {
-        content: vec![serde_json::json!({
-            "type": "text",
-            "text": "hello",
-        })],
-        structured_content: Some(serde_json::json!({"x": 1})),
-        is_error: Some(false),
-        meta: Some(serde_json::json!({"k": "v"})),
-    };
-
-    let got = truncate_mcp_tool_result_for_event(&Ok(original.clone()))
-        .expect("small result should remain successful");
-
-    assert_eq!(got, original);
-}
-
-#[test]
-fn truncate_mcp_tool_result_for_event_bounds_large_result() {
-    let original = CallToolResult {
-        content: vec![serde_json::json!({
-            "type": "text",
-            "text": "long-message-with-newlines-\n".repeat(200_000),
-        })],
-        structured_content: Some(serde_json::json!({
-            "structured": "structured-value-".repeat(200_000),
-        })),
-        is_error: Some(false),
-        meta: Some(serde_json::json!({
-            "meta": "meta-value-".repeat(200_000),
-        })),
-    };
-
-    let got = truncate_mcp_tool_result_for_event(&Ok(original))
-        .expect("large result should remain successful");
-    let serialized = serde_json::to_string(&got).expect("truncated result should serialize");
-
-    // The truncated preview is embedded as a JSON string, so quotes and
-    // backslashes can be escaped again. That can roughly double the preview
-    // bytes in the worst case. The extra buffer covers the small result wrapper
-    // and marker.
-    assert!(serialized.len() < MCP_TOOL_CALL_EVENT_RESULT_MAX_BYTES * 2 + 1024);
-    assert_eq!(got.structured_content, None);
-    assert_eq!(got.meta, None);
-    assert_eq!(got.is_error, Some(false));
-    assert!(
-        got.content[0]
-            .get("text")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|text| text.contains("truncated")),
-        "large event result should contain a truncation marker: {got:?}"
-    );
-}
-
-#[test]
 fn truncate_mcp_tool_result_for_event_bounds_large_error() {
     let got = truncate_mcp_tool_result_for_event(&Err("error-message-".repeat(200_000)))
         .expect_err("large error should remain an error");
@@ -1433,6 +1379,7 @@ fn mcp_tool_call_item_metadata_only_trusts_codex_apps_identity() {
         McpToolCallItemMetadata {
             connector_id: Some("asdk_app_0123456789abcdef0123456789abcdef".to_string()),
             link_id: Some("link_fedcba9876543210fedcba9876543210".to_string()),
+            mcp_app_resource_uri: None,
             mcp_app_ui: None,
             app_name: Some("Calendar".to_string()),
             action_name: Some("create_event".to_string()),
@@ -1445,6 +1392,7 @@ fn mcp_tool_call_item_metadata_only_trusts_codex_apps_identity() {
         McpToolCallItemMetadata {
             connector_id: None,
             link_id: None,
+            mcp_app_resource_uri: None,
             mcp_app_ui: None,
             app_name: None,
             action_name: None,
@@ -1470,6 +1418,7 @@ async fn mcp_tool_call_item_includes_app_identity() {
         McpToolCallItemMetadata {
             connector_id: Some("asdk_app_0123456789abcdef0123456789abcdef".to_string()),
             link_id: Some("link_fedcba9876543210fedcba9876543210".to_string()),
+            mcp_app_resource_uri: None,
             mcp_app_ui: None,
             app_name: Some("Calendar".to_string()),
             action_name: Some("create_event".to_string()),
@@ -1520,6 +1469,7 @@ async fn codex_apps_tool_call_request_meta_includes_turn_metadata_and_codex_apps
         plugin_id: None,
         tool_title: Some("Create Event".to_string()),
         tool_description: Some("Create a calendar event.".to_string()),
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: Some(
             serde_json::json!({
@@ -1979,6 +1929,7 @@ fn guardian_mcp_review_request_includes_annotations_when_present() {
         plugin_id: None,
         tool_title: None,
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -2744,6 +2695,7 @@ async fn approve_mode_skips_when_annotations_do_not_require_approval() {
         plugin_id: None,
         tool_title: Some("Read Only Tool".to_string()),
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -2825,6 +2777,7 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
         plugin_id: None,
         tool_title: Some("Read Only Tool".to_string()),
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -2888,6 +2841,7 @@ async fn permission_request_hook_allows_mcp_tool_call() {
         plugin_id: None,
         tool_title: Some("Create entities".to_string()),
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -3039,6 +2993,7 @@ async fn permission_request_hook_runs_after_remembered_mcp_approval() {
         plugin_id: None,
         tool_title: Some("Create entities".to_string()),
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -3116,13 +3071,6 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
         turn_context.auth_manager.clone(),
     );
 
-    let active_turn = ActiveTurn::default();
-    active_turn
-        .turn_state
-        .lock()
-        .await
-        .enable_strict_auto_review();
-    *session.active_turn.lock().await = Some(active_turn);
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let invocation = McpInvocation {
@@ -3140,6 +3088,7 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
         plugin_id: None,
         tool_title: Some("Dangerous Tool".to_string()),
         tool_description: Some("Reads calendar data.".to_string()),
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -3150,9 +3099,15 @@ async fn strict_auto_review_forces_guardian_for_mcp_policy_skip() {
         .set(AskForApproval::OnRequest)
         .expect("captured MCP policy should allow updating approval policy");
 
+    turn_context.record_granted_permissions(
+        codex_exec_server::LOCAL_ENVIRONMENT_ID,
+        Default::default(),
+        /*strict_auto_review*/ true,
+    );
+    let step_context = StepContext::for_test(Arc::clone(&turn_context));
     let decision = maybe_request_mcp_tool_approval(
         &session,
-        &StepContext::for_test(Arc::clone(&turn_context)),
+        &step_context,
         &CancellationToken::new(),
         "call-guardian-deny",
         &invocation,
@@ -3219,6 +3174,7 @@ async fn assert_mcp_user_approval_persistence(
         plugin_id: None,
         tool_title: Some("Create entities".to_string()),
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -3305,6 +3261,7 @@ async fn prompt_mode_waits_for_approval_when_annotations_do_not_require_approval
         plugin_id: None,
         tool_title: Some("Read Only Tool".to_string()),
         tool_description: None,
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -3370,6 +3327,7 @@ async fn full_access_mode_skips_mcp_tool_approval_for_all_approval_modes() {
         plugin_id: None,
         tool_title: Some("Dangerous Tool".to_string()),
         tool_description: Some("Performs a risky action.".to_string()),
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,
@@ -3429,6 +3387,7 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
         plugin_id: None,
         tool_title: Some("Dangerous Tool".to_string()),
         tool_description: Some("Performs a risky action.".to_string()),
+        mcp_app_resource_uri: None,
         mcp_app_ui: None,
         codex_apps_meta: None,
         openai_file_input_optional_fields: None,

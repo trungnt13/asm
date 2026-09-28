@@ -66,9 +66,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `274d41a39850eaaf4b60d0cfa66ea52dc917b274`.
+- Last incorporated upstream commit: `d7748e11854cc13dbcafca790f9e8387a2a7512e`.
 - Commit date: 2026-09-27.
-- Subject: Prevent Linux ETXTBSY races in MCP stdio tests (#48724).
+- Subject: Add opt-in structured errors for Guardian circuit-breaker interruptions (#48796).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
