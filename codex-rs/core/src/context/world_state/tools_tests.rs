@@ -6,6 +6,7 @@ use crate::context::world_state::WorldStateSection;
 use crate::context::world_state::test_support::render_section_cases;
 use codex_extension_api::ExtensionMetrics;
 use codex_otel::THREAD_TOOLS_FRAGMENT_BYTES_METRIC;
+use codex_otel::THREAD_TOOLS_METRIC_BUCKETS;
 use codex_otel::THREAD_TOOLS_NAMESPACES_TOTAL_METRIC;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
@@ -68,6 +69,7 @@ fn renders_first_line_of_namespace_descriptions() {
 
     let rendered = tools
         .render_diff(PreviousSectionState::Absent)
+        .1
         .expect("tools state should render")
         .render();
 
@@ -100,10 +102,8 @@ fn renders_added_removed_and_updated_namespace_descriptions() {
         ),
     ]);
 
-    let rendered = tools
-        .render_diff(PreviousSectionState::Known(&previous))
-        .expect("tools state delta should render")
-        .render();
+    let (snapshot, fragment) = tools.render_diff(PreviousSectionState::Known(&previous));
+    let rendered = fragment.expect("tools state delta should render").render();
 
     assert_eq!(
         rendered,
@@ -117,7 +117,8 @@ fn renders_added_removed_and_updated_namespace_descriptions() {
     );
     assert!(
         tools
-            .render_diff(PreviousSectionState::Known(&tools.snapshot()))
+            .render_diff(PreviousSectionState::Known(&snapshot.unwrap()))
+            .1
             .is_none()
     );
     assert!(metrics.take().is_empty());
@@ -138,18 +139,16 @@ fn caps_namespace_descriptions_by_character_count() {
         Arc::new(RecordingMetrics::default()),
     );
 
+    let (snapshot, fragment) = tools.render_diff(PreviousSectionState::Absent);
     assert_eq!(
-        tools.snapshot(),
+        snapshot.unwrap(),
         BTreeMap::from([
             ("exact".to_string(), exact_description.clone()),
             ("over".to_string(), capped_description.clone()),
         ])
     );
     assert_eq!(
-        tools
-            .render_diff(PreviousSectionState::Absent)
-            .expect("tools state should render")
-            .render(),
+        fragment.expect("tools state should render").render(),
         format!(
             "<tools>\nDeferred tool namespaces:\n- exact: {exact_description}\n- over: {capped_description}\n</tools>"
         )
@@ -176,6 +175,7 @@ fn records_fragment_metrics_after_description_normalization_and_truncation() {
     let tools = ToolsState::new(namespaces, metrics.clone());
     let rendered = tools
         .render_diff(PreviousSectionState::Absent)
+        .1
         .expect("tools state should render")
         .render();
 
@@ -203,13 +203,11 @@ fn retains_all_names_before_sharing_description_bytes() {
         Arc::new(RecordingMetrics::default()),
     );
 
-    let rendered = tools
-        .render_diff(PreviousSectionState::Absent)
-        .expect("tools state should render")
-        .render();
+    let (snapshot, fragment) = tools.render_diff(PreviousSectionState::Absent);
+    let rendered = fragment.expect("tools state should render").render();
 
-    let entries = tools
-        .snapshot()
+    let entries = snapshot
+        .unwrap()
         .keys()
         .enumerate()
         .map(|(index, namespace)| {
@@ -242,6 +240,7 @@ fn retains_names_that_fit_without_reserving_an_omission_notice() {
     );
     let rendered = tools
         .render_diff(PreviousSectionState::Absent)
+        .1
         .expect("tools state should render")
         .render();
     let entries = namespaces
@@ -274,6 +273,7 @@ fn preserves_raw_names_and_complete_unicode_at_the_budget_boundary() {
 
     let rendered = tools
         .render_diff(PreviousSectionState::Absent)
+        .1
         .expect("tools state should render")
         .render();
 
@@ -301,6 +301,7 @@ fn redistributes_description_space_after_short_and_empty_descriptions() {
 
     let rendered = tools
         .render_diff(PreviousSectionState::Absent)
+        .1
         .expect("tools state should render")
         .render();
 
@@ -324,6 +325,7 @@ fn reserves_names_and_shares_descriptions_across_added_and_removed_groups() {
 
     let rendered = tools
         .render_diff(PreviousSectionState::Known(&previous))
+        .1
         .expect("tools state delta should render")
         .render();
 
@@ -360,6 +362,7 @@ fn omits_whole_names_per_group_only_after_dropping_every_description() {
 
     let rendered = tools
         .render_diff(PreviousSectionState::Known(&previous))
+        .1
         .expect("tools state delta should render")
         .render();
 
@@ -382,6 +385,7 @@ fn reserves_the_empty_state_notice_when_all_namespaces_are_removed() {
 
     let rendered = ToolsState::new([], Arc::new(RecordingMetrics::default()))
         .render_diff(PreviousSectionState::Known(&previous))
+        .1
         .expect("final tools state delta should render")
         .render();
 
@@ -398,7 +402,13 @@ fn reserves_the_empty_state_notice_when_all_namespaces_are_removed() {
 
 #[derive(Default)]
 struct RecordingMetrics {
-    samples: Mutex<BTreeMap<(String, String, String), i64>>,
+    samples: Mutex<BTreeMap<(String, String, String), RecordedHistogram>>,
+}
+
+#[derive(Debug, PartialEq)]
+struct RecordedHistogram {
+    value: i64,
+    boundaries: Vec<f64>,
 }
 
 impl ExtensionMetrics for RecordingMetrics {
@@ -410,25 +420,28 @@ impl ExtensionMetrics for RecordingMetrics {
         &self,
         name: &str,
         value: i64,
-        _boundaries: &[f64],
+        boundaries: &[f64],
         tags: &[(&str, &str)],
     ) {
-        self.histogram(name, value, tags);
-    }
-
-    fn histogram(&self, name: &str, value: i64, tags: &[(&str, &str)]) {
         let [("stage", stage), ("kind", kind)] = tags else {
             panic!("unexpected tags: {tags:?}")
         };
         self.samples.lock().expect("metric samples lock").insert(
             (name.to_string(), (*stage).to_string(), (*kind).to_string()),
-            value,
+            RecordedHistogram {
+                value,
+                boundaries: boundaries.to_vec(),
+            },
         );
+    }
+
+    fn histogram(&self, name: &str, _value: i64, _tags: &[(&str, &str)]) {
+        panic!("expected explicit boundaries for {name}");
     }
 }
 
 impl RecordingMetrics {
-    fn take(&self) -> BTreeMap<(String, String, String), i64> {
+    fn take(&self) -> BTreeMap<(String, String, String), RecordedHistogram> {
         std::mem::take(&mut *self.samples.lock().expect("metric samples lock"))
     }
 }
@@ -437,7 +450,7 @@ fn expected_metrics(
     kind: &str,
     before: (usize, &str),
     after: (usize, &str),
-) -> BTreeMap<(String, String, String), i64> {
+) -> BTreeMap<(String, String, String), RecordedHistogram> {
     [("before", before), ("after", after)]
         .into_iter()
         .flat_map(|(stage, (count, text))| {
@@ -448,7 +461,10 @@ fn expected_metrics(
             .map(|(name, value)| {
                 (
                     (name.to_string(), stage.to_string(), kind.to_string()),
-                    value as i64,
+                    RecordedHistogram {
+                        value: value as i64,
+                        boundaries: THREAD_TOOLS_METRIC_BUCKETS.to_vec(),
+                    },
                 )
             })
         })
