@@ -3,6 +3,7 @@
 //! Shift-click extends the existing selection from its original text unit.
 //! Optional automatic copying happens only when a nonempty mouse selection is released.
 //! Automatic copies retain the selection; explicit copies clear it after confirmed delivery.
+//! Wheel input accumulates fractional rows and discards the remainder when direction reverses.
 
 use crate::key_hint::KeyBindingListExt;
 use crossterm::event::KeyCode;
@@ -20,6 +21,7 @@ pub(crate) enum ViewAction {
     Changed,
     Copy(String),
     CopyOnSelect(String),
+    PrimarySelection(String),
     CopyAndFollow(String),
     OpenLink(String),
 }
@@ -80,6 +82,15 @@ impl JumpTarget {
 }
 
 impl TranscriptView {
+    /// Resolve links in the last rendered transcript, sharing geometry with click activation.
+    pub(crate) fn link_at(&self, column: u16, row: u16) -> Option<String> {
+        if !self.area.contains(ScreenPosition::new(column, row)) {
+            return None;
+        }
+        let visible = self.visible.get(usize::from(row - self.area.y))?;
+        visible.layout.link_at(visible.row, column - self.area.x)
+    }
+
     pub(crate) fn navigate_pager(
         &mut self,
         key: KeyEvent,
@@ -125,10 +136,7 @@ impl TranscriptView {
             return true;
         }
         if self.selection.is_some() {
-            return (code == KeyCode::Char('c')
-                && matches!(modifiers, KeyModifiers::CONTROL | KeyModifiers::SUPER))
-                || (code == KeyCode::Char('c')
-                    && modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT))
+            return crate::text_selection::is_copy_key(key)
                 || code == KeyCode::Esc
                 || (code == KeyCode::Enter && modifiers == KeyModifiers::NONE)
                 || (matches!(modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
@@ -139,8 +147,11 @@ impl TranscriptView {
                 || (modifiers == KeyModifiers::NONE
                     && matches!(code, KeyCode::PageUp | KeyCode::PageDown));
         }
-        self.is_search_active()
-            && (matches!(code, KeyCode::Esc | KeyCode::Enter)
+        self.search.is_active()
+            && (code == KeyCode::Esc
+                || (code == KeyCode::Enter && self.is_search_editing())
+                || (modifiers == KeyModifiers::NONE
+                    && matches!(code, KeyCode::PageUp | KeyCode::PageDown))
                 || (modifiers == KeyModifiers::CONTROL
                     && matches!(code, KeyCode::Char('c' | 'n' | 'p'))))
     }
@@ -219,8 +230,27 @@ impl TranscriptView {
             selection.pointer = None;
         }
         match event.kind {
-            MouseEventKind::ScrollUp => self.scroll(cells, /*rows*/ -3),
-            MouseEventKind::ScrollDown => self.scroll(cells, /*rows*/ 3),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let direction = if event.kind == MouseEventKind::ScrollUp {
+                    -1.0
+                } else {
+                    1.0
+                };
+                if self.pending_mouse_scroll.signum() != direction {
+                    self.pending_mouse_scroll = 0.0;
+                }
+                self.pending_mouse_scroll += direction * self.mouse_scroll_speed;
+                // Decimal speeds can land just short of a whole row after repeated addition.
+                let rounded = self.pending_mouse_scroll.round();
+                if rounded != 0.0 && (self.pending_mouse_scroll - rounded).abs() < 1e-9 {
+                    self.pending_mouse_scroll = rounded;
+                }
+                let rows = self.pending_mouse_scroll as isize;
+                self.pending_mouse_scroll = self.pending_mouse_scroll.fract();
+                if rows != 0 {
+                    self.scroll(cells, rows);
+                }
+            }
             MouseEventKind::Down(MouseButton::Right) if inside => {
                 return self
                     .selected_text(cells)
@@ -243,15 +273,7 @@ impl TranscriptView {
                     .flatten()
                 });
                 let link = link.filter(|destination| {
-                    self.visible
-                        .get(usize::from(event.row - self.area.y))
-                        .and_then(|visible| {
-                            visible
-                                .layout
-                                .link_at(visible.row, event.column - self.area.x)
-                        })
-                        .as_ref()
-                        == Some(destination)
+                    self.link_at(event.column, event.row).as_ref() == Some(destination)
                 });
                 if self
                     .selection
@@ -268,10 +290,13 @@ impl TranscriptView {
                 if let Some(link) = link {
                     return Some(ViewAction::OpenLink(link));
                 }
-                if self.copy_on_select
-                    && let Some(text) = selected.filter(|text| !text.is_empty())
-                {
-                    return Some(ViewAction::CopyOnSelect(text));
+                if let Some(text) = selected.filter(|text| !text.is_empty()) {
+                    if self.copy_on_select {
+                        return Some(ViewAction::CopyOnSelect(text));
+                    }
+                    if self.primary_selection {
+                        return Some(ViewAction::PrimarySelection(text));
+                    }
                 }
             }
             _ => return None,
@@ -358,9 +383,8 @@ impl TranscriptView {
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
         {
-            return visible
-                .layout
-                .link_at(visible.row, event.column.saturating_sub(self.area.x))
+            return self
+                .link_at(event.column, event.row)
                 .map(ViewAction::OpenLink);
         }
         if event.modifiers == KeyModifiers::SHIFT && self.has_selection_range() {
@@ -383,11 +407,7 @@ impl TranscriptView {
             return None;
         }
         let link = (clicks == 1 && event.modifiers.is_empty())
-            .then(|| {
-                visible
-                    .layout
-                    .link_at(visible.row, event.column.saturating_sub(self.area.x))
-            })
+            .then(|| self.link_at(event.column, event.row))
             .flatten();
         self.begin_selection(cells, event.column, event.row, clicks);
         if let Some(selection) = &mut self.selection {
