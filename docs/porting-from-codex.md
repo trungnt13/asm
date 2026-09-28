@@ -26,13 +26,24 @@ A full sync incorporates a selected upstream `main` commit and all its ancestors
 
 Pushing to `origin/main` with `--force-with-lease` is always allowed.
 
-Inspect Git status, the branch, remotes, and fork differences before editing. Preserve existing work. If local changes would block a sync, use a separate worktree unless the task authorizes committing or stashing them. When stashing is authorized, keep the named stash until restoration is verified; keep unfinished work out of published commits.
+Before editing or resuming, inspect Git status, branches, worktrees, remotes, fork differences, and relevant active or recent repo sessions. Identify overlapping work and unresolved handoffs from session history and Git; do not rely on the owner to remember them. Preserve existing work. If local changes would block a sync, use a separate worktree unless the task authorizes committing or stashing them. When stashing is authorized, keep the named stash until restoration is verified; keep unfinished work out of published commits.
 
 Follow the requested sync method. Without a specified method, merge to preserve published history; rebase unpublished branches when useful. A requested rebase permits local history rewriting; force-pushing branches other than `origin/main` still requires explicit authorization. Use `git cherry-pick -x` for targeted ports and `codex/` for new branch names. Do not discard work, move existing release tags, or publish releases without explicit authorization.
 
 Verify the upstream URL before fetching. Focus on fork differences and the upstream changes that affect them, not unchanged upstream code. Resolve conflicts against this guide's intent, comparing the base, fork, and upstream versions when needed. Inspect all currently exposed conflicts before asking one consolidated question with recommended resolutions. Later rebase commits may expose more conflicts.
 
 Keep related generated files correct when fork changes require them: schemas, snapshots, dependency lockfiles, and Bazel data declarations. Not running Bazel CI does not authorize breaking its files. Reuse already-correct upstream outputs rather than regenerating everything after a sync.
+
+## Task ownership and completion
+
+An implementation request, including documentation edits, authorizes committing the task's completed changes and integrating them into local `main`, unless the owner says otherwise. This permission does not itself authorize a push or release.
+
+- When tasks overlap, use a named branch and separate worktree for each task before editing. Coordinate overlapping files. In any shared checkout, one coordinating agent owns staging and commits; integrate into `main` one task at a time.
+- The lead agent owns completion, including delegated work. Once the requested change is implemented, required narrow checks pass, and no owner decision remains, commit and integrate it immediately. Do not wait for a separate "done" signal or manual testing unless the owner explicitly asks to approve or test before integration. Delivering a development binary is a progress milestone, not completion.
+- Inspect the staged diff and commit only finished task changes, including affected tests, generated files, and fork intent. Do not include unrelated or unfinished work. Recheck the target branch before integration, resolve mechanical conflicts, and validate changed behavior from conflict resolutions with narrow checks.
+- "Done" means the change is committed and integrated into local `main`, not merely finished by a subagent or committed in another worktree. Verify integration and reconcile task-owned duplicate edits only when other work can be preserved. Never overwrite unrelated work to make the checkout clean.
+- If integration is unsafe or needs an owner decision, preserve completed work in a commit and report "ready, integration blocked" with the exact blocker. Identify any unfinished work separately; do not claim completion.
+- Finish with a concise handoff: what changed, validation results, commit, integration and push status, and any remaining work with its branch or worktree. Use existing sessions and Git records; do not create a separate task diary by default.
 
 ## Platforms and build profiles
 
