@@ -1,5 +1,9 @@
+#[path = "remote_env_capability_roots_tests.rs"]
+mod capability_roots;
 #[path = "guardian_environments_tests.rs"]
 mod guardian_environments;
+#[path = "remote_env_spawn_tests.rs"]
+pub(super) mod spawn_tests;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -193,13 +197,15 @@ impl ContextContributor for ReadyCapabilityRootsTestExtension {
             let body = root_ids.join(",");
             vec![WorldStateSectionContribution::new(
                 "ready_capability_roots_test",
-                json!(root_ids),
                 move |_| {
-                    Some(RenderedWorldStateFragment::new(
-                        "user",
-                        ("<ready_capability_roots>", "</ready_capability_roots>"),
-                        body.clone(),
-                    ))
+                    (
+                        Some(json!(root_ids)),
+                        Some(RenderedWorldStateFragment::new(
+                            "user",
+                            ("<ready_capability_roots>", "</ready_capability_roots>"),
+                            body.clone(),
+                        )),
+                    )
                 },
             )]
         })
@@ -1442,6 +1448,19 @@ async fn serve_environment_with_agents_md(
     listener: TcpListener,
     contents: &str,
     attach: tokio::sync::oneshot::Receiver<()>,
+    shutdown: tokio::sync::oneshot::Receiver<()>,
+) -> usize {
+    serve_environment_with_instruction_files(
+        listener, contents, /*skill*/ None, attach, shutdown,
+    )
+    .await
+}
+
+async fn serve_environment_with_instruction_files(
+    listener: TcpListener,
+    contents: &str,
+    skill: Option<&str>,
+    attach: tokio::sync::oneshot::Receiver<()>,
     mut shutdown: tokio::sync::oneshot::Receiver<()>,
 ) -> usize {
     let mut websocket = accept_initialized_exec_server(listener).await;
@@ -1457,6 +1476,10 @@ async fn serve_environment_with_agents_md(
         let is_agents_md = request["params"]["path"]
             .as_str()
             .is_some_and(|path| path.ends_with("/AGENTS.md"));
+        let is_skill_root = skill.is_some()
+            && request["params"]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/.agents/skills"));
         let response = match request["method"].as_str() {
             Some("environment/info") => json!({
                 "id": request["id"],
@@ -1466,16 +1489,38 @@ async fn serve_environment_with_agents_md(
                 "id": request["id"],
                 "result": { "path": request["params"]["path"] }
             }),
-            Some("fs/walk") => json!({
-                "id": request["id"],
-                "result": { "entries": [], "errors": [], "truncated": false }
-            }),
-            Some("fs/getMetadata") if is_agents_md => {
+            Some("fs/walk") => {
+                let root = request["params"]["path"].as_str().expect("walk root");
+                let entries = if is_skill_root {
+                    vec![json!({
+                        "path": format!("{root}/guardian-fixture-skill/SKILL.md"),
+                        "kind": "file",
+                    })]
+                } else {
+                    Vec::new()
+                };
+                json!({
+                    "id": request["id"],
+                    "result": { "entries": entries, "errors": [], "truncated": false }
+                })
+            }
+            Some("fs/readFile")
+                if skill.is_some()
+                    && request["params"]["path"]
+                        .as_str()
+                        .is_some_and(|path| path.ends_with("/guardian-fixture-skill/SKILL.md")) =>
+            {
+                json!({
+                    "id": request["id"],
+                    "result": { "dataBase64": BASE64_STANDARD.encode(skill.expect("skill contents")) }
+                })
+            }
+            Some("fs/getMetadata") if is_agents_md || is_skill_root => {
                 json!({
                     "id": request["id"],
                     "result": {
-                        "isDirectory": false,
-                        "isFile": true,
+                        "isDirectory": is_skill_root,
+                        "isFile": is_agents_md,
                         "isSymlink": false,
                         "size": contents.len(),
                         "createdAtMs": 0,
@@ -2907,12 +2952,22 @@ async fn deferred_executor_spawn_agent_inherits_ready_step_environments(
     Ok(())
 }
 
+#[test_case("exec_command")]
+#[test_case("mcp_elicitation")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Result<()> {
+async fn deferred_executor_guardian_uses_newly_ready_step_environment(
+    tool: &'static str,
+) -> Result<()> {
     const WAIT_CALL_ID: &str = "wait-for-guardian-environment";
     const EXEC_CALL_ID: &str = "guardian-ready-environment-command";
     const DENIAL_RATIONALE: &str = "The remote environment policy denies this action.";
 
+    if tool == "mcp_elicitation" {
+        core_test_support::skip_if_wine_exec!(
+            Ok(()),
+            "the MCP fixture requires a host Python interpreter"
+        );
+    }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let server = start_mock_server().await;
     let completed_response =
@@ -2930,17 +2985,21 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
             ),
             completed_response(
                 "resp-guardian-command",
-                ev_function_call(
-                    EXEC_CALL_ID,
-                    "exec_command",
-                    &json!({
-                        "cmd": "printf guardian-should-not-run",
-                        "environment_id": REMOTE_ENVIRONMENT_ID,
-                        "sandbox_permissions": SandboxPermissions::RequireEscalated,
-                        "justification": "Review the newly ready remote environment.",
-                    })
-                    .to_string(),
-                ),
+                if tool == "mcp_elicitation" {
+                    ev_function_call_with_namespace(EXEC_CALL_ID, "mcp__cua_repl", "js", "{}")
+                } else {
+                    ev_function_call(
+                        EXEC_CALL_ID,
+                        "exec_command",
+                        &json!({
+                            "cmd": "printf guardian-should-not-run",
+                            "environment_id": REMOTE_ENVIRONMENT_ID,
+                            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+                            "justification": "Review the newly ready remote environment.",
+                        })
+                        .to_string(),
+                    )
+                },
             ),
             completed_response(
                 "resp-guardian-review",
@@ -2958,11 +3017,21 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
     .await;
     let mut builder = test_codex()
         .with_exec_server_url(format!("ws://{}", listener.local_addr()?))
-        .with_config(|config| {
+        .with_config(move |config| {
             config.project_doc_max_bytes = 0;
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
             config.approvals_reviewer = ApprovalsReviewer::AutoReview;
             assert!(config.features.enable(Feature::DeferredExecutor).is_ok());
+            if tool == "mcp_elicitation" {
+                config.mcp_servers.set(serde_json::from_value(json!({
+                    "cua_repl": {
+                        "command": if cfg!(windows) { "python" } else { "python3" },
+                        "args": ["-u", "-c", super::guardian_mcp_elicitation::ELICITATION_SERVER,
+                            json!([{"codex_sensitive_action": true}]).to_string(), "forward"],
+                        "default_tools_approval_mode": "approve",
+                    }
+                })).expect("MCP server config")).expect("set MCP fixture");
+            }
         });
     let (attach_tx, attach_rx) = tokio::sync::oneshot::channel();
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -2973,6 +3042,9 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
         shutdown_rx,
     ));
     let test = expect_startup(builder.build_with_remote_and_local_env(&server)).await;
+    if tool == "mcp_elicitation" {
+        core_test_support::wait_for_mcp_server(&test.codex, "cua_repl").await?;
+    }
     let remote_cwd = test.cwd.path().join("guardian-remote").abs();
     let local_cwd = test.cwd.path().abs();
     fs::create_dir_all(remote_cwd.as_path())?;
@@ -3058,10 +3130,10 @@ async fn deferred_executor_guardian_uses_newly_ready_step_environment() -> Resul
         "Guardian used the stale local environment's denied-read policy: {guardian_context}"
     );
     let rejection = requests
-        .iter()
-        .find_map(|request| request.function_call_output_text(EXEC_CALL_ID))
-        .context("Guardian denial should be returned to the parent model")?;
-    assert!(rejection.contains(DENIAL_RATIONALE));
+        .last()
+        .context("expected parent continuation after review")?
+        .function_call_output(EXEC_CALL_ID);
+    assert!(rejection.to_string().contains(DENIAL_RATIONALE));
 
     shutdown_tx
         .send(())

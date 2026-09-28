@@ -226,6 +226,7 @@ async fn resume(test: &TestCodex, thread: &CodexThread) -> Result<Arc<CodexThrea
         .resume_thread_with_history(
             test.config.clone(),
             InitialHistory::Resumed(ResumedHistory {
+                history_revision: None,
                 conversation_id: thread_id,
                 history: Arc::new(items),
                 rollout_path: None,
@@ -746,7 +747,7 @@ async fn legacy_checkpoint_recovers_root_excerpt_before_discarding_backup(
                 text: "Never publish publicly.".to_owned(),
             }];
             window.push(shortened.into());
-            checkpoint.guardian_history = Some(GuardianHistoryCheckpoint(vec![source]));
+            checkpoint.guardian_history = Some(GuardianHistoryCheckpoint(vec![source.into()]));
         }
         LegacyInstructionSource::ModelWindow => window.push(source.into()),
         LegacyInstructionSource::Missing => expected = legacy,
@@ -923,6 +924,7 @@ async fn standalone_fork_retains_inherited_user_instructions(
                 ForkSnapshot::Interrupted,
                 codex_core::StartThreadOptions::new(test.config.clone()),
                 InitialHistory::Resumed(ResumedHistory {
+                    history_revision: None,
                     conversation_id: worker.startup_metadata().thread_id,
                     history: Arc::new(load_context(&test, &worker).await?),
                     rollout_path: None,
