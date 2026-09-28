@@ -4505,6 +4505,11 @@ async fn inactive_thread_approval_badge_clears_after_turn_completion_notificatio
 #[tokio::test]
 async fn inactive_thread_started_notification_initializes_replay_session() -> Result<()> {
     let mut app = make_test_app().await;
+    app.config
+        .features
+        .enable(Feature::FastMode)
+        .expect("enable fast mode");
+    app.config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
     let temp_dir = tempdir()?;
     let main_thread_id =
         ThreadId::from_string("00000000-0000-0000-0000-000000000101").expect("valid thread");
@@ -4515,6 +4520,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_session = ThreadSessionState {
         windows_sandbox_host: WindowsSandboxHost::Local,
         approval_policy: AskForApproval::OnRequest,
+        service_tier: Some("default".to_string()),
         permission_profile: PermissionProfile::workspace_write(),
         runtime_workspace_roots: vec![primary_cwd.clone(), shared_root.clone()],
         ..test_thread_session(main_thread_id, primary_cwd.to_path_buf())
@@ -4557,7 +4563,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
                 history_mode: Default::default(),
                 model_provider: "agent-provider".to_string(),
                 model: Some("gpt-agent".to_string()),
-                reasoning_effort: None,
+                reasoning_effort: Some(ReasoningEffortConfig::High),
                 created_at: 1,
                 updated_at: 2,
                 recency_at: Some(2),
@@ -4593,6 +4599,18 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     assert_eq!(session.thread_name, Some("agent thread".to_string()));
     assert_eq!(session.model, "gpt-agent");
     assert_eq!(session.model_provider_id, "agent-provider");
+    assert_eq!(
+        app.agent_picker_model_label(agent_thread_id, /*is_primary*/ false),
+        Some("gpt-agent-high".to_string())
+    );
+    app.primary_session_configured
+        .as_mut()
+        .expect("primary session")
+        .service_tier = Some(ServiceTier::Fast.request_value().to_string());
+    assert_eq!(
+        app.agent_picker_model_label(agent_thread_id, /*is_primary*/ false),
+        Some("gpt-agent-high-fast".to_string())
+    );
     assert_eq!(session.approval_policy, primary_session.approval_policy);
     assert_eq!(session.cwd.as_path(), test_path_buf("/tmp/agent").as_path());
     assert_eq!(
