@@ -4,11 +4,16 @@ inputs:
   target:
     description: Rust target triple with Codex-built V8 release artifacts.
     required: true
+  repository:
+    description: Source repository for fork-built V8 artifacts; empty keeps upstream behavior.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
     - name: Configure rusty_v8 artifact overrides and verify checksums
+      if: ${{ inputs.repository == '' }}
       shell: bash
       env:
         TARGET: ${{ inputs.target }}
@@ -62,3 +67,28 @@ runs:
         (cd "${binding_dir}" && tr -d '\r' < "${checksums_path}" | "${checksum_command[@]}")
         echo "RUSTY_V8_ARCHIVE=${archive_path}" >> "${GITHUB_ENV}"
         echo "RUSTY_V8_SRC_BINDING_PATH=${binding_path}" >> "${GITHUB_ENV}"
+
+    - name: Configure fork-built rusty_v8 pair
+      if: ${{ inputs.repository != '' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPOSITORY: ${{ inputs.repository }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        version="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/rusty_v8_bazel.py" resolved-v8-crate-version)"
+        tag="asm-v8-v${version}"
+        profile=ptrcomp_sandbox_release
+        archive="librusty_v8_${profile}_${TARGET}.a.gz"
+        binding="src_binding_${profile}_${TARGET}.rs"
+        manifest="rusty_v8_${profile}_${TARGET}.sha256"
+        dir="${RUNNER_TEMP}/rusty_v8"
+        mkdir -p "$dir"
+        gh api "repos/${REPOSITORY}/releases/tags/${tag}" > "$dir/release.json"
+        for name in "$archive" "$binding" "$manifest"; do
+          gh release download "$tag" -R "$REPOSITORY" -p "$name" -D "$dir"
+        done
+        python3 "${GITHUB_WORKSPACE}/.github/scripts/verify-fork-v8.py" "$dir/release.json" "$dir" "$TARGET" "$version"
+        echo "RUSTY_V8_ARCHIVE=${dir}/${archive}" >> "$GITHUB_ENV"
+        echo "RUSTY_V8_SRC_BINDING_PATH=${dir}/${binding}" >> "$GITHUB_ENV"
