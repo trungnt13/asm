@@ -93,7 +93,7 @@ fn exec_command_tool_matches_expected_spec() {
 
 #[test]
 fn write_stdin_tool_matches_expected_spec() {
-    let tool = create_write_stdin_tool();
+    let tool = create_write_stdin_tool(BackgroundTerminalTimeoutBounds::default());
 
     let properties = BTreeMap::from([
         (
@@ -111,7 +111,7 @@ fn write_stdin_tool_matches_expected_spec() {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms. A completed process returns sooner.".to_string(),
             )),
         ),
         (
@@ -139,6 +139,21 @@ fn write_stdin_tool_matches_expected_spec() {
             output_schema: Some(unified_exec_output_schema().into()),
         })
     );
+}
+
+#[test]
+fn write_stdin_tool_advertises_configured_empty_poll_bounds() {
+    let spec = create_write_stdin_tool(BackgroundTerminalTimeoutBounds {
+        min_ms: 100,
+        max_ms: 7_200_000,
+    });
+    let description = serde_json::to_value(spec)
+        .unwrap()
+        .pointer("/parameters/properties/yield_time_ms/description")
+        .and_then(serde_json::Value::as_str)
+        .unwrap()
+        .to_string();
+    assert!(description.contains("empty polls wait 100-7200000 ms"));
 }
 
 #[test]
