@@ -76,6 +76,21 @@ pub(crate) const WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS: u64 = 10_000;
 pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 5_000;
 pub(crate) const MAX_YIELD_TIME_MS: u64 = 30_000;
 pub(crate) const DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS: u64 = 300_000;
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BackgroundTerminalTimeoutBounds {
+    pub(crate) min_ms: u64,
+    pub(crate) max_ms: u64,
+}
+
+impl Default for BackgroundTerminalTimeoutBounds {
+    fn default() -> Self {
+        Self {
+            min_ms: MIN_EMPTY_YIELD_TIME_MS,
+            max_ms: DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
+        }
+    }
+}
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_TOKENS: usize = UNIFIED_EXEC_OUTPUT_MAX_BYTES / 4;
@@ -169,22 +184,21 @@ impl ProcessStore {
 
 pub(crate) struct UnifiedExecProcessManager {
     process_store: Mutex<ProcessStore>,
-    max_write_stdin_yield_time_ms: u64,
+    background_terminal_timeout_bounds: BackgroundTerminalTimeoutBounds,
 }
 
 impl UnifiedExecProcessManager {
-    pub(crate) fn new(max_write_stdin_yield_time_ms: u64) -> Self {
+    pub(crate) fn new(background_terminal_timeout_bounds: BackgroundTerminalTimeoutBounds) -> Self {
         Self {
             process_store: Mutex::new(ProcessStore::default()),
-            max_write_stdin_yield_time_ms: max_write_stdin_yield_time_ms
-                .max(MIN_EMPTY_YIELD_TIME_MS),
+            background_terminal_timeout_bounds,
         }
     }
 }
 
 impl Default for UnifiedExecProcessManager {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
+        Self::new(BackgroundTerminalTimeoutBounds::default())
     }
 }
 
