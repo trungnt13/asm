@@ -21,6 +21,12 @@ const STANDALONE_PACKAGES_DIRNAME: &str = "standalone";
 const ZSH_DIRNAME: &str = "zsh";
 static INSTALL_CONTEXT: OnceLock<InstallContext> = OnceLock::new();
 
+/// ASM installs and updates are managed externally, not by inherited Codex updaters.
+pub const BUILT_IN_UPDATES_ENABLED: bool = false;
+/// Guidance shown when an inherited update entry point is invoked.
+pub const EXTERNAL_UPDATE_MESSAGE: &str =
+    "ASM updates are managed externally. Use the ASM installer to update.";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StandalonePlatform {
     Unix,

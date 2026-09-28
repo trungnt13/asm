@@ -66,6 +66,9 @@ pub(super) async fn background_server_check(config: &Config) -> DoctorCheck {
         &state_dir.join("daemon-updater.pid"),
     );
     push_configured_updater(&mut details, &state_dir.join(SETTINGS_FILE_NAME));
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        details.push("automatic updates: disabled in ASM (effective)".to_string());
+    }
 
     let socket_path = match codex_app_server::app_server_control_socket_path(&config.codex_home) {
         Ok(socket_path) => socket_path,
@@ -266,6 +269,11 @@ mod tests {
         assert_eq!(check.summary, "background server is not running");
         assert!(check.details.contains(&"status: not running".to_string()));
         assert!(
+            check
+                .details
+                .contains(&"automatic updates: disabled in ASM (effective)".to_string())
+        );
+        assert!(
             !check
                 .details
                 .iter()
@@ -319,7 +327,7 @@ mod tests {
         std::fs::create_dir(&state_dir).expect("state dir");
         std::fs::write(
             state_dir.join(SETTINGS_FILE_NAME),
-            r#"{"updater":{"autoUpdateEnabled":false,"updateIntervalMinutes":90}}"#,
+            r#"{"updater":{"autoUpdateEnabled":true,"updateIntervalMinutes":90}}"#,
         )
         .expect("settings");
         let config = test_config(temp.path().to_path_buf()).await;
