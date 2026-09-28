@@ -1,4 +1,4 @@
-#![cfg(not(debug_assertions))]
+#![cfg(any(not(debug_assertions), test))]
 
 use crate::legacy_core::config::Config;
 use crate::npm_registry;
@@ -22,10 +22,14 @@ use std::path::Path;
 
 use crate::version::CODEX_CLI_VERSION;
 
+#[cfg(not(debug_assertions))]
 pub(crate) use crate::updates_cache::dismiss_version;
 
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED
+        || !config.check_for_update_on_startup
+        || is_source_build_version(CODEX_CLI_VERSION)
+    {
         return None;
     }
 
@@ -150,7 +154,10 @@ async fn fetch_latest_github_release_version(
 /// Returns the latest version to show in a popup, if it should be shown.
 /// This respects the user's dismissal choice for the current latest version.
 pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
-    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED
+        || !config.check_for_update_on_startup
+        || is_source_build_version(CODEX_CLI_VERSION)
+    {
         return None;
     }
 
@@ -164,3 +171,7 @@ pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
     }
     Some(latest)
 }
+
+#[cfg(test)]
+#[path = "updates_tests.rs"]
+mod tests;
