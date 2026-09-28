@@ -14,7 +14,11 @@ attached:
 
 › draft during startup
 
+<<<<<<< HEAD
   GPT-6.1-Sol default · /tmp/project
+=======
+  GPT-6-Astra default·/tmp/project
+>>>>>>> eee193874f (Record compact status line and fork maintenance policy)
 
 owned=true
 startup:
@@ -27,4 +31,8 @@ attached:
 
 › draft during startup
 
+<<<<<<< HEAD
   GPT-6.1-Sol default · /tmp/project
+=======
+  GPT-6-Astra default·/tmp/project
+>>>>>>> eee193874f (Record compact status line and fork maintenance policy)
