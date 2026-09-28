@@ -179,6 +179,8 @@ pub struct GuardianRootSnapshot {
     /// Distinguishes a history reset from additional authorization in the same history.
     pub(crate) history_reset_version: u64,
     pub authorization_version: GuardianAuthorizationVersion,
+    /// Confirmed assistant context is relevant to review but cannot authorize an action.
+    pub review_context_revision: u64,
     pub messages: Vec<GuardianRootMessage>,
     pub trusted_skill_paths: Vec<String>,
 }
@@ -1030,6 +1032,24 @@ impl CodexThread {
             .await?;
 
         Ok(serde_json::to_value(result)?)
+    }
+
+    /// Inspects one server through this thread's current MCP connection.
+    pub async fn mcp_server_status_snapshot(
+        &self,
+        server: &str,
+        detail: codex_mcp::McpSnapshotDetail,
+    ) -> anyhow::Result<(
+        Arc<codex_mcp::McpConfig>,
+        codex_mcp::McpServerStatusSnapshot,
+    )> {
+        self.session.refresh_mcp_if_dirty().await;
+        let runtime_context = self.session.current_mcp_runtime_context().await;
+        self.session
+            .services
+            .mcp_runtime
+            .server_status_snapshot(server, detail, &runtime_context)
+            .await
     }
 
     /// Reads an app resource using the current authority of its originating tool call.
