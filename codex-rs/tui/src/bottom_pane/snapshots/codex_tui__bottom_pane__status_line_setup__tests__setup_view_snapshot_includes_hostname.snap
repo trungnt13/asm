@@ -17,5 +17,5 @@ expression: "render_lines(&view,\n100).lines().map(str::trim_end).collect::<Vec<
   [ ] reasoning             Current reasoning level
   [ ] project-name          Project name (omitted when unavailable)
 ↓
-  ssh-build-01.example.com · ~/codex-rs
+  ssh-build-01.example.com·~/codex-rs
   space toggle · ←/→ reorder · enter save · esc cancel
