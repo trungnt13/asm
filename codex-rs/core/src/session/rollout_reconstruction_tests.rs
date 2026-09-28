@@ -98,6 +98,7 @@ async fn recorded_questions_share_queued_input_order_across_resume() {
     let saved = serde_json::from_value(serde_json::to_value(saved).unwrap()).unwrap();
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: session.thread_id,
             history: Arc::new(saved),
             rollout_path: None,
@@ -124,7 +125,10 @@ async fn recorded_questions_share_queued_input_order_across_resume() {
 async fn sender_context_follows_its_delivery_through_checkpoint_and_rollback() {
     let (session, turn_context) = make_session_and_context().await;
 
-    let mut live = ContextManager::for_session(&SessionSource::default());
+    let mut live = ContextManager::for_session(
+        &SessionSource::default(),
+        &crate::config::ManagedFeatures::from(codex_features::Features::with_defaults()),
+    );
     let mut items = Vec::new();
     let mut snapshots = Vec::new();
     for index in 0..2 {
@@ -304,6 +308,7 @@ async fn record_initial_history_reconstructs_typed_inter_agent_message() {
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(vec![RolloutItem::InterAgentCommunication(
                 communication.clone(),
@@ -331,6 +336,7 @@ async fn record_initial_history_ignores_security_risk_scores() {
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(vec![
                 RolloutItem::ResponseItem(ResponseItemEnvelope::new(user_item.clone())),
@@ -391,6 +397,7 @@ async fn record_initial_history_restores_world_state_baseline(input: BaselineTur
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -464,6 +471,7 @@ async fn record_initial_history_resumed_bare_turn_context_does_not_hydrate_previ
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -549,6 +557,7 @@ async fn record_initial_history_resumed_hydrates_previous_turn_settings_from_lif
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -1177,6 +1186,7 @@ async fn record_initial_history_resumed_rollback_skips_only_user_turns() {
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -1271,6 +1281,7 @@ async fn record_initial_history_resumed_rollback_drops_incomplete_user_turn_comp
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -1338,6 +1349,7 @@ async fn record_initial_history_requires_surviving_full_snapshot_without_user_tu
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -1371,6 +1383,7 @@ async fn record_initial_history_resumed_does_not_seed_reference_context_item_aft
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -1555,7 +1568,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
                     })])),
                     retained_context: None,
                     guardian_history: Some(codex_history::GuardianHistoryCheckpoint(vec![
-                        user_message("original task"),
+                        user_message("original task").into(),
                     ])),
                     mcp_resource_origins: None,
                     window_number: Some(window_number as u64),
@@ -1596,6 +1609,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
             codex_protocol::protocol::TurnAbortedEvent {
                 turn_id: Some(format!("wake-{window_number}")),
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 started_at: None,
                 completed_at: None,
                 duration_ms: None,
@@ -1629,8 +1643,8 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
     assert_eq!(
         bounded.guardian_history.as_ref(),
         Some(&codex_history::GuardianHistoryCheckpoint(vec![
-            user_message("original task"),
-            assistant_message("continued working"),
+            user_message("original task").into(),
+            assistant_message("continued working").into()
         ])),
     );
     if current {
@@ -1982,6 +1996,7 @@ async fn record_initial_history_resumed_turn_context_after_compaction_reestablis
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -2127,6 +2142,7 @@ async fn record_initial_history_resumed_aborted_turn_without_id_clears_active_tu
                 turn_id: None,
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             },
@@ -2149,6 +2165,7 @@ async fn record_initial_history_resumed_aborted_turn_without_id_clears_active_tu
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -2265,6 +2282,7 @@ async fn record_initial_history_resumed_unmatched_abort_preserves_active_turn_fo
                 turn_id: Some(unmatched_abort_turn_id),
                 started_at: None,
                 reason: TurnAbortReason::Interrupted,
+                error: None,
                 completed_at: None,
                 duration_ms: None,
             },
@@ -2285,6 +2303,7 @@ async fn record_initial_history_resumed_unmatched_abort_preserves_active_turn_fo
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -2417,6 +2436,7 @@ async fn record_initial_history_resumed_trailing_incomplete_turn_compaction_clea
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -2470,6 +2490,7 @@ async fn record_initial_history_resumed_trailing_incomplete_turn_preserves_turn_
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -2615,6 +2636,7 @@ async fn record_initial_history_resumed_replaced_incomplete_compacted_turn_clear
 
     session
         .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(rollout_items),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
