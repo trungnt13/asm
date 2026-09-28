@@ -1,9 +1,11 @@
 ---
-source: tui/src/chatwidget/tests/status_and_layout.rs
+source: tui/src/chatwidget/tests/exec_flow.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
+"                                                                                "
+"• Working (0s • esc to interrupt)                                               "
 "                                                                                "
 "                                                                                "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
-"  gpt-5.4 xhigh fast·Ctx100%left·/tmp/project                                   "
+"  GPT-5.6-Sol default·/tmp/project                                              "
