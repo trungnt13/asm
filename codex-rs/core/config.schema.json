@@ -390,6 +390,24 @@
     },
     "AutoReviewToml": {
       "properties": {
+        "circuit_break_action": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/CircuitBreakAction"
+            }
+          ],
+          "description": "Controls whether circuit-breaker interruptions include a structured error. Strict mode writes structured errors that older clients may not recognize when reading shared history. Defaults to `default`."
+        },
+        "conversation_history_max_output_tokens": {
+          "description": "Maximum estimated tokens per Guardian history-tool response, before the standard serialization allowance. Defaults to 4,000; stricter parent tool limits still apply.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "experimental_conversation_history_prompt": {
+          "description": "Experimental replacement for the history-retrieval instructions when history tools and Apps are enabled. Omitted or blank values use the built-in prompt.",
+          "type": "string"
+        },
         "experimental_policy_template": {
           "description": "Experimental full Guardian prompt template containing the tenant policy placeholder.",
           "type": "string"
@@ -508,6 +526,24 @@
         }
       },
       "type": "object"
+    },
+    "CircuitBreakAction": {
+      "oneOf": [
+        {
+          "description": "Emit the warning and interrupt without structured error details.",
+          "enum": [
+            "default"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Emit the same warning and interruption, with structured error details.",
+          "enum": [
+            "strict"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "CloudToml": {
       "additionalProperties": false,
@@ -849,6 +885,9 @@
             "guardian_approval": {
               "type": "boolean"
             },
+            "guardian_conversation_history_tools": {
+              "type": "boolean"
+            },
             "guardian_enhanced_node_repl_transcripts": {
               "type": "boolean"
             },
@@ -859,6 +898,9 @@
               "type": "boolean"
             },
             "guardian_reuse_parent_compaction": {
+              "type": "boolean"
+            },
+            "guardian_root_handoff_context": {
               "type": "boolean"
             },
             "guardianv2": {
@@ -6901,6 +6943,9 @@
         "guardian_approval": {
           "type": "boolean"
         },
+        "guardian_conversation_history_tools": {
+          "type": "boolean"
+        },
         "guardian_enhanced_node_repl_transcripts": {
           "type": "boolean"
         },
@@ -6911,6 +6956,9 @@
           "type": "boolean"
         },
         "guardian_reuse_parent_compaction": {
+          "type": "boolean"
+        },
+        "guardian_root_handoff_context": {
           "type": "boolean"
         },
         "guardianv2": {
