@@ -3,6 +3,8 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::future::Future;
 use std::io::ErrorKind;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 #[cfg(not(unix))]
 use std::process::Stdio;
@@ -27,6 +29,9 @@ use tokio::task::JoinSet;
 use tokio::time::timeout;
 use tracing::Span;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use super::CommandShell;
 use super::ConfiguredHandler;
 use super::ConfiguredHandlerKind;
@@ -38,7 +43,6 @@ use super::dispatcher::hook_handler_type_label;
 use super::dispatcher::hook_scope_label;
 use super::dispatcher::hook_source_label;
 use super::dispatcher::scope_for_event;
-use crate::output_spill::AdditionalContext;
 use crate::output_spill::HookOutputSpiller;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::HookCompletedEvent;
@@ -136,21 +140,17 @@ impl CommandHookRuntime {
             for entry in std::mem::take(&mut hook_result.run.entries) {
                 match entry.kind {
                     HookOutputEntryKind::Context => {
-                        if let Some(text) = runtime
+                        let text = runtime
                             .output_spiller
-                            .maybe_spill_additional_contexts(vec![AdditionalContext {
-                                text: entry.text,
-                                limit: handler.additional_context_limit,
-                            }])
-                            .await
-                            .into_iter()
-                            .next()
-                        {
-                            entries.push(HookOutputEntry {
-                                kind: HookOutputEntryKind::Context,
-                                text,
-                            });
-                        }
+                            .maybe_spill_text_with_limit(
+                                entry.text,
+                                handler.additional_context_limit,
+                            )
+                            .await;
+                        entries.push(HookOutputEntry {
+                            kind: HookOutputEntryKind::Context,
+                            text,
+                        });
                     }
                     HookOutputEntryKind::Warning => warnings.push(entry),
                     HookOutputEntryKind::Error => entries.push(entry),
@@ -221,18 +221,9 @@ pub(crate) async fn run_command(
     command.current_dir(cwd);
 
     #[cfg(windows)]
-    let mut process_tree_job = JobObject::create().ok();
-    #[cfg(windows)]
-    let child = match process_tree_job.as_ref() {
-        Some(job) => match job.spawn_contained(&mut command) {
-            Ok(child) => Ok(child),
-            Err(_) => {
-                process_tree_job = None;
-                command.creation_flags(0);
-                command.spawn()
-            }
-        },
-        None => command.spawn(),
+    let (child, process_tree_job) = match JobObject::spawn_background(&mut command) {
+        Ok((child, job)) => (Ok(child), job),
+        Err(error) => (Err(error), None),
     };
     #[cfg(not(windows))]
     let child = command.spawn();
@@ -353,6 +344,7 @@ impl Drop for ProcessTreeGuard {
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
+                    .creation_flags(CREATE_NO_WINDOW)
                     .spawn();
             }
         }
@@ -374,6 +366,7 @@ fn finish_command_run(
 ) -> HandlerRunResult {
     Span::current().record("hook.command_outcome", completion.outcome);
     HandlerRunResult {
+        context_metadata: codex_protocol::models::ContentItemMetadata::command_hook(),
         started_at,
         completed_at: chrono::Utc::now().timestamp(),
         duration_ms: started.elapsed().as_millis().try_into().unwrap_or(i64::MAX),
@@ -414,6 +407,8 @@ fn build_command(
 
     #[cfg(unix)]
     command.process_mode(codex_utils_pty::ProcessMode::NewSession);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
     #[cfg(not(unix))]
     command
         .env_clear()

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use codex_exec_server_protocol::ExecutorCapabilityDiscoverySnapshot;
 use codex_protocol::ThreadId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
+use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use serde_json::Value;
@@ -26,6 +27,8 @@ pub struct WorldStateContributionInput<'a> {
     pub session_store: &'a ExtensionData,
     pub thread_store: &'a ExtensionData,
     pub turn_store: &'a ExtensionData,
+    /// The same captured extension inputs that were used to build this step's tools.
+    pub step_store: &'a ExtensionData,
     /// Persisted comparison state from the last recorded step. Its rendered text may have
     /// left model history; use a retained-fragment matcher before referring back to it.
     /// After compaction, sections may contain only retained extension metadata.
@@ -45,6 +48,7 @@ pub struct RenderedWorldStateFragment {
     role: &'static str,
     markers: (&'static str, &'static str),
     body: String,
+    metadata: ContentItemMetadata,
 }
 
 impl RenderedWorldStateFragment {
@@ -57,7 +61,18 @@ impl RenderedWorldStateFragment {
             role,
             markers,
             body: body.into(),
+            metadata: ContentItemMetadata::harness(),
         }
+    }
+
+    /// Attach the producer's source before the harness assembles the context message.
+    pub fn with_metadata(mut self, metadata: ContentItemMetadata) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    pub fn metadata(&self) -> &ContentItemMetadata {
+        &self.metadata
     }
 
     pub fn role(&self) -> &'static str {
@@ -73,7 +88,7 @@ impl RenderedWorldStateFragment {
     }
 }
 
-type RenderDiff = dyn for<'a> Fn(PreviousWorldStateSection<'a>) -> Option<RenderedWorldStateFragment>
+type RenderDiff = dyn for<'a> Fn(PreviousWorldStateSection<'a>) -> (Option<Value>, Option<RenderedWorldStateFragment>)
     + Send
     + Sync;
 type LegacyFragmentMatcher = dyn Fn(&str, &str) -> bool + Send + Sync;
@@ -85,26 +100,26 @@ type LegacyFragmentMatcher = dyn Fn(&str, &str) -> bool + Send + Sync;
 #[derive(Clone)]
 pub struct WorldStateSectionContribution {
     id: &'static str,
-    snapshot: Value,
     render_diff: Arc<RenderDiff>,
     matches_legacy_fragment: Arc<LegacyFragmentMatcher>,
     matches_retained_fragment: Option<Arc<LegacyFragmentMatcher>>,
 }
 
 impl WorldStateSectionContribution {
+    /// Return a replacement snapshot and/or fragment. A missing snapshot retains the
+    /// previous section state; a missing fragment emits no model-visible update. A null
+    /// snapshot removes the section from persisted state.
     pub fn new(
         id: &'static str,
-        snapshot: Value,
         render_diff: impl for<'a> Fn(
             PreviousWorldStateSection<'a>,
-        ) -> Option<RenderedWorldStateFragment>
+        ) -> (Option<Value>, Option<RenderedWorldStateFragment>)
         + Send
         + Sync
         + 'static,
     ) -> Self {
         Self {
             id,
-            snapshot,
             render_diff: Arc::new(render_diff),
             matches_legacy_fragment: Arc::new(|_, _| false),
             matches_retained_fragment: None,
@@ -132,14 +147,10 @@ impl WorldStateSectionContribution {
         self.id
     }
 
-    pub fn snapshot(&self) -> &Value {
-        &self.snapshot
-    }
-
     pub fn render_diff(
         &self,
         previous: PreviousWorldStateSection<'_>,
-    ) -> Option<RenderedWorldStateFragment> {
+    ) -> (Option<Value>, Option<RenderedWorldStateFragment>) {
         (self.render_diff)(previous)
     }
 

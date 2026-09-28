@@ -4,15 +4,19 @@
 use self::budget::DESCRIPTION_TRUNCATION_SUFFIX;
 use self::budget::truncate_namespace_rows;
 use super::PreviousSectionState;
+use super::SectionTransition;
 use super::WorldStateContextFragment;
 use super::WorldStateSection;
+use super::WorldStateUpdate;
 use crate::context::ContextualUserFragment;
 use codex_extension_api::ExtensionMetrics;
 use codex_extension_api::RenderedWorldStateFragment;
-use codex_otel::CONTEXT_FRAGMENT_BYTES_BUCKETS;
 use codex_otel::THREAD_TOOLS_FRAGMENT_BYTES_METRIC;
+use codex_otel::THREAD_TOOLS_METRIC_BUCKETS;
 use codex_otel::THREAD_TOOLS_NAMESPACES_TOTAL_METRIC;
 use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::ContentItemMetadata;
+use codex_protocol::models::ContentItemNamespace;
 use codex_protocol::protocol::TOOLS_CLOSE_TAG;
 use codex_protocol::protocol::TOOLS_OPEN_TAG;
 use std::collections::BTreeMap;
@@ -85,10 +89,6 @@ impl WorldStateSection for ToolsState {
     // Object-valued entries let RFC 7386 patches add and remove namespaces individually.
     type Snapshot = BTreeMap<String, String>;
 
-    fn snapshot(&self) -> Self::Snapshot {
-        self.deferred_namespaces.clone()
-    }
-
     fn should_persist(&self) -> bool {
         !self.deferred_namespaces.is_empty()
     }
@@ -96,8 +96,8 @@ impl WorldStateSection for ToolsState {
     fn render_diff(
         &self,
         previous: PreviousSectionState<'_, Self::Snapshot>,
-    ) -> Option<Box<dyn ContextualUserFragment>> {
-        let current = self.snapshot();
+    ) -> SectionTransition<Self::Snapshot> {
+        let current = self.deferred_namespaces.clone();
         if matches!(previous, PreviousSectionState::Known(previous) if previous == &current)
             || self.deferred_namespaces.is_empty()
                 && matches!(
@@ -105,7 +105,7 @@ impl WorldStateSection for ToolsState {
                     PreviousSectionState::Absent | PreviousSectionState::Unknown
                 )
         {
-            return None;
+            return (Some(current), Vec::new());
         }
 
         let rendered = match previous {
@@ -139,14 +139,22 @@ impl WorldStateSection for ToolsState {
             }
         };
         record_fragment_metrics(self.metrics.as_ref(), previous, &rendered);
-        Some(Box::new(WorldStateContextFragment {
-            fragment: RenderedWorldStateFragment::new(
-                "developer",
-                (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG),
-                rendered.body,
-            ),
-            content_kind: ContentItemKind("tools.deferred_namespaces".to_string()),
-        }))
+        (
+            Some(current),
+            vec![WorldStateUpdate::fragment(
+                WorldStateContextFragment {
+                    fragment: RenderedWorldStateFragment::new(
+                        "developer",
+                        (TOOLS_OPEN_TAG, TOOLS_CLOSE_TAG),
+                        rendered.body,
+                    ),
+                    content_kind: ContentItemKind("tools.deferred_namespaces".to_string()),
+                }
+                .with_metadata(ContentItemMetadata::tool(Some(
+                    ContentItemNamespace::ToolSearch,
+                ))),
+            )],
+        )
     }
 }
 
@@ -231,15 +239,16 @@ fn record_fragment_metrics(
     };
     for (stage, size) in [("before", &rendered.before), ("after", &rendered.after)] {
         let tags = [("stage", stage), ("kind", kind)];
-        metrics.histogram(
+        metrics.histogram_with_boundaries(
             THREAD_TOOLS_NAMESPACES_TOTAL_METRIC,
             i64::try_from(size.namespaces).unwrap_or(i64::MAX),
+            THREAD_TOOLS_METRIC_BUCKETS.as_slice(),
             &tags,
         );
         metrics.histogram_with_boundaries(
             THREAD_TOOLS_FRAGMENT_BYTES_METRIC,
             i64::try_from(size.bytes).unwrap_or(i64::MAX),
-            CONTEXT_FRAGMENT_BYTES_BUCKETS,
+            THREAD_TOOLS_METRIC_BUCKETS.as_slice(),
             &tags,
         );
     }
