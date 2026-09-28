@@ -24,6 +24,7 @@ use crate::multi_agents::SubAgentActivityDisplay;
 use crate::multi_agents::next_agent_shortcut;
 use crate::multi_agents::previous_agent_shortcut;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::ReasoningEffort;
 use ratatui::text::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -42,6 +43,8 @@ use uuid::Uuid;
 pub(crate) struct AgentNavigationState {
     /// Latest picker metadata for each tracked thread id.
     threads: HashMap<ThreadId, AgentPickerThreadEntry>,
+    /// Configured model choices received for picker threads, independent of their display names.
+    model_settings: HashMap<ThreadId, AgentPickerModelSettings>,
     /// Stable first-seen traversal order for picker rows and keyboard cycling.
     order: Vec<ThreadId>,
     /// Threads with observed terminal liveness that must not be revived by delayed activity.
@@ -51,6 +54,12 @@ pub(crate) struct AgentNavigationState {
     picker_excluded_threads: HashSet<ThreadId>,
     /// Coalesces root refreshes while rejecting replies from a previous session.
     pub(super) picker_refresh: Option<AgentPickerRefreshState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AgentPickerModelSettings {
+    pub(crate) model: String,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// Direction of keyboard traversal through the stable picker order.
@@ -129,6 +138,27 @@ impl AgentNavigationState {
     /// this stays optional.
     pub(crate) fn get(&self, thread_id: &ThreadId) -> Option<&AgentPickerThreadEntry> {
         self.threads.get(thread_id)
+    }
+
+    pub(crate) fn model_settings(&self, thread_id: &ThreadId) -> Option<&AgentPickerModelSettings> {
+        self.model_settings.get(thread_id)
+    }
+
+    pub(crate) fn set_model_settings(
+        &mut self,
+        thread_id: ThreadId,
+        model: Option<String>,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) {
+        if let Some(model) = model.filter(|model| !model.is_empty()) {
+            self.model_settings.insert(
+                thread_id,
+                AgentPickerModelSettings {
+                    model,
+                    reasoning_effort,
+                },
+            );
+        }
     }
 
     pub(crate) fn is_parent_owned(&self, thread_id: ThreadId) -> bool {
@@ -263,6 +293,7 @@ impl AgentNavigationState {
     /// to a pristine single-session state.
     pub(crate) fn clear(&mut self) {
         self.threads.clear();
+        self.model_settings.clear();
         self.order.clear();
         self.stopped_threads.clear();
         self.parent_owned_threads.clear();
@@ -277,6 +308,7 @@ impl AgentNavigationState {
     /// would leave ghost rows in `/subagents`.
     pub(crate) fn remove(&mut self, thread_id: ThreadId) {
         self.threads.remove(&thread_id);
+        self.model_settings.remove(&thread_id);
         self.order.retain(|candidate| *candidate != thread_id);
         self.stopped_threads.remove(&thread_id);
         self.parent_owned_threads.remove(&thread_id);
