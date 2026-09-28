@@ -753,10 +753,10 @@ impl ChatWidget {
             }
             StatusLineItem::ContextRemaining => self
                 .status_line_context_remaining_percent()
-                .map(|remaining| format!("Context {remaining}% left")),
+                .map(|remaining| format!("Ctx{remaining}%left")),
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
-                .map(|used| format!("Context {used}% used")),
+                .map(|used| format!("Ctx{used}%")),
             StatusLineItem::FiveHourLimit => {
                 let (window, is_secondary) = self
                     .rate_limit_snapshots_by_limit_id
@@ -783,6 +783,16 @@ impl ChatWidget {
                     format_tokens_compact(self.status_line_total_usage().input_tokens)
                 )
             }),
+            StatusLineItem::CacheHitRate => {
+                let usage = self.status_line_total_usage();
+                if self.token_usage_pending || usage.input_tokens <= 0 {
+                    None
+                } else {
+                    let percent =
+                        usage.cached_input_tokens as f64 / usage.input_tokens as f64 * 100.0;
+                    Some(format!("Cch{percent:.1}%"))
+                }
+            }
             StatusLineItem::TotalOutputTokens => (!self.token_usage_pending).then(|| {
                 format!(
                     "{} out",
@@ -810,9 +820,9 @@ impl ChatWidget {
                 .is_none_or(|preset| preset.supports_fast_mode())
                 .then(|| {
                     if self.current_service_tier() == Some(ServiceTier::Fast.request_value()) {
-                        "Fast on".to_string()
+                        "F:on".to_string()
                     } else {
-                        "Fast off".to_string()
+                        "F:off".to_string()
                     }
                 }),
             StatusLineItem::RawOutput => self.raw_output_mode().then(|| "raw output".to_string()),
@@ -863,6 +873,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,
             StatusSurfacePreviewItem::TotalInputTokens => StatusLineItem::TotalInputTokens,
+            StatusSurfacePreviewItem::CacheHitRate => StatusLineItem::CacheHitRate,
             StatusSurfacePreviewItem::TotalOutputTokens => StatusLineItem::TotalOutputTokens,
             StatusSurfacePreviewItem::ThreadCredits => StatusLineItem::ThreadCredits,
             StatusSurfacePreviewItem::EstimatedThreadCost => StatusLineItem::EstimatedThreadCost,

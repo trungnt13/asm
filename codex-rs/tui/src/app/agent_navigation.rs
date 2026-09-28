@@ -21,7 +21,6 @@
 
 use crate::multi_agents::AgentPickerThreadEntry;
 use crate::multi_agents::SubAgentActivityDisplay;
-use crate::multi_agents::format_agent_picker_item_name;
 use crate::multi_agents::next_agent_shortcut;
 use crate::multi_agents::previous_agent_shortcut;
 use codex_protocol::ThreadId;
@@ -334,31 +333,35 @@ impl AgentNavigationState {
         }
 
         let thread_id = current_displayed_thread_id?;
-        let is_primary = primary_thread_id == Some(thread_id);
-        Some(
-            self.threads
-                .get(&thread_id)
-                .map(|entry| {
-                    if !is_primary
-                        && let Some(agent_path) = entry
-                            .agent_path
-                            .as_deref()
-                            .filter(|agent_path| !agent_path.trim().is_empty())
-                    {
-                        return format!("`{agent_path}`");
-                    }
-                    format_agent_picker_item_name(
-                        entry.agent_nickname.as_deref(),
-                        entry.agent_role.as_deref(),
-                        is_primary,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    format_agent_picker_item_name(
-                        /*agent_nickname*/ None, /*agent_role*/ None, is_primary,
-                    )
-                }),
-        )
+        if primary_thread_id == Some(thread_id) {
+            return Some("Main[default]".to_string());
+        }
+        let Some(entry) = self.threads.get(&thread_id) else {
+            return Some("Agent".to_string());
+        };
+        if let Some(agent_path) = entry
+            .agent_path
+            .as_deref()
+            .filter(|agent_path| !agent_path.trim().is_empty())
+        {
+            return Some(format!("`{agent_path}`"));
+        }
+        let nickname = entry
+            .agent_nickname
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        let role = entry
+            .agent_role
+            .as_deref()
+            .map(str::trim)
+            .filter(|role| !role.is_empty());
+        Some(match (nickname, role) {
+            (Some(nickname), Some(role)) => format!("{nickname}[{role}]"),
+            (Some(nickname), None) => nickname.to_string(),
+            (None, Some(role)) => format!("[{role}]"),
+            (None, None) => "Agent".to_string(),
+        })
     }
 
     /// Builds the `/subagents` picker subtitle from the same canonical bindings used by key handling.
@@ -506,11 +509,11 @@ mod tests {
 
         assert_eq!(
             state.active_agent_label(Some(first_agent_id), Some(main_thread_id)),
-            Some("Robie [explorer]".to_string())
+            Some("Robie[explorer]".to_string())
         );
         assert_eq!(
             state.active_agent_label(Some(main_thread_id), Some(main_thread_id)),
-            Some("Main [default]".to_string())
+            Some("Main[default]".to_string())
         );
     }
 }
