@@ -23,6 +23,7 @@ use crate::tools::hook_names::HookToolName;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::turn_diff_tracker::TurnDiffTracker;
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use tokio::sync::Mutex;
 
 const TEST_TRUNCATION_POLICY: TruncationPolicy = TruncationPolicy::Tokens(10_000);
@@ -578,7 +579,7 @@ async fn exec_command_pre_tool_use_payload_skips_write_stdin() {
     };
     let (session, turn) = make_session_and_context().await;
     let turn = Arc::new(turn);
-    let handler = WriteStdinHandler;
+    let handler = WriteStdinHandler::new(BackgroundTerminalTimeoutBounds::default());
 
     assert_eq!(
         handler.pre_tool_use_payload(&ToolInvocation {
@@ -705,7 +706,7 @@ async fn write_stdin_post_tool_use_payload_uses_original_exec_call_id_and_comman
         hook_command: Some("sleep 1; echo finished".to_string()),
     };
     let invocation = invocation_for_payload("write_stdin", "write-stdin-call", payload).await;
-    let handler = WriteStdinHandler;
+    let handler = WriteStdinHandler::new(BackgroundTerminalTimeoutBounds::default());
 
     assert_eq!(
         handler.post_tool_use_payload(&invocation, &output),
@@ -751,7 +752,7 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
     };
     let invocation_b = invocation_for_payload("write_stdin", "write-call-b", payload.clone()).await;
     let invocation_a = invocation_for_payload("write_stdin", "write-call-a", payload).await;
-    let handler = WriteStdinHandler;
+    let handler = WriteStdinHandler::new(BackgroundTerminalTimeoutBounds::default());
 
     let payloads = [
         handler.post_tool_use_payload(&invocation_b, &output_b),
