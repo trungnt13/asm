@@ -380,6 +380,8 @@ min_rollout_idle_hours = 24
 min_rate_limit_remaining_percent = 12
 extract_model = "gpt-5-mini"
 consolidation_model = "gpt-5.2"
+extract_reasoning_effort = "max"
+consolidation_reasoning_effort = "high"
 "#;
     let memories_cfg =
         toml::from_str::<ConfigToml>(memories).expect("TOML deserialization should succeed");
@@ -399,6 +401,8 @@ consolidation_model = "gpt-5.2"
             min_rate_limit_remaining_percent: Some(12),
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
+            extract_reasoning_effort: Some(ReasoningEffort::Max),
+            consolidation_reasoning_effort: Some(ReasoningEffort::High),
         }),
         memories_cfg.memories
     );
@@ -427,6 +431,8 @@ consolidation_model = "gpt-5.2"
             min_rate_limit_remaining_percent: 12,
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
+            extract_reasoning_effort: Some(ReasoningEffort::Max),
+            consolidation_reasoning_effort: Some(ReasoningEffort::High),
         }
     );
 
