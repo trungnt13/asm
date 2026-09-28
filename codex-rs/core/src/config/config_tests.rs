@@ -289,6 +289,53 @@ async fn load_config_rejects_thread_unload_delay_overflow() -> anyhow::Result<()
 }
 
 #[tokio::test]
+async fn load_config_resolves_background_terminal_timeout_bounds() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    for (toml, expected) in [
+        ("", (5_000, 300_000)),
+        (
+            "background_terminal_min_timeout = 100\nbackground_terminal_max_timeout = 7200000",
+            (100, 7_200_000),
+        ),
+    ] {
+        let config = Config::load_from_base_config_with_overrides(
+            toml::from_str(toml)?,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await?;
+        assert_eq!(
+            (
+                config.background_terminal_min_timeout,
+                config.background_terminal_max_timeout,
+            ),
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_config_rejects_invalid_background_terminal_timeout_bounds() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    for toml in [
+        "background_terminal_min_timeout = 0",
+        "background_terminal_min_timeout = 6000\nbackground_terminal_max_timeout = 5000",
+        "background_terminal_max_timeout = 4000",
+    ] {
+        let error = Config::load_from_base_config_with_overrides(
+            toml::from_str(toml)?,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await
+        .expect_err("invalid terminal bounds must fail at config load");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_toml_parsing() {
     let history_with_persistence = r#"
 [history]
