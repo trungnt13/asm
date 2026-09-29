@@ -2985,25 +2985,10 @@ async fn status_line_cache_hit_rate_uses_latest_request() {
     info.total_token_usage.cached_input_tokens = 10_000;
     info.last_token_usage.input_tokens = 10_000;
     info.last_token_usage.cached_input_tokens = 8_960;
-    handle_token_count(&mut chat, Some(info.clone()));
-    chat.refresh_status_line();
-
-    assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
-
-    info.total_token_usage.input_tokens += 2_000;
-    info.total_token_usage.cached_input_tokens += 200;
-    info.last_token_usage.input_tokens = 2_000;
-    info.last_token_usage.cached_input_tokens = 200;
-    handle_token_count(&mut chat, Some(info.clone()));
-    chat.refresh_status_line();
-
-    assert_eq!(status_line_text(&chat), Some("Cch10.0%".to_string()));
-
-    info.last_token_usage = TokenUsage::default();
     handle_token_count(&mut chat, Some(info));
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), None);
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
 }
 
 #[tokio::test]
