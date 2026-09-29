@@ -66,9 +66,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `33a0f766a647208b471cfbcad889c67fd324ee04`.
-- Commit date: 2026-09-28.
-- Subject: Reclaim unused SQLite log database pages in the background (#49069).
+- Last incorporated upstream commit: `f53f5a6fed662bd6f352d08066925c871a061182`.
+- Commit date: 2026-09-29.
+- Subject: Expose original error details to turn lifecycle contributors (#49138).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
