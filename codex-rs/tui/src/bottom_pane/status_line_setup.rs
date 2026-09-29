@@ -202,7 +202,7 @@ impl StatusLineItem {
             StatusLineItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             StatusLineItem::TotalInputTokens => "Total input tokens used in session",
             StatusLineItem::CacheHitRate => {
-                "Cached share of this thread's total input tokens (omitted until available)"
+                "Cached share of the latest request's input tokens (omitted until available)"
             }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
             StatusLineItem::ThreadCredits => {
