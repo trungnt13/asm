@@ -2900,19 +2900,36 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 }
 
 #[tokio::test]
-async fn status_line_cache_hit_rate_shows_one_decimal_place() {
+async fn status_line_cache_hit_rate_uses_latest_request() {
     let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.local_settings.tui.status_line = Some(vec!["cache-hit-rate".to_string()]);
     let mut info = make_token_info(
-        /*total_tokens*/ 11_000, /*context_window*/ 200_000,
+        /*total_tokens*/ 22_000, /*context_window*/ 200_000,
     );
-    info.total_token_usage.input_tokens = 10_000;
-    info.total_token_usage.cached_input_tokens = 8_960;
-    handle_token_count(&mut chat, Some(info));
+    info.total_token_usage.input_tokens = 20_000;
+    info.total_token_usage.cached_input_tokens = 10_000;
+    info.last_token_usage.input_tokens = 10_000;
+    info.last_token_usage.cached_input_tokens = 8_960;
+    handle_token_count(&mut chat, Some(info.clone()));
     chat.refresh_status_line();
 
     assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
+
+    info.total_token_usage.input_tokens += 2_000;
+    info.total_token_usage.cached_input_tokens += 200;
+    info.last_token_usage.input_tokens = 2_000;
+    info.last_token_usage.cached_input_tokens = 200;
+    handle_token_count(&mut chat, Some(info.clone()));
+    chat.refresh_status_line();
+
+    assert_eq!(status_line_text(&chat), Some("Cch10.0%".to_string()));
+
+    info.last_token_usage = TokenUsage::default();
+    handle_token_count(&mut chat, Some(info));
+    chat.refresh_status_line();
+
+    assert_eq!(status_line_text(&chat), None);
 }
 
 #[tokio::test]
