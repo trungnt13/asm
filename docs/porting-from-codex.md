@@ -168,7 +168,7 @@ Keep Markdown paragraphs, code blocks, and list items adjacent while streaming a
 
 Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode. Remove the space before the agent role only in the footer, such as `Main[default]`; leave picker labels unchanged. Preserve titles, paths, models, roles, colors, order, and single-row truncation.
 
-Offer opt-in `cache-hit-rate` in `/statusline` and `tui.status_line`. Show `CchN.N%`: cumulative cached input tokens divided by total input tokens for the current thread, rounded to one decimal. Use existing usage data without new requests or API changes. Hide unknown or zero-input usage; keep defaults unchanged. Missing cache details remain indistinguishable from reported zero.
+Offer opt-in `cache-hit-rate` in `/statusline` and `tui.status_line`. Show `CchN.N%`: cached input tokens divided by input tokens for the latest reported request in the current thread, rounded to one decimal. Never average across requests or use cumulative thread totals. Use existing usage data without new requests or API changes. Hide unknown or zero-input usage; keep defaults unchanged. Missing cache details remain indistinguishable from reported zero.
 
 ### Subagent service tiers and picker
 
