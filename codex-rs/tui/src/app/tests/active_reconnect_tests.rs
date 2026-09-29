@@ -397,7 +397,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
             .join("\n");
         if deferred_notice {
             assert_snapshot!(notices, @r###"
-⚠ A background Codex service is running v2.0.0, older than your ASM CLI
+⚠ A background Codex service is running v2.0.0, older than your ASM CLI v2.1.0.
 "###);
         } else if edit_offline {
             assert!(notices.contains("unacknowledged prompt"));
