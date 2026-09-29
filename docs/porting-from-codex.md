@@ -66,9 +66,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `f53f5a6fed662bd6f352d08066925c871a061182`.
+- Last incorporated upstream commit: `d515b2f85ec1b24a4b5ec3fbd86db27fd51aea3b`.
 - Commit date: 2026-09-29.
-- Subject: Expose original error details to turn lifecycle contributors (#49138).
+- Subject: Avoid a turn teardown race in the Guardian agent message test (#49277).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
