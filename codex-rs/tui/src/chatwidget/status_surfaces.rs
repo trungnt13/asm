@@ -801,7 +801,7 @@ impl ChatWidget {
                 )
             }),
             StatusLineItem::CacheHitRate => {
-                let usage = self.status_line_total_usage();
+                let usage = &self.token_info.as_ref()?.last_token_usage;
                 if self.token_usage_pending || usage.input_tokens <= 0 {
                     None
                 } else {
