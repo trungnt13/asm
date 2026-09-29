@@ -131,10 +131,7 @@ Allow top-level `background_terminal_min_timeout` and `background_terminal_max_t
 
 Choose checks from fork changes and conflict resolutions, not the size of the imported upstream range:
 
-- **Documentation:** read the changed guidance, check local links, and run `git diff --check`. No builds or tests.
-- **Workflows and scripts:** lint changed workflows with `actionlint` and check affected script logic with small fixtures. Run native builds only when needed to validate changed packaging or an authorized experiment.
-- **Rust:** use `just test -p <crate> <test-filter>` for changed behavior, not direct `cargo test`. Keep formatting and affected generated outputs current. Do not run whole-crate or workspace suites by default.
-- **Conflicts:** check the behavior or build setup changed by the resolution. A clean merge alone proves neither correctness nor a need for full upstream testing.
+Offer opt-in `cache-hit-rate` in `/statusline` and `tui.status_line`. Show `CchN.N%`: cached input tokens divided by input tokens for the latest reported request in the current thread, rounded to one decimal. Never average across requests or use cumulative thread totals. Use existing usage data without new requests or API changes. Hide unknown or zero-input usage; keep defaults unchanged. Missing cache details remain indistinguishable from reported zero.
 
 If narrow checks cannot establish safety, explain the gap and ask before expanding scope. Report exact checks, results, skipped or blocked work, and remaining uncertainty. Do not claim upstream CI passed unless verified.
 
