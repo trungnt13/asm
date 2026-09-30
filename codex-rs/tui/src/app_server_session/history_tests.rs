@@ -92,3 +92,123 @@ async fn owned_initial_history_stops_after_viewport_or_scan_budget() {
         );
     }
 }
+
+#[test]
+fn side_boundary_stops_initial_and_older_turn_pages_in_server_order() {
+    use codex_app_server_protocol::ThreadTurnsListResponse;
+    use codex_app_server_protocol::Turn;
+    use codex_app_server_protocol::TurnItemsView;
+    use codex_app_server_protocol::TurnStatus;
+    let turn = |id: &str| Turn {
+        id: id.into(),
+        items: Vec::new(),
+        items_view: TurnItemsView::NotLoaded,
+        status: TurnStatus::Completed,
+        error: None,
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+    };
+    let mut recent = ThreadTurnsListResponse {
+        data: vec![turn("a-newest"), turn("z-newer")],
+        next_cursor: Some("older".into()),
+        backwards_cursor: None,
+    };
+    super::trim_side_turn_page(&mut recent, Some("m-parent"));
+    assert_eq!(
+        recent
+            .data
+            .iter()
+            .map(|turn| turn.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a-newest", "z-newer"]
+    );
+    assert_eq!(recent.next_cursor.as_deref(), Some("older"));
+    let mut older = ThreadTurnsListResponse {
+        data: vec![
+            turn("b-side-first"),
+            turn("m-parent"),
+            turn("zz-parent-older"),
+        ],
+        next_cursor: Some("inherited".into()),
+        backwards_cursor: None,
+    };
+    super::trim_side_turn_page(&mut older, Some("m-parent"));
+    assert_eq!(
+        older
+            .data
+            .iter()
+            .map(|turn| turn.id.as_str())
+            .collect::<Vec<_>>(),
+        ["b-side-first"]
+    );
+    assert_eq!(older.next_cursor, None);
+}
+
+#[tokio::test]
+async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_boundary_turn()
+-> color_eyre::Result<()> {
+    use codex_app_server_protocol::ThreadItem;
+    use codex_app_server_protocol::ThreadItemEntry;
+    use codex_app_server_protocol::ThreadItemsListResponse;
+    use codex_app_server_protocol::Turn;
+    use codex_app_server_protocol::TurnItemsView;
+    use codex_app_server_protocol::TurnStatus;
+    let home = tempfile::tempdir()?;
+    let config = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .build()
+        .await?;
+    let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
+    let visible = ThreadItem::ContextCompaction {
+        id: "side-item".into(),
+    };
+    let mut turns = vec![Turn {
+        id: "side-turn".into(),
+        items: Vec::new(),
+        items_view: TurnItemsView::NotLoaded,
+        status: TurnStatus::Completed,
+        error: None,
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+    }];
+    let mut state = super::ThreadHistoryPagination {
+        side_boundary: Some("empty-inherited-turn".into()),
+        next_item_cursor: Some("page".into()),
+        ..Default::default()
+    };
+    let page = ThreadItemsListResponse {
+        data: vec![
+            ThreadItemEntry {
+                turn_id: "side-turn".into(),
+                item: visible.clone(),
+                started_at_ms: None,
+                completed_at_ms: None,
+            },
+            ThreadItemEntry {
+                turn_id: "older-parent-turn".into(),
+                item: ThreadItem::ContextCompaction {
+                    id: "parent-item".into(),
+                },
+                started_at_ms: None,
+                completed_at_ms: None,
+            },
+        ],
+        next_cursor: Some("parent-items".into()),
+        backwards_cursor: None,
+    };
+    let items = server
+        .merge_thread_item_page(
+            codex_protocol::ThreadId::new(),
+            page,
+            &mut state,
+            &mut turns,
+        )
+        .await?;
+    assert_eq!(items, vec![visible.clone()]);
+    assert_eq!(turns[0].items, vec![visible]);
+    assert_eq!(state.next_item_cursor, None);
+    server.shutdown().await?;
+    Ok(())
+}
