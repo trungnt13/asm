@@ -192,6 +192,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             id: thread_id,
             forked_from_id: None,
             forked_from_ordinal_exclusive: None,
