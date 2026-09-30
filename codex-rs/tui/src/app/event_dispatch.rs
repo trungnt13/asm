@@ -3669,6 +3669,11 @@ impl App {
                     thread_id: thread_id.to_string(),
                 },
             ));
+            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to save the closed side selection: {error}"
+                ));
+            }
             self.discard_thread_local_state(thread_id).await;
             self.agents_overview.input_states.remove(&thread_id);
             self.agents_overview.dispatched_requests.remove(&thread_id);
@@ -3747,6 +3752,11 @@ impl App {
                     thread_id: thread_id.to_string(),
                 },
             ));
+            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to save the closed side selection: {error}"
+                ));
+            }
             self.discard_thread_local_state(thread_id).await;
             self.agents_overview.input_states.remove(&thread_id);
             self.agents_overview.dispatched_requests.remove(&thread_id);
