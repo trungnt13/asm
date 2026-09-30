@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::status_line_labels::compact_model_name;
+use crate::status_line_labels::compact_reasoning_label;
 use codex_protocol::ThreadId;
 use ratatui::text::Line;
 
@@ -248,8 +250,22 @@ impl StatusSurfacePreviewData {
         I: IntoIterator<Item = StatusLineItem>,
     {
         let segments = items.into_iter().filter_map(|item| {
-            self.value_for(item.preview_item())
-                .map(|value| (item, value.to_string()))
+            let value = self.values.get(&item.preview_item())?;
+            let text = match item {
+                StatusLineItem::ModelName if value.is_placeholder => {
+                    compact_model_name(&value.text)
+                }
+                StatusLineItem::ModelWithReasoning if value.is_placeholder => format!(
+                    "{} {}",
+                    compact_model_name(StatusSurfacePreviewItem::Model.placeholder()),
+                    compact_reasoning_label(StatusSurfacePreviewItem::Reasoning.placeholder()),
+                ),
+                StatusLineItem::Reasoning if value.is_placeholder => {
+                    compact_reasoning_label(&value.text)
+                }
+                _ => value.text.clone(),
+            };
+            Some((item, text))
         });
         status_line_from_segments(segments, use_theme_colors, self.thread_id)
     }
