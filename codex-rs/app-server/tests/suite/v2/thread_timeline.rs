@@ -62,6 +62,7 @@ async fn timeline_pages_mix_items_and_resolve_the_opening_realtime_session() -> 
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,
