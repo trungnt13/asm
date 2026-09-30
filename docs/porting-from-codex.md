@@ -166,7 +166,7 @@ Keep Markdown paragraphs, code blocks, and list items adjacent while streaming a
 
 ### Compact status line
 
-Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode. Remove the space before the agent role only in the footer, such as `Main[default]`; leave picker labels unchanged. Preserve titles, paths, models, roles, colors, order, and single-row truncation.
+Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode. Lowercase model labels, remove `gpt-` and dots, and put numeric versions after the family: `GPT-6.1-Sol` becomes `sol61`. Show only the first three letters of reasoning labels, including model-with-reasoning items: `medium`, `high`, and `xhigh` become `med`, `hig`, and `xhi`. Apply these labels to the footer and `/statusline` preview only; preserve model identifiers, picker labels, and terminal titles. Remove the space before the agent role only in the footer, such as `Main[default]`. Preserve paths, roles, colors, order, and single-row truncation.
 
 Offer opt-in `cache-hit-rate` in `/statusline` and `tui.status_line`. Show `CchN.N%`: cached input tokens divided by input tokens for the latest reported request in the current thread, rounded to one decimal. Never average across requests or use cumulative thread totals. Use existing usage data without new requests or API changes. Hide unknown or zero-input usage; keep defaults unchanged. Missing cache details remain indistinguishable from reported zero.
 
