@@ -161,14 +161,13 @@ async fn api_key_subagent_uses_session_id_as_prompt_cache_key() -> Result<()> {
     Ok(())
 }
 
-#[rstest::rstest]
-#[case::saved(false, ThreadHistoryMode::Legacy)]
-#[case::ephemeral(true, ThreadHistoryMode::Legacy)]
-#[case::saved_paginated(false, ThreadHistoryMode::Paginated)]
+#[test_case::test_case(/*ephemeral*/ false, ThreadHistoryMode::Legacy; "saved")]
+#[test_case::test_case(/*ephemeral*/ true, ThreadHistoryMode::Legacy; "ephemeral")]
+#[test_case::test_case(/*ephemeral*/ false, ThreadHistoryMode::Paginated; "saved_paginated")]
 #[tokio::test]
 async fn root_fork_shares_cache_routing_but_keeps_session_identity(
-    #[case] ephemeral: bool,
-    #[case] history_mode: ThreadHistoryMode,
+    ephemeral: bool,
+    history_mode: ThreadHistoryMode,
 ) -> Result<()> {
     use codex_core::ForkSnapshot;
     use codex_core::StartThreadOptions;

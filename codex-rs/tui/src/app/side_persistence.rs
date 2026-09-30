@@ -4,16 +4,6 @@ use super::*;
 use crate::side_conversations::SideConversationStore;
 
 impl App {
-    #[tracing::instrument(skip_all)]
-    pub(super) async fn remember_side_conversation(
-        &mut self,
-        app_server: &mut AppServerSession,
-        parent: ThreadId,
-        side: ThreadId,
-    ) -> Result<()> {
-        app_server.save_side_conversation(parent, side).await
-    }
-
     pub(super) fn close_side_selection(&self, parent: ThreadId, side: ThreadId) -> Result<()> {
         SideConversationStore::new(&self.config.codex_home, &self.app_server_target)
             .close_selection(parent, side)?;
