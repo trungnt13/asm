@@ -1,3 +1,4 @@
+use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::protocol::EventMsg;
@@ -37,7 +38,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     .expect("initialize state database");
     let store = LocalThreadStore::new(config, Some(state_db.clone()));
     let thread_id = ThreadId::new();
-    create_paginated_thread(&store, thread_id).await;
+    let prompt_cache_key = create_paginated_thread(&store, thread_id).await;
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
@@ -93,7 +94,18 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .await
         .expect("read replacement metadata")
         .meta;
-    assert_eq!(replacement_meta.id, thread_id);
+    assert_eq!(
+        (
+            replacement_meta.id,
+            replacement_meta.session_id,
+            replacement_meta.prompt_cache_key
+        ),
+        (
+            thread_id,
+            SessionId::from(thread_id),
+            Some(prompt_cache_key)
+        ),
+    );
     assert_eq!(
         (
             replacement_meta.creator_user_id.as_deref(),
@@ -144,6 +156,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .await
         .expect("read recovered creator metadata")
         .meta;
+    assert_eq!(recovered.prompt_cache_key, Some(prompt_cache_key));
     assert_eq!(
         (recovered.creator_user_id, recovered.creator_account_id),
         (
@@ -269,13 +282,14 @@ async fn rollout_paths_for_thread(
         .collect()
 }
 
-async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) {
+async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) -> SessionId {
+    let prompt_cache_key = ThreadId::new().into();
     store
         .create_thread(CreateThreadParams {
             creator_user_id: Some("creator-user".to_string()),
             creator_account_id: Some("creator-account".to_string()),
             session_id: thread_id.into(),
-            prompt_cache_key: None,
+            prompt_cache_key: Some(prompt_cache_key),
             thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -300,6 +314,7 @@ async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) 
         })
         .await
         .expect("create paginated thread");
+    prompt_cache_key
 }
 
 async fn turn_ids(store: &LocalThreadStore, thread_id: ThreadId) -> Vec<String> {
