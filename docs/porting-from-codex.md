@@ -20,13 +20,17 @@ Preserve existing work. Use a separate worktree if it blocks progress. Committin
 
 ### Build the binary first
 
-For runtime or UI changes, inspect all affected paths, including streaming and completed output. Make the smallest coherent change, then build from `codex-rs`:
+For runtime or UI changes, inspect all affected paths, including streaming and completed output. Make the smallest coherent change.
+
+Before running Cargo in a new worktree, check available disk space and resolve insufficient space before starting. Explicitly select a compatible existing cache with `CARGO_TARGET_DIR`; do not accidentally start with an empty worktree-local cache. Keep the native target, toolchain, profile, flags, and cache stable. Cache reuse can still require recompilation.
+
+Build from `codex-rs`:
 
 ```bash
 cargo build -p codex-cli --bin codex --profile dev-small
 ```
 
-Prioritize this build over competing Cargo jobs. Keep the native target, toolchain, profile, flags, and cache stable; switching profiles or cleaning caches can trigger rebuilds. Test executables are not the CLI; instant builds are not guaranteed.
+Prioritize the CLI build over competing Cargo jobs. When sharing a target directory, coordinate and serialize Cargo jobs, and verify which checkout produced the binary before handing it off. Use build time for independent inspection and affected-test or snapshot review. Test executables are not the CLI.
 
 Hand off the binary before automated checks finish when safe. Report its verified absolute path, build time, a manual check, and pending checks. Rebuild after runtime edits; never present an old binary as current or replace the installed `codex` without permission. Binary handoff is progress, not completion.
 
@@ -37,7 +41,7 @@ Use optimized or cross-platform builds locally only when requested or needed to 
 Choose checks from changed behavior and conflict resolutions, not the size of an upstream sync:
 
 - **Documentation:** review wording and local links; run `git diff --check`. No builds or tests.
-- **Rust:** use `just test -p <crate> <test-filter>`, not direct `cargo test`. Format changed code and use targeted Clippy when needed. Group affected assertion and snapshot updates; never disable tests to hide intentional output changes.
+- **Rust:** use `just test -p <crate> <test-filter>`, not direct `cargo test`. Format changed code and use targeted Clippy when needed. Group affected assertion and snapshot updates before validation; keep unrelated stale expectations out of the change, and never disable tests to hide intentional output changes.
 - **Workflows and scripts:** run `actionlint` for changed workflows and small fixtures for script logic. Build natively only for affected packaging or an approved experiment.
 
 Run required generators for changed inputs; keep schemas, dependency lockfiles, and Bazel data correct. Reuse correct upstream outputs; skipping Bazel CI does not waive Bazel correctness.
