@@ -168,8 +168,7 @@ async fn discarding_side_cancels_verification_and_ignores_late_proof() -> Result
         .begin("deployments", request.id())
         .expect("pending side-thread verification");
 
-    app.discard_side_thread_in_background(&mut app_server, side_thread_id)
-        .await;
+    app.discard_closed_side_thread(side_thread_id).await;
     assert!(attempt.cancelled.is_cancelled());
     assert!(
         !app.pending_app_server_requests
