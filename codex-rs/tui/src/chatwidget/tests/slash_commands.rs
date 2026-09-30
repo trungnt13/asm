@@ -3290,6 +3290,7 @@ async fn slash_cd_changes_current_session_after_replay_and_defaults_to_home() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
+    chat.set_side_conversation_active(/*active*/ true);
     chat.thread_name = Some("Completed task".to_string());
     chat.forked_from = Some(ThreadId::new());
     let (status, duration, error) = (AppServerTurnStatus::Completed, None, None);
@@ -3334,7 +3335,7 @@ async fn rejected_queued_cd_drains_following_input() {
 #[tokio::test]
 async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
     let mut errors = Vec::new();
-    for state in "new active pending queued steer side owned ephemeral mcp exec".split(' ') {
+    for state in "new active pending queued steer owned ephemeral mcp exec".split(' ') {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = (state != "new").then(ThreadId::new);
         let (queued, steer) = (UserMessage::from("q").into(), pending_steer("s"));
@@ -3343,7 +3344,6 @@ async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
             "pending" => chat.input_queue.user_turn_pending_start = true,
             "queued" => chat.input_queue.queued_user_messages.push_back(queued),
             "steer" => chat.input_queue.pending_steers.push_back(steer),
-            "side" => chat.set_side_conversation_active(/*active*/ true),
             "owned" => chat.set_parent_owned_thread(),
             "ephemeral" => chat.config.ephemeral = true,
             "exec" => chat.track_unified_exec_process_begin("call", Some("process"), "sleep"),
@@ -3367,7 +3367,7 @@ async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
     }
     insta::assert_snapshot!(format!("{}{}", errors[0], errors[3]), @r"
 ■ The session must start before you can change its working directory.
-■ Changing directories requires an idle primary session without queued input.
+■ Changing directories requires an idle session without queued input.
 ");
 }
 
@@ -3413,6 +3413,7 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
     chat.bottom_pane.set_task_running(/*running*/ true);
+    chat.set_side_conversation_active(/*active*/ true);
 
     submit_composer_text(&mut chat, "/fast");
 
