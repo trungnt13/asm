@@ -4471,6 +4471,7 @@ async fn thread_resume_prefers_persisted_git_metadata_for_local_threads() -> Res
         creator_user_id: None,
         creator_account_id: None,
         session_id: conversation_id.into(),
+        prompt_cache_key: None,
         id: conversation_id,
         forked_from_id: None,
         forked_from_ordinal_exclusive: None,
