@@ -5760,7 +5760,7 @@ async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Resu
 #[tokio::test]
 async fn closed_side_cleanup_removes_local_state_and_ignores_late_events() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let mut app_server =
+    let app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
     let parent_thread_id = ThreadId::new();
     let side_thread_id = ThreadId::new();
