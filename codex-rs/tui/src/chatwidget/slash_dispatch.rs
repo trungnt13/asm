@@ -271,7 +271,9 @@ impl ChatWidget {
                             ..Default::default()
                         },
                         SelectionItem {
-                            name: if self.remote_connection.is_some() {
+                            name: if self.side_conversation_active() {
+                                "Yes, delete and return to main"
+                            } else if self.remote_connection.is_some() {
                                 "Yes, delete and return to command center"
                             } else {
                                 "Yes, delete and exit"
