@@ -140,9 +140,7 @@ impl SlashCommand {
             SlashCommand::Goal => "set or view the goal for a long-running task",
             SlashCommand::Agents => "open the agent command center",
             SlashCommand::MultiAgents => "switch between this session's subagents",
-            SlashCommand::Side | SlashCommand::Btw => {
-                "start a side conversation in an ephemeral fork"
-            }
+            SlashCommand::Side | SlashCommand::Btw => "start a saved side conversation",
             SlashCommand::Permissions => "choose what ASM is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",

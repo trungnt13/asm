@@ -1022,7 +1022,7 @@ async fn cancelling_saved_side_pauses_goal_and_preserves_running_parent() -> Res
     app.side_threads
         .insert(side_id, SideThreadState::new(parent_id));
     App::install_side_thread_snapshot(
-        &mut app.ensure_thread_channel(side_id).store.lock().await,
+        &mut *app.ensure_thread_channel(side_id).store.lock().await,
         side.session,
         side.turns,
     );
@@ -1141,7 +1141,7 @@ async fn removing_saved_side_returns_to_parent_on_embedded_and_shared_servers() 
             app.side_threads
                 .insert(side_id, SideThreadState::new(parent_id));
             App::install_side_thread_snapshot(
-                &mut app.ensure_thread_channel(side_id).store.lock().await,
+                &mut *app.ensure_thread_channel(side_id).store.lock().await,
                 side.session,
                 side.turns,
             );

@@ -2851,22 +2851,28 @@ async fn slash_delete_confirmation_requests_current_thread_delete() {
         },
         crate::AppServerTarget::Remote { endpoint },
     ] {
-        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-        chat.remote_connection = crate::status::remote_connection::remote_connection_status_value(
-            &target, /*server_version*/ None,
-        );
-        chat.dispatch_command(SlashCommand::Delete);
-        assert!(chat.bottom_pane.has_active_view());
-        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
-        let popup = render_bottom_popup(&chat, /*width*/ 80);
-        if matches!(target, crate::AppServerTarget::Embedded) {
-            assert_chatwidget_snapshot!("slash_delete_confirmation_popup", popup);
-        } else {
-            assert_chatwidget_snapshot!("slash_delete_confirmation_command_center", popup);
+        for side in [false, true] {
+            let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+            chat.remote_connection =
+                crate::status::remote_connection::remote_connection_status_value(
+                    &target, /*server_version*/ None,
+                );
+            chat.set_side_conversation_active(side);
+            chat.dispatch_command(SlashCommand::Delete);
+            assert!(chat.bottom_pane.has_active_view());
+            assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+            let popup = render_bottom_popup(&chat, /*width*/ 80);
+            if side {
+                assert_chatwidget_snapshot!("slash_delete_confirmation_side", popup);
+            } else if matches!(target, crate::AppServerTarget::Embedded) {
+                assert_chatwidget_snapshot!("slash_delete_confirmation_popup", popup);
+            } else {
+                assert_chatwidget_snapshot!("slash_delete_confirmation_command_center", popup);
+            }
+            chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+            chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+            assert_matches!(rx.try_recv(), Ok(AppEvent::DeleteCurrentThread));
         }
-        chat.handle_key_event(KeyEvent::from(KeyCode::Down));
-        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-        assert_matches!(rx.try_recv(), Ok(AppEvent::DeleteCurrentThread));
     }
 }
 
