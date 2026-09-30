@@ -66,9 +66,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `2a34aef79484bf769b4b225f3f595755f2962170`.
-- Commit date: 2026-09-29.
-- Subject: Update Bedrock GPT-6 Sol catalog tests to expect multi-agent V2 (#49369).
+- Last incorporated upstream commit: `9ef9cb1d9fc6013f6c1994346e0ee93ad9e6f986`.
+- Commit date: 2026-09-30.
+- Subject: Complete turn abort callbacks before emitting terminal events (#49475).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
