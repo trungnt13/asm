@@ -94,6 +94,7 @@ pub struct RolloutRecorder {
 pub enum RolloutRecorderParams {
     Create {
         session_id: SessionId,
+        prompt_cache_key: Option<SessionId>,
         conversation_id: ThreadId,
         /// Overrides the rollout ID encoded in the filename.
         ///
@@ -206,6 +207,7 @@ impl RolloutRecorderParams {
     ) -> Self {
         Self::Create {
             session_id: conversation_id.into(),
+            prompt_cache_key: None,
             conversation_id,
             rollout_id_override: None,
             forked_from_id,
@@ -245,6 +247,17 @@ impl RolloutRecorderParams {
     pub fn with_session_id(mut self, session_id: SessionId) -> Self {
         if let Self::Create { session_id: id, .. } = &mut self {
             *id = session_id;
+        }
+        self
+    }
+
+    pub fn with_prompt_cache_key(mut self, prompt_cache_key: Option<SessionId>) -> Self {
+        if let Self::Create {
+            prompt_cache_key: key,
+            ..
+        } = &mut self
+        {
+            *key = prompt_cache_key;
         }
         self
     }
@@ -912,6 +925,7 @@ impl RolloutRecorder {
         let state = match params {
             RolloutRecorderParams::Create {
                 session_id,
+                prompt_cache_key,
                 conversation_id,
                 rollout_id_override,
                 forked_from_id,
@@ -947,6 +961,7 @@ impl RolloutRecorder {
 
                 let session_meta = SessionMeta {
                     session_id,
+                    prompt_cache_key,
                     id: conversation_id,
                     forked_from_id,
                     forked_from_ordinal_exclusive: forked_from_ordinal_exclusive
