@@ -2985,6 +2985,29 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             .is_closed
     );
 
+    let saved_pair = crate::side_conversations::SideConversationStore::new(
+        &app.config.codex_home,
+        &app.app_server_target,
+    )
+    .pair(side_thread_id)?
+    .expect("side navigation should be durable");
+    assert_eq!(
+        (saved_pair.parent, saved_pair.side),
+        (parent_thread_id, side_thread_id)
+    );
+    let resumed_side = app_server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            side_thread_id,
+            crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+        )
+        .await?;
+    assert!(
+        resumed_side.turns.is_empty(),
+        "resuming an empty side must hide inherited history"
+    );
+
     let mut saw_thread_started = false;
     for _ in 0..20 {
         let event = time::timeout(
