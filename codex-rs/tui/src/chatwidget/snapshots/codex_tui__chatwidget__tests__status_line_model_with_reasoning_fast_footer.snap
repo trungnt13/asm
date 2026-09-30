@@ -6,4 +6,4 @@ expression: normalized_backend_snapshot(terminal.backend())
 "                                                                                "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
-"  gpt-5.4 xhigh fast·Ctx0%·/tmp/project                                         "
+"  54 xhi fast·Ctx0%·/tmp/project                                                "
