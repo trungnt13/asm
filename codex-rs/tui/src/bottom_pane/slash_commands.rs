@@ -327,6 +327,7 @@ mod tests {
                 SlashCommand::Ide,
                 SlashCommand::Agents,
                 SlashCommand::Copy,
+                SlashCommand::CopyId,
                 SlashCommand::Export,
                 SlashCommand::Raw,
                 SlashCommand::Diff,

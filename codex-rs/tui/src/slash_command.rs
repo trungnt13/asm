@@ -45,6 +45,8 @@ pub enum SlashCommand {
     Side,
     Btw,
     Copy,
+    #[strum(serialize = "copyid")]
+    CopyId,
     Export,
     Raw,
     Tui,
@@ -105,6 +107,7 @@ impl SlashCommand {
             SlashCommand::App => "continue this session in the Desktop app",
             SlashCommand::Quit | SlashCommand::Exit => "exit ASM",
             SlashCommand::Copy => "copy the last response or part of it",
+            SlashCommand::CopyId => "copy the current session ID to the clipboard",
             SlashCommand::Export => "export the conversation as markdown",
             SlashCommand::Raw => "toggle raw scrollback mode for copy-friendly terminal selection",
             SlashCommand::Tui => "choose the TUI mode for the next launch",
@@ -194,6 +197,7 @@ impl SlashCommand {
         matches!(
             self,
             SlashCommand::Copy
+                | SlashCommand::CopyId
                 | SlashCommand::Agents
                 | SlashCommand::Export
                 | SlashCommand::Raw
@@ -231,6 +235,7 @@ impl SlashCommand {
                 | SlashCommand::Pwd
                 | SlashCommand::Rollout
                 | SlashCommand::Copy
+                | SlashCommand::CopyId
                 | SlashCommand::Raw
         )
     }
@@ -266,6 +271,7 @@ impl SlashCommand {
             | SlashCommand::Model
             | SlashCommand::Permissions
             | SlashCommand::Copy
+            | SlashCommand::CopyId
             | SlashCommand::Raw
             | SlashCommand::Rename
             | SlashCommand::Mention
@@ -303,7 +309,7 @@ impl SlashCommand {
 
     fn is_visible(self) -> bool {
         match self {
-            SlashCommand::Copy => !cfg!(target_os = "android"),
+            SlashCommand::Copy | SlashCommand::CopyId => !cfg!(target_os = "android"),
             SlashCommand::App => cfg!(any(target_os = "macos", target_os = "windows")),
             SlashCommand::Voice => true,
             SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
