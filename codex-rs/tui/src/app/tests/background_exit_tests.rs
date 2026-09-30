@@ -545,22 +545,93 @@ async fn exit_interrupts_before_requesting_shutdown() -> Result<()> {
 #[tokio::test]
 async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
-    let side_thread_id = prepare_running_local_daemon(&mut app)?;
+    let cwd = tempdir()?;
+    app.config.cwd = cwd.path().abs();
+    prepare_local_daemon_thread(&mut app)?;
     let (mut app_server, mut tui) =
         prepare_background_exit_test(&app, &mut app_event_rx, &mut op_rx).await?;
-    let started = app_server.start_thread(&app.config).await?;
-    let parent_thread_id = started.session.thread_id;
-    app.primary_thread_id = Some(parent_thread_id);
+    let parent = app_server.start_thread(&app.config).await?;
+    let parent_thread_id = parent.session.thread_id;
+    app.active_thread_id = Some(parent_thread_id);
+    app.enqueue_primary_thread_session(parent.session.clone(), parent.turns)
+        .await?;
+    app.chat_widget.handle_thread_session(parent.session);
+    let side = app_server.start_thread(&app.config).await?;
+    let side_thread_id = side.session.thread_id;
+    let running = tempdir()?;
+    let running_path = running.path().to_string_lossy();
+    let command = if cfg!(windows) {
+        format!(
+            "Write-Output 'side-test-ready'; while (Test-Path -LiteralPath '{}') {{ Start-Sleep -Milliseconds 100 }}",
+            running_path.replace('\'', "''"),
+        )
+    } else {
+        format!(
+            "printf 'side-test-ready\n'; while [ -d {} ]; do sleep 0.1; done",
+            shlex::try_quote(&running_path)?,
+        )
+    };
+    app_server
+        .thread_shell_command(side_thread_id, command)
+        .await?;
+    let turn_id = time::timeout(Duration::from_secs(/*secs*/ 10), async {
+        let mut turn_id = None;
+        let mut output = String::new();
+        loop {
+            let event = app_server
+                .next_event()
+                .await
+                .expect("app-server event stream");
+            if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = event
+            {
+                match notification.as_ref() {
+                    ServerNotification::TurnStarted(notification)
+                        if notification.thread_id == side_thread_id.to_string() =>
+                    {
+                        turn_id = Some(notification.turn.id.clone());
+                    }
+                    ServerNotification::CommandExecutionOutputDelta(notification)
+                        if notification.thread_id == side_thread_id.to_string() =>
+                    {
+                        output.push_str(&notification.delta);
+                    }
+                    ServerNotification::TurnCompleted(notification)
+                        if notification.thread_id == side_thread_id.to_string() =>
+                    {
+                        panic!("side command ended before cancellation: {notification:?}");
+                    }
+                    _ => {}
+                }
+            }
+            if output.contains("side-test-ready")
+                && let Some(turn_id) = turn_id.as_ref()
+            {
+                break turn_id.clone();
+            }
+        }
+    })
+    .await
+    .expect("side shell command running before Ctrl+C");
     app.side_threads
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
     app.thread_event_channels.insert(
-        parent_thread_id,
+        side_thread_id,
         ThreadEventChannel::new_with_session(
             THREAD_EVENT_CHANNEL_CAPACITY,
-            started.session,
-            started.turns,
+            side.session,
+            vec![test_turn(&turn_id, TurnStatus::InProgress, Vec::new())],
         ),
     );
+    app.upsert_agent_picker_thread(
+        side_thread_id,
+        /*agent_nickname*/ None,
+        /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
+    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+        .await?;
+    while app_event_rx.try_recv().is_ok() {}
+    while op_rx.try_recv().is_ok() {}
 
     open_running_task_exit_menu(&mut app, &mut tui, &mut app_server).await;
 
@@ -568,6 +639,20 @@ async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Res
     assert_eq!(app.active_thread_id, Some(parent_thread_id));
     assert!(!app.side_threads.contains_key(&side_thread_id));
     assert!(op_rx.try_recv().is_err());
+    let saved_side = app_server
+        .thread_read(side_thread_id, /*include_turns*/ false)
+        .await?;
+    assert!(!matches!(
+        saved_side.status,
+        codex_app_server_protocol::ThreadStatus::Active { .. }
+    ));
+    assert!(
+        app_server
+            .thread_read(parent_thread_id, /*include_turns*/ false)
+            .await
+            .is_ok()
+    );
+    app_server.shutdown().await?;
     Ok(())
 }
 
