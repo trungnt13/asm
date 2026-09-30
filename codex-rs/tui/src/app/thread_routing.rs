@@ -1254,9 +1254,7 @@ impl App {
                 });
             }
         }
-        let inferred_session = if let ServerNotification::ThreadStarted(started) = &notification
-            && self.primary_session_configured.is_some()
-        {
+        let inferred_session = if let ServerNotification::ThreadStarted(started) = &notification {
             self.upsert_agent_picker_thread(
                 thread_id,
                 started.thread.agent_nickname.clone(),
@@ -1428,7 +1426,22 @@ impl App {
         thread_id: ThreadId,
         notification: &ThreadStartedNotification,
     ) -> Option<ThreadSessionState> {
-        let mut session = self.primary_session_configured.clone()?;
+        let parent_thread_id = match &notification.thread.source {
+            codex_app_server_protocol::SessionSource::SubAgent(
+                codex_app_server_protocol::SubAgentSource::ThreadSpawn {
+                    parent_thread_id, ..
+                },
+            ) => Some(*parent_thread_id),
+            _ => None,
+        };
+        let parent_session = if let Some(channel) =
+            parent_thread_id.and_then(|parent| self.thread_event_channels.get(&parent))
+        {
+            channel.store.lock().await.session.clone()
+        } else {
+            None
+        };
+        let mut session = parent_session.or_else(|| self.primary_session_configured.clone())?;
         session.thread_id = thread_id;
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
@@ -1588,6 +1601,7 @@ impl App {
         }
 
         let thread_id = session.thread_id;
+        self.abandoned_side_threads.remove(&thread_id);
         self.pending_server_profiles.remove(&thread_id);
         self.agents_overview
             .requested_permission_profiles
@@ -1599,6 +1613,7 @@ impl App {
         self.agents_overview.hidden_threads.remove(&thread_id);
         self.agents_overview.threads.entry(thread_id).or_default();
         self.primary_session_configured = Some(session.clone());
+        self.restore_side_conversation(thread_id);
         self.upsert_agent_picker_thread(
             thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
             /*is_closed*/ false,
@@ -1623,7 +1638,11 @@ impl App {
             ThreadAttachPresentation::Fresh
             | ThreadAttachPresentation::FreshWithDraft
             | ThreadAttachPresentation::SessionLineage => {
-                self.chat_widget.handle_thread_session(session);
+                if self.side_threads.contains_key(&thread_id) {
+                    self.chat_widget.handle_side_thread_session(session);
+                } else {
+                    self.chat_widget.handle_thread_session(session);
+                }
             }
         }
         let should_buffer_initial_replay = !turns.is_empty();
@@ -1673,6 +1692,7 @@ impl App {
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ false);
         self.chat_widget.submit_initial_user_message_if_pending();
+        self.sync_side_thread_ui();
         Ok(())
     }
 
