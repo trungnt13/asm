@@ -163,6 +163,16 @@ Use explicit repository selection for GitHub operations, such as `gh ... -R trun
 
 ### Installer boundaries
 
+### Saved forks and side conversations
+
+Preserve the parent's effective prompt-cache routing key for saved and temporary root forks, independently of thread/session identity. Persist that routing choice for resume and further forks; keep old rollouts readable without ancestor lookups. Preserve upstream guardian and subagent routing. Sharing routing is an optimization, not a promise of backend cache hits.
+
+Make `/side` a saved ordinary user fork with the same command availability as main under normal permissions, feature flags, platform support, and busy-state checks. Inherited history is reference context, not a request to continue the parent's task or control its agents. Sides may own goals and subagents. Keep the initial side transcript clean without rewriting stored or model-visible history.
+
+Keep one main/side pair. `/side` from a side returns to its parent and starts a replacement side; previous sides remain saved. Ctrl+/ switches views without stopping work. With an empty composer and no modal, Ctrl+C stops the side, pauses its active goal, and returns to its parent without deleting history. Selecting subagents must not stop their owning side. Ordinary `/new`, `/clear`, `/resume`, `/fork`, `/cd`, and `/worktree` navigation leaves side mode instead of maintaining a separate side slot. Archive/delete act on the displayed side and return to its parent.
+
+Keep pairing and transcript-display boundaries in ASM client-local state scoped to the app-server target. Restore an open pair on resume; closing the selection must not delete its saved conversation. Do not use analytics source classification or false fork ancestry to encode UI relationships. Stock clients see ordinary threads through unchanged app-server APIs; their UI need not implement side switching. Shared files and explicitly global configuration changes are not isolated between chats.
+
 ### Copy session ID
 
 Offer `/copyid` to copy only the currently displayed session's ID directly through the existing clipboard path, without requiring `/status`, an assistant response, or a picker. Allow it while a task is running, in side conversations, and when viewing parent-owned subagents. Report missing IDs and clipboard failures; preserve `/copy` behavior and clipboard platform support.
