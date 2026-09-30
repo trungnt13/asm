@@ -203,6 +203,7 @@ mod session_resume;
 mod session_start;
 mod session_state;
 mod shortcut_help;
+mod side_conversations;
 mod skills_helpers;
 mod slash_command;
 mod startup_draft;
@@ -641,7 +642,8 @@ pub(crate) async fn start_app_server_for_picker(
     .await?;
     Ok(
         AppServerSession::new(app_server, target.thread_params_mode())
-            .with_local_codex_home(&config.codex_home),
+            .with_local_codex_home(&config.codex_home)
+            .with_side_conversations(&config.codex_home, &target),
     )
 }
 
@@ -668,7 +670,8 @@ pub(crate) async fn start_embedded_app_server_for_picker(
     .await?;
     Ok(
         AppServerSession::new(app_server, target.thread_params_mode())
-            .with_local_codex_home(&config.codex_home),
+            .with_local_codex_home(&config.codex_home)
+            .with_side_conversations(&config.codex_home, &target),
     )
 }
 
@@ -1222,6 +1225,7 @@ async fn run_ratatui_app(
         Ok(Ok(app_server)) => {
             AppServerSession::new(app_server, app_server_target.thread_params_mode())
                 .with_local_codex_home(&initial_config.codex_home)
+                .with_side_conversations(&initial_config.codex_home, &app_server_target)
         }
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
@@ -1800,6 +1804,7 @@ async fn run_ratatui_app(
                 startup_account = None;
                 AppServerSession::new(app_server, app_server_target.thread_params_mode())
                     .with_local_codex_home(&config.codex_home)
+                    .with_side_conversations(&config.codex_home, &app_server_target)
                     .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -1884,7 +1889,8 @@ async fn run_ratatui_app(
                 )
                 .await?;
                 app_server = AppServerSession::new(client, app_server_target.thread_params_mode())
-                    .with_local_codex_home(&config.codex_home);
+                    .with_local_codex_home(&config.codex_home)
+                    .with_side_conversations(&config.codex_home, &app_server_target);
             }
             #[cfg(target_os = "windows")]
             {
