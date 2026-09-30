@@ -1080,6 +1080,15 @@ impl AppServerSession {
             }
         };
         let mut response = response;
+        if presentation == ForkPresentation::SideConversation {
+            // Side views skip inherited-history hydration, but boundary capture still needs the
+            // actual rollout format returned by the server, including on remote legacy servers.
+            let side_id = ThreadId::from_string(&response.thread.id)?;
+            self.history_pagination
+                .entry(side_id)
+                .or_default()
+                .history_mode = response.thread.history_mode;
+        }
         if presentation == ForkPresentation::Regular
             && !response.thread.ephemeral
             && let Err(error) = self
