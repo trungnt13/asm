@@ -7,7 +7,6 @@ impl ChatWidget {
     pub(crate) fn can_change_working_directory(&self, thread_id: ThreadId) -> bool {
         let active = &self.transcript.active_cell;
         self.thread_id == Some(thread_id)
-            && !self.active_side_conversation
             && !self.blocks_direct_input
             && !self.config.ephemeral
             && self.unified_exec_processes.is_empty()
@@ -31,8 +30,7 @@ impl ChatWidget {
             return;
         };
         if !self.can_change_working_directory(thread_id) {
-            let message =
-                "Changing directories requires an idle primary session without queued input.";
+            let message = "Changing directories requires an idle session without queued input.";
             self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::new_error_event(message.to_string()),
             )));
