@@ -125,7 +125,7 @@ impl super::ChatComposer {
                 toggle_voice: self
                     .footer
                     .toggle_voice_key
-                    .filter(|_| self.voice_command_enabled && !self.side_conversation_active),
+                    .filter(|_| self.voice_command_enabled),
             },
             active_agent_label: self.footer.active_agent_label.clone(),
         }
