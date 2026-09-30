@@ -160,8 +160,13 @@ async fn api_key_subagent_uses_session_id_as_prompt_cache_key() -> Result<()> {
     Ok(())
 }
 
+#[rstest::rstest]
+#[case::saved(false)]
+#[case::ephemeral(true)]
 #[tokio::test]
-async fn ephemeral_fork_shares_cache_routing_but_keeps_session_identity() -> Result<()> {
+async fn root_fork_shares_cache_routing_but_keeps_session_identity(
+    #[case] ephemeral: bool,
+) -> Result<()> {
     use codex_core::ForkSnapshot;
     use codex_core::StartThreadOptions;
     use core_test_support::responses::mount_sse_sequence;
@@ -180,7 +185,7 @@ async fn ephemeral_fork_shares_cache_routing_but_keeps_session_identity() -> Res
     test.codex.flush_rollout().await?;
     let parent_session = test.session_configured.session_id.to_string();
     let mut config = test.config.clone();
-    config.ephemeral = true;
+    config.ephemeral = ephemeral;
     let fork = test
         .thread_manager
         .fork_legacy_thread(
@@ -224,5 +229,169 @@ async fn ephemeral_fork_shares_cache_routing_but_keeps_session_identity() -> Res
             "tools": requests[0].body_json()["tools"],
         }),
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn saved_nested_fork_retains_cache_routing_on_resume_without_ancestors() -> Result<()> {
+    use codex_core::ForkSnapshot;
+    use codex_core::StartThreadOptions;
+    use codex_protocol::protocol::ThreadHistoryMode;
+    use core_test_support::responses::mount_sse_sequence;
+
+    let server = start_mock_server().await;
+    let requests = mount_sse_sequence(
+        &server,
+        ["parent", "fork", "nested", "resumed", "legacy-resumed"]
+            .into_iter()
+            .map(|id| sse(vec![ev_completed(id)]))
+            .collect(),
+    )
+    .await;
+    let mut builder = test_codex().with_history_mode(ThreadHistoryMode::Legacy);
+    let mut test = builder.build_with_auto_env(&server).await?;
+    let parent_session = test.session_configured.session_id;
+    test.submit_text_turn("parent").await?;
+    test.codex.flush_rollout().await?;
+    let parent_path = test.codex.rollout_path().expect("parent rollout");
+    let parent_meta = codex_rollout::read_session_meta_line(&parent_path).await?;
+    assert_eq!(parent_meta.meta.prompt_cache_key, None);
+    let first = test
+        .thread_manager
+        .fork_legacy_thread(
+            ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
+            StartThreadOptions {
+                environments: Some(test.codex.environment_selections().await),
+                ..StartThreadOptions::new(test.config.clone())
+            },
+            parent_path.clone(),
+        )
+        .await?;
+    test.codex.shutdown_and_wait().await?;
+    test.codex = first.thread;
+    test.submit_text_turn("fork").await?;
+    test.codex.flush_rollout().await?;
+    let first_path = test.codex.rollout_path().expect("first fork rollout");
+    let nested = test
+        .thread_manager
+        .fork_legacy_thread(
+            ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
+            StartThreadOptions {
+                environments: Some(test.codex.environment_selections().await),
+                ..StartThreadOptions::new(test.config.clone())
+            },
+            first_path.clone(),
+        )
+        .await?;
+    let nested_session = nested.session_configured.session_id;
+    let nested_thread = nested.thread_id;
+    assert_ne!(nested_session, first.session_configured.session_id);
+    assert_ne!(nested_session, parent_session);
+    test.codex.shutdown_and_wait().await?;
+    test.codex = nested.thread;
+    test.submit_text_turn("nested").await?;
+    test.codex.flush_rollout().await?;
+    let nested_path = test.codex.rollout_path().expect("nested rollout");
+    let nested_meta = codex_rollout::read_session_meta_line(&nested_path).await?;
+    assert_eq!(
+        (
+            nested_meta.meta.session_id,
+            nested_meta.meta.prompt_cache_key
+        ),
+        (nested_session, Some(parent_session)),
+    );
+    test.codex.shutdown_and_wait().await?;
+    tokio::fs::remove_file(parent_path).await?;
+    tokio::fs::remove_file(first_path).await?;
+    let history = codex_rollout::RolloutRecorder::get_rollout_history(&nested_path).await?;
+    let resumed = test
+        .thread_manager
+        .resume_thread_with_history(
+            test.config.clone(),
+            history,
+            codex_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("dummy")),
+            /*parent_trace*/ None,
+            codex_protocol::mcp::ClientMcpExtensions::default(),
+        )
+        .await?;
+    assert_eq!(resumed.session_configured.session_id, nested_session);
+    test.codex = resumed.thread;
+    test.submit_text_turn("resumed").await?;
+    test.codex.shutdown_and_wait().await?;
+    // A legacy fork's own header must win over cache keys in copied ancestor headers.
+    let rollout = tokio::fs::read_to_string(&nested_path).await?;
+    let mut lines = rollout
+        .lines()
+        .map(serde_json::from_str::<Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    lines[0]["payload"]
+        .as_object_mut()
+        .expect("session metadata")
+        .remove("prompt_cache_key");
+    let rollout = lines
+        .into_iter()
+        .map(|line| serde_json::to_string(&line))
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n")
+        + "\n";
+    tokio::fs::write(&nested_path, rollout).await?;
+    let history = codex_rollout::RolloutRecorder::get_rollout_history(&nested_path).await?;
+    let legacy_resumed = test
+        .thread_manager
+        .resume_thread_with_history(
+            test.config.clone(),
+            history,
+            codex_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("dummy")),
+            /*parent_trace*/ None,
+            codex_protocol::mcp::ClientMcpExtensions::default(),
+        )
+        .await?;
+    test.codex = legacy_resumed.thread;
+    test.submit_text_turn("legacy-resumed").await?;
+    let actual = requests
+        .requests()
+        .into_iter()
+        .map(|request| {
+            let body = request.body_json();
+            let metadata: Value = serde_json::from_str(
+                body["client_metadata"]["x-codex-turn-metadata"]
+                    .as_str()
+                    .expect("turn metadata"),
+            )
+            .expect("valid turn metadata");
+            json!({
+                "cache": body["prompt_cache_key"],
+                "route": request.header("session-id"),
+                "session": metadata["session_id"],
+                "thread": request.header("thread-id"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let expected = [
+        (
+            parent_session,
+            test.session_configured.thread_id,
+            parent_session,
+        ),
+        (
+            first.session_configured.session_id,
+            first.thread_id,
+            parent_session,
+        ),
+        (nested_session, nested_thread, parent_session),
+        (nested_session, nested_thread, parent_session),
+        (nested_session, nested_thread, nested_session),
+    ]
+    .into_iter()
+    .map(|(session, thread, cache)| {
+        json!({
+            "cache": cache.to_string(),
+            "route": cache.to_string(),
+            "session": session.to_string(),
+            "thread": thread.to_string(),
+        })
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
     Ok(())
 }
