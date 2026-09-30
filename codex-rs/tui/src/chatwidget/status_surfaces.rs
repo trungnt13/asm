@@ -13,6 +13,8 @@ use crate::model_catalog::LUNA_RESERVE_MODEL;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
 use crate::status::format_tokens_compact;
+use crate::status_line_labels::compact_model_name;
+use crate::status_line_labels::compact_reasoning_label;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
@@ -711,9 +713,14 @@ impl ChatWidget {
     /// git metadata.
     pub(super) fn status_line_value(&mut self, item: StatusLineItem) -> Option<String> {
         match item {
-            StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
-            StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name()),
-            StatusLineItem::Reasoning => Some(self.reasoning_display_name()),
+            StatusLineItem::ModelName => Some(compact_model_name(self.model_display_name())),
+            StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name(
+                &compact_model_name(self.model_display_name()),
+                &compact_reasoning_label(&self.reasoning_display_name()),
+            )),
+            StatusLineItem::Reasoning => {
+                Some(compact_reasoning_label(&self.reasoning_display_name()))
+            }
             StatusLineItem::CurrentDir => {
                 Some(format_directory_display(
                     self.status_line_cwd(),
@@ -963,7 +970,10 @@ impl ChatWidget {
                 /*max_chars*/ 32,
             )),
             TerminalTitleItem::ModelWithReasoning => Some(Self::truncate_terminal_title_part(
-                self.model_with_reasoning_display_name(),
+                self.model_with_reasoning_display_name(
+                    self.model_display_name(),
+                    &self.reasoning_display_name(),
+                ),
                 /*max_chars*/ 32,
             )),
             TerminalTitleItem::Reasoning => Some(Self::truncate_terminal_title_part(
@@ -979,8 +989,7 @@ impl ChatWidget {
         Self::status_line_reasoning_effort_label(effort.as_ref())
     }
 
-    fn model_with_reasoning_display_name(&self) -> String {
-        let label = self.reasoning_display_name();
+    fn model_with_reasoning_display_name(&self, model_name: &str, label: &str) -> String {
         let service_tier_label = self
             .current_service_tier()
             .and_then(|service_tier| {
@@ -992,7 +1001,7 @@ impl ChatWidget {
             .filter(|_| self.has_chatgpt_account)
             .map(|tier| format!(" {tier}"))
             .unwrap_or_default();
-        format!("{} {label}{service_tier_label}", self.model_display_name())
+        format!("{model_name} {label}{service_tier_label}")
     }
 
     /// Computes the compact runtime status label used by word-based status items.
