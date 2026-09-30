@@ -22,7 +22,6 @@ impl ChatWidget {
             self.normal_placeholder_text.clone()
         };
         self.bottom_pane.set_placeholder_text(placeholder);
-        self.bottom_pane.set_side_conversation_active(active);
         if self.blocks_direct_input && !active {
             self.bottom_pane.set_parent_owned_thread();
         }
