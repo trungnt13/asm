@@ -2,9 +2,9 @@
 
 ## Principles
 
-1. **Personal use only.** This fork exists solely for Trung Ngo's personal use.
-2. **Keep changes minimal, safe, and minor.** Assume unchanged upstream code has already been tested upstream. Validate fork changes, conflict resolutions, and packaging with narrow, fast checks. Do not repeat full upstream suites by default. Upstream testing does not establish that our changes or packages work.
-3. **Record the owner's current intent here.** Ensure each fork change's purpose and constraints are covered in the relevant section; update missing or changed intent, not a log of work already covered. If a proposed change conflicts with recorded intent, ask the owner first. Once accepted, replace the old intent rather than keeping contradictory rules. With intent clear, agents may triage changes and resolve merge or rebase conflicts within the authorized scope without asking about each conflict.
+1. **Personal use only.** This fork is for Trung Ngo.
+2. **Keep changes minimal, safe, and minor.** Prefer durable, localized solutions that minimize upstream divergence and future merge or rebase conflicts. Do not sacrifice correctness, maintainability, or runtime performance merely to reduce the diff. Assume unchanged code was tested upstream. Check our changes, conflicts, and packages narrowly; upstream testing does not prove they work.
+3. **Record current intent here.** Cover each fork change's purpose and constraints; update new or changed intent, not a task log. Ask before contradicting existing intent. Once approved, replace the old rule. Agents may then resolve mechanical conflicts without further approval.
 
 This file takes precedence over other repository instructions, including [AGENTS.md](../AGENTS.md), where they conflict. Its narrow validation policy replaces whole-crate and full-suite defaults; other implementation rules still apply. This file records intended behavior, not proof that a change has been committed, deployed, or included in a published binary.
 
