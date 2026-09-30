@@ -3129,6 +3129,10 @@ pub struct SessionMeta {
     pub creator_account_id: Option<String>,
     /// session_id is equal to the root thread's ID.
     pub session_id: SessionId,
+    /// Cache routing shared by root forks, separate from session identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prompt_cache_key: Option<SessionId>,
     pub id: ThreadId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forked_from_id: Option<ThreadId>,
@@ -3204,6 +3208,7 @@ impl Default for SessionMeta {
             creator_user_id: None,
             creator_account_id: None,
             session_id: id.into(),
+            prompt_cache_key: None,
             id,
             forked_from_id: None,
             forked_from_ordinal_exclusive: None,
@@ -6164,9 +6169,14 @@ mod tests {
         assert_eq!(session_meta.history_mode, ThreadHistoryMode::Legacy);
         assert_eq!(session_meta.history_base, None);
         assert_eq!(session_meta.forked_from_ordinal_exclusive, None);
+        assert_eq!(session_meta.prompt_cache_key, None);
         let serialized = serde_json::to_value(&session_meta)?;
         assert!(serialized.get("forked_from_ordinal_exclusive").is_none());
+        assert!(serialized.get("prompt_cache_key").is_none());
         assert_eq!(serialized["history_mode"], json!("legacy"));
+        let mut invalid_key = serialized.clone();
+        invalid_key["prompt_cache_key"] = json!("unbounded arbitrary cache routing");
+        assert!(serde_json::from_value::<SessionMeta>(invalid_key).is_err());
         let mut unknown = serialized;
         unknown["history_mode"] = json!("future");
         assert!(serde_json::from_value::<SessionMeta>(unknown).is_err());
