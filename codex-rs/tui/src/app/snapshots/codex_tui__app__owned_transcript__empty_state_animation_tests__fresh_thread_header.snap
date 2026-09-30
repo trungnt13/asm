@@ -4,7 +4,7 @@ expression: "format!(\"enabled:\\n{}\\n---\\ndisabled:\\n{}\", text(after), text
 ---
 enabled:
 
-  >_ ASM (v0.161.1-alpha.3)
+  >_ ASM (v0.161.1-alpha.4)
      /tmp/project
 
 
@@ -50,7 +50,7 @@ enabled:
 ---
 disabled:
 
-  >_ ASM (v0.161.1-alpha.3)
+  >_ ASM (v0.161.1-alpha.4)
      /tmp/project
 
 
