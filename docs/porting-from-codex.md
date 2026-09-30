@@ -12,7 +12,61 @@ This file takes precedence over other repository instructions, including [AGENTS
 
 Use ASM in the README heading, GitHub repository description and release titles, introductory release prose, and descriptive workflow step labels, while clearly attributing the fork to OpenAI Codex. Keep the existing `codex` executable, crate, state and config names, archive filenames, tags, workflow names, job IDs, and CI check identities unchanged. Branding does not change what upstream links or installers provide.
 
-## Upstream baseline
+Check Git status, branches, worktrees, remotes, fork differences, and relevant repo sessions for overlapping work and unfinished handoffs. Recover context from Git and sessions, not the owner's memory or a separate task diary.
+
+For concurrent tasks, create a named `codex/` branch and separate worktree before editing; coordinate shared files. One agent owns staging and commits in each checkout. Integrate into local `main` one task at a time.
+
+Preserve existing work. Use a separate worktree if it blocks progress. Committing or stashing unrelated work needs permission; keep any authorized stash until restoration is verified. Never overwrite other work to make a checkout clean.
+
+### Build the binary first
+
+For runtime or UI changes, inspect all affected paths, including streaming and completed output. Make the smallest coherent change.
+
+Before running Cargo in a new worktree, check available disk space and resolve insufficient space before starting. Explicitly select a compatible existing cache with `CARGO_TARGET_DIR`; do not accidentally start with an empty worktree-local cache. Keep the native target, toolchain, profile, flags, and cache stable. Cache reuse can still require recompilation.
+
+Build from `codex-rs`:
+
+```bash
+cargo build -p codex-cli --bin codex --profile dev-small
+```
+
+Prioritize the CLI build over competing Cargo jobs. When sharing a target directory, coordinate and serialize Cargo jobs, and verify which checkout produced the binary before handing it off. Use build time for independent inspection and affected-test or snapshot review. Test executables are not the CLI.
+
+Hand off the binary before automated checks finish when safe. Report its verified absolute path, build time, a manual check, and pending checks. Rebuild after runtime edits; never present an old binary as current or replace the installed `codex` without permission. Binary handoff is progress, not completion.
+
+Use optimized or cross-platform builds locally only when requested or needed to reproduce the affected behavior.
+
+### Validate narrowly
+
+Choose checks from changed behavior and conflict resolutions, not the size of an upstream sync:
+
+- **Documentation:** review wording and local links; run `git diff --check`. No builds or tests.
+- **Rust:** use `just test -p <crate> <test-filter>`, not direct `cargo test`. Format changed code and use targeted Clippy when needed. Group affected assertion and snapshot updates before validation; keep unrelated stale expectations out of the change, and never disable tests to hide intentional output changes.
+- **Workflows and scripts:** run `actionlint` for changed workflows and small fixtures for script logic. Build natively only for affected packaging or an approved experiment.
+
+Run required generators for changed inputs; keep schemas, dependency lockfiles, and Bazel data correct. Reuse correct upstream outputs; skipping Bazel CI does not waive Bazel correctness.
+
+Do not run whole-crate or workspace suites by default. If narrow checks cannot establish safety, explain the gap and ask before expanding. A clean merge is not validation; claim upstream CI passed only when verified.
+
+### Commit, integrate, and report
+
+Implementation requests, including documentation edits, authorize committing finished task changes and integrating them into local `main`, unless the owner says otherwise.
+
+The lead agent owns completion, including delegated work. Once narrow checks pass and owner decisions are resolved, commit and integrate immediately. Wait for manual testing or a separate approval only if requested. **Done means committed and verified in local `main`**, not just finished in another worktree.
+
+Inspect the staged diff; include only finished task changes and their tests, generated files, and intent. Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`; verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. Correct local configuration when needed, but do not rewrite published history just to fix attribution without approval.
+
+Recheck the target branch before integration. Resolve conflicts against this guide, comparing base, fork, and upstream. Check affected behavior. For owner decisions, inspect all exposed conflicts, then ask one consolidated question with recommendations; later commits may expose more conflicts.
+
+Reconcile task-owned duplicate edits only when other work is preserved. If integration is blocked, commit completed work and report **ready, integration blocked**, with the reason. Identify unfinished work separately.
+
+Finish with the change, exact checks and results, commit, integration and push status, and remaining work's branch or worktree. Report skipped checks and uncertainty, not just successes.
+
+### Push permissions
+
+Pushing to `origin/main`, including `--force-with-lease`, has standing owner approval but is not required for local task completion. Other force pushes, moving existing tags, discarding work, and publishing releases need explicit approval. An implementation request alone does not authorize a release.
+
+## Upstream sync
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
