@@ -83,6 +83,7 @@ fn unavailable_thread_dispatches_recovery_and_local_commands() {
         SlashCommand::Pwd,
         SlashCommand::Rollout,
         SlashCommand::Copy,
+        SlashCommand::CopyId,
         SlashCommand::Raw,
     ] {
         let (mut composer, _) = new_test_composer();
