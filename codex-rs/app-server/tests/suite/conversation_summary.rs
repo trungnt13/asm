@@ -125,6 +125,7 @@ async fn get_conversation_summary_by_thread_id_reads_pathless_store_thread() -> 
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,
