@@ -70,9 +70,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `67727e7cf114cf3e1b71db368d74b24e32f6cb12`.
+- Last incorporated upstream commit: `60947e234156ac12bdb7fba2477d3965f166bd34`.
 - Commit date: 2026-09-30.
-- Subject: Allow managed requirements to disable the Windows MXC sandbox (#49642).
+- Subject: Add account security setup reminders to the TUI (#49715).
 
 A full sync incorporates a selected upstream `main` commit and all its ancestors. Capture the old baseline and selected upstream commit before syncing; use that fixed range for the report. After success, update the marker to the incorporated commit. A targeted cherry-pick does not advance it. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and check that it is an ancestor of the fork branch.
 
