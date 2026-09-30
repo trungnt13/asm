@@ -3875,10 +3875,12 @@ mod tests {
         assert_eq!(side.session.forked_from_id, Some(source_thread_id));
         assert_eq!(side.turns, Vec::<Turn>::new());
         assert!(app_server.has_older_history(source_thread_id));
-        assert!(
-            !app_server
-                .history_pagination
-                .contains_key(&side.session.thread_id)
+        assert_eq!(
+            (
+                app_server.history_pagination[&side.session.thread_id].history_mode,
+                app_server.has_older_history(side.session.thread_id),
+            ),
+            (ThreadHistoryMode::Paginated, false),
         );
 
         app_server.shutdown().await?;
