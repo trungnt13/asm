@@ -133,6 +133,7 @@ pub(crate) struct ThreadHistoryPagination {
     seen_turn_cursors: HashSet<String>,
     seen_item_cursors: HashSet<String>,
     loading_older: bool,
+    side_boundary: Option<String>,
 }
 
 impl AppServerSession {
@@ -247,7 +248,8 @@ impl AppServerSession {
         limit: u32,
     ) -> Result<ThreadTurnsListResponse> {
         let request_id = self.next_request_id();
-        self.client
+        let mut page: ThreadTurnsListResponse = self
+            .client
             .request_typed(ClientRequest::ThreadTurnsList {
                 request_id,
                 params: ThreadTurnsListParams {
@@ -259,7 +261,11 @@ impl AppServerSession {
                 },
             })
             .await
-            .wrap_err("failed to load a bounded thread history page")
+            .wrap_err("failed to load a bounded thread history page")?;
+        if let Some(side) = self.side_conversation(thread_id)? {
+            trim_side_turn_page(&mut page, side.last_inherited_turn.as_deref());
+        }
+        Ok(page)
     }
 
     async fn merge_thread_item_page(
@@ -289,9 +295,10 @@ impl AppServerSession {
                 // Fetch only the remaining item-backed turns so metadata does not run ahead
                 // of this page. Empty turns between them may require another bounded request.
                 let limit = missing_turn_ids.len().min(HISTORY_ITEM_PAGE_LIMIT as usize) as u32;
-                let page = self
+                let mut page = self
                     .thread_turns_page(thread_id, Some(cursor.clone()), limit)
                     .await?;
+                trim_side_turn_page(&mut page, state.side_boundary.as_deref());
                 state.next_turn_cursor = advancing_cursor(
                     Some(&cursor),
                     page.next_cursor,
@@ -301,6 +308,12 @@ impl AppServerSession {
                     missing_turn_ids.remove(&turn.id);
                 }
                 turns.splice(0..0, page.data.into_iter().rev());
+            }
+            if state.side_boundary.is_some() && !turns.iter().any(|turn| turn.id == entry.turn_id) {
+                // Items arrive newest first. Once metadata reaches the inherited boundary,
+                // the first unknown turn and every older item belong to the parent transcript.
+                state.next_item_cursor = None;
+                break;
             }
             if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
                 && !turn.items.iter().any(|item| item.id() == entry.item.id())
@@ -329,22 +342,29 @@ impl AppServerSession {
     ) -> Result<()> {
         let thread_id = ThreadId::from_string(&thread.id)
             .wrap_err("invalid thread id in bounded history response")?;
+        let side = self.side_conversation(thread_id)?;
         if thread.history_mode == ThreadHistoryMode::Legacy {
             if thread.turns.is_empty() {
                 thread.turns = Box::pin(self.thread_read(thread_id, /*include_turns*/ true))
                     .await?
                     .turns;
             }
+            if let Some(side) = &side {
+                side.trim_turns(&mut thread.turns);
+            }
             self.history_pagination.entry(thread_id).or_default();
             return Ok(());
         }
 
-        let page = self
+        let mut page = self
             .thread_turns_page(thread_id, turn_cursor, INITIAL_HISTORY_TURN_LIMIT)
             .await?;
+        let side_boundary = side.and_then(|side| side.last_inherited_turn);
+        trim_side_turn_page(&mut page, side_boundary.as_deref());
         thread.turns = page.data.into_iter().rev().collect();
         let mut state = ThreadHistoryPagination {
             history_mode: ThreadHistoryMode::Paginated,
+            side_boundary,
             next_turn_cursor: page.next_cursor,
             next_item_cursor: item_cursor,
             ..ThreadHistoryPagination::default()
@@ -402,6 +422,15 @@ impl AppServerSession {
             self.history_pagination.insert(thread_id, state);
         }
         Ok(())
+    }
+}
+
+fn trim_side_turn_page(page: &mut ThreadTurnsListResponse, boundary: Option<&str>) {
+    if let Some(boundary) = boundary
+        && let Some(index) = page.data.iter().position(|turn| turn.id == boundary)
+    {
+        page.data.truncate(index);
+        page.next_cursor = None;
     }
 }
 
