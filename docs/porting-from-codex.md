@@ -70,9 +70,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `67727e7cf114cf3e1b71db368d74b24e32f6cb12`.
+- Last incorporated upstream commit: `60947e234156ac12bdb7fba2477d3965f166bd34`.
 - Commit date: 2026-09-30.
-- Subject: Allow managed requirements to disable the Windows MXC sandbox (#49642).
+- Subject: Add account security setup reminders to the TUI (#49715).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
