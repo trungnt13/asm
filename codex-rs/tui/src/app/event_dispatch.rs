@@ -241,11 +241,11 @@ impl App {
                 requested_cwd,
             } => {
                 if self.pending_working_directory_change.is_some()
-                    || self.primary_thread_id != Some(thread_id)
+                    || self.current_displayed_thread_id() != Some(thread_id)
                     || !self.chat_widget.can_change_working_directory(thread_id)
                 {
                     self.chat_widget.add_error_message(
-                        "Changing directories requires an idle primary session without queued input."
+                        "Changing directories requires an idle session without queued input."
                             .to_string(),
                     );
                 } else if crate::uses_remote_workspace_or_environment(
@@ -3605,15 +3605,10 @@ impl App {
                 .add_error_message("A thread must start before it can be archived.".to_string());
             return Ok(AppRunControl::Continue);
         };
-        if self.side_threads.contains_key(&thread_id) {
-            self.chat_widget.add_error_message(
-                "'/archive' is unavailable in side conversations. Press Ctrl+C to return to the main thread first."
-                    .to_string(),
-            );
-            return Ok(AppRunControl::Continue);
-        }
-
-        if !matches!(self.app_server_target, AppServerTarget::Embedded) {
+        let side_parent_thread_id = self.active_side_parent_thread_id();
+        if side_parent_thread_id.is_none()
+            && !matches!(self.app_server_target, AppServerTarget::Embedded)
+        {
             self.shutdown_side_threads(app_server).await;
             if !self.side_threads.is_empty() {
                 return Ok(AppRunControl::Continue);
@@ -3626,6 +3621,21 @@ impl App {
             app_server.thread_archive(thread_id).await
         }
         .await;
+        if result.is_ok()
+            && let Some(parent_thread_id) = side_parent_thread_id
+        {
+            self.track_agents_overview_notification(&ServerNotification::ThreadArchived(
+                codex_app_server_protocol::ThreadArchivedNotification {
+                    thread_id: thread_id.to_string(),
+                },
+            ));
+            self.discard_thread_local_state(thread_id).await;
+            self.agents_overview.input_states.remove(&thread_id);
+            self.agents_overview.dispatched_requests.remove(&thread_id);
+            self.select_agent_thread(tui, app_server, parent_thread_id)
+                .await?;
+            return Ok(AppRunControl::Continue);
+        }
         Ok(match result {
             Ok(()) if matches!(self.app_server_target, AppServerTarget::Embedded) => {
                 AppRunControl::Exit(ExitReason::Archived(thread_id))
@@ -3673,15 +3683,10 @@ impl App {
                 .add_error_message("A thread must start before it can be deleted.".to_string());
             return Ok(AppRunControl::Continue);
         };
-        if self.side_threads.contains_key(&thread_id) {
-            self.chat_widget.add_error_message(
-                "'/delete' is unavailable in side conversations. Press Ctrl+C to return to the main thread first."
-                    .to_string(),
-            );
-            return Ok(AppRunControl::Continue);
-        }
-
-        if !matches!(self.app_server_target, AppServerTarget::Embedded) {
+        let side_parent_thread_id = self.active_side_parent_thread_id();
+        if side_parent_thread_id.is_none()
+            && !matches!(self.app_server_target, AppServerTarget::Embedded)
+        {
             self.shutdown_side_threads(app_server).await;
             if !self.side_threads.is_empty() {
                 return Ok(AppRunControl::Continue);
@@ -3694,6 +3699,21 @@ impl App {
             app_server.thread_delete(thread_id).await
         }
         .await;
+        if result.is_ok()
+            && let Some(parent_thread_id) = side_parent_thread_id
+        {
+            self.track_agents_overview_notification(&ServerNotification::ThreadDeleted(
+                codex_app_server_protocol::ThreadDeletedNotification {
+                    thread_id: thread_id.to_string(),
+                },
+            ));
+            self.discard_thread_local_state(thread_id).await;
+            self.agents_overview.input_states.remove(&thread_id);
+            self.agents_overview.dispatched_requests.remove(&thread_id);
+            self.select_agent_thread(tui, app_server, parent_thread_id)
+                .await?;
+            return Ok(AppRunControl::Continue);
+        }
         Ok(match result {
             Ok(()) if matches!(self.app_server_target, AppServerTarget::Embedded) => {
                 AppRunControl::Exit(ExitReason::ThreadRemoved)
