@@ -150,6 +150,10 @@ The optional `macos_concurrency_experiment` compares cold builds of one commit o
 
 ## Intentional behavior differences
 
+### Copy session ID
+
+Offer `/copyid` to copy only the currently displayed session's ID directly through the existing clipboard path, without requiring `/status`, an assistant response, or a picker. Allow it while a task is running, in side conversations, and when viewing parent-owned subagents. Report missing IDs and clipboard failures; preserve `/copy` behavior and clipboard platform support.
+
 ### ASM branding
 
 Use ASM in the README heading, repository description, release titles and introductory prose, workflow step descriptions, and the fork's own TUI-visible labels and terminal title. Credit OpenAI Codex where origin is described. Keep real upstream service and product names, and keep `codex` executable, CLI version prefix, crate, config/state, archive, tag, workflow, job, and check identifiers unchanged. Branding does not redirect upstream links or installers.

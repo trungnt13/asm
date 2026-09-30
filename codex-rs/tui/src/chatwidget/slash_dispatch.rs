@@ -495,6 +495,17 @@ impl ChatWidget {
             SlashCommand::Copy => {
                 self.show_copy_picker();
             }
+            SlashCommand::CopyId => {
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx.send(AppEvent::CopySelection {
+                        text: Arc::from(thread_id.to_string()),
+                        label: "Session ID".to_string(),
+                        format: crate::clipboard_copy::CopyFormat::PlainText,
+                    });
+                } else {
+                    self.add_error_message("No session ID to copy.".to_string());
+                }
+            }
             SlashCommand::Export => {
                 self.show_transcript_export_popup();
             }
@@ -1279,6 +1290,7 @@ impl ChatWidget {
             | SlashCommand::Plugins
             | SlashCommand::Rollout
             | SlashCommand::Copy
+            | SlashCommand::CopyId
             | SlashCommand::Raw
             | SlashCommand::Vim
             | SlashCommand::Daybreak
