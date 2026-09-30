@@ -1,17 +1,22 @@
 use super::*;
+use crate::app::session_lifecycle::ThreadAttachPresentation;
+use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn saved_side_replacement_and_cancel_keep_history_and_resume_events() -> Result<()> {
     let (mut app, mut app_events, _ops) = make_test_app_with_channels().await;
     let config = app.chat_widget.config_ref().clone();
-    let parent_id = ThreadId::from_string(&app_test_support::create_fake_rollout(
-        config.codex_home.as_path(),
-        "2025-01-05T12-00-00",
-        "2025-01-05T12:00:00Z",
-        "Parent history must remain saved",
-        Some(config.model_provider_id.as_str()),
-        /*git_info*/ None,
-    )?)?;
+    let parent_id = ThreadId::from_string(
+        &app_test_support::create_fake_rollout(
+            config.codex_home.as_path(),
+            "2025-01-05T12-00-00",
+            "2025-01-05T12:00:00Z",
+            "Parent history must remain saved",
+            Some(config.model_provider_id.as_str()),
+            /*git_info*/ None,
+        )
+        .expect("synthetic parent rollout"),
+    )?;
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
     let parent = server
         .resume_thread(
