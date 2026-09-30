@@ -280,14 +280,6 @@ impl ChatWidget {
             return;
         }
 
-        if self.side_conversation_active() {
-            self.add_error_message(
-                "Voice mode is unavailable in side conversations. Return to the main thread first."
-                    .to_string(),
-            );
-            return;
-        }
-
         if self.blocks_direct_input {
             self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
             return;
