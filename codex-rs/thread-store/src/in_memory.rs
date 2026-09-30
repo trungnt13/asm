@@ -169,6 +169,7 @@ mod tests {
                     creator_user_id: None,
                     creator_account_id: None,
                     session_id: thread_id.into(),
+                    prompt_cache_key: None,
                     thread_id,
                     extra_config: None,
                     forked_from_id: None,
@@ -445,6 +446,7 @@ mod tests {
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -584,6 +586,7 @@ impl InMemoryThreadStore {
         state.calls.create_thread += 1;
         let session_meta = SessionMeta {
             session_id: params.session_id,
+            prompt_cache_key: params.prompt_cache_key,
             id: params.thread_id,
             forked_from_id: params.forked_from_id,
             parent_thread_id: params.parent_thread_id,
