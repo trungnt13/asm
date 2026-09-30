@@ -3,7 +3,7 @@
 ## Principles
 
 1. **Personal use only.** This fork is for Trung Ngo.
-2. **Keep changes minimal, safe, and minor.** Assume unchanged code was tested upstream. Check our changes, conflicts, and packages narrowly; upstream testing does not prove they work.
+2. **Keep changes minimal, safe, and minor.** Prefer durable, localized solutions that minimize upstream divergence and future merge or rebase conflicts. Do not sacrifice correctness, maintainability, or runtime performance merely to reduce the diff. Assume unchanged code was tested upstream. Check our changes, conflicts, and packages narrowly; upstream testing does not prove they work.
 3. **Record current intent here.** Cover each fork change's purpose and constraints; update new or changed intent, not a task log. Ask before contradicting existing intent. Once approved, replace the old rule. Agents may then resolve mechanical conflicts without further approval.
 
 This guide overrides other repository instructions, including [AGENTS.md](../AGENTS.md), where they conflict. Its validation and platform limits replace upstream defaults; other coding, formatting, test-authoring, and generator rules still apply. Intent recorded here is not proof of implementation, integration, or publication.
