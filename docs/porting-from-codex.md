@@ -66,9 +66,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `9ef9cb1d9fc6013f6c1994346e0ee93ad9e6f986`.
+- Last incorporated upstream commit: `d42056091aded7feb1d88ac7e83972108b2aa478`.
 - Commit date: 2026-09-30.
-- Subject: Complete turn abort callbacks before emitting terminal events (#49475).
+- Subject: Add a fork shortcut to the TUI command center (#49517).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
