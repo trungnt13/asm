@@ -212,6 +212,7 @@ mod startup_presentation;
 mod startup_recovery;
 mod status;
 mod status_indicator_widget;
+mod status_line_labels;
 mod streaming;
 mod style;
 mod subscription;
