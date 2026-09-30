@@ -2920,7 +2920,7 @@ impl App {
                 self.apply_agent_picker_thread_refresh(primary_thread_id, request_id, result);
             }
             AppEvent::SelectAgentThread(thread_id) => {
-                self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
+                self.select_agent_thread(tui, app_server, thread_id)
                     .await?;
             }
             AppEvent::StartSide {
@@ -3602,6 +3602,11 @@ impl App {
                     thread_id: thread_id.to_string(),
                 },
             ));
+            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to save the closed side selection: {error}"
+                ));
+            }
             self.discard_thread_local_state(thread_id).await;
             self.agents_overview.input_states.remove(&thread_id);
             self.agents_overview.dispatched_requests.remove(&thread_id);
@@ -3680,6 +3685,11 @@ impl App {
                     thread_id: thread_id.to_string(),
                 },
             ));
+            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to save the closed side selection: {error}"
+                ));
+            }
             self.discard_thread_local_state(thread_id).await;
             self.agents_overview.input_states.remove(&thread_id);
             self.agents_overview.dispatched_requests.remove(&thread_id);
