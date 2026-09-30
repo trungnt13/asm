@@ -38,13 +38,6 @@ impl SlashCommandItem {
         }
     }
 
-    pub(crate) fn available_in_side_conversation(&self) -> bool {
-        match self {
-            Self::Builtin(cmd) => cmd.available_in_side_conversation(),
-            Self::ServiceTier(_) => false,
-        }
-    }
-
     pub(crate) fn available_during_task(&self) -> bool {
         match self {
             Self::Builtin(cmd) => cmd.available_during_task(),
@@ -65,7 +58,6 @@ pub(crate) struct BuiltinCommandFlags {
     pub(crate) voice_command_enabled: bool,
     pub(crate) worktrees_enabled: bool,
     pub(crate) allow_elevate_sandbox: bool,
-    pub(crate) side_conversation_active: bool,
 }
 
 /// Return the built-ins that should be visible/usable for the current input.
@@ -83,7 +75,6 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
         .filter(|(_, cmd)| {
             flags.daybreak_command_description.is_some() || *cmd != SlashCommand::Daybreak
         })
-        .filter(|(_, cmd)| !flags.side_conversation_active || cmd.available_in_side_conversation())
         .collect()
 }
 
@@ -105,16 +96,11 @@ pub(crate) fn commands_for_input(
         }
     }
     commands
-        .into_iter()
-        .filter(|cmd| !flags.side_conversation_active || cmd.available_in_side_conversation())
-        .collect()
 }
 
 /// Find a single built-in command by a recognized name or alias, after applying feature gating.
 ///
-/// Side-conversation and token-activity gating are intentionally enforced by dispatch rather than
-/// command lookup so a typed command can produce a specific unavailable message while the popup
-/// still hides it.
+/// Token-activity gating is enforced by dispatch so typed commands can report why they are hidden.
 pub(crate) fn find_builtin_command(name: &str, flags: BuiltinCommandFlags) -> Option<SlashCommand> {
     let cmd = SlashCommand::from_str(name).ok().or_else(|| {
         let repeated_os = name.strip_prefix('g')?.strip_suffix("al")?;
@@ -124,7 +110,6 @@ pub(crate) fn find_builtin_command(name: &str, flags: BuiltinCommandFlags) -> Op
     builtins_for_input(BuiltinCommandFlags {
         token_activity_command_enabled: true,
         daybreak_command_description: Some(""),
-        side_conversation_active: false,
         ..flags
     })
     .into_iter()
@@ -175,7 +160,6 @@ pub(crate) fn has_slash_command_prefix(
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::slice::from_ref;
 
     fn all_enabled_flags() -> BuiltinCommandFlags {
         BuiltinCommandFlags {
@@ -189,7 +173,6 @@ mod tests {
             voice_command_enabled: true,
             worktrees_enabled: true,
             allow_elevate_sandbox: true,
-            side_conversation_active: false,
         }
     }
 
@@ -322,68 +305,6 @@ mod tests {
         assert_eq!(
             find_builtin_command("usage", flags),
             Some(SlashCommand::Usage)
-        );
-    }
-
-    #[test]
-    fn side_conversation_hides_commands_without_side_flag() {
-        let commands = builtins_for_input(BuiltinCommandFlags {
-            side_conversation_active: true,
-            ..all_enabled_flags()
-        })
-        .into_iter()
-        .map(|(_, command)| command)
-        .collect::<Vec<_>>();
-
-        assert_eq!(
-            commands,
-            vec![
-                SlashCommand::Ide,
-                SlashCommand::Agents,
-                SlashCommand::Copy,
-                SlashCommand::CopyId,
-                SlashCommand::Export,
-                SlashCommand::Raw,
-                SlashCommand::Diff,
-                SlashCommand::Mention,
-                SlashCommand::Status,
-                SlashCommand::Daemon,
-                SlashCommand::Warnings,
-                SlashCommand::Pwd,
-                SlashCommand::Usage,
-            ]
-        );
-    }
-
-    #[test]
-    fn side_conversation_exact_lookup_still_resolves_hidden_commands_for_dispatch_error() {
-        assert_eq!(
-            find_builtin_command(
-                "review",
-                BuiltinCommandFlags {
-                    side_conversation_active: true,
-                    ..all_enabled_flags()
-                },
-            ),
-            Some(SlashCommand::Review)
-        );
-    }
-
-    #[test]
-    fn side_conversation_exact_lookup_still_resolves_service_tier_commands_for_dispatch_error() {
-        let command = ServiceTierCommand {
-            id: "priority".to_string(),
-            name: "fast".to_string(),
-            description: "fastest inference".to_string(),
-        };
-        let flags = BuiltinCommandFlags {
-            side_conversation_active: true,
-            ..all_enabled_flags()
-        };
-
-        assert_eq!(
-            find_slash_command("fast", flags, from_ref(&command)),
-            Some(SlashCommandItem::ServiceTier(command))
         );
     }
 }
