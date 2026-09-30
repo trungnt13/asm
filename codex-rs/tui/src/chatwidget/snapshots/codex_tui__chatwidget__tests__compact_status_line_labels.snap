@@ -1,0 +1,62 @@
+---
+source: tui/src/chatwidget/tests/model_display_name_tests.rs
+expression: "snapshots.join(\"\\n\\n\")"
+---
+GPT-6.1-Sol
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  sol61·med·sol61 med                                                           "
+
+
+GPT-6-Astra
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  astra6·hig·astra6 hig                                                         "
+
+
+GPT-6-Luna
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  luna6·xhi·luna6 xhi                                                           "
+
+
+GPT-5.6 Luna
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  luna56·low·luna56 low                                                         "
+
+
+GPT-5.2
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  52·def·52 def                                                                 "
+
+
+Luna Reserve
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  luna reserve·dee·luna reserve dee                                             "
+
+
+Custom.V2
+"                                                                                "
+"                                                                                "
+"» Ask ASM to do anything                                                        "
+"                                                                                "
+"  customv2·ult·customv2 ult                                                     "
+
+
+Placeholder preview
+codex52·med·codex52 med
