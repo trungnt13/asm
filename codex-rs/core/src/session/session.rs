@@ -898,21 +898,27 @@ impl Session {
                 .runtime()
                 .root_thread_instructions_provider(thread_id, instructions.thread_provider);
         }
-        // Ephemeral forks reuse cache routing, without sharing storage or lifecycle identity.
-        let fork_cache_key = match &initial_history {
-            InitialHistory::Forked(items)
-                if config.ephemeral
-                    && !session_configuration.session_source.is_non_root_agent() =>
-            {
-                items.iter().find_map(|item| match item {
-                    RolloutItem::SessionMeta(meta) => Some(meta.meta.session_id.to_string()),
+        // Persist cache routing separately so root forks retain independent session identities.
+        let prompt_cache_key = if session_configuration.session_source.is_non_root_agent() {
+            None
+        } else {
+            match &initial_history {
+                InitialHistory::Forked(items) => items.iter().find_map(|item| match item {
+                    RolloutItem::SessionMeta(meta) => {
+                        Some(meta.meta.prompt_cache_key.unwrap_or(meta.meta.session_id))
+                    }
                     _ => None,
-                })
+                }),
+                InitialHistory::Resumed(resumed) => resumed
+                    .history
+                    .iter()
+                    .find_map(|item| match item {
+                        RolloutItem::SessionMeta(meta) => Some(meta.meta.prompt_cache_key),
+                        _ => None,
+                    })
+                    .flatten(),
+                InitialHistory::New | InitialHistory::Cleared => None,
             }
-            InitialHistory::New
-            | InitialHistory::Cleared
-            | InitialHistory::Resumed(_)
-            | InitialHistory::Forked(_) => None,
         };
         let resumed_session_id = match &initial_history {
             InitialHistory::Resumed(resumed) => {
@@ -1044,6 +1050,7 @@ impl Session {
                             creator_user_id: auth.as_ref().and_then(CodexAuth::get_chatgpt_user_id),
                             creator_account_id: auth.as_ref().and_then(CodexAuth::get_account_id),
                             session_id,
+                            prompt_cache_key,
                             thread_id,
                             extra_config: config.extra_config.clone(),
                             forked_from_id,
@@ -1802,7 +1809,7 @@ impl Session {
                         &session_configuration.session_source,
                         session_configuration.parent_thread_id,
                     )
-                    .or(fork_cache_key),
+                    .or(prompt_cache_key.map(|key| key.to_string())),
                     tx_event.clone(),
                     codex_responses_headers,
                     crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),
