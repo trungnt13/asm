@@ -70,6 +70,9 @@ impl AppServerSession {
                 })
                 .await?;
             thread.turns = page.data.into_iter().rev().collect();
+            if let Some(side) = self.side_conversation(thread_id)? {
+                side.trim_turns(&mut thread.turns);
+            }
             self.history_pagination.remove(&thread_id);
             history_notice = Some(
                 "Showing up to 100 recent prompts and final replies. Intermediate messages and tool activity are unavailable.",
