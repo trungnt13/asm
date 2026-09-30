@@ -34,8 +34,6 @@ struct PreparedSlashCommandArgs {
 }
 
 const SIDE_STARTING_CONTEXT_LABEL: &str = "Side starting...";
-const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
-    "Press Ctrl+C to return to the main thread first.";
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
 const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
@@ -56,15 +54,6 @@ impl ChatWidget {
 
     pub(super) fn handle_service_tier_command_dispatch(&mut self, command: ServiceTierCommand) {
         self.transcript.last_status_copy_targets = None;
-        if self.active_side_conversation {
-            self.add_error_message(format!(
-                "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
-                command.name
-            ));
-            self.bottom_pane.drain_pending_submission_state();
-            self.bottom_pane.record_pending_slash_command_history();
-            return;
-        }
         self.toggle_service_tier_from_ui(command);
         self.bottom_pane.record_pending_slash_command_history();
     }
@@ -166,9 +155,6 @@ impl ChatWidget {
     ) {
         if cmd != SlashCommand::Copy {
             self.transcript.last_status_copy_targets = None;
-        }
-        if !self.ensure_slash_command_allowed_in_side_conversation(cmd) {
-            return;
         }
         if !self.ensure_side_command_allowed_outside_review(cmd) {
             return;
@@ -675,9 +661,6 @@ impl ChatWidget {
     ) {
         if cmd != SlashCommand::Copy {
             self.transcript.last_status_copy_targets = None;
-        }
-        if !self.ensure_slash_command_allowed_in_side_conversation(cmd) {
-            return;
         }
         if !self.ensure_side_command_allowed_outside_review(cmd) {
             return;
@@ -1250,7 +1233,6 @@ impl ChatWidget {
             worktrees_enabled: self.config.features.enabled(Feature::Worktrees)
                 && self.local_worktree_operations,
             allow_elevate_sandbox,
-            side_conversation_active: self.active_side_conversation,
         }
     }
 
@@ -1366,18 +1348,6 @@ impl ChatWidget {
                 (start < end).then_some(elem.map_range(|_| ByteRange { start, end }))
             })
             .collect()
-    }
-
-    fn ensure_slash_command_allowed_in_side_conversation(&mut self, cmd: SlashCommand) -> bool {
-        if !self.active_side_conversation || cmd.available_in_side_conversation() {
-            return true;
-        }
-        self.add_error_message(format!(
-            "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
-            cmd.command()
-        ));
-        self.bottom_pane.drain_pending_submission_state();
-        false
     }
 
     fn ensure_side_command_allowed_outside_review(&mut self, cmd: SlashCommand) -> bool {
