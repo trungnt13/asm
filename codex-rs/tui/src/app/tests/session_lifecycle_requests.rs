@@ -1166,6 +1166,95 @@ async fn external_transport_registers_dynamic_tools_and_finds_task_mentions() ->
 }
 
 #[tokio::test]
+async fn removing_saved_side_returns_to_parent_on_embedded_and_shared_servers() -> Result<()> {
+    let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500")?;
+    for target in [
+        AppServerTarget::Embedded,
+        AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
+            endpoint: endpoint.clone(),
+        },
+        AppServerTarget::Remote { endpoint },
+    ] {
+        for (method, event) in [
+            ("thread/archive", AppEvent::ArchiveCurrentThread),
+            ("thread/delete", AppEvent::DeleteCurrentThread),
+        ] {
+            let (mut app, _codex_home) = make_history_test_app().await?;
+            let parent_id =
+                create_history_rollout(&app.config, ThreadHistoryMode::Legacy, "keep parent")?;
+            let (mut server, requests, proxy) = start_recording_app_server(
+                &app.config,
+                /*blocked_thread_list*/ None,
+                /*failed_thread_name*/ None,
+            )
+            .await?;
+            let resumed = server
+                .resume_thread(
+                    &app.local_settings,
+                    app.config.clone(),
+                    parent_id,
+                    crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+                )
+                .await?;
+            app.app_server_target = target.clone();
+            app.enqueue_primary_thread_session(resumed.session.clone(), resumed.turns)
+                .await?;
+            app.chat_widget.handle_thread_session(resumed.session);
+            let side = server
+                .fork_side_thread(
+                    &app.local_settings,
+                    app.config.clone(),
+                    parent_id,
+                    /*selected_profile*/ None,
+                )
+                .await?;
+            let side_id = side.session.thread_id;
+            app.side_threads
+                .insert(side_id, SideThreadState::new(parent_id));
+            App::install_side_thread_snapshot(
+                &mut app.ensure_thread_channel(side_id).store.lock().await,
+                side.session,
+                side.turns,
+            );
+            app.upsert_agent_picker_thread(
+                side_id, /*agent_nickname*/ None, /*agent_role*/ None,
+                /*is_closed*/ false,
+            );
+            let mut tui = crate::tui::test_support::make_test_tui()?;
+            app.select_agent_thread(&mut tui, &mut server, side_id)
+                .await?;
+            assert_eq!(app.current_displayed_thread_id(), Some(side_id));
+
+            let control = Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+
+            assert_matches!(control, AppRunControl::Continue);
+            assert_eq!(
+                (
+                    app.current_displayed_thread_id(),
+                    app.chat_widget.thread_id()
+                ),
+                (Some(parent_id), Some(parent_id))
+            );
+            assert!(app.side_threads.is_empty());
+            assert_eq!(
+                recorded_params(&requests, method),
+                vec![serde_json::json!({"threadId": side_id.to_string()})]
+            );
+            assert!(
+                server
+                    .thread_read(parent_id, /*include_turns*/ true)
+                    .await
+                    .is_ok()
+            );
+            server.shutdown().await?;
+            proxy.await??;
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn archive_current_thread_reports_success_only_after_archiving() -> Result<()> {
     let (mut app, _codex_home) = make_history_test_app().await?;
     let thread_id = ThreadId::from_string(
