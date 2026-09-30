@@ -1426,7 +1426,7 @@ impl App {
     ) -> Option<ThreadSessionState> {
         let parent_thread_id = match &notification.thread.source {
             codex_app_server_protocol::SessionSource::SubAgent(
-                codex_app_server_protocol::SubAgentSource::ThreadSpawn {
+                codex_protocol::protocol::SubAgentSource::ThreadSpawn {
                     parent_thread_id, ..
                 },
             ) => Some(*parent_thread_id),
