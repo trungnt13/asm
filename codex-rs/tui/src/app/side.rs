@@ -758,8 +758,8 @@ impl App {
         {
             Ok(forked) => {
                 let child_thread_id = forked.session.thread_id;
-                if let Err(error) = self
-                    .remember_side_conversation(app_server, parent_thread_id, child_thread_id)
+                if let Err(error) = app_server
+                    .save_side_conversation(parent_thread_id, child_thread_id)
                     .await
                 {
                     self.discard_side_thread(app_server, child_thread_id).await;
