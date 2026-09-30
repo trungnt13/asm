@@ -192,26 +192,6 @@ impl SlashCommand {
         )
     }
 
-    /// Whether this command remains available inside an active side conversation.
-    pub fn available_in_side_conversation(self) -> bool {
-        matches!(
-            self,
-            SlashCommand::Copy
-                | SlashCommand::CopyId
-                | SlashCommand::Agents
-                | SlashCommand::Export
-                | SlashCommand::Raw
-                | SlashCommand::Diff
-                | SlashCommand::Mention
-                | SlashCommand::Status
-                | SlashCommand::Daemon
-                | SlashCommand::Warnings
-                | SlashCommand::Pwd
-                | SlashCommand::Usage
-                | SlashCommand::Ide
-        )
-    }
-
     /// Whether dispatch needs thread state to validate this command before consuming its draft.
     /// The composer must defer busy-state rejection and draft clearing for these commands.
     pub(crate) fn requires_dispatch_validation(self) -> bool {
@@ -356,7 +336,6 @@ mod tests {
         assert!(SlashCommand::Title.available_during_task());
         assert!(SlashCommand::Statusline.available_during_task());
         assert!(SlashCommand::Raw.available_during_task());
-        assert!(SlashCommand::Raw.available_in_side_conversation());
         assert!(SlashCommand::Raw.supports_inline_args());
         assert!(SlashCommand::App.available_during_task());
     }
