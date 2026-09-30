@@ -16,9 +16,9 @@ Use ASM in the README heading, GitHub repository description and release titles,
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `2a34aef79484bf769b4b225f3f595755f2962170`.
-- Commit date: 2026-09-29.
-- Subject: Update Bedrock GPT-6 Sol catalog tests to expect multi-agent V2 (#49369).
+- Last incorporated upstream commit: `9ef9cb1d9fc6013f6c1994346e0ee93ad9e6f986`.
+- Commit date: 2026-09-30.
+- Subject: Complete turn abort callbacks before emitting terminal events (#49475).
 
 A full sync incorporates a selected upstream `main` commit and all its ancestors. Capture the old baseline and selected upstream commit before syncing; use that fixed range for the report. After success, update the marker to the incorporated commit. A targeted cherry-pick does not advance it. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and check that it is an ancestor of the fork branch.
 
