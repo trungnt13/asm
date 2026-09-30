@@ -48,102 +48,33 @@ async fn suppressed_interrupted_turn_notice_skips_history_warning() {
     );
 }
 
-fn assert_side_rename_rejected(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
-    op_rx: &mut tokio::sync::mpsc::UnboundedReceiver<Op>,
-) {
-    let event = rx
-        .try_recv()
-        .expect("expected side conversation rename error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(
-                rendered.contains("Side conversations are ephemeral and cannot be renamed."),
-                "expected side conversation rename error, got {rendered:?}"
-            );
-        }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
-    }
-    assert!(rx.try_recv().is_err(), "expected no follow-up events");
-    assert!(op_rx.try_recv().is_err(), "expected no rename op");
-}
-
 #[tokio::test]
-async fn slash_rename_is_rejected_for_side_threads() {
+async fn slash_rename_with_args_updates_saved_side_name() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_thread_rename_block_message(
-        "Side conversations are ephemeral and cannot be renamed.".to_string(),
-    );
-
-    chat.dispatch_command(SlashCommand::Rename);
-    assert_side_rename_rejected(&mut rx, &mut op_rx);
-}
-
-#[tokio::test]
-async fn slash_rename_with_args_is_rejected_for_side_threads() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_thread_rename_block_message(
-        "Side conversations are ephemeral and cannot be renamed.".to_string(),
-    );
+    chat.set_side_conversation_active(/*active*/ true);
 
     chat.dispatch_command_with_args(SlashCommand::Rename, "investigate".to_string(), Vec::new());
-    assert_side_rename_rejected(&mut rx, &mut op_rx);
+
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::CodexOp(Op::SetThreadName { name })) if name == "investigate"
+    );
+    assert!(rx.try_recv().is_err());
+    assert!(op_rx.try_recv().is_err());
 }
 
 #[tokio::test]
-async fn slash_commands_without_side_flag_are_rejected_for_side_threads() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn slash_review_opens_normal_picker_in_side() {
+    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_side_conversation_active(/*active*/ true);
 
     chat.dispatch_command(SlashCommand::Review);
 
-    let event = rx
-        .try_recv()
-        .expect("expected side conversation slash command error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(
-                rendered.contains(
-                    "'/review' is unavailable in side conversations. Press Ctrl+C to return to the main thread first."
-                ),
-                "expected side conversation slash command error, got {rendered:?}"
-            );
-        }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
-    }
-    assert!(rx.try_recv().is_err(), "expected no follow-up events");
-    assert!(op_rx.try_recv().is_err(), "expected no review op");
-}
-
-#[tokio::test]
-async fn slash_side_is_rejected_for_side_threads() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_side_conversation_active(/*active*/ true);
-
-    chat.dispatch_command(SlashCommand::Side);
-
-    let event = rx
-        .try_recv()
-        .expect("expected side conversation slash command error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(
-                rendered.contains(
-                    "'/side' is unavailable in side conversations. Press Ctrl+C to return to the main thread first."
-                ),
-                "expected side conversation slash command error, got {rendered:?}"
-            );
-        }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
-    }
-    assert!(rx.try_recv().is_err(), "expected no follow-up events");
-    assert!(
-        op_rx.try_recv().is_err(),
-        "expected no side conversation op"
+    assert_chatwidget_snapshot!(
+        "slash_review_picker_in_side",
+        render_bottom_popup(&chat, /*width*/ 80)
     );
+    assert!(op_rx.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -248,10 +179,11 @@ async fn submit_user_message_as_plain_user_turn_does_not_run_shell_commands() {
 }
 
 #[tokio::test]
-async fn slash_side_without_args_starts_empty_side_conversation() {
+async fn slash_side_without_args_in_side_requests_replacement_side() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let parent_thread_id = ThreadId::new();
     chat.thread_id = Some(parent_thread_id);
+    chat.set_side_conversation_active(/*active*/ true);
     chat.on_task_started();
     chat.bottom_pane
         .set_composer_text("/side".to_string(), Vec::new(), Vec::new());

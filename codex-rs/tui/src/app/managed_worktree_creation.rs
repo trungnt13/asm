@@ -80,12 +80,11 @@ impl App {
                 "Managed worktrees are only supported for local sessions.".to_string(),
             );
         } else if self
-            .primary_thread_id
+            .current_displayed_thread_id()
             .is_none_or(|thread_id| !self.chat_widget.can_change_working_directory(thread_id))
         {
             self.chat_widget.add_error_message(
-                "Creating a worktree requires an idle primary session without queued input."
-                    .to_string(),
+                "Creating a worktree requires an idle session without queued input.".to_string(),
             );
         } else if self.pending_managed_worktree_creation {
             self.chat_widget
@@ -100,9 +99,9 @@ impl App {
             {
                 return self.working_directory_error("MCP inventory is still loading.");
             }
-            let Some(thread_id) = self.primary_thread_id else {
+            let Some(thread_id) = self.current_displayed_thread_id() else {
                 return self.working_directory_error(
-                    "Creating a worktree requires an idle primary session without queued input.",
+                    "Creating a worktree requires an idle session without queued input.",
                 );
             };
             let agents = self.agent_navigation.ordered_threads();
@@ -235,7 +234,7 @@ impl App {
                 &self.app_server_target,
                 self.environment_manager.as_ref(),
             )
-            && self.primary_thread_id == Some(created.source_thread_id)
+            && self.current_displayed_thread_id() == Some(created.source_thread_id)
             && !crate::session_resume::cwds_differ(
                 self.config.cwd.as_path(),
                 created.source_cwd.as_path(),

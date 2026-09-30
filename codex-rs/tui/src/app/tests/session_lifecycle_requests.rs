@@ -4143,7 +4143,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         ("../config.toml", "local", "Not a directory"),
         (r"C:\bad", "workspace", "not supported for remote"),
         ("~", "executor", "not supported for remote"),
-        ("../trusted", "stale", "requires an idle primary session"),
+        ("../trusted", "stale", "requires an idle session"),
         ("../trusted", "running", "another agent is running"),
         ("../trusted", "active", "another agent is running"),
         ("../trusted", "mcp", "inventory is still loading"),
