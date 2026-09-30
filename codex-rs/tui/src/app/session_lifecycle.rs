@@ -33,7 +33,7 @@ pub(super) struct LoadedSubagentBackfill {
 
 impl App {
     pub(super) async fn open_agent_picker(&mut self, app_server: &mut AppServerSession) {
-        let backfill = if self.primary_thread_id.is_none() {
+        let backfill = if self.primary_thread_id.is_none() || !self.side_threads.is_empty() {
             self.backfill_loaded_subagent_threads(app_server).await
         } else {
             LoadedSubagentBackfill::default()
@@ -473,6 +473,12 @@ impl App {
             } else {
                 Default::default()
             };
+        if live_attached {
+            self.abandoned_side_threads.remove(&thread_id);
+            if self.primary_thread_id == Some(thread_id) {
+                self.primary_session_configured = Some(session.clone());
+            }
+        }
         let channel = self.ensure_thread_channel(thread_id);
         if !live_attached {
             if was_external_writer {
@@ -1250,7 +1256,15 @@ impl App {
         }
 
         let mut refreshed_thread_ids = HashSet::new();
-        for thread in find_loaded_subagent_threads_for_primary(threads, primary_thread_id) {
+        let mut descendants =
+            find_loaded_subagent_threads_for_primary(threads.clone(), primary_thread_id);
+        for side in self.side_threads.keys().copied() {
+            descendants.extend(find_loaded_subagent_threads_for_primary(
+                threads.clone(),
+                side,
+            ));
+        }
+        for thread in descendants {
             let agent_path = thread.agent_path;
             let has_live_channel = self
                 .thread_event_channels
