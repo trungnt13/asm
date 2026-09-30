@@ -27,6 +27,7 @@ expression: commands
 /agents - open the agent command center
 /side - start a side conversation in an ephemeral fork
 /copy - copy the last response or part of it
+/copyid - copy the current session ID to the clipboard
 /export - export the conversation as markdown
 /raw - toggle raw scrollback mode for copy-friendly terminal selection
 /tui - choose the TUI mode for the next launch
