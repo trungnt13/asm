@@ -55,11 +55,19 @@ impl AppServerSession {
         store.save(&SideConversation {
             parent,
             side,
-            last_inherited_turn,
+            last_inherited_turn: last_inherited_turn.clone(),
         })?;
-        // The fork response's pagination still refers to inherited history. Rehydrate on the next
-        // resume; the newly created side starts with an empty visible transcript.
-        self.history_pagination.remove(&side);
+        // The new side has no visible history to page yet. Keep its format and boundary for
+        // prompt editing; reverting an empty visible window must not reopen inherited history.
+        let state = self.history_pagination.entry(side).or_default();
+        let history_mode = state.history_mode;
+        *state = history::ThreadHistoryPagination::default();
+        state.history_mode = history_mode;
+        state.side_boundary = last_inherited_turn;
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "side_conversations_tests.rs"]
+mod tests;
