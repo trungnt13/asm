@@ -4057,7 +4057,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.4 xhigh fast·Ctx0%·{test_cwd}"))
+        Some(format!("54 xhi fast·Ctx0%·{test_cwd}"))
     );
 
     chat.set_model("gpt-5.2");
@@ -4065,7 +4065,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.2 xhigh·Ctx0%·{test_cwd}"))
+        Some(format!("52 xhi·Ctx0%·{test_cwd}"))
     );
 }
 
@@ -4096,7 +4096,7 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
     chat.refresh_status_line();
     chat.refresh_terminal_title();
 
-    assert_eq!(status_line_text(&chat), Some("xhigh".to_string()));
+    assert_eq!(status_line_text(&chat), Some("xhi".to_string()));
     assert_eq!(chat.last_terminal_title, Some("xhigh".to_string()));
 }
 
@@ -4107,13 +4107,13 @@ async fn status_line_reasoning_updates_on_mode_switch_without_manual_refresh() {
     chat.local_settings.tui.status_line = Some(vec!["reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    assert_eq!(status_line_text(&chat), Some("high".to_string()));
+    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
         .expect("expected plan collaboration mode");
     chat.set_collaboration_mask(plan_mask);
 
-    assert_eq!(status_line_text(&chat), Some("medium".to_string()));
+    assert_eq!(status_line_text(&chat), Some("med".to_string()));
 }
 
 #[tokio::test]
@@ -4123,19 +4123,19 @@ async fn status_line_model_with_reasoning_updates_on_mode_switch_without_manual_
     chat.local_settings.tui.status_line = Some(vec!["model-with-reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    assert_eq!(status_line_text(&chat), Some("gpt-5.2 high".to_string()));
+    assert_eq!(status_line_text(&chat), Some("52 hig".to_string()));
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
         .expect("expected plan collaboration mode");
     chat.set_collaboration_mask(plan_mask);
 
-    assert_eq!(status_line_text(&chat), Some("gpt-5.2 medium".to_string()));
+    assert_eq!(status_line_text(&chat), Some("52 med".to_string()));
 
     let default_mask = collaboration_modes::default_mask(chat.model_catalog.as_ref())
         .expect("expected default collaboration mode");
     chat.set_collaboration_mask(default_mask);
 
-    assert_eq!(status_line_text(&chat), Some("gpt-5.2 high".to_string()));
+    assert_eq!(status_line_text(&chat), Some("52 hig".to_string()));
 }
 
 #[tokio::test]
