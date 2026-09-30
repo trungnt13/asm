@@ -4,6 +4,7 @@ use anyhow::Result;
 use anyhow::anyhow;
 use codex_features::Feature;
 use codex_login::CodexAuth;
+use codex_protocol::protocol::ThreadHistoryMode;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call_with_namespace;
@@ -160,67 +161,129 @@ async fn api_key_subagent_uses_session_id_as_prompt_cache_key() -> Result<()> {
 }
 
 #[rstest::rstest]
-#[case::saved(false)]
-#[case::ephemeral(true)]
+#[case::saved(false, ThreadHistoryMode::Legacy)]
+#[case::ephemeral(true, ThreadHistoryMode::Legacy)]
+#[case::saved_paginated(false, ThreadHistoryMode::Paginated)]
 #[tokio::test]
 async fn root_fork_shares_cache_routing_but_keeps_session_identity(
     #[case] ephemeral: bool,
+    #[case] history_mode: ThreadHistoryMode,
 ) -> Result<()> {
     use codex_core::ForkSnapshot;
     use codex_core::StartThreadOptions;
     use core_test_support::responses::mount_sse_sequence;
 
     let server = start_mock_server().await;
+    let response_ids = if ephemeral {
+        vec!["parent", "fork"]
+    } else {
+        vec!["parent", "fork", "resumed"]
+    };
     let requests = mount_sse_sequence(
         &server,
-        vec![
-            sse(vec![ev_completed("parent")]),
-            sse(vec![ev_completed("fork")]),
-        ],
+        response_ids
+            .into_iter()
+            .map(|id| sse(vec![ev_completed(id)]))
+            .collect(),
     )
     .await;
-    let mut test = test_codex().build_with_auto_env(&server).await?;
+    let mut test = test_codex()
+        .with_history_mode(history_mode)
+        .build_with_auto_env(&server)
+        .await?;
     test.submit_text_turn("parent").await?;
     test.codex.flush_rollout().await?;
     let parent_session = test.session_configured.session_id.to_string();
     let mut config = test.config.clone();
     config.ephemeral = ephemeral;
-    let fork = test
-        .thread_manager
-        .fork_legacy_thread(
-            ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
-            StartThreadOptions {
-                environments: Some(test.codex.environment_selections().await),
-                ..StartThreadOptions::new(config)
-            },
-            test.codex.rollout_path().expect("parent rollout"),
-        )
-        .await?;
+    let options = StartThreadOptions {
+        environments: Some(test.codex.environment_selections().await),
+        history_mode: Some(history_mode),
+        ..StartThreadOptions::new(config)
+    };
+    let fork = match history_mode {
+        ThreadHistoryMode::Legacy => {
+            test.thread_manager
+                .fork_legacy_thread(
+                    ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
+                    options,
+                    test.codex.rollout_path().expect("parent rollout"),
+                )
+                .await?
+        }
+        ThreadHistoryMode::Paginated => {
+            let prepared = test
+                .thread_store
+                .prepare_fork(codex_thread_store::PrepareForkParams {
+                    thread_id: test.session_configured.thread_id,
+                    boundary: codex_thread_store::ForkBoundary::Latest,
+                })
+                .await?;
+            test.thread_manager
+                .fork_prepared_thread(options, prepared)
+                .await?
+        }
+    };
     let fork_session = fork.session_configured.session_id.to_string();
     assert_ne!(fork_session, parent_session);
     test.codex = fork.thread;
     test.submit_text_turn("side").await?;
+    if !ephemeral {
+        let fork_path = test.codex.rollout_path().expect("saved fork rollout");
+        test.codex.shutdown_and_wait().await?;
+        let context = test
+            .thread_store
+            .load_latest_model_context(codex_thread_store::LoadThreadHistoryParams {
+                thread_id: fork.thread_id,
+                include_archived: false,
+            })
+            .await?;
+        let resumed = test
+            .thread_manager
+            .resume_thread_with_history(
+                test.config.clone(),
+                codex_history::InitialHistory::Resumed(codex_history::ResumedHistory {
+                    history_revision: context.revision,
+                    conversation_id: fork.thread_id,
+                    history: std::sync::Arc::new(context.items),
+                    rollout_path: Some(fork_path),
+                }),
+                codex_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("dummy")),
+                /*parent_trace*/ None,
+                codex_protocol::mcp::ClientMcpExtensions::default(),
+            )
+            .await?;
+        assert_eq!(
+            resumed.session_configured.session_id.to_string(),
+            fork_session
+        );
+        test.codex = resumed.thread;
+        test.submit_text_turn("resumed").await?;
+    }
     let requests = requests.requests();
-    let body = requests[1].body_json();
-    let metadata: Value = serde_json::from_str(
-        body["client_metadata"]["x-codex-turn-metadata"]
-            .as_str()
-            .expect("turn metadata"),
-    )?;
-    assert_eq!(
-        json!({
-            "cache": body["prompt_cache_key"],
-            "route": requests[1].header("session-id"),
-            "session": metadata["session_id"],
-            "thread": requests[1].header("thread-id"),
-            "tools": body["tools"],
-        }),
-        json!({
-            "cache": parent_session, "route": parent_session,
-            "session": fork_session, "thread": fork.thread_id.to_string(),
-            "tools": requests[0].body_json()["tools"],
-        }),
-    );
+    assert_eq!(requests.len(), if ephemeral { 2 } else { 3 });
+    for request in &requests[1..] {
+        let body = request.body_json();
+        let metadata: Value = serde_json::from_str(
+            body["client_metadata"]["x-codex-turn-metadata"]
+                .as_str()
+                .expect("turn metadata"),
+        )?;
+        assert_eq!(
+            json!({
+                "cache": body["prompt_cache_key"],
+                "route": request.header("session-id"),
+                "session": metadata["session_id"],
+                "thread": request.header("thread-id"),
+                "tools": body["tools"],
+            }),
+            json!({
+                "cache": parent_session, "route": parent_session,
+                "session": fork_session, "thread": fork.thread_id.to_string(),
+                "tools": requests[0].body_json()["tools"],
+            }),
+        );
+    }
     Ok(())
 }
 
@@ -228,7 +291,6 @@ async fn root_fork_shares_cache_routing_but_keeps_session_identity(
 async fn saved_nested_fork_retains_cache_routing_on_resume_without_ancestors() -> Result<()> {
     use codex_core::ForkSnapshot;
     use codex_core::StartThreadOptions;
-    use codex_protocol::protocol::ThreadHistoryMode;
     use core_test_support::responses::mount_sse_sequence;
 
     let server = start_mock_server().await;
