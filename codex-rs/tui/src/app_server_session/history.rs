@@ -133,7 +133,7 @@ pub(crate) struct ThreadHistoryPagination {
     seen_turn_cursors: HashSet<String>,
     seen_item_cursors: HashSet<String>,
     loading_older: bool,
-    side_boundary: Option<String>,
+    pub(super) side_boundary: Option<String>,
 }
 
 impl AppServerSession {
@@ -157,10 +157,15 @@ impl AppServerSession {
         // Older cursors in the retained prefix remain valid. If the entire displayed window
         // disappeared, resume paging at the replacement history's end instead.
         if retained_turns.iter().all(|turn| turn.items.is_empty()) {
+            let side_boundary = self
+                .history_pagination
+                .get(&thread_id)
+                .and_then(|state| state.side_boundary.clone());
             self.history_pagination.insert(
                 thread_id,
                 ThreadHistoryPagination {
                     history_mode: ThreadHistoryMode::Paginated,
+                    side_boundary,
                     next_turn_cursor: response.turns_backwards_cursor.clone(),
                     next_item_cursor: response.items_backwards_cursor.clone(),
                     ..ThreadHistoryPagination::default()
