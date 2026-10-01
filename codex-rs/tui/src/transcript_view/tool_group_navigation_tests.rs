@@ -5,6 +5,7 @@ use crate::transcript_view::tests::cell;
 use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
 use crate::transcript_view::tool_groups::tests::completed;
+use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -66,4 +67,56 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
         &mut view, &cells, /*width*/ 72, /*height*/ 20,
     ));
     assert!(latest.contains("Ran 3 tool calls (curl, git, glab)"));
+}
+
+#[test]
+fn find_reveals_hidden_group_follower_without_changing_group_disclosure() {
+    let output = format!(
+        "{}hidden needle\n{}",
+        "head\n".repeat(/*n*/ 20),
+        "tail\n".repeat(/*n*/ 20)
+    );
+    let cells = vec![
+        completed("first", "git status", "first output", /*exit_code*/ 0),
+        completed("second", "curl endpoint", &output, /*exit_code*/ 0),
+    ];
+    for manually_expanded in [false, true] {
+        let mut view = TranscriptView::default();
+        view.set_collapse_tool_calls(/*enabled*/ true);
+        render(&mut view, &cells, /*width*/ 80, /*height*/ 24);
+        if manually_expanded {
+            view.handle_key(KeyCode::F(4).into(), &cells);
+            view.handle_key(KeyCode::Enter.into(), &cells);
+        }
+        view.jump_to_latest();
+        let before = render(&mut view, &cells, /*width*/ 80, /*height*/ 24);
+        assert!(!text(&before).contains("hidden needle"));
+        assert!(text(&before).contains("Ran 2 tool calls"));
+        let disclosure = view.disclosure.expanded.clone();
+
+        view.begin_search();
+        view.paste_search("hidden needle");
+        for _ in 0..512 {
+            if !view.advance_search(&cells) {
+                break;
+            }
+        }
+        assert_eq!(
+            view.search.match_anchor().map(|anchor| anchor.index),
+            Some(1)
+        );
+        let found = render(&mut view, &cells, /*width*/ 80, /*height*/ 24);
+        assert!(text(&found).contains("hidden needle"));
+        if !manually_expanded {
+            insta::assert_snapshot!("find_hidden_group_follower", text(&found));
+        }
+        let snapshot = view.capture_snapshot(&cells);
+        assert_eq!(snapshot.pinned[&EntryKey::cell(&cells[1])].text(), "",);
+        assert_eq!(view.disclosure.expanded, disclosure);
+
+        view.cancel_search();
+        let restored = render(&mut view, &cells, /*width*/ 80, /*height*/ 24);
+        assert_eq!(restored, before);
+        assert_eq!(view.disclosure.expanded, disclosure);
+    }
 }
