@@ -5,16 +5,16 @@ expression: "normalize_voice_snapshot_directory(&format!(\"Other task:\\n{other_
 Other task:
 › Ask ASM to do anything
 
-  test def·/tmp/project
+  tes def·/tmp/project
 Restored owner:
  voice ● listening                                      ⌃x mute     /voice stop
    mic ▁▁▁▁▁▁  ASM ▁▁▁▁▁▁
 
 › Ask ASM to do anything
 
-  test def·/tmp/project
+  tes def·/tmp/project
 
-  >_ ASM (v0.161.1-alpha.5)
+  >_ ASM (v0.161.1-alpha.6)
      /tmp/project
 
   To get started, describe a task or try one of these commands:
