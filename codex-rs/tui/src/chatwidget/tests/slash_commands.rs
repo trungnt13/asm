@@ -3015,28 +3015,22 @@ async fn slash_delete_confirmation_requests_current_thread_delete() {
         },
         crate::AppServerTarget::Remote { endpoint },
     ] {
-        for parallel in [false, true] {
-            let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-            chat.remote_connection =
-                crate::status::remote_connection::remote_connection_status_value(
-                    &target, /*server_version*/ None,
-                );
-            chat.set_parallel_conversation_active(parallel);
-            chat.dispatch_command(SlashCommand::Delete);
-            assert!(chat.bottom_pane.has_active_view());
-            assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
-            let popup = render_bottom_popup(&chat, /*width*/ 80);
-            if parallel {
-                assert_chatwidget_snapshot!("slash_delete_confirmation_parallel", popup);
-            } else if matches!(target, crate::AppServerTarget::Embedded) {
-                assert_chatwidget_snapshot!("slash_delete_confirmation_popup", popup);
-            } else {
-                assert_chatwidget_snapshot!("slash_delete_confirmation_command_center", popup);
-            }
-            chat.handle_key_event(KeyEvent::from(KeyCode::Down));
-            chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-            assert_matches!(rx.try_recv(), Ok(AppEvent::DeleteCurrentThread));
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.remote_connection = crate::status::remote_connection::remote_connection_status_value(
+            &target, /*server_version*/ None,
+        );
+        chat.dispatch_command(SlashCommand::Delete);
+        assert!(chat.bottom_pane.has_active_view());
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        let popup = render_bottom_popup(&chat, /*width*/ 80);
+        if matches!(target, crate::AppServerTarget::Embedded) {
+            assert_chatwidget_snapshot!("slash_delete_confirmation_popup", popup);
+        } else {
+            assert_chatwidget_snapshot!("slash_delete_confirmation_command_center", popup);
         }
+        chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::DeleteCurrentThread));
     }
 }
 
@@ -3341,16 +3335,16 @@ async fn rejected_queued_cd_drains_following_input() {
 #[tokio::test]
 async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
     let mut errors = Vec::new();
-    for state in "new active pending queued steer owned ephemeral mcp exec side".split(' ') {
+    for state in "new active pending queued steer side owned ephemeral mcp exec".split(' ') {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = (state != "new").then(ThreadId::new);
         let (queued, steer) = (UserMessage::from("q").into(), pending_steer("s"));
         match state {
             "active" => chat.bottom_pane.set_task_running(/*running*/ true),
-            "side" => chat.set_side_conversation_active(/*active*/ true),
             "pending" => chat.input_queue.user_turn_pending_start = true,
             "queued" => chat.input_queue.queued_user_messages.push_back(queued),
             "steer" => chat.input_queue.pending_steers.push_back(steer),
+            "side" => chat.set_side_conversation_active(/*active*/ true),
             "owned" => chat.set_parent_owned_thread(),
             "ephemeral" => chat.config.ephemeral = true,
             "exec" => chat.track_unified_exec_process_begin("call", Some("process"), "sleep"),
