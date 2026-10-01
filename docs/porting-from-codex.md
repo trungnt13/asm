@@ -107,32 +107,30 @@ For runtime or UI changes, make the smallest coherent change and deliver a runna
 cargo build -p codex-cli --bin codex --profile dev-small
 ```
 
-- Keep the native target, toolchain, `dev-small` profile, compiler flags, and target directory consistent. Do not clean caches or switch profiles to try to speed up one build. Authorized cache cleanup makes the next build slower.
-- Prioritize the CLI build over competing Cargo jobs. Tests may reuse some dependencies, but test executables are not the CLI. Do not promise instant builds.
-- After a successful build, report the verified absolute binary path, build duration, a short manual check, and pending automated checks. Do not overwrite the installed `codex` unless asked, or present an old executable as the new build.
-- When safe, hand off the binary before updating test expectations or running focused tests. Group related assertion and snapshot updates; do not disable tests to hide changed behavior.
-- If runtime code changes after handoff, rebuild and identify the replacement binary. Distinguish ready for manual testing from validated complete.
+- macOS ARM64: `aarch64-apple-darwin`, `macos-15`, 180-minute timeout.
+- Linux x86_64 glibc: `x86_64-unknown-linux-gnu`, `ubuntu-22.04`, 90-minute timeout. Ubuntu 22.04 / glibc 2.35 is the minimum supported Linux baseline. Keep Linux build and native smoke jobs on that baseline; changing only the target triple on a newer runner is not sufficient. Before GitHub retires this runner in April 2027, move the same build environment into an Ubuntu 22.04 container on a supported runner rather than raising the runtime requirement.
 
 Documentation-only changes need no binary build. Use release builds, cross-compilation, or packaging during local work only when requested or needed to reproduce the affected behavior.
 
 ## Release versions
 
-When the owner requests a release, select the latest published, non-draft upstream Codex prerelease with a `rust-v` tag on `openai/codex`, ordered by publication time. Increment only its numeric patch component by one and preserve its suffix. For example, `rust-v0.159.0-alpha.6` gives fork version `0.159.1-alpha.6` and tag `v0.159.1-alpha.6`.
+Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on the packaged binaries on their native runner: CLI `--version` matches Cargo, and both `--help` commands succeed with usage. Do not require the helper to support `--version`. Record binary and archive sizes. For GNU Linux archives, verify both ELF executables use the x86_64 GNU loader and require no glibc symbol newer than 2.35. Also run version/help checks in a clean Ubuntu 22.04 container with only the declared runtime libraries; a dependency-rich build runner does not establish runtime compatibility.
 
 Choose this version automatically; do not increment the previous fork version or the suffix number. Check the fork's remote tags before changing versions. If the derived tag already exists or no upstream prerelease can be determined, stop and ask for a decision. Do not invent another number or move an existing tag. The current rule therefore requires a decision for another release based on the same upstream prerelease.
 
 - No Apple Developer signing or notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners.
 - Use host `bwrap`, `rg`, and the system shell where needed. Do not bundle Bubblewrap, voice, patched zsh, or other helpers, or change runtime sandbox/security defaults for packaging.
-- Retain Zig, [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), `AWS_LC_SYS_NO_JITTER_ENTROPY`, and verified fork-built V8 via [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml).
+- Use the native GNU toolchain and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh) for fork Linux builds. Do not use Zig or MUSL build wrappers there; keep inherited MUSL tooling for upstream workflows. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified fork-built V8 via [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04 for artifact verification.
+- Preserve upstream GNU runtime choices, including the system allocator, locale handling, and PTY support; do not change Rust platform conditionals merely to mimic MUSL. GNU packages use system OpenSSL 3 and may use system liblzma. Keep the runtime package list in [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) aligned with actual ELF dependencies. Voice remains unbundled; this migration does not add an ALSA or GStreamer requirement.
 - Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, or website/OpenAI-only publishing without an agreed intent change.
 
 ### V8 dependency release
 
-Build V8 separately from the CLI only when the resolved `v8` crate version lacks a fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) with tag `asm-v8-v<exact resolved v8 crate version>`. A manual branch run builds only by default; explicit `publish=true` builds and smokes first, then creates the tag and release at that commit. Tag pushes also publish. Never move a tag or replace published assets without approval. Reuse a verified fork V8 release when V8 inputs have not changed; if source, patches, build flags, or bindings change under the same crate version, ask how to version the dependency.
+Build V8 separately from the CLI only when the required crate version, target, or baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) with tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35`. The suffix identifies the GNU-baseline artifact generation, including its matching macOS pair, without moving or replacing the old MUSL release. A manual branch run builds only by default; explicit `publish=true` builds and smokes first, then creates the tag and release at that commit. Tag pushes also publish. Never move a tag or replace published assets without approval. Reuse a verified fork V8 release when V8 inputs have not changed; if source, patches, build flags, or bindings change under the same crate version, ask how to version the dependency.
 
-Build only sandbox + pointer-compression optimized pairs for macOS ARM64 and Linux x86_64 MUSL. Use the existing Bazel source pair and staging helper locally on GitHub-hosted runners, without BuildBuddy, remote execution, paid infrastructure, or broad suites. Keep the static library's required symbols. Run the native `codex-v8-poc` sandbox and JavaScript smoke tests on both targets, including MUSL. Publish only each target's archive, Rust binding, and two-file checksum manifest. The dependency release is normal but **not Latest**; it has no installer and does not affect CLI release discovery.
+Build only sandbox + pointer-compression optimized pairs for macOS ARM64 and Linux x86_64 GNU. Use the existing Bazel source pair and staging helper locally on GitHub-hosted runners, without BuildBuddy, remote execution, paid infrastructure, or broad suites. Keep the static library's required symbols. Run the native `codex-v8-poc` sandbox and JavaScript smoke tests on both targets, including GNU on Ubuntu 22.04. Reuse the existing GNU Bazel platform and its older glibc sysroot; the native Ubuntu 22.04 tests must still pass. Publish only each target's archive, Rust binding, and two-file checksum manifest. The dependency release is normal but **not Latest**; it has no installer and does not affect CLI release discovery.
 
-Fork CI and CLI releases consume only the matching verified fork V8 release. For a new V8 version, publish and verify both target pairs before the first `main` push that consumes it. Check each downloaded asset's GitHub SHA-256 digest and the manifest's exact target names and hashes. Missing or bad assets fail without upstream fallback. The inherited upstream V8 action path remains for workflows outside fork CI.
+Fork CI and CLI releases consume only the matching verified fork V8 release. For a new V8 version or artifact generation, publish and verify both target pairs before the first `main` push that consumes it. Check each downloaded asset's GitHub SHA-256 digest and the manifest's exact target names and hashes. Missing or bad assets fail without upstream fallback. The inherited upstream V8 action path remains for workflows outside fork CI.
 
 ### Reuse and publish
 
@@ -144,11 +142,7 @@ Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-arch
 
 Preserve these build constraints:
 
-- No Apple Developer signing or notarization, paid Apple membership, Azure Key Vault, repository release secrets, or self-hosted runners.
-- Linux stays on MUSL. Do not bundle Bubblewrap; install `bwrap` on the host when sandboxing needs it. Rely on the host's `rg` and system shell where relevant; do not bundle voice, patched zsh, or other auxiliary binaries. Do not silently disable sandboxing.
-- Keep Zig, [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), and `AWS_LC_SYS_NO_JITTER_ENTROPY` settings for Linux native dependencies.
-- Keep [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml) for verified prebuilt V8 artifacts.
-- Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, website publishing, or OpenAI-only publishing infrastructure without an agreed change of intent.
+The published installer uses only `trungnt13/asm` GitHub `v*` releases for macOS ARM64 and Linux x86_64 GNU. Verify GitHub SHA-256 digests and `SHA256SUMS` before installing the two-binary archive. Reject unsupported targets and Linux hosts without glibc 2.35+ before downloading release metadata or changing install state. Select only GNU Linux archives; never silently fall back to MUSL. A MUSL-only historical release requires its original installer. A GNU update uses a separate target-qualified package directory and preserves old MUSL packages and shared config/state.
 
 [Postmerge CI](../.github/workflows/postmerge-ci.yml) saves release archives. A tag release uses [the artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) to reuse both unexpired archives from a successful same-repository push-to-`main` run at the exact tagged commit. It waits for a matching active run. If that run stays active beyond the wait limit, stop rather than build concurrently. If no usable completed run remains, build the archives in the release workflow. API errors are failures, not cache misses.
 
