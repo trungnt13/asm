@@ -356,6 +356,20 @@ impl McpToolCallCell {
 }
 
 impl HistoryCell for McpToolCallCell {
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        if self.success() == Some(false) || self.invocation.is_computer_activity() {
+            return None;
+        }
+        Some(ToolCallSummary {
+            count: 1,
+            running: self.duration.is_none(),
+            names: vec![format!(
+                "{}/{}",
+                self.invocation.server, self.invocation.tool
+            )],
+        })
+    }
+
     fn activity_ids(&self) -> Vec<String> {
         vec![format!("mcp:{}", self.call_id)]
     }
