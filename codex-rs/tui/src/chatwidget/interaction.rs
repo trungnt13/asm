@@ -471,13 +471,13 @@ impl ChatWidget {
     }
 
     pub(super) fn ensure_thread_rename_allowed(&mut self) -> bool {
-        if self.active_side_conversation {
-            self.add_error_message(
-                "Side conversations are ephemeral and cannot be renamed.".to_string(),
-            );
-            return false;
+        match self.thread_rename_block_message.clone() {
+            Some(message) => {
+                self.add_error_message(message);
+                false
+            }
+            None => true,
         }
-        true
     }
 
     pub(crate) fn handle_paste(&mut self, text: String) {

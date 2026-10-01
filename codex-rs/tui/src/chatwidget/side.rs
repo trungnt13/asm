@@ -1,8 +1,10 @@
-//! Chat-surface modes for temporary sides and saved parallel conversations.
+//! Chat widget hooks for side-conversation mode.
 //!
-//! Temporary sides restrict commands and use a follow-up placeholder.
-//! Saved parallel conversations retain normal composer behavior.
-//! App-level lifecycle lives in `app::side`.
+//! App-level side-thread lifecycle lives in `app::side`; this module owns the
+//! chat-surface pieces that side mode toggles, such as the composer placeholder,
+//! footer label, and inline `/side` message submission behavior.
+//!
+//! Saved parallel mode retains normal composer behavior.
 
 use super::*;
 
