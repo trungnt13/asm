@@ -16,10 +16,10 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         .features
         .enable(Feature::FastMode)
         .expect("enable fast mode");
-    app.config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
+    app.config.service_tier = Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
     app.config
         .subagent_service_tiers
-        .entry("gpt-6-sol".to_string())
+        .entry("gpt-6.1-sol".to_string())
         .or_default()
         .extend([
             (ReasoningEffort::High, "fast".to_string()),
@@ -34,7 +34,7 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         .first()
         .expect("model preset")
         .clone();
-    model.model = "gpt-6-sol".to_string();
+    model.model = "gpt-6.1-sol".to_string();
     model.default_reasoning_effort = ReasoningEffort::Medium;
     model.service_tiers = vec![ModelServiceTier {
         id: ServiceTier::Fast.request_value().to_string(),
@@ -58,14 +58,23 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         .set_agent_path(fast_id, Some("/root/sol_fast".to_string()));
     app.agent_navigation
         .set_agent_path(standard_id, Some("/root/sol_standard".to_string()));
+    assert_eq!(
+        app.agent_picker_model_label(root_id, /*is_primary*/ true),
+        None
+    );
+    app.agent_navigation.set_model_settings(
+        root_id,
+        Some("gpt-6-astra".to_string()),
+        Some(ReasoningEffort::XHigh),
+    );
     app.agent_navigation.set_model_settings(
         fast_id,
-        Some("gpt-6-sol".to_string()),
+        Some("gpt-6.1-sol".to_string()),
         Some(ReasoningEffort::High),
     );
     app.agent_navigation.set_model_settings(
         standard_id,
-        Some("gpt-6-sol".to_string()),
+        Some("gpt-6.1-sol".to_string()),
         Some(ReasoningEffort::Max),
     );
 
@@ -77,9 +86,9 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "Main [default]",
-            "/root/sol_fast gpt-6-sol-high-fast",
-            "/root/sol_standard gpt-6-sol-max",
+            "Main [default] ast6-xhi",
+            "/root/sol_fast sol61-hig-fast",
+            "/root/sol_standard sol61-max",
         ]
     );
     app.chat_widget.show_selection_view(params);
@@ -88,22 +97,27 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         render_bottom_popup(&app.chat_widget, /*width*/ 110)
     );
 
+    app.config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
+    assert_eq!(
+        app.agent_picker_model_label(standard_id, /*is_primary*/ false),
+        Some("sol61-max".to_string())
+    );
     app.agent_navigation.set_model_settings(
         standard_id,
-        Some("gpt-6-sol".to_string()),
+        Some("gpt-6.1-sol".to_string()),
         Some(ReasoningEffort::Low),
     );
     assert_eq!(
         app.agent_picker_model_label(standard_id, /*is_primary*/ false),
-        Some("gpt-6-sol-low-fast".to_string())
+        Some("sol61-low-fast".to_string())
     );
     app.agent_navigation.set_model_settings(
         standard_id,
-        Some("gpt-6-sol".to_string()),
+        Some("gpt-6.1-sol".to_string()),
         /*reasoning_effort*/ None,
     );
     assert_eq!(
         app.agent_picker_model_label(standard_id, /*is_primary*/ false),
-        Some("gpt-6-sol-medium-fast".to_string())
+        Some("sol61-med-fast".to_string())
     );
 }
