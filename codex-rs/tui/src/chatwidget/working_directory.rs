@@ -7,6 +7,7 @@ impl ChatWidget {
     pub(crate) fn can_change_working_directory(&self, thread_id: ThreadId) -> bool {
         let active = &self.transcript.active_cell;
         self.thread_id == Some(thread_id)
+            && !self.active_side_conversation
             && !self.blocks_direct_input
             && !self.config.ephemeral
             && self.unified_exec_processes.is_empty()
