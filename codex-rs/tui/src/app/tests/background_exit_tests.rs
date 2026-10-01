@@ -543,7 +543,7 @@ async fn exit_interrupts_before_requesting_shutdown() -> Result<()> {
 }
 
 #[tokio::test]
-async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Result<()> {
+async fn daemon_ctrl_c_closes_running_parallel_thread_and_returns_to_parent() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
     let cwd = tempdir()?;
     app.config.cwd = cwd.path().abs();
@@ -613,7 +613,7 @@ async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Res
     .await
     .expect("side shell command running before Ctrl+C");
     app.side_threads
-        .insert(side_thread_id, SideThreadState::new(parent_thread_id));
+        .insert(side_thread_id, SideThreadState::parallel(parent_thread_id));
     app.thread_event_channels.insert(
         side_thread_id,
         ThreadEventChannel::new_with_session(
