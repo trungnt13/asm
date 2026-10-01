@@ -33,7 +33,12 @@ pub(super) struct LoadedSubagentBackfill {
 
 impl App {
     pub(super) async fn open_agent_picker(&mut self, app_server: &mut AppServerSession) {
-        let backfill = if self.primary_thread_id.is_none() || !self.side_threads.is_empty() {
+        let backfill = if self.primary_thread_id.is_none()
+            || self
+                .side_threads
+                .values()
+                .any(|state| state.kind == CompanionKind::Parallel)
+        {
             self.backfill_loaded_subagent_threads(app_server).await
         } else {
             LoadedSubagentBackfill::default()
@@ -800,11 +805,13 @@ impl App {
             && self.agent_navigation.get(&thread_id).is_none_or(|entry| {
                 !entry.is_closed
                     || self.thread_unavailable(thread_id)
-                    || self.side_threads.contains_key(&thread_id)
                     || self
                         .side_threads
-                        .values()
-                        .any(|side| side.parent_thread_id == thread_id)
+                        .get(&thread_id)
+                        .is_some_and(|state| state.kind == CompanionKind::Parallel)
+                    || self.side_threads.values().any(|side| {
+                        side.kind == CompanionKind::Parallel && side.parent_thread_id == thread_id
+                    })
             })
     }
 
@@ -1250,7 +1257,11 @@ impl App {
         let mut refreshed_thread_ids = HashSet::new();
         let mut descendants =
             find_loaded_subagent_threads_for_primary(threads.clone(), primary_thread_id);
-        for side in self.side_threads.keys().copied() {
+        for side in self
+            .side_threads
+            .iter()
+            .filter_map(|(id, state)| (state.kind == CompanionKind::Parallel).then_some(*id))
+        {
             descendants.extend(find_loaded_subagent_threads_for_primary(
                 threads.clone(),
                 side,
