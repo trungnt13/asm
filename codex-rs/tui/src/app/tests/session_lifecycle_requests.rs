@@ -910,7 +910,10 @@ async fn external_transport_registers_dynamic_tools_and_finds_task_mentions() ->
     }
     let target_id = started.session.thread_id;
     app_server
-        .thread_inject_items(target_id, vec![App::side_boundary_prompt_item()])
+        .thread_inject_items(
+            target_id,
+            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
+        )
         .await?;
     crate::init_state_db_for_app_server_target(&app.config, &crate::AppServerTarget::Embedded)
         .await?
@@ -1020,7 +1023,7 @@ async fn cancelling_saved_side_pauses_goal_and_preserves_running_parent() -> Res
         )
         .await?;
     app.side_threads
-        .insert(side_id, SideThreadState::new(parent_id));
+        .insert(side_id, SideThreadState::parallel(parent_id));
     App::install_side_thread_snapshot(
         &mut *app.ensure_thread_channel(side_id).store.lock().await,
         side.session,
@@ -1139,7 +1142,7 @@ async fn removing_saved_side_returns_to_parent_on_embedded_and_shared_servers() 
                 .await?;
             let side_id = side.session.thread_id;
             app.side_threads
-                .insert(side_id, SideThreadState::new(parent_id));
+                .insert(side_id, SideThreadState::parallel(parent_id));
             App::install_side_thread_snapshot(
                 &mut *app.ensure_thread_channel(side_id).store.lock().await,
                 side.session,

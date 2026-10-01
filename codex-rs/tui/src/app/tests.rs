@@ -2839,7 +2839,7 @@ async fn refresh_agent_picker_thread_liveness_prunes_closed_metadata_only_thread
 }
 
 #[tokio::test]
-async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()> {
+async fn parallel_seeds_navigation_before_thread_started() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let config = app.chat_widget.config_ref().clone();
     let parent_thread_id = ThreadId::from_string(
@@ -2881,10 +2881,11 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     )
     .await;
 
-    let control = Box::pin(app.handle_start_side(
+    let control = Box::pin(app.start_companion_conversation(
         &mut tui,
         &mut app_server,
         parent_thread_id,
+        CompanionKind::Parallel,
         /*user_message*/ None,
     ))
     .await?;
@@ -4942,14 +4943,14 @@ fn agent_picker_item_name_snapshot() {
 }
 
 #[tokio::test]
-async fn side_fork_config_is_saved_and_appends_developer_guardrails() {
+async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
     let app = make_test_app().await;
     let original_approval_policy = app.config.permissions.approval_policy.value();
     let original_sandbox_policy = app.config.legacy_sandbox_policy();
 
-    let fork_config = app.side_fork_config();
+    let fork_config = app.side_fork_config(CompanionKind::Side);
 
-    assert!(!fork_config.ephemeral);
+    assert!(fork_config.ephemeral);
     assert_eq!(
         fork_config.permissions.approval_policy.value(),
         original_approval_policy
@@ -4980,7 +4981,9 @@ async fn side_fork_config_is_saved_and_appends_developer_guardrails() {
         developer_instructions
             .contains("Any MCP or external tool calls or outputs visible in the inherited")
     );
-    assert!(developer_instructions.contains("You may create and manage your own sub-agents."));
+    assert!(
+        developer_instructions.contains("Sub-agents are off-limits in this side conversation.")
+    );
     assert!(developer_instructions.contains("Do not modify files"));
     assert!(developer_instructions.contains("Do not request escalated permissions"));
     assert!(app.transcript_cells.is_empty());
@@ -5009,7 +5012,7 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
     app.chat_widget
         .set_approvals_reviewer(ApprovalsReviewer::AutoReview);
 
-    let fork_config = app.side_fork_config();
+    let fork_config = app.side_fork_config(CompanionKind::Side);
 
     assert_eq!(
         (
@@ -5032,15 +5035,15 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
 }
 
 #[tokio::test]
-async fn side_start_block_message_allows_replacing_open_side_conversation() {
+async fn side_start_block_message_rejects_temporary_but_allows_parallel_replacement() {
     let mut app = make_test_app().await;
     assert_eq!(
-        app.side_start_block_message(),
+        app.side_start_block_message(CompanionKind::Side),
         Some("'/side' is unavailable until the main thread is ready.")
     );
 
     app.primary_thread_id = Some(ThreadId::new());
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 
     let parent_thread_id = ThreadId::new();
     let side_thread_id = ThreadId::new();
@@ -5048,13 +5051,21 @@ async fn side_start_block_message_allows_replacing_open_side_conversation() {
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
 
     app.active_thread_id = Some(parent_thread_id);
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 
     app.active_thread_id = Some(side_thread_id);
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(
+        app.side_start_block_message(CompanionKind::Side),
+        Some(
+            "A side conversation is already open. Press ctrl + c to return before starting another."
+        )
+    );
+    app.side_threads
+        .insert(side_thread_id, SideThreadState::parallel(parent_thread_id));
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 
     app.side_threads.remove(&side_thread_id);
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 }
 
 #[tokio::test]
