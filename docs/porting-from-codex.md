@@ -99,7 +99,7 @@ Keep these release targets and GitHub-hosted runners:
 
 Local iteration uses `dev-small` for build speed. Published binaries always use optimized `--release`. Fix release build timeouts in the pipeline, not by switching to a development profile. In release workflows, use `CARGO_PROFILE_RELEASE_STRIP=debuginfo` to remove debug information while retaining function symbols and existing optimization settings. Do not remove runtime dependencies or additional symbols merely because upstream tests passed.
 
-## Local development: binary first
+Prepare the version on an immutable release-candidate branch, not on `main`. Set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) and the matching workspace package versions in [`Cargo.lock`](../codex-rs/Cargo.lock), without changing dependencies. The tag, Cargo version, and CLI `--version` must agree, ignoring their name prefixes. Renaming a tag cannot change an existing binary. Advance `main` only after publication and verification succeed; preserve unrelated concurrent changes and stop on version conflicts rather than force-pushing. Leave existing pre-policy version bumps intact until the next successful release.
 
 For runtime or UI changes, make the smallest coherent change and deliver a runnable development binary before automated testing is complete. Inspect all affected paths, including streaming and completed output where relevant. From `codex-rs`, build the affected binaries; include `codex-code-mode-host` when changing its behavior:
 
@@ -134,9 +134,13 @@ Fork CI and CLI releases consume only the matching verified fork V8 release. For
 
 ### Reuse and publish
 
-## Release packaging and publication
+Start an explicitly requested release by dispatching [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. This single durable workflow owns version selection, candidate creation, builds, publication, verification, and updating `main`; no later chat action or workflow triggered by a token-created push is required. Serialize release runs. Pin every build, installer, and verification checkout to the candidate commit. Ordinary branch dispatch remains build-only, and a `main` push never requests publication.
 
-Keep [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) separate from upstream's release workflow. Build `codex` and `codex-code-mode-host` together from the same commit, target, and optimized release profile. Each `codex-<target>.tar.gz` contains exactly these two regular executable siblings. Upload both target archives, `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh), not source trees or diagnostic artifacts. The release job checks out the exact tag before adding the installer to the checksum manifest, including when it reuses postmerge archives.
+The candidate lives at `agent/release-<run-id>`. Rerun failed jobs to continue after interruption; to resume from a new dispatch, set `publish_release=true` and `resume_run_id` to the original run ID. Reuse the frozen version and commit even if upstream has advanced. Never move a candidate or existing tag. A new candidate must use a free release tag; conflicts require owner input. Keep candidate branches for recovery. Existing `v*` tag pushes and tag dispatches can still publish without modifying `main`.
+
+Use [the artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) to reuse both unexpired, smoke-checked archives from the current dispatch or original candidate run. Legacy tag releases may reuse a successful same-repository push-to-`main` run at the exact tagged commit; wait for a matching active run rather than building concurrently, and fail if the wait expires. Build only when no usable archives remain. API errors are failures, not cache misses.
+
+Upload all four assets to a draft before publishing. Resume partial uploads only when existing names, sizes, and digests agree; never replace assets. Verify the tag commit, GitHub digests, checksum manifest, installer bytes, and both downloaded archives before publication. Publish normal and Latest even with an `alpha` suffix, then repeat metadata and native binary smoke checks on both release platforms. Only then merge the candidate into `main`. If publication already succeeded, retries verify the existing release and finish updating `main` without rebuilding or republishing.
 
 Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on both packaged binaries on their native runner. The CLI's `--version` must match Cargo; both executables' `--help` must succeed and print usage. Do not demand `--version` from the helper. Record binary and archive sizes. These checks validate our packaging; they do not replace functional tests of changed code.
 
