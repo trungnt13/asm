@@ -1,6 +1,8 @@
 //! Root-scoped background refresh for the agent picker.
 
 use super::*;
+use crate::status_line_labels::compact_model_name;
+use crate::status_line_labels::compact_reasoning_label;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::Thread;
@@ -60,10 +62,10 @@ impl App {
                     ServiceTier::Fast.request_value(),
                 )
             });
-        let mut label = settings.model.clone();
+        let mut label = compact_model_name(&settings.model);
         if let Some(effort) = effort {
             label.push('-');
-            label.push_str(effort.as_str());
+            label.push_str(&compact_reasoning_label(effort.as_str()));
         }
         if fast {
             label.push_str("-fast");
