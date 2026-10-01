@@ -9,6 +9,8 @@ use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
+use crate::history_cell::ToolCallSummary;
+use crate::history_cell::command_names;
 use crate::history_cell::plain_lines;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
@@ -210,6 +212,34 @@ fn activity_marker(start_time: Option<Instant>, animations_enabled: bool) -> Spa
 }
 
 impl HistoryCell for ExecCell {
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        if self.group.calls.is_empty()
+            || self.group.calls.iter().any(|call| {
+                call.is_user_shell_command()
+                    || call.is_unified_exec_interaction()
+                    || call
+                        .output
+                        .as_ref()
+                        .is_some_and(|output| output.exit_code != 0)
+            })
+        {
+            return None;
+        }
+        let mut names = Vec::new();
+        for call in &self.group.calls {
+            for name in command_names(&call.command) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        Some(ToolCallSummary {
+            count: self.group.calls.len(),
+            running: self.is_active(),
+            names,
+        })
+    }
+
     fn append_reasoning(&mut self, cell: Box<dyn HistoryCell>) -> Result<(), Box<dyn HistoryCell>> {
         if self.is_exploring_cell() {
             self.group.push_detail(std::sync::Arc::from(cell));

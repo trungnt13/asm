@@ -4519,6 +4519,11 @@
           "description": "Generate automatic conversation recaps when the terminal is unfocused. Defaults to `true`. Disabling this leaves `/recap` available on demand.",
           "type": "boolean"
         },
+        "collapse_tool_calls": {
+          "default": false,
+          "description": "Group consecutive tool calls into compact fullscreen transcript summaries. Defaults to `false` to preserve existing tool previews.",
+          "type": "boolean"
+        },
         "copy_on_select": {
           "allOf": [
             {
