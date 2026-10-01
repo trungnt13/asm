@@ -229,6 +229,7 @@ impl ChatWidget {
             thread_id: None,
             thread_name: None,
             active_side_conversation: false,
+            active_parallel_conversation: false,
             blocks_direct_input: false,
             external_writer_view: false,
             fork_in_progress: false,
