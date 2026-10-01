@@ -70,9 +70,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `60947e234156ac12bdb7fba2477d3965f166bd34`.
-- Commit date: 2026-09-30.
-- Subject: Add account security setup reminders to the TUI (#49715).
+- Last incorporated upstream commit: `e53e932dc855927afb1cafab5f1ae6edf2695e81`.
+- Commit date: 2026-10-01.
+- Subject: Allow microphone channel selection for voice conversations (#49836).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
