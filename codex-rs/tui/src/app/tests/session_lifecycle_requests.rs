@@ -168,13 +168,104 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
         background_thread_id,
         crate::app::side::SideThreadState::new(thread_id),
     );
-    app.submit_thread_op(&mut server, background_thread_id, turn)
+    app.submit_thread_op(&mut server, background_thread_id, turn.clone())
         .await?;
     let turns = recorded_params(&requests, "turn/start");
     assert_eq!(turns.len(), 3);
     assert_eq!(turns[0]["cyberAccessProgram"], "standard");
     assert_eq!(turns[1]["cyberAccessProgram"], "daybreakBlue");
     assert_eq!(turns[2]["cyberAccessProgram"], "standard");
+
+    enabled_config.ephemeral = false;
+    let saved_parent_id = ThreadId::from_string(
+        &create_fake_rollout(
+            &app.config.codex_home,
+            "2026-01-01T00-00-00",
+            "2026-01-01T00:00:00Z",
+            "Saved Daybreak parent",
+            Some(app.config.model_provider_id.as_str()),
+            /*git_info*/ None,
+        )
+        .expect("create saved Daybreak parent rollout"),
+    )?;
+    server
+        .thread_read(saved_parent_id, /*include_turns*/ false)
+        .await?;
+    let request_id = server.next_request_id();
+    let _: codex_app_server_protocol::ThreadMetadataUpdateResponse = server
+        .request_handle()
+        .request_typed(ClientRequest::ThreadMetadataUpdate {
+            request_id,
+            params: codex_app_server_protocol::ThreadMetadataUpdateParams {
+                thread_id: saved_parent_id.to_string(),
+                project_id: None,
+                git_info: None,
+                daybreak_enabled: Some(true),
+            },
+        })
+        .await?;
+    let saved_parent = server
+        .resume_thread(
+            &app.local_settings,
+            enabled_config.clone(),
+            saved_parent_id,
+            crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+        )
+        .await?;
+    assert!(saved_parent.session.daybreak_enabled);
+    let parallel = server
+        .fork_side_thread(
+            &app.local_settings,
+            enabled_config,
+            saved_parent_id,
+            /*selected_profile*/ None,
+        )
+        .await?;
+    let parallel_id = parallel.session.thread_id;
+    assert!(parallel.session.daybreak_enabled);
+    app.side_threads
+        .insert(parallel_id, SideThreadState::parallel(saved_parent_id));
+    app.store_active_thread_receiver().await;
+    app.clear_active_thread().await;
+    app.enqueue_primary_thread_session(parallel.session, parallel.turns)
+        .await?;
+    assert!(app.chat_widget.daybreak_enabled);
+    assert!(!app.chat_widget.side_conversation_active());
+    assert_eq!(app.current_displayed_thread_id(), Some(parallel_id));
+    app.submit_thread_op(&mut server, parallel_id, turn.clone())
+        .await?;
+
+    app.store_active_thread_receiver().await;
+    app.clear_active_thread().await;
+    app.enqueue_primary_thread_session(saved_parent.session, saved_parent.turns)
+        .await?;
+    assert!(app.chat_widget.daybreak_enabled);
+    assert_ne!(app.current_displayed_thread_id(), Some(parallel_id));
+    app.submit_thread_op(&mut server, parallel_id, turn).await?;
+    let turns = recorded_params(&requests, "turn/start");
+    let parallel_id_string = parallel_id.to_string();
+    assert_eq!(
+        turns[3..]
+            .iter()
+            .map(|turn| (
+                turn["threadId"].as_str(),
+                turn["cyberAccessProgram"].as_str()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (Some(parallel_id_string.as_str()), Some("daybreakBlue")),
+            (Some(parallel_id_string.as_str()), Some("daybreakBlue")),
+        ],
+    );
+
+    let snapshot = app.thread_event_channels[&parallel_id]
+        .store
+        .lock()
+        .await
+        .snapshot();
+    app.chat_widget.set_daybreak_enabled(/*enabled*/ false);
+    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+    assert!(app.chat_widget.daybreak_enabled);
     app.chat_widget.set_daybreak_enabled(/*enabled*/ false);
     while events.try_recv().is_ok() {}
 

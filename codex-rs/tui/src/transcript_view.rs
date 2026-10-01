@@ -507,7 +507,11 @@ impl TranscriptView {
             Position::Latest => self.bottom_start(cells),
             Position::Reading(anchor) => {
                 let index = self.resolve(cells, anchor);
-                let index = self.tool_group_start(cells, index).unwrap_or(index);
+                let index = if self.is_search_expanded(anchor.key) {
+                    index
+                } else {
+                    self.tool_group_start(cells, index).unwrap_or(index)
+                };
                 let row = self.layout(cells, index).map_or(/*default*/ 0, |layout| {
                     layout
                         .row_for_offset(anchor.offset)
