@@ -154,7 +154,7 @@ The optional `macos_concurrency_experiment` compares cold builds of one commit o
 
 Preserve the parent's effective prompt-cache routing key for saved and temporary root forks, independently of thread/session identity. Persist that routing choice for resume and further forks; keep old rollouts readable without ancestor lookups. Preserve upstream guardian and subagent routing. Sharing routing is an optimization, not a promise of backend cache hits.
 
-Keep `/side` and its `/btw` alias aligned with upstream: temporary forks, upstream command restrictions and reference-only instructions, no subagents, and no saved pairing metadata. Ctrl+/ switches views; Ctrl+C returns to the parent and discards the temporary side. Ordinary picker navigation discards temporary sides as upstream does.
+Keep `/side` and its `/btw` alias aligned with upstream: temporary forks, upstream command restrictions and reference-only instructions, no subagents, and no saved pairing metadata. Ctrl+/ switches views; Ctrl+C returns to the parent and discards the temporary side. Ordinary picker navigation discards temporary sides as upstream does. Preserve upstream `/side` helper names, constants, and tests where practical; add parallel-specific behavior without unnecessary rewrites of the upstream path.
 
 Use `/parallel` for the saved ordinary user fork with normal command availability under permissions, feature flags, platform support, and busy-state checks. Inherited history is reference context, not a request to continue the parent's task or control its agents. Parallel chats may own goals and subagents. Keep the initial transcript clean without rewriting stored or model-visible history.
 
