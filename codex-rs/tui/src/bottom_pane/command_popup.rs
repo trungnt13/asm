@@ -52,6 +52,7 @@ pub(crate) struct CommandPopupFlags {
     pub(crate) voice_command_enabled: bool,
     pub(crate) worktrees_enabled: bool,
     pub(crate) windows_degraded_sandbox_active: bool,
+    pub(crate) side_conversation_active: bool,
 }
 
 impl From<CommandPopupFlags> for BuiltinCommandFlags {
@@ -67,6 +68,7 @@ impl From<CommandPopupFlags> for BuiltinCommandFlags {
             voice_command_enabled: value.voice_command_enabled,
             worktrees_enabled: value.worktrees_enabled,
             allow_elevate_sandbox: value.windows_degraded_sandbox_active,
+            side_conversation_active: value.side_conversation_active,
         }
     }
 }
@@ -676,6 +678,7 @@ mod tests {
                 voice_command_enabled: false,
                 worktrees_enabled: true,
                 windows_degraded_sandbox_active: false,
+                side_conversation_active: false,
             },
             Vec::new(),
         );

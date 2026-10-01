@@ -413,6 +413,12 @@ pub(crate) enum AppEvent {
         user_message: Option<UserMessage>,
     },
 
+    /// Fork the current thread into a saved parallel conversation.
+    StartParallel {
+        parent_thread_id: ThreadId,
+        user_message: Option<UserMessage>,
+    },
+
     /// Submit an op to the specified thread, regardless of current focus.
     SubmitThreadOp {
         thread_id: ThreadId,
