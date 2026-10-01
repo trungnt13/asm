@@ -171,9 +171,7 @@ impl TranscriptView {
         {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
         }
-        if !full_content
-            && let Some(layout) = self.tool_group_layout(cells, index)
-        {
+        if !full_content && let Some(layout) = self.tool_group_layout(cells, index) {
             return Some(layout);
         }
         let mode = self.mode;
