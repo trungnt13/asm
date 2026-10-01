@@ -629,6 +629,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub(crate) fn set_side_conversation_active(&mut self, active: bool) {
+        self.composer.set_side_conversation_active(active);
+        self.request_redraw();
+    }
+
     pub(crate) fn set_placeholder_text(&mut self, placeholder: String) {
         self.composer.set_placeholder_text(placeholder);
         self.request_redraw();

@@ -1,5 +1,5 @@
 ---
-source: tui/src/chatwidget/tests/side.rs
+source: tui/src/chatwidget/tests/parallel_tests.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
   Select a review preset
