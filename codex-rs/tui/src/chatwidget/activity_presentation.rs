@@ -4,6 +4,10 @@
 use super::*;
 use crate::transcript_view::ActivityTranscriptLines;
 
+#[cfg(test)]
+#[path = "activity_presentation_tests.rs"]
+mod tests;
+
 impl ChatWidget {
     pub(crate) fn active_activity_ids(&self) -> Vec<String> {
         self.transcript
@@ -31,16 +35,35 @@ impl ChatWidget {
         };
         let has_activity = mode == HistoryRenderMode::Rich
             && active.is_some_and(|cell| !cell.activity_ids().is_empty());
+        let summary = active
+            .filter(|_| {
+                self.local_settings.tui.collapse_tool_calls
+                    && self.local_settings.transcript_mode.is_owned()
+                    && mode == HistoryRenderMode::Rich
+            })
+            .and_then(HistoryCell::tool_call_summary);
         let activity = active.map_or_else(Vec::new, |cell| {
-            if expanded && has_activity {
+            if let Some(summary) = &summary {
+                let mut lines = vec![crate::transcript_view::tool_group_summary_line(
+                    summary, width, expanded,
+                )];
+                if expanded {
+                    lines.extend(cell.compact_hyperlink_lines(width));
+                }
+                lines
+            } else if expanded && has_activity {
                 cell.expanded_hyperlink_lines(width)
             } else {
                 render_compact(cell, width)
             }
         });
-        let disclosure = active
-            .filter(|_| has_activity)
-            .and_then(|cell| cell.activity_disclosure(width));
+        let disclosure = if summary.is_some() {
+            Some(history_cell::ActivityDisclosure::ToolGroup)
+        } else {
+            active
+                .filter(|_| has_activity)
+                .and_then(|cell| cell.activity_disclosure(width))
+        };
         let mut auxiliary = self
             .active_cell_hyperlink_lines_with(width, |cell, width| {
                 if active.is_some_and(|active| std::ptr::eq(active, cell)) {

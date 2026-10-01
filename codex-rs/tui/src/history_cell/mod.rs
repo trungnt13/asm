@@ -12,6 +12,9 @@
 
 mod activity_group;
 pub(crate) use activity_group::ActivityGroup;
+mod tool_summary;
+pub(crate) use tool_summary::ToolCallSummary;
+pub(crate) use tool_summary::command_names;
 
 use crate::diff_model::FileChange;
 use crate::diff_render::create_diff_summary;
@@ -253,6 +256,12 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Empty identities indicate ordinary content without a local disclosure control.
     fn activity_ids(&self) -> Vec<String> {
         Vec::new()
+    }
+
+    /// Identify tool calls eligible for grouped summaries without reading their output.
+    /// Return `None` for failures or content that must keep its own visible preview.
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        None
     }
 
     /// Available activity details, preserving source order and any upstream truncation notices.
