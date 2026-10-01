@@ -4,7 +4,7 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn slash_copyid_copies_displayed_session_without_status_or_response() {
-    for mode in ["idle", "running", "side", "parent-owned"] {
+    for mode in ["idle", "running", "side", "parallel", "parent-owned"] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let session_id = "00000000-0000-0000-0000-000000000123";
         chat.thread_id = Some(ThreadId::from_string(session_id).expect("valid thread ID"));
@@ -12,7 +12,10 @@ async fn slash_copyid_copies_displayed_session_without_status_or_response() {
             handle_turn_started(&mut chat, "active");
         }
         if mode == "side" {
-            chat.active_side_conversation = true;
+            chat.set_side_conversation_active(/*active*/ true);
+        }
+        if mode == "parallel" {
+            chat.set_parallel_conversation_active(/*active*/ true);
         }
         if mode == "parent-owned" {
             chat.set_parent_owned_thread();
