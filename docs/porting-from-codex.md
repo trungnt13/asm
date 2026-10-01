@@ -163,15 +163,17 @@ Use explicit repository selection for GitHub operations, such as `gh ... -R trun
 
 ### Installer boundaries
 
-### Saved forks and side conversations
+### Saved forks, upstream sides, and parallel conversations
 
 Preserve the parent's effective prompt-cache routing key for saved and temporary root forks, independently of thread/session identity. Persist that routing choice for resume and further forks; keep old rollouts readable without ancestor lookups. Preserve upstream guardian and subagent routing. Sharing routing is an optimization, not a promise of backend cache hits.
 
-Make `/side` a saved ordinary user fork with the same command availability as main under normal permissions, feature flags, platform support, and busy-state checks. Inherited history is reference context, not a request to continue the parent's task or control its agents. Sides may own goals and subagents. Keep the initial side transcript clean without rewriting stored or model-visible history.
+Keep `/side` and its `/btw` alias aligned with upstream: temporary forks, upstream command restrictions and reference-only instructions, no subagents, and no saved pairing metadata. Ctrl+/ switches views; Ctrl+C returns to the parent and discards the temporary side. Ordinary picker navigation discards temporary sides as upstream does.
 
-Keep one main/side pair. `/side` from a side returns to its parent and starts a replacement side; previous sides remain saved. Ctrl+/ switches views without stopping work. With an empty composer and no modal, Ctrl+C stops the side, pauses its active goal, and returns to its parent without deleting history. Selecting subagents must not stop their owning side. Ordinary `/new`, `/clear`, `/resume`, `/fork`, `/cd`, and `/worktree` navigation leaves side mode instead of maintaining a separate side slot. Archive/delete act on the displayed side and return to its parent.
+Use `/parallel` for the saved ordinary user fork with normal command availability under permissions, feature flags, platform support, and busy-state checks. Inherited history is reference context, not a request to continue the parent's task or control its agents. Parallel chats may own goals and subagents. Keep the initial transcript clean without rewriting stored or model-visible history.
 
-Keep pairing and transcript-display boundaries in ASM client-local state scoped to the app-server target. Restore an open pair on resume; closing the selection must not delete its saved conversation. Do not use analytics source classification or false fork ancestry to encode UI relationships. Stock clients see ordinary threads through unchanged app-server APIs; their UI need not implement side switching. Shared files and explicitly global configuration changes are not isolated between chats.
+Share one main/companion pair without nesting. Starting a companion from a parallel chat returns to its parent and replaces the selected companion; old parallel chats remain saved. Temporary sides keep upstream restrictions, including rejecting another companion command inside them. Ctrl+/ switches without stopping work. With an empty composer and no modal, Ctrl+C stops the parallel chat, pauses its active goal, and returns to its parent without deleting history. Selecting its subagents must not stop it. Ordinary `/new`, `/clear`, `/resume`, `/fork`, `/cd`, and `/worktree` navigation leaves parallel mode. Archive/delete act on the displayed parallel chat and return to its parent.
+
+Keep parallel pairing and transcript-display boundaries in ASM client-local state scoped to the app-server target. Read existing saved-side records as parallel chats without migrating files or rewriting history. Restore an open pair on resume; closing the selection must not delete its saved conversation. Do not use analytics source classification or false fork ancestry to encode UI relationships. Stock clients see ordinary threads through unchanged app-server APIs; their UI need not implement companion switching. Shared files and explicitly global configuration changes are not isolated between chats.
 
 ### Copy session ID
 
