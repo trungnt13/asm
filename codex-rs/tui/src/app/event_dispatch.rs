@@ -102,6 +102,7 @@ impl App {
                 AppEvent::OpenAgentPicker
                     | AppEvent::SelectAgentThread(_)
                     | AppEvent::StartSide { .. }
+                    | AppEvent::StartParallel { .. }
                     | AppEvent::ForkCurrentSession { .. }
                     | AppEvent::StartManagedWorktree {
                         mode: crate::app_event::ManagedWorktreeMode::Fork,
@@ -2923,7 +2924,7 @@ impl App {
                 self.apply_agent_picker_thread_refresh(primary_thread_id, request_id, result);
             }
             AppEvent::SelectAgentThread(thread_id) => {
-                self.select_agent_thread(tui, app_server, thread_id)
+                self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
                     .await?;
             }
             AppEvent::StartSide {
@@ -2931,8 +2932,11 @@ impl App {
                 user_message,
             } => {
                 return self
-                    .handle_start_side(tui, app_server, parent_thread_id, user_message)
+                    .start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Side, user_message)
                     .await;
+            }
+            AppEvent::StartParallel { parent_thread_id, user_message } => {
+                return self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Parallel, user_message).await;
             }
             AppEvent::OpenSkillsList => {
                 self.chat_widget.open_skills_list();
@@ -3581,6 +3585,14 @@ impl App {
                 .add_error_message("A thread must start before it can be archived.".to_string());
             return Ok(AppRunControl::Continue);
         };
+        if self
+            .side_threads
+            .get(&thread_id)
+            .is_some_and(|state| state.kind == CompanionKind::Side)
+        {
+            self.chat_widget.add_error_message("'/archive' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.".to_string());
+            return Ok(AppRunControl::Continue);
+        }
         let side_parent_thread_id = self.active_side_parent_thread_id();
         if side_parent_thread_id.is_none()
             && !matches!(self.app_server_target, AppServerTarget::Embedded)
@@ -3664,6 +3676,14 @@ impl App {
                 .add_error_message("A thread must start before it can be deleted.".to_string());
             return Ok(AppRunControl::Continue);
         };
+        if self
+            .side_threads
+            .get(&thread_id)
+            .is_some_and(|state| state.kind == CompanionKind::Side)
+        {
+            self.chat_widget.add_error_message("'/delete' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.".to_string());
+            return Ok(AppRunControl::Continue);
+        }
         let side_parent_thread_id = self.active_side_parent_thread_id();
         if side_parent_thread_id.is_none()
             && !matches!(self.app_server_target, AppServerTarget::Embedded)
