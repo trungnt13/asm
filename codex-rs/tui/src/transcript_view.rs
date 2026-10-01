@@ -20,6 +20,7 @@ mod search;
 mod selection;
 mod snapshot;
 mod text;
+mod tool_groups;
 mod turn_tip;
 
 use std::sync::Arc;
@@ -46,6 +47,7 @@ pub(crate) use bookmark::TranscriptBookmark;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;
+pub(crate) use tool_groups::summary_line as tool_group_summary_line;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum EntryKey {
@@ -117,6 +119,7 @@ pub(crate) struct TranscriptView {
     last_tail: Option<EntryKey>,
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
+    collapsed_tools: tool_groups::CollapsedToolGroups,
 }
 
 impl Default for TranscriptView {
@@ -153,6 +156,7 @@ impl Default for TranscriptView {
             last_tail: None,
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
+            collapsed_tools: tool_groups::CollapsedToolGroups::default(),
         }
     }
 }
@@ -356,6 +360,7 @@ impl TranscriptView {
         self.copy_mode = None;
         self.release_live_reading();
         self.cache.clear();
+        self.collapsed_tools.invalidate_layouts();
         self.suppressed_prompt_header = None;
         self.live_key = None;
         // Keep search's origin independent of either presentation's saved position.
@@ -525,6 +530,7 @@ impl TranscriptView {
             Position::Latest => self.bottom_start(cells),
             Position::Reading(anchor) => {
                 let index = self.resolve(cells, anchor);
+                let index = self.tool_group_start(cells, index).unwrap_or(index);
                 let row = self.layout(cells, index).map_or(/*default*/ 0, |layout| {
                     layout
                         .row_for_offset(anchor.offset)
