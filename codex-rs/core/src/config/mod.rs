@@ -804,6 +804,9 @@ pub struct Config {
     /// Own the fullscreen transcript when the alternate screen is enabled.
     pub tui_fullscreen_transcript: bool,
 
+    /// Group consecutive tools in the fullscreen transcript.
+    pub tui_collapse_tool_calls: bool,
+
     /// Override the terminal-specific default for copying transcript mouse selections.
     pub tui_copy_on_select: codex_config::types::CopyOnSelect,
 
@@ -4555,6 +4558,7 @@ impl Config {
                 .as_ref()
                 .map(|t| t.raw_output_mode)
                 .unwrap_or(false),
+            tui_collapse_tool_calls: cfg.tui.as_ref().is_some_and(|tui| tui.collapse_tool_calls),
             tui_fullscreen_transcript: cfg
                 .tui
                 .as_ref()

@@ -27,11 +27,16 @@ pub(super) fn activity_layout(
     expanded: bool,
     shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
+    let inline = matches!(lines.disclosure, Some(ActivityDisclosure::ToolGroup));
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
     let source_offset = (!lines.auxiliary.is_empty())
         .then(|| TextLayout::new(lines.activity.clone(), width).text().len());
     lines.activity.extend(lines.auxiliary);
-    let layout = TextLayout::new(lines.activity, width);
+    let mut layout = TextLayout::new(lines.activity, width);
+    if inline {
+        layout.disclosure = true;
+        return layout;
+    }
     if !has_details {
         return layout;
     }
@@ -49,7 +54,9 @@ pub(super) fn activity_layout(
             }
             label
         }
-        (false, Some(ActivityDisclosure::Generic) | None) => "+ Show details".to_owned(),
+        (false, Some(ActivityDisclosure::Generic | ActivityDisclosure::ToolGroup) | None) => {
+            "+ Show details".to_owned()
+        }
     };
     match source_offset {
         Some(offset) => layout.with_disclosure_control_at(label, offset),
@@ -139,6 +146,9 @@ impl TranscriptView {
             && cell.as_any().is::<crate::history_cell::SessionInfoCell>()
         {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
+        }
+        if let Some(layout) = self.tool_group_layout(cells, index) {
+            return Some(layout);
         }
         let detailed = self.detailed;
         let mode = self.mode;

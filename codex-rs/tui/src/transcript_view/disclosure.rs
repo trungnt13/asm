@@ -79,6 +79,9 @@ impl TranscriptView {
     }
 
     pub(super) fn activity_ids(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Vec<String> {
+        if let Some(ids) = self.tool_group_ids(cells, index) {
+            return ids;
+        }
         cells.get(index).map_or_else(
             || self.disclosure.live_ids.clone(),
             |cell| cell.activity_ids(),
@@ -354,6 +357,7 @@ impl TranscriptView {
         self.disclosure.focused = Some(ids);
         self.position = Position::Reading(anchor);
         self.cache.clear();
+        self.collapsed_tools.invalidate_layouts();
         self.live_key = None;
         self.live_separated = None;
         self.restart_search();

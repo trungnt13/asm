@@ -872,6 +872,11 @@ pub struct Tui {
     #[serde(default = "default_true")]
     pub fullscreen_transcript: bool,
 
+    /// Group consecutive tool calls into compact fullscreen transcript summaries.
+    /// Defaults to `false` to preserve existing tool previews.
+    #[serde(default)]
+    pub collapse_tool_calls: bool,
+
     /// Copy selected transcript text when the mouse button is released.
     /// Defaults to `auto`: enabled except in direct terminals known to forward their native
     /// copy shortcut (Ghostty 1.2+, Kitty on macOS, Windows Terminal, and VS Code on Windows).
