@@ -54,6 +54,24 @@ impl TranscriptView {
                 .iter()
                 .map(|visible| (visible.key, Arc::clone(&visible.activity_ids))),
         );
+        if self.groups_tools() {
+            // Retain hidden members too, so a later status update cannot duplicate a pinned group.
+            let visible_ids = activities
+                .values()
+                .flat_map(|ids| ids.iter())
+                .cloned()
+                .collect::<std::collections::HashSet<_>>();
+            for (index, cell) in cells.iter().enumerate() {
+                if cell
+                    .activity_ids()
+                    .iter()
+                    .any(|id| visible_ids.contains(id))
+                    && let Some(layout) = self.base_layout(&cells, index)
+                {
+                    pinned.entry(EntryKey::cell(cell)).or_insert(layout);
+                }
+            }
+        }
         if let Some(live) = self.base_layout(&cells, cells.len()) {
             pinned.insert(EntryKey::Live, live);
             activities.insert(
@@ -100,7 +118,10 @@ impl TranscriptView {
                 && (!cell.has_stable_transcript_height()
                     || cell.transcript_animation_tick().is_some())
         });
-        if anchor.key == EntryKey::Live || mutable_cell {
+        if anchor.key == EntryKey::Live
+            || mutable_cell
+            || self.tool_group_start(cells, anchor.index).is_some()
+        {
             if self
                 .held_reading
                 .as_ref()
