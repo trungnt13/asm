@@ -1,0 +1,96 @@
+---
+source: tui/src/transcript_view/tool_groups_tests.rs
+expression: "format!(\"collapsed\\n{collapsed}\\n\\nexpanded\\n{expanded}\\n\\nappended\\n{appended}\\n\\ncollapsed after append\\n{recollapsed}\")"
+---
+collapsed
+▸ Ran 3 tool calls (glab, curl)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+expanded
+▾ Ran 3 tool calls (glab, curl)
+• Ran glab api first
+  └ output-09
+    output-10
+    output-11
+• Ran curl endpoint
+  └ curl result
+• Ran glab api third
+  └ third result
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+appended
+▾ Ran 4 tool calls (glab, curl, jq)
+• Ran glab api first
+  └ output-09
+    output-10
+    output-11
+• Ran curl endpoint
+  └ curl result
+• Ran glab api third
+  └ third result
+• Ran jq .
+  └ fourth result
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+collapsed after append
+▸ Ran 4 tool calls (glab, curl, jq)

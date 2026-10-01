@@ -899,6 +899,10 @@ pub struct Tui {
     #[serde(default, deserialize_with = "crate::tui_mouse_scroll::deserialize")]
     #[schemars(schema_with = "crate::tui_mouse_scroll::schema")]
     pub mouse_scroll_speed: Option<f64>,
+    /// Group consecutive tool calls into compact fullscreen transcript summaries.
+    /// Defaults to `false` to preserve existing tool previews.
+    #[serde(default)]
+    pub collapse_tool_calls: bool,
 
     /// Copy selected transcript text when the mouse button is released.
     /// Defaults to `auto`: enabled except in direct terminals known to forward their native
