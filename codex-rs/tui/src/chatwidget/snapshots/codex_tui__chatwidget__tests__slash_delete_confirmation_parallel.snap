@@ -1,5 +1,5 @@
 ---
-source: tui/src/chatwidget/tests/slash_commands.rs
+source: tui/src/chatwidget/tests/parallel_tests.rs
 expression: popup
 ---
   Delete this session?
