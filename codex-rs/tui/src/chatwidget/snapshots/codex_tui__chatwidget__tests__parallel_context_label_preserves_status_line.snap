@@ -1,0 +1,9 @@
+---
+source: tui/src/chatwidget/tests/parallel_tests.rs
+expression: terminal.backend()
+---
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  sol56         Parallel from main thread · ctrl+/ to switch · ctrl+c to close  "
