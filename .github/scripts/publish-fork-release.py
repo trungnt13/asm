@@ -39,6 +39,23 @@ def api(repository, endpoint, *, payload=None, optional=False):
     return json.loads(result.stdout)
 
 
+def release_for_tag(repository, tag):
+    release = api(repository, f"releases/tags/{tag}", optional=True)
+    if release is not None:
+        return release
+    # The by-tag endpoint omits drafts; authenticated release listings include them.
+    matches = []
+    page = 1
+    while True:
+        releases = api(repository, f"releases?per_page=100&page={page}")
+        matches.extend(release for release in releases if release["tag_name"] == tag)
+        if len(matches) > 1:
+            raise ValueError(f"multiple releases use tag {tag}")
+        if len(releases) < 100:
+            return matches[0] if matches else None
+        page += 1
+
+
 def verify_tag(repository, tag, sha, *, create=False):
     reference = api(repository, f"git/ref/tags/{tag}", optional=True)
     if reference is None:
@@ -167,7 +184,7 @@ def main():
     installer = subprocess.check_output(
         ["git", "show", f"{sha}:scripts/install/install.sh"], cwd=ROOT
     )
-    release = api(repository, f"releases/tags/{tag}", optional=True)
+    release = release_for_tag(repository, tag)
     if arguments.command == "verify":
         if release is None:
             raise ValueError("release has not been published")
@@ -221,7 +238,7 @@ def main():
         subprocess.run(
             ["gh", "release", "upload", tag, *missing, "-R", repository], check=True
         )
-    release = api(repository, f"releases/tags/{tag}")
+    release = api(repository, f"releases/{release['id']}")
     verify_remote(repository, tag, sha, release, installer, published=False)
     release = api(
         repository,
