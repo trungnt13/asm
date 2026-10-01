@@ -25,35 +25,6 @@ async fn suppressed_interrupted_turn_notice_skips_history_warning() {
 }
 
 #[tokio::test]
-async fn slash_rename_with_args_updates_saved_side_name() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_side_conversation_active(/*active*/ true);
-
-    chat.dispatch_command_with_args(SlashCommand::Rename, "investigate".to_string(), Vec::new());
-
-    assert_matches!(
-        rx.try_recv(),
-        Ok(AppEvent::CodexOp(Op::SetThreadName { name })) if name == "investigate"
-    );
-    assert!(rx.try_recv().is_err());
-    assert!(op_rx.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn slash_review_opens_normal_picker_in_side() {
-    let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_side_conversation_active(/*active*/ true);
-
-    chat.dispatch_command(SlashCommand::Review);
-
-    assert_chatwidget_snapshot!(
-        "slash_review_picker_in_side",
-        render_bottom_popup(&chat, /*width*/ 80)
-    );
-    assert!(op_rx.try_recv().is_err());
-}
-
-#[tokio::test]
 async fn side_aliases_are_rejected_during_review_mode() {
     for (command, name) in [(SlashCommand::Side, "side"), (SlashCommand::Btw, "btw")] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
@@ -137,7 +108,6 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let parent_thread_id = ThreadId::new();
         chat.thread_id = Some(parent_thread_id);
-        chat.set_side_conversation_active(/*active*/ true);
         chat.on_task_started();
         chat.bottom_pane
             .set_composer_text(input.to_string(), Vec::new(), Vec::new());
@@ -282,4 +252,63 @@ async fn side_context_label_shows_hidden_side_snapshot() {
         )),
     );
     assert_chatwidget_snapshot!("side_context_label_shows_hidden_side", terminal.backend());
+}
+
+#[tokio::test]
+async fn temporary_side_rejects_navigation_and_mutating_commands() {
+    for command in [
+        SlashCommand::Review,
+        SlashCommand::Side,
+        SlashCommand::Btw,
+        SlashCommand::Parallel,
+        SlashCommand::Rename,
+        SlashCommand::New,
+        SlashCommand::Clear,
+        SlashCommand::Resume,
+        SlashCommand::Fork,
+        SlashCommand::Worktree,
+        SlashCommand::Compact,
+        SlashCommand::Delete,
+    ] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.thread_id = Some(ThreadId::new());
+        chat.set_side_conversation_active(/*active*/ true);
+
+        chat.dispatch_command(command);
+
+        let Ok(AppEvent::InsertHistoryCell(cell)) = rx.try_recv() else {
+            panic!("expected temporary-side command error for {command:?}");
+        };
+        let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 200));
+        let name = command.command();
+        assert_eq!(
+            rendered,
+            format!(
+                "■ '/{name}' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
+            )
+        );
+        assert!(rx.try_recv().is_err(), "{command:?}");
+        assert!(op_rx.try_recv().is_err(), "{command:?}");
+        assert!(!chat.bottom_pane.has_active_view(), "{command:?}");
+    }
+}
+
+#[tokio::test]
+async fn temporary_side_rejects_inline_rename_and_direct_rename_prompt() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_side_conversation_active(/*active*/ true);
+    chat.dispatch_command_with_args(SlashCommand::Rename, "investigate".to_string(), Vec::new());
+    let errors = drain_insert_history(&mut rx);
+    assert!(
+        lines_to_single_string(&errors[0])
+            .contains("'/rename' is unavailable in side conversations.")
+    );
+    chat.show_rename_prompt();
+    let errors = drain_insert_history(&mut rx);
+    assert!(
+        lines_to_single_string(&errors[0])
+            .contains("Side conversations are ephemeral and cannot be renamed.")
+    );
+    assert!(!chat.bottom_pane.has_active_view());
+    assert!(op_rx.try_recv().is_err());
 }
