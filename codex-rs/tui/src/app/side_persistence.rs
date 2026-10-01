@@ -23,7 +23,7 @@ impl App {
         let Some(pair) = pair else { return };
         self.side_threads.clear();
         self.side_threads
-            .insert(pair.side, SideThreadState::new(pair.parent));
+            .insert(pair.side, SideThreadState::parallel(pair.parent));
         self.primary_thread_id = Some(pair.parent);
         if thread_id == pair.side {
             // A parent is attached only after explicit navigation. Never resume its goal merely

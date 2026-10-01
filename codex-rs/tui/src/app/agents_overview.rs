@@ -868,7 +868,7 @@ impl App {
             || (self.thread_unavailable(root_thread_id)
                 && !self.chat_widget.is_external_writer_view())
         {
-            self.select_agent_thread(tui, app_server, root_thread_id)
+            self.select_agent_thread_and_discard_side(tui, app_server, root_thread_id)
                 .await?;
         }
         let read_only = self.chat_widget.is_external_writer_view();
