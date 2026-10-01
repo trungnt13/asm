@@ -14,7 +14,7 @@ while :; do
     [[ $(jq -r .status <<<"$run") == completed && $(jq -r .conclusion <<<"$run") == success ]] || continue
     id=$(jq -r .id <<<"$run")
     artifacts=$(gh api -X GET "repos/$repo/actions/runs/$id/artifacts?per_page=100")
-    if jq -e '[.artifacts[] | select(.expired == false) | .name] | (index("codex-aarch64-apple-darwin") != null and index("codex-x86_64-unknown-linux-musl") != null)' <<<"$artifacts" >/dev/null; then
+    if jq -e '[.artifacts[] | select(.expired == false) | .name] | (index("codex-aarch64-apple-darwin") != null and index("codex-x86_64-unknown-linux-gnu") != null)' <<<"$artifacts" >/dev/null; then
       echo "Reusing successful postmerge run $id"
       echo 'reuse=true' >> "$GITHUB_OUTPUT"
       echo "run_id=$id" >> "$GITHUB_OUTPUT"
