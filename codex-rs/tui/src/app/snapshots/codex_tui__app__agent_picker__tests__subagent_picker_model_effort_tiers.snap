@@ -1,14 +1,13 @@
 ---
 source: tui/src/app/agent_picker_tests.rs
-assertion_line: 76
 expression: "render_bottom_popup(&app.chat_widget, 110)"
 ---
   Subagents
-  Select an agent to watch. ⌥+← previous, ⌥+→ next.
+  Select an agent to watch. ⌥← previous, ⌥→ next.
 
 
-› 1. • Main [default] (current)            00000000-0000-0000-0000-000000000001
-  2. • /root/sol_fast gpt-6-sol-high-fast  00000000-0000-0000-0000-000000000002
-  3. • /root/sol_standard gpt-6-sol-max    00000000-0000-0000-0000-000000000003
+› 1. • Main [default] ast6-xhi (current)  00000000-0000-0000-0000-000000000001
+  2. • /root/sol_fast sol61-hig-fast      00000000-0000-0000-0000-000000000002
+  3. • /root/sol_standard sol61-max       00000000-0000-0000-0000-000000000003
 
   enter select · esc back
