@@ -70,9 +70,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `e53e932dc855927afb1cafab5f1ae6edf2695e81`.
+- Last incorporated upstream commit: `2635431edbd43279a4da9c1199456758fbbc8ad3`.
 - Commit date: 2026-10-01.
-- Subject: Allow microphone channel selection for voice conversations (#49836).
+- Subject: Add attachment owner lookup to the app-server (#50094).
 
 A full sync incorporates a selected upstream `main` commit and all its ancestors. Capture the old baseline and selected upstream commit before syncing; use that fixed range for the report. After success, update the marker to the incorporated commit. A targeted cherry-pick does not advance it. Verify the marker with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and check that it is an ancestor of the fork branch.
 
