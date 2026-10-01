@@ -39,13 +39,13 @@ jobs:
           version="$(python3 .github/scripts/rusty_v8_bazel.py resolved-v8-crate-version)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$REF" == refs/tags/* ]]; then
-            [[ "$REF_NAME" == "asm-v8-v${version}" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
+            [[ "$REF_NAME" == "asm-v8-v${version}-glibc2.35" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
             [[ "$(git rev-parse "${REF_NAME}^{commit}")" == "$(git rev-parse "${GITHUB_SHA}^{commit}")" ]] || {
               echo 'V8 tag does not point to this workflow commit' >&2; exit 1;
             }
           fi
           if [[ "$REF" == refs/tags/* || "$PUBLISH" == true ]]; then
-            tag="asm-v8-v${version}"
+            tag="asm-v8-v${version}-glibc2.35"
             status="$(curl -sS -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
@@ -83,9 +83,9 @@ jobs:
             target: aarch64-apple-darwin
             platform: macos_arm64
             cpu: arm64
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-            platform: linux_amd64_musl
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux_amd64
             cpu: x64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -100,12 +100,13 @@ jobs:
       - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
         with:
           tool: nextest
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Install native MUSL linker
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y musl-tools
-          echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.11'
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Install GNU build tools
+        run: bash .github/scripts/install-gnu-build-tools.sh
       - name: Build and stage V8 archive and Rust binding
         env:
           TARGET: ${{ matrix.target }}
@@ -149,12 +150,12 @@ jobs:
       - name: Publish only the six expected files
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: asm-v8-v${{ needs.metadata.outputs.version }}
+          TAG: asm-v8-v${{ needs.metadata.outputs.version }}-glibc2.35
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           assets=()
-          for target in aarch64-apple-darwin x86_64-unknown-linux-musl; do
+          for target in aarch64-apple-darwin x86_64-unknown-linux-gnu; do
             dir="dist/fork-v8-${target}"
             for name in "librusty_v8_ptrcomp_sandbox_release_${target}.a.gz" \
               "src_binding_ptrcomp_sandbox_release_${target}.rs" \
