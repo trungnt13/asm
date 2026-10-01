@@ -1450,10 +1450,14 @@ impl App {
             ThreadAttachPresentation::Fresh
             | ThreadAttachPresentation::FreshWithDraft
             | ThreadAttachPresentation::SessionLineage => {
-                if self.side_threads.contains_key(&thread_id) {
-                    self.chat_widget.handle_side_thread_session(session);
-                } else {
-                    self.chat_widget.handle_thread_session(session);
+                match self.side_threads.get(&thread_id).map(|side| side.kind) {
+                    Some(CompanionKind::Side) => {
+                        self.chat_widget.handle_side_thread_session(session);
+                    }
+                    Some(CompanionKind::Parallel) => {
+                        self.chat_widget.handle_thread_session_quiet(session);
+                    }
+                    None => self.chat_widget.handle_thread_session(session),
                 }
             }
         }
@@ -1736,12 +1740,21 @@ impl App {
                 self.chat_widget
                     .set_plan_mode_reasoning_effort(self.config.plan_mode_reasoning_effort.clone());
             }
-            if self.side_threads.contains_key(&session.thread_id) {
-                self.chat_widget.handle_side_thread_session(session);
-            } else if suppress_replay_notices {
-                self.chat_widget.handle_thread_session_quiet(session);
-            } else {
-                self.chat_widget.handle_thread_session(session);
+            match self
+                .side_threads
+                .get(&session.thread_id)
+                .map(|side| side.kind)
+            {
+                Some(CompanionKind::Side) => {
+                    self.chat_widget.handle_side_thread_session(session);
+                }
+                Some(CompanionKind::Parallel) => {
+                    self.chat_widget.handle_thread_session_quiet(session);
+                }
+                None if suppress_replay_notices => {
+                    self.chat_widget.handle_thread_session_quiet(session);
+                }
+                None => self.chat_widget.handle_thread_session(session),
             }
         }
         let retained_assistant_captions =
