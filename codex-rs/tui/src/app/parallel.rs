@@ -17,6 +17,13 @@ impl CompanionKind {
     }
 }
 
+pub(super) const PARALLEL_MAIN_THREAD_UNAVAILABLE_MESSAGE: &str =
+    "'/parallel' is unavailable until the main thread is ready.";
+pub(super) const PARALLEL_NO_STARTED_CONVERSATION_MESSAGE: &str = concat!(
+    "'/parallel' is unavailable until the current conversation has started. ",
+    "Send a message first, then try /parallel again."
+);
+
 pub(super) const PARALLEL_BOUNDARY_PROMPT: &str = r#"Parallel conversation boundary.
 
 Everything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.

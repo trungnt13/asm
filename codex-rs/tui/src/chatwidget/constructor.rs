@@ -228,6 +228,7 @@ impl ChatWidget {
             pet_image_support_override: None,
             thread_id: None,
             thread_name: None,
+            thread_rename_block_message: None,
             active_side_conversation: false,
             active_parallel_conversation: false,
             blocks_direct_input: false,
