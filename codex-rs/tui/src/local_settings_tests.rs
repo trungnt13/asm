@@ -105,6 +105,7 @@ show_tooltips = false
 show_server_version_notice = false
 auto_recap = false
 fullscreen_transcript = true
+collapse_tool_calls = true
 copy_on_select = "never"
 right_click_paste = "off"
 vim_mode_default = true
