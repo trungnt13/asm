@@ -664,6 +664,7 @@ pub(crate) struct ChatWidget {
     thread_id: Option<ThreadId>,
     thread_name: Option<String>,
     active_side_conversation: bool,
+    active_parallel_conversation: bool,
     blocks_direct_input: bool,
     external_writer_view: bool,
     /// Covers both queued and executing forks so repeated shortcuts cannot queue another one.
