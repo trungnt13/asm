@@ -3,7 +3,7 @@ use crate::app::session_lifecycle::ThreadAttachPresentation;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn saved_side_replacement_and_cancel_keep_history_and_resume_events() -> Result<()> {
+async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Result<()> {
     let (mut app, mut app_events, _ops) = make_test_app_with_channels().await;
     let config = app.chat_widget.config_ref().clone();
     let parent_id = ThreadId::from_string(
@@ -29,8 +29,14 @@ async fn saved_side_replacement_and_cancel_keep_history_and_resume_events() -> R
     app.enqueue_primary_thread_session(parent.session, parent.turns)
         .await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    Box::pin(app.handle_start_side(&mut tui, &mut server, parent_id, /*user_message*/ None))
-        .await?;
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        parent_id,
+        CompanionKind::Parallel,
+        /*user_message*/ None,
+    ))
+    .await?;
     let first_id = app.current_displayed_thread_id().expect("first side");
     assert_ne!(first_id, parent_id);
     assert!(
@@ -40,7 +46,14 @@ async fn saved_side_replacement_and_cancel_keep_history_and_resume_events() -> R
             .ephemeral
     );
 
-    Box::pin(app.handle_start_side(&mut tui, &mut server, first_id, /*user_message*/ None)).await?;
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        first_id,
+        CompanionKind::Parallel,
+        /*user_message*/ None,
+    ))
+    .await?;
     let second_id = app.current_displayed_thread_id().expect("replacement side");
     assert_ne!(second_id, first_id);
     assert_eq!(app.active_side_parent_thread_id(), Some(parent_id));
@@ -98,6 +111,8 @@ async fn saved_side_replacement_and_cancel_keep_history_and_resume_events() -> R
     .await?;
     assert_eq!(app.current_displayed_thread_id(), Some(second_id));
     assert_eq!(app.active_side_parent_thread_id(), Some(parent_id));
+    assert!(app.chat_widget.parallel_conversation_active());
+    assert!(!app.chat_widget.side_conversation_active());
     assert!(!app.abandoned_side_threads.contains(&second_id));
     while app_events.try_recv().is_ok() {}
     if let Some(receiver) = app.active_thread_rx.as_mut() {
@@ -115,5 +130,42 @@ async fn saved_side_replacement_and_cancel_keep_history_and_resume_events() -> R
             .try_recv()
             .is_ok()
     );
+    // A temporary side replaces the companion slot, not the saved conversation.
+    let store = crate::side_conversations::SideConversationStore::new(
+        &app.config.codex_home,
+        &app.app_server_target,
+    );
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        second_id,
+        CompanionKind::Side,
+        /*user_message*/ None,
+    ))
+    .await?;
+    let temporary_id = app.current_displayed_thread_id().expect("temporary side");
+    let temporary = server
+        .thread_read(temporary_id, /*include_turns*/ false)
+        .await?;
+    assert!(temporary.ephemeral);
+    assert!(app.chat_widget.side_conversation_active());
+    assert!(!app.chat_widget.parallel_conversation_active());
+    assert_eq!(app.active_side_parent_thread_id(), Some(parent_id));
+    assert_eq!(store.side(temporary_id)?, None);
+    assert_eq!(store.pair(parent_id)?, None);
+    assert!(store.side(second_id)?.is_some());
+    assert!(
+        !server
+            .thread_read(second_id, /*include_turns*/ false)
+            .await?
+            .ephemeral
+    );
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(temporary_id));
+    assert!(Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
+    assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
+    assert!(app.side_threads.is_empty());
     Ok(())
 }

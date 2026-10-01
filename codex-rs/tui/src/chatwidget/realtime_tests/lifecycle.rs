@@ -515,7 +515,10 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
 async fn temporary_side_blocks_voice_but_parallel_keeps_normal_feature_gate() {
     for temporary_side in [true, false] {
         let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-        chat.config.features.disable(Feature::RealtimeConversation);
+        chat.config
+            .features
+            .disable(Feature::RealtimeConversation)
+            .expect("test config should allow disabling realtime");
         if temporary_side {
             chat.set_side_conversation_active(/*active*/ true);
         } else {
