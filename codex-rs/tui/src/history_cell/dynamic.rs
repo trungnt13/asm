@@ -1,6 +1,7 @@
 //! Dynamic tool activity with retained arguments and output across live and loaded transcripts.
 
 use super::HistoryCell;
+use super::ToolCallSummary;
 use super::activity_preview::DETAIL_PREVIEW_LINES;
 use super::activity_preview::clipped_line;
 use super::raw_lines_from_source;
@@ -173,6 +174,21 @@ impl DynamicToolCallData {
 }
 
 impl HistoryCell for DynamicToolCallCell {
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        let data = self
+            .data
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if data.interrupted || matches!(data.status, DynamicToolCallStatus::Failed) {
+            return None;
+        }
+        Some(ToolCallSummary {
+            count: 1,
+            running: data.is_active(),
+            names: vec![data.name.clone()],
+        })
+    }
+
     fn has_stable_transcript_height(&self) -> bool {
         false
     }

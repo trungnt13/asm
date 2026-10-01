@@ -1,0 +1,36 @@
+---
+source: tui/src/transcript_view/tool_groups_tests.rs
+expression: "format!(\"barriers\\n{rendered}\\n\\nnarrow\\n{narrow_rendered}\")"
+---
+barriers
+▸ Ran 2 tool calls (glab, curl)
+
+Assistant message between tools
+
+• Failed (exit 1) false
+  └ failure diagnostic
+
+▸ Ran 2 tool calls (jq, git)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+narrow
+▸ Ran 6 tool calls (+6 more)
