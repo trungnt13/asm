@@ -1165,7 +1165,7 @@ impl AppServerSession {
         if let Some(permissions) = selected_permissions {
             started.session.permission_profile = permissions;
         }
-        if presentation == ForkPresentation::SideConversation {
+        if presentation == ForkPresentation::SideConversation && config.ephemeral {
             started.session.daybreak_enabled = false;
         }
         started.session.fork_parent_title = fork_parent.and_then(|thread| thread.name);
