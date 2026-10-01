@@ -32,9 +32,9 @@ jobs:
           - runner: macos-15
             timeout: 180
             target: aarch64-apple-darwin
-          - runner: ubuntu-24.04
+          - runner: ubuntu-22.04
             timeout: 90
-            target: x86_64-unknown-linux-musl
+            target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -42,28 +42,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           targets: ${{ matrix.target }}
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Use hermetic Cargo home
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
-          mkdir -p "${cargo_home}/bin"
-          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
-          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
-          : > "${cargo_home}/config.toml"
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Install Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Install Python for artifact verification
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          version: 0.14.0
-          use-cache: false
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Install musl build tools
-        env:
-          TARGET: ${{ matrix.target }}
-        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
+          python-version: '3.11'
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Install GNU build tools
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-gnu-build-tools.sh"
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
         name: Disable aws-lc jitter entropy
         shell: bash
         run: |
@@ -124,6 +111,15 @@ jobs:
           set -euo pipefail
           python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-${TARGET}.log"
 
+      - name: Smoke packaged ASM on clean Ubuntu 22.04
+        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          bash "${GITHUB_WORKSPACE}/.github/scripts/smoke-ubuntu-archive.sh" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" "$version" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-ubuntu-${TARGET}.log"
+
       - name: Upload archive
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
@@ -139,6 +135,7 @@ jobs:
           path: |
             diagnostics/resources-${{ matrix.target }}.log
             diagnostics/smoke-${{ matrix.target }}.log
+            diagnostics/smoke-ubuntu-${{ matrix.target }}.log
             codex-rs/target/cargo-timings/cargo-timing*.html
           if-no-files-found: warn
 
