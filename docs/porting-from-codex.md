@@ -105,28 +105,29 @@ Set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml), ref
 Keep [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) separate from upstream's release workflow. Use GitHub-hosted runners:
 
 - macOS ARM64: `aarch64-apple-darwin`, `macos-15`, 180-minute timeout.
-- Linux x86_64 MUSL: `x86_64-unknown-linux-musl`, `ubuntu-24.04`, 90-minute timeout.
+- Linux x86_64 glibc: `x86_64-unknown-linux-gnu`, `ubuntu-22.04`, 90-minute timeout. Ubuntu 22.04 / glibc 2.35 is the minimum supported Linux baseline. Keep Linux build and native smoke jobs on that baseline; changing only the target triple on a newer runner is not sufficient. Before GitHub retires this runner in April 2027, move the same build environment into an Ubuntu 22.04 container on a supported runner rather than raising the runtime requirement.
 
 Published binaries use optimized `--release`, never `dev-small`. Set `CARGO_PROFILE_RELEASE_STRIP=debuginfo`; retain function symbols and optimization settings. Fix pipeline timeouts rather than weakening the profile. Upstream tests do not justify stripping more symbols or dependencies.
 
 Build `codex` and `codex-code-mode-host` from the same commit, target, and profile. Each `codex-<target>.tar.gz` contains exactly those two regular executable siblings. Publish both target archives, `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh), not source trees or diagnostics. Check out the exact tag when adding the installer to the checksum manifest, even when reusing archives.
 
-Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on the packaged binaries on their native runner: CLI `--version` matches Cargo, and both `--help` commands succeed with usage. Do not require the helper to support `--version`. Record binary and archive sizes.
+Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on the packaged binaries on their native runner: CLI `--version` matches Cargo, and both `--help` commands succeed with usage. Do not require the helper to support `--version`. Record binary and archive sizes. For GNU Linux archives, verify both ELF executables use the x86_64 GNU loader and require no glibc symbol newer than 2.35. Also run version/help checks in a clean Ubuntu 22.04 container with only the declared runtime libraries; a dependency-rich build runner does not establish runtime compatibility.
 
 Keep these boundaries:
 
 - No Apple Developer signing or notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners.
 - Use host `bwrap`, `rg`, and the system shell where needed. Do not bundle Bubblewrap, voice, patched zsh, or other helpers, or change runtime sandbox/security defaults for packaging.
-- Retain Zig, [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), `AWS_LC_SYS_NO_JITTER_ENTROPY`, and verified fork-built V8 via [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml).
+- Use the native GNU toolchain and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh) for fork Linux builds. Do not use Zig or MUSL build wrappers there; keep inherited MUSL tooling for upstream workflows. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified fork-built V8 via [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04 for artifact verification.
+- Preserve upstream GNU runtime choices, including the system allocator, locale handling, and PTY support; do not change Rust platform conditionals merely to mimic MUSL. GNU packages use system OpenSSL 3 and may use system liblzma. Keep the runtime package list in [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) aligned with actual ELF dependencies. Voice remains unbundled; this migration does not add an ALSA or GStreamer requirement.
 - Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, or website/OpenAI-only publishing without an agreed intent change.
 
 ### V8 dependency release
 
-Build V8 separately from the CLI only when the resolved `v8` crate version lacks a fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) with tag `asm-v8-v<exact resolved v8 crate version>`. A manual branch run builds only by default; explicit `publish=true` builds and smokes first, then creates the tag and release at that commit. Tag pushes also publish. Never move a tag or replace published assets without approval. Reuse a verified fork V8 release when V8 inputs have not changed; if source, patches, build flags, or bindings change under the same crate version, ask how to version the dependency.
+Build V8 separately from the CLI only when the required crate version, target, or baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) with tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35`. The suffix identifies the GNU-baseline artifact generation, including its matching macOS pair, without moving or replacing the old MUSL release. A manual branch run builds only by default; explicit `publish=true` builds and smokes first, then creates the tag and release at that commit. Tag pushes also publish. Never move a tag or replace published assets without approval. Reuse a verified fork V8 release when V8 inputs have not changed; if source, patches, build flags, or bindings change under the same crate version, ask how to version the dependency.
 
-Build only sandbox + pointer-compression optimized pairs for macOS ARM64 and Linux x86_64 MUSL. Use the existing Bazel source pair and staging helper locally on GitHub-hosted runners, without BuildBuddy, remote execution, paid infrastructure, or broad suites. Keep the static library's required symbols. Run the native `codex-v8-poc` sandbox and JavaScript smoke tests on both targets, including MUSL. Publish only each target's archive, Rust binding, and two-file checksum manifest. The dependency release is normal but **not Latest**; it has no installer and does not affect CLI release discovery.
+Build only sandbox + pointer-compression optimized pairs for macOS ARM64 and Linux x86_64 GNU. Use the existing Bazel source pair and staging helper locally on GitHub-hosted runners, without BuildBuddy, remote execution, paid infrastructure, or broad suites. Keep the static library's required symbols. Run the native `codex-v8-poc` sandbox and JavaScript smoke tests on both targets, including GNU on Ubuntu 22.04. Reuse the existing GNU Bazel platform and its older glibc sysroot; the native Ubuntu 22.04 tests must still pass. Publish only each target's archive, Rust binding, and two-file checksum manifest. The dependency release is normal but **not Latest**; it has no installer and does not affect CLI release discovery.
 
-Fork CI and CLI releases consume only the matching verified fork V8 release. For a new V8 version, publish and verify both target pairs before the first `main` push that consumes it. Check each downloaded asset's GitHub SHA-256 digest and the manifest's exact target names and hashes. Missing or bad assets fail without upstream fallback. The inherited upstream V8 action path remains for workflows outside fork CI.
+Fork CI and CLI releases consume only the matching verified fork V8 release. For a new V8 version or artifact generation, publish and verify both target pairs before the first `main` push that consumes it. Check each downloaded asset's GitHub SHA-256 digest and the manifest's exact target names and hashes. Missing or bad assets fail without upstream fallback. The inherited upstream V8 action path remains for workflows outside fork CI.
 
 ### Reuse and publish
 
@@ -138,7 +139,7 @@ Use explicit repository selection, such as `gh ... -R trungnt13/asm`. Verify the
 
 ### Installer
 
-The published installer uses only `trungnt13/asm` GitHub `v*` releases for macOS ARM64 and Linux x86_64 MUSL. Verify GitHub SHA-256 digests and `SHA256SUMS` before installing the two-binary archive. Reject unsupported targets before changing install state.
+The published installer uses only `trungnt13/asm` GitHub `v*` releases for macOS ARM64 and Linux x86_64 GNU. Verify GitHub SHA-256 digests and `SHA256SUMS` before installing the two-binary archive. Reject unsupported targets and Linux hosts without glibc 2.35+ before downloading release metadata or changing install state. Select only GNU Linux archives; never silently fall back to MUSL. A MUSL-only historical release requires its original installer. A GNU update uses a separate target-qualified package directory and preserves old MUSL packages and shared config/state.
 
 Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, install locking, and safe `current` selection. Store packages under `packages/asm-standalone`; leave upstream packages and update markers untouched. Keep the shared Codex config/state home and `codex` command.
 
