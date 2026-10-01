@@ -1037,9 +1037,9 @@ impl AppServerSession {
             }
         };
         let mut response = response;
-        if presentation == ForkPresentation::SideConversation {
-            // Side views skip inherited-history hydration, but boundary capture still needs the
-            // actual rollout format returned by the server, including on remote legacy servers.
+        if presentation == ForkPresentation::SideConversation && !response.thread.ephemeral {
+            // Saved parallel views skip inherited-history hydration, but boundary capture needs
+            // the actual rollout format returned by the server, including remote legacy servers.
             let side_id = ThreadId::from_string(&response.thread.id)?;
             self.history_pagination
                 .entry(side_id)
@@ -3875,12 +3875,10 @@ mod tests {
         assert_eq!(side.session.forked_from_id, Some(source_thread_id));
         assert_eq!(side.turns, Vec::<Turn>::new());
         assert!(app_server.has_older_history(source_thread_id));
-        assert_eq!(
-            (
-                app_server.history_pagination[&side.session.thread_id].history_mode,
-                app_server.has_older_history(side.session.thread_id),
-            ),
-            (ThreadHistoryMode::Paginated, false),
+        assert!(
+            !app_server
+                .history_pagination
+                .contains_key(&side.session.thread_id)
         );
 
         app_server.shutdown().await?;
