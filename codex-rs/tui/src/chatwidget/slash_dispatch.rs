@@ -105,35 +105,20 @@ impl ChatWidget {
         }
     }
 
-    fn request_context_conversation(
+    fn request_side_conversation(
         &mut self,
-        cmd: SlashCommand,
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
     ) {
-        let (label, event) = if cmd == SlashCommand::Parallel {
-            (
-                PARALLEL_STARTING_CONTEXT_LABEL,
-                AppEvent::StartParallel {
-                    parent_thread_id,
-                    user_message,
-                },
-            )
-        } else {
-            (
-                SIDE_STARTING_CONTEXT_LABEL,
-                AppEvent::StartSide {
-                    parent_thread_id,
-                    user_message,
-                },
-            )
-        };
-        self.set_side_conversation_context_label(Some(label.to_string()));
+        self.set_side_conversation_context_label(Some(SIDE_STARTING_CONTEXT_LABEL.to_string()));
         self.request_redraw();
-        self.app_event_tx.send(event);
+        self.app_event_tx.send(AppEvent::StartSide {
+            parent_thread_id,
+            user_message,
+        });
     }
 
-    fn request_empty_context_conversation(&mut self, cmd: SlashCommand) {
+    fn request_empty_side_conversation(&mut self, cmd: SlashCommand) {
         let Some(parent_thread_id) = self.thread_id else {
             let command = cmd.command();
             self.add_error_message(format!(
@@ -142,7 +127,20 @@ impl ChatWidget {
             return;
         };
 
-        self.request_context_conversation(cmd, parent_thread_id, /*user_message*/ None);
+        self.request_side_conversation(parent_thread_id, /*user_message*/ None);
+    }
+
+    fn request_parallel_conversation(
+        &mut self,
+        parent_thread_id: ThreadId,
+        user_message: Option<UserMessage>,
+    ) {
+        self.set_side_conversation_context_label(Some(PARALLEL_STARTING_CONTEXT_LABEL.to_string()));
+        self.request_redraw();
+        self.app_event_tx.send(AppEvent::StartParallel {
+            parent_thread_id,
+            user_message,
+        });
     }
 
     fn emit_raw_output_mode_changed(&self, enabled: bool) {
@@ -420,8 +418,17 @@ impl ChatWidget {
                     control: crate::app_event::VoiceControl::Toggle,
                 });
             }
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel => {
-                self.request_empty_context_conversation(cmd);
+            SlashCommand::Side | SlashCommand::Btw => {
+                self.request_empty_side_conversation(cmd);
+            }
+            SlashCommand::Parallel => {
+                let Some(parent_thread_id) = self.thread_id else {
+                    self.add_error_message(
+                        "'/parallel' is unavailable before the session starts.".to_string(),
+                    );
+                    return;
+                };
+                self.request_parallel_conversation(parent_thread_id, /*user_message*/ None);
             }
             SlashCommand::Agents => {
                 self.app_event_tx.send(AppEvent::OpenAgentsOverview);
@@ -1115,7 +1122,11 @@ impl ChatWidget {
                     mention_bindings,
                     source,
                 );
-                self.request_context_conversation(cmd, parent_thread_id, Some(user_message));
+                if cmd == SlashCommand::Parallel {
+                    self.request_parallel_conversation(parent_thread_id, Some(user_message));
+                } else {
+                    self.request_side_conversation(parent_thread_id, Some(user_message));
+                }
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 self.submit_op(AppCommand::review(ReviewTarget::Custom {
