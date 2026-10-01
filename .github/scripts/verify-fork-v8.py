@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def verify(metadata: dict, directory: Path, target: str, version: str) -> None:
-    tag = f"asm-v8-v{version}"
+    tag = f"asm-v8-v{version}-glibc2.35"
     if (
         metadata.get("tag_name") != tag
         or metadata.get("draft") is not False
