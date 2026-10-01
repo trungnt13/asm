@@ -20,8 +20,8 @@ async fn restoring_either_end_keeps_parent_lazy_and_unrelated_threads_ordinary()
         assert_eq!(
             app.side_threads
                 .get(&pair.side)
-                .map(|state| state.parent_thread_id),
-            Some(pair.parent)
+                .map(|state| (state.parent_thread_id, state.kind)),
+            Some((pair.parent, CompanionKind::Parallel))
         );
         assert!(app.thread_event_channels.is_empty());
         app.agent_navigation.mark_closed(pair.parent);
