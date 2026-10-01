@@ -262,7 +262,6 @@ mod server_version_notice;
 mod session_lifecycle;
 mod session_picker;
 mod side;
-mod side_navigation;
 mod side_persistence;
 mod startup;
 pub(crate) mod startup_bootstrap;
