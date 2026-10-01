@@ -2851,19 +2851,19 @@ async fn slash_delete_confirmation_requests_current_thread_delete() {
         },
         crate::AppServerTarget::Remote { endpoint },
     ] {
-        for side in [false, true] {
+        for parallel in [false, true] {
             let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
             chat.remote_connection =
                 crate::status::remote_connection::remote_connection_status_value(
                     &target, /*server_version*/ None,
                 );
-            chat.set_side_conversation_active(side);
+            chat.set_parallel_conversation_active(parallel);
             chat.dispatch_command(SlashCommand::Delete);
             assert!(chat.bottom_pane.has_active_view());
             assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
             let popup = render_bottom_popup(&chat, /*width*/ 80);
-            if side {
-                assert_chatwidget_snapshot!("slash_delete_confirmation_side", popup);
+            if parallel {
+                assert_chatwidget_snapshot!("slash_delete_confirmation_parallel", popup);
             } else if matches!(target, crate::AppServerTarget::Embedded) {
                 assert_chatwidget_snapshot!("slash_delete_confirmation_popup", popup);
             } else {
@@ -3147,7 +3147,7 @@ async fn slash_cd_changes_current_session_after_replay_and_defaults_to_home() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.set_side_conversation_active(/*active*/ true);
+    chat.set_parallel_conversation_active(/*active*/ true);
     chat.thread_name = Some("Completed task".to_string());
     chat.forked_from = Some(ThreadId::new());
     let (status, duration, error) = (AppServerTurnStatus::Completed, None, None);
@@ -3192,12 +3192,13 @@ async fn rejected_queued_cd_drains_following_input() {
 #[tokio::test]
 async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
     let mut errors = Vec::new();
-    for state in "new active pending queued steer owned ephemeral mcp exec".split(' ') {
+    for state in "new active pending queued steer owned ephemeral mcp exec side".split(' ') {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = (state != "new").then(ThreadId::new);
         let (queued, steer) = (UserMessage::from("q").into(), pending_steer("s"));
         match state {
             "active" => chat.bottom_pane.set_task_running(/*running*/ true),
+            "side" => chat.set_side_conversation_active(/*active*/ true),
             "pending" => chat.input_queue.user_turn_pending_start = true,
             "queued" => chat.input_queue.queued_user_messages.push_back(queued),
             "steer" => chat.input_queue.pending_steers.push_back(steer),
@@ -3270,7 +3271,7 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
     chat.bottom_pane.set_task_running(/*running*/ true);
-    chat.set_side_conversation_active(/*active*/ true);
+    chat.set_parallel_conversation_active(/*active*/ true);
 
     submit_composer_text(&mut chat, "/fast");
 
@@ -3651,4 +3652,22 @@ async fn transcript_copy_feedback_stays_in_the_footer_without_history_or_interru
         "transcript_copy_failure",
         render_bottom_popup(&chat, /*width*/ 80)
     );
+}
+
+#[tokio::test]
+async fn temporary_side_rejects_service_tier_dispatch() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
+    chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
+    chat.set_side_conversation_active(/*active*/ true);
+
+    submit_composer_text(&mut chat, "/fast");
+
+    let errors = drain_insert_history(&mut rx);
+    assert_eq!(
+        lines_to_single_string(&errors[0]),
+        "■ '/fast' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
+    );
+    assert!(rx.try_recv().is_err());
+    assert!(op_rx.try_recv().is_err());
 }

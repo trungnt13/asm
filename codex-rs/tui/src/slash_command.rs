@@ -44,6 +44,7 @@ pub enum SlashCommand {
     Agents,
     Side,
     Btw,
+    Parallel,
     Copy,
     #[strum(serialize = "copyid")]
     CopyId,
@@ -140,7 +141,10 @@ impl SlashCommand {
             SlashCommand::Goal => "set or view the goal for a long-running task",
             SlashCommand::Agents => "open the agent command center",
             SlashCommand::MultiAgents => "switch between this session's subagents",
-            SlashCommand::Side | SlashCommand::Btw => "start a saved side conversation",
+            SlashCommand::Side | SlashCommand::Btw => {
+                "start a side conversation in an ephemeral fork"
+            }
+            SlashCommand::Parallel => "start a saved parallel conversation",
             SlashCommand::Permissions => "choose what ASM is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",
@@ -186,7 +190,28 @@ impl SlashCommand {
                 | SlashCommand::Pets
                 | SlashCommand::Side
                 | SlashCommand::Btw
+                | SlashCommand::Parallel
                 | SlashCommand::Resume
+        )
+    }
+
+    /// Whether this command remains available inside an active side conversation.
+    pub fn available_in_side_conversation(self) -> bool {
+        matches!(
+            self,
+            SlashCommand::Copy
+                | SlashCommand::CopyId
+                | SlashCommand::Agents
+                | SlashCommand::Export
+                | SlashCommand::Raw
+                | SlashCommand::Diff
+                | SlashCommand::Mention
+                | SlashCommand::Status
+                | SlashCommand::Daemon
+                | SlashCommand::Warnings
+                | SlashCommand::Pwd
+                | SlashCommand::Usage
+                | SlashCommand::Ide
         )
     }
 
@@ -277,7 +302,8 @@ impl SlashCommand {
             | SlashCommand::Quit
             | SlashCommand::Exit
             | SlashCommand::Side
-            | SlashCommand::Btw => true,
+            | SlashCommand::Btw
+            | SlashCommand::Parallel => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

@@ -491,6 +491,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::App
                 | SlashCommand::Side
                 | SlashCommand::Btw
+                | SlashCommand::Parallel
                 | SlashCommand::Agents
                 | SlashCommand::MultiAgents
                 | SlashCommand::Vim
@@ -635,6 +636,7 @@ pub(crate) struct ChatComposer {
     voice_command_enabled: bool,
     worktrees_enabled: bool,
     windows_degraded_sandbox_active: bool,
+    side_conversation_active: bool,
     history_search: Option<HistorySearchSession>,
     vim_history: VimHistory,
     submit_keys: Vec<KeyBinding>,
@@ -806,6 +808,7 @@ impl ChatComposer {
             voice_command_enabled: false,
             worktrees_enabled: false,
             windows_degraded_sandbox_active: false,
+            side_conversation_active: false,
             history_search: None,
             vim_history: VimHistory::default(),
             submit_keys: vec![key_hint::plain(KeyCode::Enter)],
@@ -1092,6 +1095,10 @@ impl ChatComposer {
 
     pub fn set_ide_context_active(&mut self, active: bool) {
         self.footer.ide_context_active = active;
+    }
+
+    pub fn set_side_conversation_active(&mut self, active: bool) {
+        self.side_conversation_active = active;
     }
 
     /// Compatibility shim for tests that still toggle the removed steer mode flag.
@@ -3872,7 +3879,7 @@ impl ChatComposer {
                 toggle_voice: self
                     .footer
                     .toggle_voice_key
-                    .filter(|_| self.voice_command_enabled),
+                    .filter(|_| self.voice_command_enabled && !self.side_conversation_active),
             },
             active_agent_label: self.footer.active_agent_label.clone(),
         }

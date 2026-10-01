@@ -34,6 +34,9 @@ struct PreparedSlashCommandArgs {
 }
 
 const SIDE_STARTING_CONTEXT_LABEL: &str = "Side starting...";
+const PARALLEL_STARTING_CONTEXT_LABEL: &str = "Parallel starting...";
+const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
+    "Press Ctrl+C to return to the main thread first.";
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
 const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
@@ -54,6 +57,15 @@ impl ChatWidget {
 
     pub(super) fn handle_service_tier_command_dispatch(&mut self, command: ServiceTierCommand) {
         self.transcript.last_status_copy_targets = None;
+        if self.active_side_conversation {
+            self.add_error_message(format!(
+                "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
+                command.name
+            ));
+            self.bottom_pane.drain_pending_submission_state();
+            self.bottom_pane.record_pending_slash_command_history();
+            return;
+        }
         self.toggle_service_tier_from_ui(command);
         self.bottom_pane.record_pending_slash_command_history();
     }
@@ -93,20 +105,35 @@ impl ChatWidget {
         }
     }
 
-    fn request_side_conversation(
+    fn request_context_conversation(
         &mut self,
+        cmd: SlashCommand,
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
     ) {
-        self.set_side_conversation_context_label(Some(SIDE_STARTING_CONTEXT_LABEL.to_string()));
+        let (label, event) = if cmd == SlashCommand::Parallel {
+            (
+                PARALLEL_STARTING_CONTEXT_LABEL,
+                AppEvent::StartParallel {
+                    parent_thread_id,
+                    user_message,
+                },
+            )
+        } else {
+            (
+                SIDE_STARTING_CONTEXT_LABEL,
+                AppEvent::StartSide {
+                    parent_thread_id,
+                    user_message,
+                },
+            )
+        };
+        self.set_side_conversation_context_label(Some(label.to_string()));
         self.request_redraw();
-        self.app_event_tx.send(AppEvent::StartSide {
-            parent_thread_id,
-            user_message,
-        });
+        self.app_event_tx.send(event);
     }
 
-    fn request_empty_side_conversation(&mut self, cmd: SlashCommand) {
+    fn request_empty_context_conversation(&mut self, cmd: SlashCommand) {
         let Some(parent_thread_id) = self.thread_id else {
             let command = cmd.command();
             self.add_error_message(format!(
@@ -115,7 +142,7 @@ impl ChatWidget {
             return;
         };
 
-        self.request_side_conversation(parent_thread_id, /*user_message*/ None);
+        self.request_context_conversation(cmd, parent_thread_id, /*user_message*/ None);
     }
 
     fn emit_raw_output_mode_changed(&self, enabled: bool) {
@@ -155,6 +182,9 @@ impl ChatWidget {
     ) {
         if cmd != SlashCommand::Copy {
             self.transcript.last_status_copy_targets = None;
+        }
+        if !self.ensure_slash_command_allowed_in_side_conversation(cmd) {
+            return;
         }
         if !self.ensure_side_command_allowed_outside_review(cmd) {
             return;
@@ -233,7 +263,7 @@ impl ChatWidget {
                             ..Default::default()
                         },
                         SelectionItem {
-                            name: if self.side_conversation_active() {
+                            name: if self.parallel_conversation_active() {
                                 "Yes, delete and return to main"
                             } else if self.remote_connection.is_some() {
                                 "Yes, delete and return to command center"
@@ -352,8 +382,8 @@ impl ChatWidget {
                     control: crate::app_event::VoiceControl::Toggle,
                 });
             }
-            SlashCommand::Side | SlashCommand::Btw => {
-                self.request_empty_side_conversation(cmd);
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel => {
+                self.request_empty_context_conversation(cmd);
             }
             SlashCommand::Agents => {
                 self.app_event_tx.send(AppEvent::OpenAgentsOverview);
@@ -634,6 +664,9 @@ impl ChatWidget {
         if cmd != SlashCommand::Copy {
             self.transcript.last_status_copy_targets = None;
         }
+        if !self.ensure_slash_command_allowed_in_side_conversation(cmd) {
+            return;
+        }
         if !self.ensure_side_command_allowed_outside_review(cmd) {
             return;
         }
@@ -847,6 +880,9 @@ impl ChatWidget {
                 _ => self.add_error_message(RAW_USAGE.to_string()),
             },
             SlashCommand::Rename if !trimmed.is_empty() => {
+                if !self.ensure_thread_rename_allowed() {
+                    return;
+                }
                 self.session_telemetry
                     .counter("codex.thread.rename", /*inc*/ 1, &[]);
                 let Some(name) = normalize_thread_name(&args) else {
@@ -1023,7 +1059,9 @@ impl ChatWidget {
                     self.clear_live_goal_submission();
                 }
             }
-            SlashCommand::Side | SlashCommand::Btw if !trimmed.is_empty() => {
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
+                if !trimmed.is_empty() =>
+            {
                 let Some(parent_thread_id) = self.thread_id else {
                     let command = cmd.command();
                     self.add_error_message(format!(
@@ -1039,7 +1077,7 @@ impl ChatWidget {
                     mention_bindings,
                     source,
                 );
-                self.request_side_conversation(parent_thread_id, Some(user_message));
+                self.request_context_conversation(cmd, parent_thread_id, Some(user_message));
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 self.submit_op(AppCommand::review(ReviewTarget::Custom {
@@ -1201,6 +1239,7 @@ impl ChatWidget {
             worktrees_enabled: self.config.features.enabled(Feature::Worktrees)
                 && self.local_worktree_operations,
             allow_elevate_sandbox,
+            side_conversation_active: self.active_side_conversation,
         }
     }
 
@@ -1269,6 +1308,7 @@ impl ChatWidget {
             | SlashCommand::Goal
             | SlashCommand::Side
             | SlashCommand::Btw
+            | SlashCommand::Parallel
             | SlashCommand::Keymap
             | SlashCommand::Agents
             | SlashCommand::MultiAgents
@@ -1317,8 +1357,24 @@ impl ChatWidget {
             .collect()
     }
 
+    fn ensure_slash_command_allowed_in_side_conversation(&mut self, cmd: SlashCommand) -> bool {
+        if !self.active_side_conversation || cmd.available_in_side_conversation() {
+            return true;
+        }
+        self.add_error_message(format!(
+            "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
+            cmd.command()
+        ));
+        self.bottom_pane.drain_pending_submission_state();
+        false
+    }
+
     fn ensure_side_command_allowed_outside_review(&mut self, cmd: SlashCommand) -> bool {
-        if !matches!(cmd, SlashCommand::Side | SlashCommand::Btw) || !self.review.is_review_mode {
+        if !matches!(
+            cmd,
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
+        ) || !self.review.is_review_mode
+        {
             return true;
         }
 
