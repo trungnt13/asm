@@ -143,7 +143,7 @@ jobs:
           done) >> "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
-          build_args=(--release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings)
+          build_args=(--locked --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings)
           if [[ "$BUILD_JOBS" != 0 ]]; then build_args+=(--jobs "$BUILD_JOBS"); fi
           cargo build "${build_args[@]}"
 

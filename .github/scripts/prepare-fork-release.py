@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -23,15 +24,74 @@ def git_file(revision, path):
     return subprocess.check_output(["git", "show", f"{revision}:{path}"], text=True)
 
 
-def api(path, *, allow_missing=False):
-    result = subprocess.run(
-        ["gh", "api", path], text=True, capture_output=True, check=False
-    )
-    if result.returncode:
-        if allow_missing and "(HTTP 404)" in result.stderr:
+def api(path, *arguments, allow_missing=False):
+    for attempt in range(3):
+        result = subprocess.run(
+            ["gh", "api", path, *arguments], text=True, capture_output=True, check=False
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        status = re.search(r"\bHTTP (\d{3})\b", result.stderr)
+        if status and status[1] == "404" and allow_missing:
             return None
-        raise RuntimeError(result.stderr)
-    return json.loads(result.stdout)
+        retryable = (
+            500 <= int(status[1]) < 600
+            if status
+            else bool(
+                re.search(
+                    r"stream error|http2|unexpected EOF|connection reset|connection refused|"
+                    r"timeout|timed out|TLS handshake|network is unreachable|dial tcp|"
+                    r"temporary failure|unexpected end of JSON input",
+                    result.stderr,
+                    re.IGNORECASE,
+                )
+            )
+        )
+        if not retryable or attempt == 2:
+            raise RuntimeError(f"GitHub API {path} failed: {result.stderr.strip()}")
+        time.sleep(2 ** (attempt + 1))
+
+
+def upstream_prereleases():
+    query = (
+        'query($cursor:String){repository(owner:"openai",name:"codex"){'
+        "releases(first:100,after:$cursor){nodes{tagName publishedAt isDraft isPrerelease}"
+        "pageInfo{endCursor hasNextPage}}}}"
+    )
+    cursor = None
+    seen_cursors = set()
+    while True:
+        arguments = ["-f", f"query={query}"]
+        if cursor:
+            arguments.extend(["-f", f"cursor={cursor}"])
+        response = api("graphql", *arguments)
+        if response.get("errors"):
+            raise RuntimeError(
+                f"GitHub GraphQL release lookup failed: {response['errors']}"
+            )
+        repository = (response.get("data") or {}).get("repository")
+        releases = repository.get("releases") if repository else None
+        if not releases or not isinstance(releases.get("nodes"), list):
+            raise ValueError("GitHub GraphQL returned no release metadata")
+        for release in releases["nodes"]:
+            if (
+                release["isPrerelease"]
+                and not release["isDraft"]
+                and release["tagName"].startswith("rust-v")
+                and release["publishedAt"]
+            ):
+                yield release
+        pagination = releases["pageInfo"]
+        if not isinstance(pagination.get("hasNextPage"), bool):
+            raise TypeError("GitHub GraphQL returned invalid release pagination")
+        if not pagination["hasNextPage"]:
+            return
+        cursor = pagination.get("endCursor")
+        if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
+            raise ValueError(
+                "GitHub GraphQL returned a missing or repeated release cursor"
+            )
+        seen_cursors.add(cursor)
 
 
 def version(revision):
@@ -170,26 +230,10 @@ def prepare():
     else:
         if resume_run_id:
             raise ValueError("Requested candidate run does not exist")
-        releases = []
-        page = 1
-        while True:
-            batch = api(f"repos/openai/codex/releases?per_page=100&page={page}")
-            releases.extend(
-                r
-                for r in batch
-                if r["prerelease"]
-                and not r["draft"]
-                and r["tag_name"].startswith("rust-v")
-                and r["published_at"]
-            )
-            if len(batch) < 100:
-                break
-            page += 1
+        releases = list(upstream_prereleases())
         if not releases:
             raise ValueError("No published upstream Rust prerelease found")
-        upstream = max(releases, key=lambda release: release["published_at"])[
-            "tag_name"
-        ]
+        upstream = max(releases, key=lambda release: release["publishedAt"])["tagName"]
         match = re.fullmatch(r"rust-v(\d+)\.(\d+)\.(\d+)(-.+)", upstream)
         if not match:
             raise ValueError(f"Unsupported upstream prerelease tag: {upstream}")
