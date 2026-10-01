@@ -4753,7 +4753,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     assert_eq!(session.model_provider_id, "agent-provider");
     assert_eq!(
         app.agent_picker_model_label(agent_thread_id, /*is_primary*/ false),
-        Some("gpt-agent-high".to_string())
+        Some("age-hig".to_string())
     );
     app.primary_session_configured
         .as_mut()
@@ -4761,7 +4761,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         .service_tier = Some(ServiceTier::Fast.request_value().to_string());
     assert_eq!(
         app.agent_picker_model_label(agent_thread_id, /*is_primary*/ false),
-        Some("gpt-agent-high-fast".to_string())
+        Some("age-hig-fast".to_string())
     );
     assert_eq!(session.approval_policy, primary_session.approval_policy);
     assert_eq!(session.cwd.as_path(), test_path_buf("/tmp/agent").as_path());
