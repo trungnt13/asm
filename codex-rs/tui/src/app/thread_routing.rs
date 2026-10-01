@@ -2215,7 +2215,7 @@ impl App {
                 self.select_agent_thread(tui, app_server, primary_thread_id)
                     .await?;
             } else {
-                self.select_agent_thread(tui, app_server, primary_thread_id)
+                self.select_agent_thread_and_discard_side(tui, app_server, primary_thread_id)
                     .await?;
             }
             if self.active_thread_id == Some(primary_thread_id) {
