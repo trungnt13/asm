@@ -47,8 +47,8 @@ jobs:
         include:
           - runner: macos-15
             target: aarch64-apple-darwin
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -57,28 +57,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
           components: clippy
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Use hermetic Cargo home
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo_home="${GITHUB_WORKSPACE}/.cargo-home"
-          mkdir -p "${cargo_home}/bin"
-          echo "CARGO_HOME=${cargo_home}" >> "$GITHUB_ENV"
-          echo "${cargo_home}/bin" >> "$GITHUB_PATH"
-          : > "${cargo_home}/config.toml"
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Install Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Install Python for artifact verification
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          version: 0.14.0
-          use-cache: false
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
-        name: Install musl build tools
-        env:
-          TARGET: ${{ matrix.target }}
-        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-musl-build-tools.sh"
-      - if: ${{ contains(matrix.target, 'linux-musl') }}
+          python-version: '3.11'
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Install GNU build tools
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-gnu-build-tools.sh"
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
         name: Disable aws-lc jitter entropy
         shell: bash
         run: |
