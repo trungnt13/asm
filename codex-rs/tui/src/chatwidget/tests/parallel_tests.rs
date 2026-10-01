@@ -115,3 +115,26 @@ async fn side_and_parallel_modes_are_mutually_exclusive() {
         (false, false)
     );
 }
+
+#[tokio::test]
+async fn parallel_context_label_preserves_status_line_snapshot() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.show_welcome_banner = false;
+    chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
+    chat.refresh_status_line();
+    chat.set_parallel_conversation_active(/*active*/ true);
+    chat.set_side_conversation_context_label(Some(
+        "Parallel from main thread · ctrl+/ to switch · ctrl+c to close".to_string(),
+    ));
+
+    let width = 80;
+    let height = chat.desired_height(width);
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("create terminal");
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw parallel conversation footer");
+    assert_chatwidget_snapshot!(
+        "parallel_context_label_preserves_status_line",
+        terminal.backend()
+    );
+}
