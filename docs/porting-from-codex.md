@@ -201,7 +201,7 @@ Offer opt-in `[tui] collapse_tool_calls = true`, defaulting to `false`. In the r
 
 ### Compact status line
 
-Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode. Lowercase model labels, remove `gpt-`, keep at most the first three letters, and append all version digits without separators: `GPT-6-Astra`, `GPT-6.1-Sol`, and `Terra 5.6` become `ast6`, `sol61`, and `ter56`. Apply the same limit to custom aliases; names without digits have no version suffix. Show only the first three letters of reasoning labels, including model-with-reasoning items: `medium`, `high`, and `xhigh` become `med`, `hig`, and `xhi`. Apply these labels to the footer and `/statusline` preview only; preserve model identifiers, picker labels, and terminal titles. Remove the space before the agent role only in the footer, such as `Main[default]`. Preserve paths, roles, colors, order, and single-row truncation.
+Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode. Lowercase model labels, remove `gpt-`, keep at most the first three letters, and append all version digits without separators: `GPT-6-Astra`, `GPT-6.1-Sol`, and `Terra 5.6` become `ast6`, `sol61`, and `ter56`. Apply the same limit to custom aliases; names without digits have no version suffix. Show only the first three letters of reasoning labels, including model-with-reasoning items: `medium`, `high`, and `xhigh` become `med`, `hig`, and `xhi`. Apply these labels to the footer, `/statusline` preview, and `/subagents` model info; preserve model identifiers, other picker labels, and terminal titles. Remove the space before the agent role only in the footer, such as `Main[default]`. Preserve paths, roles, colors, order, and single-row truncation.
 
 Offer opt-in `cache-hit-rate` in `/statusline` and `tui.status_line`. Show `CchN.N%`: cached input tokens divided by input tokens for the latest reported request in the current thread, rounded to one decimal. Never average across requests or use cumulative thread totals. Use existing usage data without new requests or API changes. Hide unknown or zero-input usage; keep defaults unchanged. Missing cache details remain indistinguishable from reported zero.
 
@@ -209,24 +209,4 @@ If narrow checks cannot establish safety, explain the gap and ask before expandi
 
 ## Commit attribution
 
-Use the configured owner identity: `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify both identities with `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT` before committing. Correct local configuration when needed; do not rewrite published commits merely to fix attribution without approval.
-
-## Memory reasoning effort
-
-Allow optional `extract_reasoning_effort` and `consolidation_reasoning_effort` under `[memories]` to control the respective memory model requests for both V1 and V2. Use the existing reasoning-effort type. Preserve extraction's `low` and consolidation's `medium` when omitted, independently of the parent thread's effort. Do not change model selection or other memory behavior.
-
-## Transcript spacing
-
-Keep Markdown paragraphs, code blocks, and bullet or numbered list items adjacent without renderer-added blank rows, both while streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
-
-## Compact status line
-
-Join status-line segments with `·` without surrounding spaces. Use `CtxN%` for context used, `CtxN%left` for context remaining, and `F:on` / `F:off` for fast mode. Remove the space before the active agent role, such as `Main[default]`, only in the footer; leave picker labels unchanged. Preserve thread titles, paths, model names, agent roles, colors, item order, and the existing single-row truncation behavior.
-
-Offer an opt-in `cache-hit-rate` item in `/statusline` and `tui.status_line`. Show `CchN.N%`, the current thread's cumulative cached input tokens divided by its total input tokens, rounded to one decimal place. Use the existing backend-reported usage without new requests or API changes. Hide the item while usage is unknown or input tokens are zero; keep existing status-line defaults unchanged. Providers that omit cache details remain indistinguishable from a reported zero.
-
-## Subagent service tiers
-
-Allow per-model, per-reasoning-effort service tiers for spawned subagents through `[subagent_service_tiers]`, for example `gpt-6-sol = { high = "fast" }`. Match the child's final model and effective effort after overrides and role settings. A matching rule overrides the root tier throughout the child's lifetime, including root tier changes; unmatched children keep upstream inheritance. Root requests are unchanged. Reject unsupported matched tiers and fast overrides when fast mode is disabled. Keep this policy out of the spawn tool arguments.
-
-In the TUI `/subagents` picker, append each known agent model and reasoning effort to its title, such as `/root/sol_hello gpt-6-sol-high`. Append `-fast` only when the configured child rule or inherited root tier selects fast routing. A child rule selecting `default` suppresses the inherited fast label. Do not guess missing model or effort, remove the thread ID description, or alter picker navigation. This is a configured-settings label, not confirmation of the service tier used by a backend request. Keep it TUI-only: no new app-server API or request tracking.
+In `/subagents`, append known model and effort to both main and child titles using the compact status-line labels: `gpt-6.1-sol-high-fast` becomes `sol61-hig-fast`, and `gpt-6-astra-xhigh` becomes `ast6-xhi`. Add `-fast` only for a matching fast rule or inherited fast tier; a matching `default` rule suppresses inherited fast. Do not guess missing settings, remove thread ID descriptions, or change navigation. Labels describe configuration, not confirmed backend routing. Keep this TUI-only, without new app-server APIs or request tracking.
