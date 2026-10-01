@@ -22,6 +22,20 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
     )?;
     let settings = LocalSettings::from(&config);
     let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
+    server.thread_read(parent, /*include_turns*/ false).await?;
+    let request_id = server.next_request_id();
+    let _: ThreadMetadataUpdateResponse = server
+        .client
+        .request_typed(ClientRequest::ThreadMetadataUpdate {
+            request_id,
+            params: ThreadMetadataUpdateParams {
+                thread_id: parent.to_string(),
+                project_id: None,
+                git_info: None,
+                daybreak_enabled: Some(true),
+            },
+        })
+        .await?;
     let fork = server
         .fork_side_thread(
             &settings,
@@ -31,6 +45,27 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
         )
         .await?;
     let side = fork.session.thread_id;
+    assert_eq!(
+        (
+            server
+                .thread_read(side, /*include_turns*/ false)
+                .await?
+                .daybreak_enabled,
+            fork.session.daybreak_enabled,
+        ),
+        (Some(true), true),
+    );
+    let mut temporary_config = config.clone();
+    temporary_config.ephemeral = true;
+    let temporary = server
+        .fork_side_thread(
+            &settings,
+            temporary_config,
+            parent,
+            /*selected_profile*/ None,
+        )
+        .await?;
+    assert!(!temporary.session.daybreak_enabled);
     assert_eq!(
         server
             .history_pagination
@@ -63,6 +98,7 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
         )
         .await?;
     assert!(resumed.turns.is_empty());
+    assert!(resumed.session.daybreak_enabled);
     let parent = server.thread_read(parent, /*include_turns*/ true).await?;
     assert!(!parent.turns.is_empty());
     server.shutdown().await?;
