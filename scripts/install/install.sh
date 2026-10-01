@@ -329,8 +329,14 @@ release_asset_digest() {
 select_release_assets() {
   package_asset="codex-$vendor_target.tar.gz"
   checksum_asset="SHA256SUMS"
+  if [ "$vendor_target" = "x86_64-unknown-linux-gnu" ] &&
+    ! release_asset_exists "$package_asset" &&
+    release_asset_exists "codex-x86_64-unknown-linux-musl.tar.gz"; then
+    echo "ASM release $resolved_version is MUSL-only; this installer requires $package_asset. Use that release's original installer for older releases." >&2
+    return 1
+  fi
   if ! release_asset_exists "$package_asset" || ! release_asset_exists "$checksum_asset"; then
-    echo "Missing ASM release archive or SHA256SUMS for $resolved_version." >&2
+    echo "Missing ASM release archive ($package_asset) or SHA256SUMS for $resolved_version." >&2
     return 1
   fi
   asset="$package_asset"
@@ -396,6 +402,20 @@ verify_archive_digest() {
     echo "expected: $verify_expected_digest" >&2
     echo "actual:   $verify_actual_digest" >&2
     return 1
+  fi
+}
+
+require_linux_glibc() {
+  libc_version="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
+  if ! printf '%s\n' "$libc_version" | awk '
+    /^glibc [0-9]+\.[0-9]+$/ {
+      split($2, version, ".")
+      supported = version[1] > 2 || (version[1] == 2 && version[2] >= 35)
+    }
+    END { exit !supported }
+  '; then
+    echo "ASM Linux releases require glibc 2.35 or newer (Ubuntu 22.04+); detected ${libc_version:-unknown or unsupported libc}." >&2
+    exit 1
   fi
 }
 
@@ -899,8 +919,9 @@ case "$os:$machine" in
     platform_label="macOS (Apple Silicon)"
     ;;
   linux:x86_64 | linux:amd64)
-    vendor_target="x86_64-unknown-linux-musl"
-    platform_label="Linux (x64)"
+    require_linux_glibc
+    vendor_target="x86_64-unknown-linux-gnu"
+    platform_label="Linux (x64, glibc 2.35+)"
     ;;
   *)
     echo "Unsupported ASM release target: $(uname -s) $(uname -m)" >&2
