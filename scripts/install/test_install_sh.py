@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -52,7 +53,7 @@ def write_release(root: Path, version: str, target: str, *, helper: bool = True,
 def run_installer(root: Path, release: str, files: tuple[Path, Path, Path] | None = None,
                   *, system: str = 'Linux', machine: str = 'x86_64', rosetta: bool = False,
                   metadata_failure: bool = False, daemon_only: bool = False,
-                  release_arg: str | None = None) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+                  release_arg: str | None = None, libc_version: str = 'glibc 2.35') -> tuple[subprocess.CompletedProcess[str], list[str]]:
     shim = root / 'shim'
     shim.mkdir(exist_ok=True)
     curl = shim / 'curl'
@@ -83,6 +84,9 @@ if [ -n "$output" ]; then cp "$source" "$output"; else cat "$source"; fi
     sysctl = shim / 'sysctl'
     sysctl.write_text(f'#!/bin/sh\necho {1 if rosetta else 0}\n')
     sysctl.chmod(0o755)
+    getconf = shim / 'getconf'
+    getconf.write_text('#!/bin/sh\n[ "$1" = "GNU_LIBC_VERSION" ] || exit 1\nprintf "%s\\n" "$TEST_LIBC_VERSION"\n')
+    getconf.chmod(0o755)
     request_log = root / 'requests.log'
     request_log.unlink(missing_ok=True)
     archive, manifest, metadata = files if files is not None else (None, None, None)
@@ -93,7 +97,7 @@ if [ -n "$output" ]; then cp "$source" "$output"; else cat "$source"; fi
                CODEX_RELEASE=release, CODEX_INSTALL_DAEMON_ONLY='1' if daemon_only else '0',
                TEST_REQUEST_LOG=str(request_log), TEST_ARCHIVE=str(archive or ''),
                TEST_MANIFEST=str(manifest or ''), TEST_METADATA=str(metadata or ''),
-               TEST_METADATA_FAILURE='1' if metadata_failure else '0',
+               TEST_METADATA_FAILURE='1' if metadata_failure else '0', TEST_LIBC_VERSION=libc_version,
                PATH=f'{shim}:/usr/bin:/bin')
     command = ['/bin/sh', str(INSTALL_SCRIPT)]
     if release_arg is not None:
@@ -116,7 +120,7 @@ class InstallShTest(unittest.TestCase):
     def test_latest_installs_pair_and_reinstall_reuses_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            files = write_release(root, VERSION, 'x86_64-unknown-linux-musl')
+            files = write_release(root, VERSION, 'x86_64-unknown-linux-gnu')
             upstream_marker = root / 'codex-home/packages/standalone/auto-update-version'
             upstream_marker.parent.mkdir(parents=True)
             upstream_marker.write_text('upstream-release')
@@ -125,10 +129,10 @@ class InstallShTest(unittest.TestCase):
             self.assertEqual(requests, [
                 'https://api.github.com/repos/trungnt13/asm/releases/latest',
                 f'https://github.com/trungnt13/asm/releases/download/v{VERSION}/SHA256SUMS',
-                f'https://github.com/trungnt13/asm/releases/download/v{VERSION}/codex-x86_64-unknown-linux-musl.tar.gz',
+                f'https://github.com/trungnt13/asm/releases/download/v{VERSION}/codex-x86_64-unknown-linux-gnu.tar.gz',
             ])
             current = root / 'codex-home/packages/asm-standalone/current'
-            self.assertEqual(current.resolve().name, f'{VERSION}-x86_64-unknown-linux-musl')
+            self.assertEqual(current.resolve().name, f'{VERSION}-x86_64-unknown-linux-gnu')
             for name in ('codex', 'codex-code-mode-host'):
                 self.assertEqual((root / 'install-bin' / name).resolve(), current.resolve() / 'bin' / name)
             self.assertFalse((root / 'codex-home/packages/asm-standalone/auto-update-version').exists())
@@ -136,13 +140,13 @@ class InstallShTest(unittest.TestCase):
             second, requests = run_installer(root, 'latest', files, release_arg=VERSION)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertEqual(requests, [f'https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}'])
-            self.assertEqual(current.resolve().name, f'{VERSION}-x86_64-unknown-linux-musl')
+            self.assertEqual(current.resolve().name, f'{VERSION}-x86_64-unknown-linux-gnu')
             self.assertEqual(upstream_marker.read_text(), 'upstream-release')
 
     def test_bad_checksum_and_missing_helper_keep_current_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            first_files = write_release(root, VERSION, 'x86_64-unknown-linux-musl')
+            first_files = write_release(root, VERSION, 'x86_64-unknown-linux-gnu')
             first, _ = run_installer(root, VERSION, first_files)
             self.assertEqual(first.returncode, 0, first.stderr)
             current = root / 'codex-home/packages/asm-standalone/current'
@@ -151,7 +155,7 @@ class InstallShTest(unittest.TestCase):
                 ({'bad_checksum': True}, 'metadata and SHA256SUMS disagree'),
                 ({'helper': False}, 'must contain codex and codex-code-mode-host only'),
             ):
-                files = write_release(root, NEXT_VERSION, 'x86_64-unknown-linux-musl', **options)
+                files = write_release(root, NEXT_VERSION, 'x86_64-unknown-linux-gnu', **options)
                 result, requests = run_installer(root, NEXT_VERSION, files)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(message, result.stderr)
@@ -160,12 +164,62 @@ class InstallShTest(unittest.TestCase):
                 self.assertTrue(all('trungnt13/asm' in url for url in requests))
             self.assertFalse((root / 'codex-home/packages/asm-standalone/auto-update-version').exists())
 
+    def test_linux_libc_floor_rejects_before_download_or_state_changes(self) -> None:
+        for libc_version in ('glibc 2.34', 'glibc 2.9', 'musl 1.2.5', '', 'glibc unknown'):
+            with self.subTest(libc_version=libc_version), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                result, requests = run_installer(root, VERSION, libc_version=libc_version)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('require glibc 2.35 or newer (Ubuntu 22.04+)', result.stderr)
+                self.assertEqual(requests, [])
+                self.assertFalse((root / 'codex-home').exists())
+                self.assertFalse((root / 'install-bin').exists())
+
+    def test_musl_only_release_is_rejected_without_state_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = write_release(root, VERSION, 'x86_64-unknown-linux-musl')
+            result, requests = run_installer(root, 'latest', files, release_arg=VERSION)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('is MUSL-only', result.stderr)
+            self.assertEqual(requests, [f'https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}'])
+            self.assertFalse((root / 'codex-home').exists())
+            self.assertFalse((root / 'install-bin').exists())
+
+    def test_gnu_install_replaces_musl_selection_without_deleting_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_release(root, VERSION, 'x86_64-unknown-linux-musl')
+            package_root = root / 'codex-home/packages/asm-standalone'
+            old_release = package_root / 'releases' / f'{VERSION}-x86_64-unknown-linux-musl'
+            (old_release / 'bin').mkdir(parents=True)
+            for name in ('codex', 'codex-code-mode-host'):
+                shutil.copy2(root / f'source-{VERSION}' / name, old_release / 'bin' / name)
+            (old_release / 'codex').symlink_to('bin/codex')
+            current = package_root / 'current'
+            current.symlink_to(old_release)
+            install_bin = root / 'install-bin'
+            install_bin.mkdir()
+            for name in ('codex', 'codex-code-mode-host'):
+                (install_bin / name).symlink_to(current / 'bin' / name)
+            config = root / 'codex-home/config.toml'
+            config.write_text('model = "custom-model"\n')
+            files = write_release(root, VERSION, 'x86_64-unknown-linux-gnu')
+            result, requests = run_installer(root, VERSION, files, libc_version='glibc 2.36')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(requests[-1].endswith('codex-x86_64-unknown-linux-gnu.tar.gz'))
+            self.assertEqual(current.resolve().name, f'{VERSION}-x86_64-unknown-linux-gnu')
+            for name in ('codex', 'codex-code-mode-host'):
+                self.assertEqual((install_bin / name).resolve(), current.resolve() / 'bin' / name)
+                self.assertTrue((old_release / 'bin' / name).is_file())
+            self.assertEqual(config.read_text(), 'model = "custom-model"\n')
+
     def test_macos_native_and_rosetta_use_arm64_archive(self) -> None:
         for machine, rosetta in (('arm64', False), ('x86_64', True)):
             with self.subTest(machine=machine, rosetta=rosetta), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 files = write_release(root, VERSION, 'aarch64-apple-darwin')
-                result, requests = run_installer(root, VERSION, files, system='Darwin', machine=machine, rosetta=rosetta)
+                result, requests = run_installer(root, VERSION, files, system='Darwin', machine=machine, rosetta=rosetta, libc_version='')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(requests[-1].endswith('codex-aarch64-apple-darwin.tar.gz'))
                 self.assertTrue((root / 'install-bin/codex-code-mode-host').is_symlink())
