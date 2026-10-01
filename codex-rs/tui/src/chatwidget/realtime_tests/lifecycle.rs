@@ -1,6 +1,7 @@
 //! Voice startup, shutdown, and retry maintain one active owned session.
 
 use super::*;
+use codex_features::Feature;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -508,4 +509,39 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("voice_device_failure_cleanup", rendered);
+}
+
+#[tokio::test]
+async fn temporary_side_blocks_voice_but_parallel_keeps_normal_feature_gate() {
+    for temporary_side in [true, false] {
+        let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
+        chat.config.features.disable(Feature::RealtimeConversation);
+        if temporary_side {
+            chat.set_side_conversation_active(/*active*/ true);
+        } else {
+            chat.set_parallel_conversation_active(/*active*/ true);
+        }
+        chat.toggle_realtime_conversation();
+        commit_realtime_history_events(&mut chat, &mut events);
+        let Ok(AppEvent::InsertHistoryCell(cell)) = events.try_recv() else {
+            panic!("expected voice availability error");
+        };
+        let rendered = cell
+            .display_lines(/*width*/ 200)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let expected = if temporary_side {
+            "■ Voice mode is unavailable in side conversations. Return to the main thread first."
+        } else {
+            "■ Voice conversations are not enabled."
+        };
+        assert_eq!(rendered, expected);
+        assert_eq!(
+            chat.realtime_conversation.phase,
+            RealtimeConversationPhase::Inactive
+        );
+        assert!(ops.try_recv().is_err());
+    }
 }
