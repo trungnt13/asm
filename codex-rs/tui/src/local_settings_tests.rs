@@ -129,6 +129,7 @@ show_server_version_notice = false
 auto_recap = false
 fullscreen_transcript = true
 mouse_scroll_speed = 0.5
+collapse_tool_calls = true
 copy_on_select = "never"
 copy_on_select_clear_selection = true
 right_click_paste = "off"

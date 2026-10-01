@@ -191,7 +191,11 @@ The optional `macos_concurrency_experiment` dispatch compares cold builds of the
 
 Allow top-level `background_terminal_min_timeout` and `background_terminal_max_timeout` in milliseconds. Keep omitted bounds at 5000 and 300000. Reject zero, reversed, or unrepresentable bounds rather than silently changing them. Clamp empty `write_stdin` polls to the configured range and show that range in the model-facing tool description. A poll returns early when the process ends. Do not change initial command waits, nonempty stdin waits, or code-mode's outer `exec`/`wait` limits. A background process exit event alone does not resume an idle model turn.
 
-## Narrow validation
+### Collapsed tool calls
+
+Offer opt-in `[tui] collapse_tool_calls = true`, defaulting to `false`. In the rich fullscreen transcript, group consecutive shell, MCP, and dynamic tool calls into a single-row summary with the call count and distinct command or tool names in first-use order. Shorten overflowing name lists with `+N more`. Other activity types and chat messages separate groups. Keep the active tool in its own short row until it joins committed history. Expanding the group restores the original previews in order. Keep failures and approval requests visible. Do not change tool execution, model-visible history, raw output, or the full transcript. When disabled, preserve existing rendering.
+
+### Compact status line
 
 Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode. Lowercase model labels, remove `gpt-`, keep at most the first three letters, and append all version digits without separators: `GPT-6-Astra`, `GPT-6.1-Sol`, and `Terra 5.6` become `ast6`, `sol61`, and `ter56`. Apply the same limit to custom aliases; names without digits have no version suffix. Show only the first three letters of reasoning labels, including model-with-reasoning items: `medium`, `high`, and `xhigh` become `med`, `hig`, and `xhi`. Apply these labels to the footer and `/statusline` preview only; preserve model identifiers, picker labels, and terminal titles. Remove the space before the agent role only in the footer, such as `Main[default]`. Preserve paths, roles, colors, order, and single-row truncation.
 
