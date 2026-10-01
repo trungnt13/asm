@@ -138,3 +138,30 @@ async fn parallel_context_label_preserves_status_line_snapshot() {
         terminal.backend()
     );
 }
+
+#[tokio::test]
+async fn parallel_delete_confirmation_returns_to_main() {
+    let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500").unwrap();
+    for target in [
+        crate::AppServerTarget::Embedded,
+        crate::AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
+            endpoint: endpoint.clone(),
+        },
+        crate::AppServerTarget::Remote { endpoint },
+    ] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.set_parallel_conversation_active(/*active*/ true);
+        chat.remote_connection = crate::status::remote_connection::remote_connection_status_value(
+            &target, /*server_version*/ None,
+        );
+        chat.dispatch_command(SlashCommand::Delete);
+        assert!(chat.bottom_pane.has_active_view());
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        let popup = render_bottom_popup(&chat, /*width*/ 80);
+        assert_chatwidget_snapshot!("slash_delete_confirmation_parallel", popup);
+        chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::DeleteCurrentThread));
+    }
+}

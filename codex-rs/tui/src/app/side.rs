@@ -1,11 +1,26 @@
 //! Shared navigation for temporary sides and saved parallel conversations.
 //! Inherited history is reference context, not an instruction to continue the parent task.
+//! Keep upstream lifecycle helpers here to limit rebase conflicts despite this module's size.
+//! Saved-only policy belongs in `app::parallel`.
 
 use super::*;
 use crate::chatwidget::InterruptedTurnNoticeMode;
+use codex_app_server_protocol::ThreadUnsubscribeParams;
+use codex_app_server_protocol::ThreadUnsubscribeResponse;
+use codex_app_server_protocol::TurnInterruptParams;
+use codex_app_server_protocol::TurnInterruptResponse;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 
+const SIDE_RENAME_BLOCK_MESSAGE: &str = "Side conversations are ephemeral and cannot be renamed.";
+const SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE: &str =
+    "'/side' is unavailable until the main thread is ready.";
+const SIDE_NO_STARTED_CONVERSATION_MESSAGE: &str = concat!(
+    "'/side' is unavailable until the current conversation has started. ",
+    "Send a message first, then try /side again."
+);
+const SIDE_ALREADY_OPEN_MESSAGE: &str =
+    "A side conversation is already open. Press ctrl + c to return before starting another.";
 const SIDE_BOUNDARY_PROMPT: &str = r#"Side conversation boundary.
 
 Everything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.
@@ -139,35 +154,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn failed_side_setup_cleanup_clears_selection_but_preserves_saved_child() -> Result<()> {
-        use crate::side_conversations::SideConversation;
-        use crate::side_conversations::SideConversationStore;
-
-        let mut app = Box::pin(super::super::test_support::make_test_app()).await;
-        let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-        let started = app_server.start_thread(&app.config).await?;
-        let pair = SideConversation {
-            parent: ThreadId::new(),
-            side: started.session.thread_id,
-            last_inherited_turn: None,
-        };
-        let store = SideConversationStore::new(&app.config.codex_home, &app.app_server_target);
-        store.save(&pair)?;
-        app.side_threads
-            .insert(pair.side, SideThreadState::parallel(pair.parent));
-        let mut tui = crate::tui::test_support::make_test_tui()?;
-
-        assert!(
-            Box::pin(app.discard_side_thread_or_keep_visible(&mut tui, &mut app_server, pair.side))
-                .await
-        );
-        assert_eq!(store.pair(pair.parent)?, None);
-        assert_eq!(store.side(pair.side)?, Some(pair));
-        app_server.shutdown().await?;
-        Ok(())
-    }
-
     #[test]
     fn side_developer_instructions_appends_existing_policy() {
         let developer_instructions = App::side_developer_instructions(
@@ -248,6 +234,7 @@ impl App {
         let clear_side_ui = |chat_widget: &mut crate::chatwidget::ChatWidget| {
             chat_widget.set_side_conversation_context_label(/*label*/ None);
             chat_widget.set_side_conversation_active(/*active*/ false);
+            chat_widget.clear_thread_rename_block();
             chat_widget.set_parallel_conversation_active(/*active*/ false);
             chat_widget.set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Default);
         };
@@ -281,12 +268,17 @@ impl App {
         };
 
         match kind {
-            CompanionKind::Side => self
-                .chat_widget
-                .set_side_conversation_active(/*active*/ true),
-            CompanionKind::Parallel => self
-                .chat_widget
-                .set_parallel_conversation_active(/*active*/ true),
+            CompanionKind::Side => {
+                self.chat_widget
+                    .set_thread_rename_block_message(SIDE_RENAME_BLOCK_MESSAGE);
+                self.chat_widget
+                    .set_side_conversation_active(/*active*/ true);
+            }
+            CompanionKind::Parallel => {
+                self.chat_widget.clear_thread_rename_block();
+                self.chat_widget
+                    .set_parallel_conversation_active(/*active*/ true);
+            }
         }
         self.chat_widget
             .set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Suppress);
@@ -398,30 +390,39 @@ impl App {
             && let Some(parent_thread_id) = self.active_side_parent_thread_id()
             && let Some(side_thread_id) = self.current_displayed_thread_id()
         {
-            match self.side_threads[&side_thread_id].kind {
-                CompanionKind::Side => {
-                    if self
-                        .select_agent_thread_and_discard_side(tui, app_server, parent_thread_id)
-                        .await
-                        .is_err()
-                    {
-                        return false;
-                    }
-                    self.active_side_parent_thread_id().is_none()
-                }
-                CompanionKind::Parallel => {
-                    self.close_parallel_conversation(
-                        tui,
-                        app_server,
-                        parent_thread_id,
-                        side_thread_id,
-                    )
-                    .await
-                }
+            if self.side_threads[&side_thread_id].kind == CompanionKind::Parallel {
+                return self
+                    .close_parallel_conversation(tui, app_server, parent_thread_id, side_thread_id)
+                    .await;
             }
+            if self
+                .select_agent_thread_and_discard_side(tui, app_server, parent_thread_id)
+                .await
+                .is_err()
+            {
+                return false;
+            }
+            self.active_side_parent_thread_id().is_none()
         } else {
             false
         }
+    }
+
+    pub(super) fn side_thread_to_discard_after_switch(
+        &self,
+        target_thread_id: ThreadId,
+    ) -> Option<ThreadId> {
+        let active_thread_id = self.current_displayed_thread_id()?;
+        let (&side_thread_id, state) = self.side_threads.iter().next()?;
+        if state.kind != CompanionKind::Side
+            || target_thread_id == side_thread_id
+            || target_thread_id == active_thread_id
+        {
+            return None;
+        }
+
+        (active_thread_id == side_thread_id || active_thread_id == state.parent_thread_id)
+            .then_some(side_thread_id)
     }
 
     pub(super) async fn toggle_side_conversation(
@@ -483,6 +484,68 @@ impl App {
         self.abandoned_side_threads.insert(thread_id);
         self.discard_thread_local_state(thread_id).await;
         true
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn discard_side_thread_in_background(
+        &mut self,
+        app_server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        self.abandoned_side_threads.insert(thread_id);
+        self.pending_app_server_requests
+            .cancel_thread_verification(&thread_id.to_string());
+        let turn_id = self
+            .active_turn_id_for_thread(thread_id)
+            .await
+            .unwrap_or_default();
+        let request_handle = app_server.request_handle();
+        let interrupt_request_id = app_server.next_request_id();
+        let retry_interrupt_request_id = app_server.next_request_id();
+        let unsubscribe_request_id = app_server.next_request_id();
+
+        self.discard_thread_local_state(thread_id).await;
+
+        tokio::spawn(async move {
+            let interrupt_result = request_handle
+                .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
+                    request_id: interrupt_request_id,
+                    params: TurnInterruptParams {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn_id.clone(),
+                    },
+                })
+                .await;
+            let interrupt_result = if let Err(error) = &interrupt_result
+                && let Some(actual_turn_id) = active_turn_interrupt_race(error)
+            {
+                request_handle
+                    .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
+                        request_id: retry_interrupt_request_id,
+                        params: TurnInterruptParams {
+                            thread_id: thread_id.to_string(),
+                            turn_id: actual_turn_id,
+                        },
+                    })
+                    .await
+            } else {
+                interrupt_result
+            };
+            if let Err(error) = interrupt_result {
+                tracing::warn!(%error, "failed to interrupt side conversation");
+            }
+            if let Err(error) = request_handle
+                .request_typed::<ThreadUnsubscribeResponse>(ClientRequest::ThreadUnsubscribe {
+                    request_id: unsubscribe_request_id,
+                    params: ThreadUnsubscribeParams {
+                        thread_id: thread_id.to_string(),
+                    },
+                })
+                .await
+            {
+                tracing::warn!(%error, "failed to unsubscribe side conversation");
+            }
+        });
     }
 
     pub(super) async fn discard_closed_side_thread(&mut self, thread_id: ThreadId) {
@@ -689,9 +752,9 @@ impl App {
     pub(super) fn side_start_block_message(&self, kind: CompanionKind) -> Option<&'static str> {
         if self.primary_thread_id.is_none() {
             Some(match kind {
-                CompanionKind::Side => "'/side' is unavailable until the main thread is ready.",
+                CompanionKind::Side => SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE,
                 CompanionKind::Parallel => {
-                    "'/parallel' is unavailable until the main thread is ready."
+                    super::parallel::PARALLEL_MAIN_THREAD_UNAVAILABLE_MESSAGE
                 }
             })
         } else if self
@@ -699,9 +762,7 @@ impl App {
             .and_then(|id| self.side_threads.get(&id))
             .is_some_and(|state| state.kind == CompanionKind::Side)
         {
-            Some(
-                "A side conversation is already open. Press ctrl + c to return before starting another.",
-            )
+            Some(SIDE_ALREADY_OPEN_MESSAGE)
         } else {
             None
         }
@@ -711,17 +772,23 @@ impl App {
         err: &color_eyre::Report,
         kind: CompanionKind,
     ) -> String {
-        let name = kind.name();
         if err.chain().any(|cause| {
             let message = cause.to_string();
             message.contains("no rollout found for thread id")
                 || message.contains("includeTurns is unavailable before first user message")
         }) {
-            format!(
-                "'/{name}' is unavailable until the current conversation has started. Send a message first, then try /{name} again."
-            )
+            match kind {
+                CompanionKind::Side => SIDE_NO_STARTED_CONVERSATION_MESSAGE,
+                CompanionKind::Parallel => {
+                    super::parallel::PARALLEL_NO_STARTED_CONVERSATION_MESSAGE
+                }
+            }
+            .to_string()
         } else {
-            format!("Failed to start {name} conversation: {err}")
+            match kind {
+                CompanionKind::Side => format!("Failed to start side conversation: {err}"),
+                CompanionKind::Parallel => format!("Failed to start parallel conversation: {err}"),
+            }
         }
     }
 
@@ -744,6 +811,26 @@ impl App {
         // conversations should visually start at the side boundary.
         session.forked_from_id = None;
         store.set_session(session, Vec::new());
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn select_agent_thread_and_discard_side(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) -> Result<()> {
+        let side_thread_to_discard = self.side_thread_to_discard_after_switch(thread_id);
+        self.select_agent_thread(tui, app_server, thread_id).await?;
+        if self.active_thread_id == Some(thread_id)
+            && let Some(side_thread_id) = side_thread_to_discard
+        {
+            self.discard_side_thread_in_background(app_server, side_thread_id)
+                .await;
+            self.surface_pending_inactive_thread_interactive_requests()
+                .await?;
+        }
+        Ok(())
     }
 
     #[tracing::instrument(skip_all)]
@@ -875,7 +962,7 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 if let Err(err) = self
-                    .select_agent_thread(tui, app_server, child_thread_id)
+                    .select_agent_thread_and_discard_side(tui, app_server, child_thread_id)
                     .await
                 {
                     let discarded = self
@@ -927,3 +1014,11 @@ impl App {
         Ok(AppRunControl::Continue)
     }
 }
+
+#[cfg(test)]
+#[path = "side_parallel_tests.rs"]
+mod parallel_tests;
+
+#[cfg(test)]
+#[path = "side_navigation_tests.rs"]
+mod navigation_tests;
