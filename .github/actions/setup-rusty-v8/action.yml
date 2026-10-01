@@ -78,7 +78,7 @@ runs:
       run: |
         set -euo pipefail
         version="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/rusty_v8_bazel.py" resolved-v8-crate-version)"
-        tag="asm-v8-v${version}"
+        tag="asm-v8-v${version}-glibc2.35"
         profile=ptrcomp_sandbox_release
         archive="librusty_v8_${profile}_${TARGET}.a.gz"
         binding="src_binding_${profile}_${TARGET}.rs"
