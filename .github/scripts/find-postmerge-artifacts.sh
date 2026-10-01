@@ -1,9 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Only a push to this fork's main at the tagged commit can supply release bits.
+# Candidate retries reuse only their original run's smoke-checked uploads.
+# Other reuse still requires a successful same-commit push to this fork's main.
 repo="$GITHUB_REPOSITORY"
 sha="$(git rev-parse HEAD)"
+if [[ -n "${CANDIDATE_REF:-}" ]]; then
+  [[ "$CANDIDATE_REF" =~ ^refs/heads/agent/release-([0-9]+)$ ]] || { echo 'Invalid candidate ref' >&2; exit 1; }
+  candidate_run="${BASH_REMATCH[1]}"
+  base=$(git rev-parse HEAD^)
+  # Dispatch inputs are immutable on reruns, including which candidate is resumed.
+  # Check this resume run before the original run to avoid rebuilding draft bytes.
+  for id in "$GITHUB_RUN_ID" "$candidate_run"; do
+    expected_base="$base"
+    if [[ "$id" == "$GITHUB_RUN_ID" ]]; then expected_base="$GITHUB_SHA"; fi
+    run=$(gh api "repos/$repo/actions/runs/$id")
+    jq -e --arg base "$expected_base" --arg repo "$repo" '.head_sha == $base and .event == "workflow_dispatch" and .path == ".github/workflows/fork-rust-release.yml" and .repository.full_name == $repo and .head_repository.full_name == $repo' <<<"$run" >/dev/null
+    artifacts=$(gh api "repos/$repo/actions/runs/$id/artifacts?per_page=100")
+    if jq -e '[.artifacts[] | select(.expired == false) | .name] | (index("codex-aarch64-apple-darwin") != null and index("codex-x86_64-unknown-linux-gnu") != null)' <<<"$artifacts" >/dev/null; then
+      echo "Reusing candidate run $id"
+      echo 'reuse=true' >> "$GITHUB_OUTPUT"
+      echo "run_id=$id" >> "$GITHUB_OUTPUT"
+      exit 0
+    fi
+    if [[ "$GITHUB_RUN_ID" == "$candidate_run" ]]; then break; fi
+  done
+  # GITHUB_TOKEN pushes do not start postmerge CI for the candidate branch.
+  echo 'reuse=false' >> "$GITHUB_OUTPUT"
+  exit 0
+fi
 absent_deadline=$((SECONDS + 300))
 deadline=$((SECONDS + 11100))
 while :; do
