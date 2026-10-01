@@ -4981,9 +4981,7 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
         developer_instructions
             .contains("Any MCP or external tool calls or outputs visible in the inherited")
     );
-    assert!(
-        developer_instructions.contains("Sub-agents are off-limits in this side conversation.")
-    );
+    assert!(developer_instructions.contains("non-mutating inspection"));
     assert!(developer_instructions.contains("Do not modify files"));
     assert!(developer_instructions.contains("Do not request escalated permissions"));
     assert!(app.transcript_cells.is_empty());
