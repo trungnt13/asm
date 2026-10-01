@@ -138,7 +138,7 @@ impl ChatWidget {
             return;
         }
 
-        let retry_turn = if self.side_conversation_active() {
+        let retry_turn = if self.side_conversation_active() || self.parallel_conversation_active() {
             None
         } else {
             self.safety_buffering
