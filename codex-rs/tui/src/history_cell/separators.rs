@@ -2,10 +2,13 @@
 
 use super::*;
 use crate::clock_format::ClockFormat;
+use crate::status::format_tokens_compact;
 use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Local;
 use chrono::NaiveDate;
+use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_protocol::ThreadId;
 
 /// Completion metadata shown after the assistant's final response.
 ///
@@ -18,6 +21,8 @@ use chrono::NaiveDate;
 #[derive(Debug)]
 pub struct FinalMessageSeparator {
     elapsed_seconds: Option<u64>,
+    token_usage: Option<TokenUsageBreakdown>,
+    session_id: Option<ThreadId>,
     runtime_metrics: Option<RuntimeMetricsSummary>,
     completed_at: Option<DateTime<Local>>,
     display_date: NaiveDate,
@@ -31,6 +36,8 @@ impl FinalMessageSeparator {
     ) -> Self {
         Self {
             elapsed_seconds,
+            token_usage: None,
+            session_id: None,
             runtime_metrics,
             completed_at: None,
             display_date: Local::now().date_naive(),
@@ -53,6 +60,16 @@ impl FinalMessageSeparator {
         runtime_metrics: Option<RuntimeMetricsSummary>,
     ) -> Self {
         self.runtime_metrics = runtime_metrics;
+        self
+    }
+
+    pub(crate) fn with_token_usage(mut self, token_usage: Option<TokenUsageBreakdown>) -> Self {
+        self.token_usage = token_usage;
+        self
+    }
+
+    pub(crate) fn with_session_id(mut self, session_id: Option<ThreadId>) -> Self {
+        self.session_id = session_id;
         self
     }
 
@@ -89,6 +106,21 @@ impl FinalMessageSeparator {
         }
         if let Some(metrics_label) = self.runtime_metrics.and_then(runtime_metrics_label) {
             label_parts.push(metrics_label);
+        }
+        if let Some(usage) = &self.token_usage {
+            let [input, cached, output, reasoning] = [
+                usage.input_tokens,
+                usage.cached_input_tokens,
+                usage.output_tokens,
+                usage.reasoning_output_tokens,
+            ]
+            .map(|tokens| format_tokens_compact(tokens).to_lowercase());
+            label_parts.push(format!("{input} in"));
+            label_parts.push(format!("{cached} cc"));
+            label_parts.push(format!("{output}|{reasoning} ou"));
+        }
+        if let Some(session_id) = self.session_id {
+            label_parts.push(session_id.to_string());
         }
         (!label_parts.is_empty()).then(|| label_parts.join(" • "))
     }

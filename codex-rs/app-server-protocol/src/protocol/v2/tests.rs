@@ -246,6 +246,9 @@ fn turn_defaults_legacy_missing_items_view_to_full() {
     .expect("legacy turn should deserialize");
 
     assert_eq!(turn.items_view, TurnItemsView::Full);
+    assert_eq!(turn.token_usage, None);
+    let value = serde_json::to_value(&turn).expect("turn should serialize");
+    assert_eq!(value.get("tokenUsage"), Some(&JsonValue::Null));
 }
 
 #[test]

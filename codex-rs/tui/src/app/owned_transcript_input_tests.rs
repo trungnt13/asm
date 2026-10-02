@@ -188,6 +188,7 @@ fn complete_plan_turn(app: &mut App) {
         id: "plan-turn".into(),
         root_turn_id: None,
         items_view: TurnItemsView::Full,
+        token_usage: None,
         items: Vec::new(),
         status: TurnStatus::InProgress,
         error: None,
