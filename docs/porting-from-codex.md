@@ -175,6 +175,12 @@ Optional `macos_concurrency_experiment` compares cold builds of one commit on `m
 
 ### Installer boundaries
 
+### Standalone request audit
+
+Keep `debug prompt-input` unchanged. `debug prompt-request` exports versioned JSON with effective base instructions and the production request representation, including ordered input, full advertised tool definitions, Responses Lite prefixes, and optional output schema. Reuse the app-server extension installer and request builder; do not add audit work to normal inference paths.
+
+Default to ephemeral startup. Require `--allow-session-state` to create session records and initialize persistent state-backed tools; setup may opt in inside its isolated temporary home. Do not dispatch queued input. Label the export as a fresh standalone debug turn, not a live-session or exact transport capture. Report omitted history, turn hooks, input-triggered skill/plugin injections, uncaptured tools, authentication-dependent request metadata, and server-side additions. Do not send an inference request or claim startup is free of network or local-state effects. Audit output can contain sensitive instructions and tool content.
+
 ### Saved forks, upstream sides, and parallel conversations
 
 - Preserve the parent's effective prompt-cache routing key for saved and temporary root forks, independently of thread/session identity. Persist it for resume and further forks. Keep old rollouts readable without ancestor lookups. Preserve upstream guardian/subagent routing. Shared routing does not guarantee backend cache hits.
