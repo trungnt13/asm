@@ -23,6 +23,8 @@ pub struct FinalMessageSeparator {
     elapsed_seconds: Option<u64>,
     token_usage: Option<TokenUsageBreakdown>,
     session_id: Option<ThreadId>,
+    turn_id: Option<String>,
+    agent_count: Option<usize>,
     runtime_metrics: Option<RuntimeMetricsSummary>,
     completed_at: Option<DateTime<Local>>,
     display_date: NaiveDate,
@@ -38,6 +40,8 @@ impl FinalMessageSeparator {
             elapsed_seconds,
             token_usage: None,
             session_id: None,
+            turn_id: None,
+            agent_count: None,
             runtime_metrics,
             completed_at: None,
             display_date: Local::now().date_naive(),
@@ -71,6 +75,19 @@ impl FinalMessageSeparator {
     pub(crate) fn with_session_id(mut self, session_id: Option<ThreadId>) -> Self {
         self.session_id = session_id;
         self
+    }
+
+    pub(crate) fn with_turn_id(mut self, turn_id: String) -> Self {
+        self.turn_id = Some(turn_id);
+        self
+    }
+
+    pub(crate) fn session_turn(&self) -> Option<(ThreadId, &str)> {
+        Some((self.session_id?, self.turn_id.as_deref()?))
+    }
+
+    pub(crate) fn set_agent_count(&mut self, agent_count: Option<usize>) {
+        self.agent_count = agent_count;
     }
 
     fn label(&self, today: NaiveDate) -> Option<String> {
@@ -118,6 +135,9 @@ impl FinalMessageSeparator {
             label_parts.push(format!("{input} in"));
             label_parts.push(format!("{cached} cc"));
             label_parts.push(format!("{output}|{reasoning} ou"));
+        }
+        if let Some(agent_count) = self.agent_count {
+            label_parts.push(format!("{agent_count}ag"));
         }
         if let Some(session_id) = self.session_id {
             label_parts.push(session_id.to_string());
