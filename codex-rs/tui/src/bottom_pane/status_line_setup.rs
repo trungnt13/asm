@@ -125,7 +125,7 @@ pub(crate) enum StatusLineItem {
     /// Total input tokens consumed.
     TotalInputTokens,
 
-    /// Percentage of this thread's cumulative input tokens served from cache.
+    /// Cached share of the latest request's input tokens.
     CacheHitRate,
 
     /// Total output tokens generated.
