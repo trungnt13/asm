@@ -207,6 +207,7 @@ pub(crate) mod agents_overview_discovery;
 mod agents_overview_threads;
 mod agents_overview_usage;
 mod agents_overview_view;
+mod turn_agent_counts;
 pub(crate) use agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 mod activity_groups;
 mod app_server_event_targets;
@@ -627,6 +628,7 @@ pub(crate) struct App {
     pending_thread_titles: HashMap<(ThreadId, ThreadTitleDestination), CancellationToken>,
     thread_event_listener_tasks: HashMap<ThreadId, JoinHandle<()>>,
     agent_navigation: AgentNavigationState,
+    turn_agent_counts: turn_agent_counts::TurnAgentCounts,
     agents_overview: agents_overview::AgentsOverviewState,
     side_threads: HashMap<ThreadId, SideThreadState>,
     abandoned_side_threads: HashSet<ThreadId>,
