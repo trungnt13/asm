@@ -8020,6 +8020,16 @@
       ],
       "description": "Directory where Codex stores the SQLite state DB. Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`."
     },
+    "subagent_model_context_windows": {
+      "additionalProperties": {
+        "format": "uint64",
+        "minimum": 1.0,
+        "type": "integer"
+      },
+      "default": {},
+      "description": "Model-specific context windows for V2 spawned children, in tokens.",
+      "type": "object"
+    },
     "subagent_service_tiers": {
       "additionalProperties": {
         "additionalProperties": {
@@ -8029,16 +8039,6 @@
       },
       "default": {},
       "description": "Child-only routing overrides, keyed by model and reasoning effort.",
-      "type": "object"
-    },
-    "subagents_model_context_windows": {
-      "additionalProperties": {
-        "format": "uint64",
-        "minimum": 1.0,
-        "type": "integer"
-      },
-      "default": {},
-      "description": "Model-specific context windows for V2 spawned children, in tokens.",
       "type": "object"
     },
     "suppress_unstable_features_warning": {
