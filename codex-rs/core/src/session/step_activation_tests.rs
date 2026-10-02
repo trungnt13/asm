@@ -554,9 +554,10 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
     let model_manager_config = {
         let state = session.state.lock().await;
         let configuration = &state.session_configuration;
-        configuration
-            .model_info_overrides
-            .models_manager_config(configuration.step_settings.personality)
+        configuration.model_info_overrides.models_manager_config(
+            configuration.step_settings.collaboration_mode.model(),
+            configuration.step_settings.personality,
+        )
     };
     let expected_destination = with_config_overrides(expected_destination, &model_manager_config);
     let desired = desired_step_settings(&session).await;
