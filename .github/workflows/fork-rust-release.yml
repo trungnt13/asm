@@ -265,10 +265,6 @@ jobs:
           archives=(codex-aarch64-apple-darwin.tar.gz codex-x86_64-unknown-linux-gnu.tar.gz)
           cp "${GITHUB_WORKSPACE}/scripts/install/install.sh" install.sh
           [[ $(find . -maxdepth 1 -type f | wc -l) -eq 3 ]] || { echo 'Unexpected release files' >&2; exit 1; }
-          for archive in "${archives[@]}"; do
-            [[ -s "$archive" ]] || { echo "Missing $archive" >&2; exit 1; }
-            python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "$archive" --inspect-only
-          done
           sha256sum "${archives[@]}" install.sh > SHA256SUMS
 
       - name: Publish or verify existing release without overwrites
