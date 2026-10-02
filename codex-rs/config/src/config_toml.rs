@@ -179,7 +179,7 @@ pub struct ConfigToml {
 
     /// Model-specific context windows for V2 spawned children, in tokens.
     #[serde(default)]
-    pub subagents_model_context_windows: HashMap<String, NonZeroU64>,
+    pub subagent_model_context_windows: HashMap<String, NonZeroU64>,
 
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
@@ -1038,8 +1038,8 @@ mod tests {
     fn subagent_service_tiers_parse_by_model_and_reasoning_effort() {
         for contents in [
             "",
-            "subagents_model_context_windows = { \"gpt-6-astra\" = 272000 }",
-            "[subagents_model_context_windows]\n\"gpt-6-astra\" = 272000",
+            "subagent_model_context_windows = { \"gpt-6-astra\" = 272000 }",
+            "[subagent_model_context_windows]\n\"gpt-6-astra\" = 272000",
         ] {
             let config: ConfigToml = toml::from_str(contents).expect("valid child context windows");
             let expected = if contents.is_empty() {
@@ -1050,11 +1050,11 @@ mod tests {
                     NonZeroU64::new(272_000).expect("positive context window"),
                 )])
             };
-            assert_eq!(config.subagents_model_context_windows, expected);
+            assert_eq!(config.subagent_model_context_windows, expected);
         }
         for invalid in ["0", "-1", "1.5", "\"272000\""] {
             let contents =
-                format!("subagents_model_context_windows = {{ \"gpt-6-astra\" = {invalid} }}");
+                format!("subagent_model_context_windows = {{ \"gpt-6-astra\" = {invalid} }}");
             assert!(toml::from_str::<ConfigToml>(&contents).is_err());
         }
         let config: ConfigToml = toml::from_str(

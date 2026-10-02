@@ -547,7 +547,7 @@ async fn model_resolution_preserves_startup_overrides_and_instruction_provenance
         (child_source, MultiAgentVersion::V2, None, None, 90_000),
     ] {
         config.model_context_window = scalar_window;
-        config.subagents_model_context_windows = mapped_window
+        config.subagent_model_context_windows = mapped_window
             .map(|window| HashMap::from([("model-b".to_string(), window)]))
             .unwrap_or_default();
         let overrides = ModelInfoOverrides::for_session(&config, &source, Some(version));
