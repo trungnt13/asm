@@ -85,6 +85,7 @@ fn transcript_export_excludes_hidden_review_prompts_and_nested_duplicates() {
         id: id.to_string(),
         items,
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status,
         error: None,
         started_at: None,

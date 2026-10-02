@@ -92,6 +92,7 @@ pub(crate) enum ThreadListenerCommand {
 #[derive(Default, Clone)]
 pub(crate) struct TurnSummary {
     pub(crate) started_at: Option<i64>,
+    pub(crate) token_usage: Option<codex_protocol::protocol::TokenUsage>,
     pub(crate) command_execution_started: HashSet<String>,
     pub(crate) last_error: Option<TurnError>,
     pub(crate) last_agent_message: Option<ThreadItem>,
@@ -198,6 +199,7 @@ impl ThreadState {
     pub(crate) fn track_current_turn_event(&mut self, event_turn_id: &str, event: &EventMsg) {
         if let EventMsg::TurnStarted(payload) = event {
             self.turn_summary.started_at = payload.started_at;
+            self.turn_summary.token_usage = None;
         }
         if let EventMsg::ItemCompleted(payload) = event
             && let CoreTurnItem::AgentMessage(item) = &payload.item
@@ -208,6 +210,15 @@ impl ThreadState {
         {
             self.turn_summary.last_agent_message =
                 Some(ThreadItem::from(CoreTurnItem::AgentMessage(item.clone())));
+        }
+        if let EventMsg::RawResponseCompleted(payload) = event
+            && self.current_turn_history.active_turn_id() == Some(event_turn_id)
+            && let Some(usage) = &payload.token_usage
+        {
+            self.turn_summary
+                .token_usage
+                .get_or_insert_default()
+                .add_assign(usage);
         }
         self.current_turn_history.handle_event(event);
         if matches!(event, EventMsg::TurnAborted(_) | EventMsg::TurnComplete(_)) {
