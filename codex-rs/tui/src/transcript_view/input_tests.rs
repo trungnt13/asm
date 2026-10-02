@@ -94,7 +94,7 @@ fn decimal_mouse_scroll_speeds_preserve_whole_rows() {
 #[test]
 fn fractional_mouse_scroll_does_not_pause_following_until_a_row_moves() {
     let (mut view, cells) = transcript(
-        "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix",
+        "one\n\ntwo\n\nthree\n\nfour\n\nfive\n\nsix\n\nseven\n\neight\n\nnine\n\nten",
         /*width*/ 12,
     );
     view.mouse_scroll_speed = 0.5;
