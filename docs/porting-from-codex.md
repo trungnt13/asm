@@ -12,7 +12,7 @@ This file takes precedence over other repository instructions, including [AGENTS
 
 Use ASM in the README heading, GitHub repository description and release titles, introductory release prose, and descriptive workflow step labels, while clearly attributing the fork to OpenAI Codex. Keep the existing `codex` executable, crate, state and config names, archive filenames, tags, workflow names, job IDs, and CI check identities unchanged. Branding does not change what upstream links or installers provide.
 
-Check Git status, branches, worktrees, remotes, fork differences, and relevant repo sessions for overlapping work and unfinished handoffs. Recover context from Git and sessions, not the owner's memory or a separate task diary.
+Refresh Git status, branches, and worktrees before editing, including on resume. Inspect remotes and fork history for syncs and pushes; inspect relevant repo sessions for overlapping work or unexplained changes. Recover missing context from Git and sessions, not the owner's memory or a separate task diary.
 
 For concurrent tasks, create a named `codex/` branch and separate worktree before editing; coordinate shared files. One agent owns staging and commits in each checkout. Integrate into local `main` one task at a time.
 
@@ -44,6 +44,8 @@ Choose checks from changed behavior and conflict resolutions, not the size of an
 - **Rust:** use `just test -p <crate> <test-filter>`, not direct `cargo test`. Format changed code and use targeted Clippy when needed. Group affected assertion and snapshot updates before validation; keep unrelated stale expectations out of the change, and never disable tests to hide intentional output changes.
 - **Workflows and scripts:** run `actionlint` for changed workflows and small fixtures for script logic. Build natively only for affected packaging or an approved experiment.
 
+Do not add new tests or new snapshot coverage without an explicit user request. An implementation request alone does not authorize new tests. By default, update existing tests and snapshots only when needed for changed behavior. This overrides instructions elsewhere to add integration or snapshot tests. Report coverage gaps and ask before adding tests; keep existing checks and required generators.
+
 Run required generators for changed inputs; keep schemas, dependency lockfiles, and Bazel data correct. Reuse correct upstream outputs; skipping Bazel CI does not waive Bazel correctness.
 
 Do not run whole-crate or workspace suites by default. If narrow checks cannot establish safety, explain the gap and ask before expanding. A clean merge is not validation; claim upstream CI passed only when verified.
@@ -52,7 +54,7 @@ Do not run whole-crate or workspace suites by default. If narrow checks cannot e
 
 Implementation requests, including documentation edits, authorize committing finished task changes and integrating them into local `main`, unless the owner says otherwise.
 
-The lead agent owns completion, including delegated work. Once narrow checks pass and owner decisions are resolved, commit and integrate immediately. Wait for manual testing or a separate approval only if requested. **Done means committed and verified in local `main`**, not just finished in another worktree.
+The lead agent owns completion, including delegated work. Once narrow checks pass and owner decisions are resolved, commit and integrate immediately. Wait for manual testing or a separate approval only if requested. **Implementation is done when committed and verified in local `main`**, not just finished in another worktree. Release requests follow the completion rules below.
 
 Inspect the staged diff; include only finished task changes and their tests, generated files, and intent. Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`; verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. Correct local configuration when needed, but do not rewrite published history just to fix attribution without approval.
 
@@ -65,6 +67,8 @@ Finish with the change, exact checks and results, commit, integration and push s
 ### Push permissions
 
 Pushing to `origin/main`, including `--force-with-lease`, has standing owner approval but is not required for local task completion. Other force pushes, moving existing tags, discarding work, and publishing releases need explicit approval. An implementation request alone does not authorize a release.
+
+Push branches with an explicit ref and `--no-follow-tags`; never include all local tags. Release-triggering tag pushes need publication approval, including tags used by inherited workflows. Before a force push, fetch and account for remote-only work, including workflow-created release commits. Preserve it in the result and use an explicit lease against the inspected remote tip; do not refresh a failed lease and retry blindly.
 
 ## Upstream sync
 
@@ -86,22 +90,31 @@ Verify the upstream URL before fetching. Focus on fork differences and the upstr
 
 Keep related generated files correct when fork changes require them: schemas, snapshots, dependency lockfiles, and Bazel data declarations. Not running Bazel CI does not authorize breaking its files. Reuse already-correct upstream outputs rather than regenerating everything after a sync.
 
-## Platforms and build profiles
+Keep [postmerge CI](../.github/workflows/postmerge-ci.yml) automatic: optimized builds, packaging, smoke checks, artifact uploads, diagnostics, and results. Use push-level `paths-ignore` for only root `AGENTS.md` and this guide, so documentation-only pushes filtered out there cannot cancel an active build. Any other changed path remains eligible for builds; do not exclude all Markdown or `docs/`. Release publication does not depend on manual blocking CI; report existing failures separately.
 
 Port useful upstream action, toolchain, security, and build fixes without restoring broad matrices. Do not add unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure to fork CI, or repeat CI locally for every edit. The separate two-target V8 dependency build below is not a broad Bazel suite or canary.
 
 Leave other inherited workflows unchanged unless the task authorizes changes. Check their own triggers and repository guards: [V8 canary](../.github/workflows/v8-canary.yml) still triggers on pull requests, with expensive builds conditional on relevant changes; [CLA](../.github/workflows/cla.yml) restricts its job to the `openai` owner. The custom CI scope does not disable these workflows.
 
-Keep these release targets and GitHub-hosted runners:
+### Operate a release
 
-- macOS ARM64: `aarch64-apple-darwin` on `macos-15`; build timeout 180 minutes. The installer treats an x86_64 process under Rosetta on Apple Silicon as ARM64, but rejects an actual Intel Mac.
-- Linux x86_64 MUSL: `x86_64-unknown-linux-musl` on `ubuntu-24.04`; build timeout 90 minutes.
+1. Release only on an explicit request. Use explicit repository selection, such as `gh ... -R trungnt13/asm`. Check the V8 prerequisite below before pushing the intended source to `origin/main`. Confirm the remote commit includes the work to release; unpushed local work is excluded. Do not wait for postmerge builds: candidate releases build or reuse their own archives.
+2. Dispatch [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. The workflow owns version selection, candidate creation, builds, publication, verification, and updating remote `main`; do not repeat those steps manually. Ordinary branch dispatch is build-only, and a `main` push never requests publication.
+3. After interruption, rerun failed jobs. To resume from a new dispatch, use `main`, `publish_release=true`, and `resume_run_id` set to the original run ID. Reuse its frozen version and commit even if upstream has advanced. Report failures that need an owner decision; do not invent a version or replace a tag.
+4. Confirm `release`, both `verify_native` jobs, and `sync_main` succeeded for that candidate. Legacy tag releases require publication and both native checks but intentionally skip `sync_main`. Inspect the exact run's recorded checks and current release metadata; do not repeat successful checks on unchanged artifacts. A green build-only run, pushed tag, or version label is not proof of publication.
+5. Fetch the result and fast-forward local `main` only when safe; preserve local edits and concurrent commits, and report any blocked local update. Report the released commit, upstream baseline, verification results, and remote and local integration status separately.
 
-Local iteration uses `dev-small` for build speed. Published binaries always use optimized `--release`. Fix release build timeouts in the pipeline, not by switching to a development profile. In release workflows, use `CARGO_PROFILE_RELEASE_STRIP=debuginfo` to remove debug information while retaining function symbols and existing optimization settings. Do not remove runtime dependencies or additional symbols merely because upstream tests passed.
+### Workflow requirements
 
-Prepare the version on an immutable release-candidate branch, not on `main`. Set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) and the matching workspace package versions in [`Cargo.lock`](../codex-rs/Cargo.lock), without changing dependencies. The tag, Cargo version, and CLI `--version` must agree, ignoring their name prefixes. Renaming a tag cannot change an existing binary. Advance `main` only after publication and verification succeed; preserve unrelated concurrent changes and stop on version conflicts rather than force-pushing. Leave existing pre-policy version bumps intact until the next successful release.
+The workflow enforces the requirements below. Preserve them when changing release code; they are not a second manual release procedure.
 
-For runtime or UI changes, make the smallest coherent change and deliver a runnable development binary before automated testing is complete. Inspect all affected paths, including streaming and completed output where relevant. From `codex-rs`, build the affected binaries; include `codex-code-mode-host` when changing its behavior:
+#### Version
+
+The workflow selects the latest published, non-draft upstream prerelease with a `rust-v` tag on `openai/codex`, ordered by publication time. It increments only the numeric patch component and preserves the suffix: `rust-v0.159.0-alpha.6` becomes `0.159.1-alpha.6`, tagged `v0.159.1-alpha.6`. Do not increment the previous fork version or suffix. The workflow checks remote tags and stops if the derived tag exists or no upstream prerelease can be determined; the agent asks the owner how to proceed.
+
+The workflow prepares the version on immutable branch `agent/release-<run-id>`, not on `main`. It sets `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) and matching workspace package versions in [`Cargo.lock`](../codex-rs/Cargo.lock), without changing dependencies. The tag, Cargo version, and CLI `--version` must agree, ignoring name prefixes. Renaming a tag cannot change an existing binary. Never move the candidate or an existing tag during retries; keep candidate branches for recovery. Leave existing pre-policy version bumps intact until the next successful release.
+
+#### Build and package
 
 ```bash
 cargo build -p codex-cli --bin codex --profile dev-small
@@ -112,7 +125,7 @@ cargo build -p codex-cli --bin codex --profile dev-small
 
 Documentation-only changes need no binary build. Use release builds, cross-compilation, or packaging during local work only when requested or needed to reproduce the affected behavior.
 
-## Release versions
+Build `codex` and `codex-code-mode-host` from the same commit, target, and profile. Each `codex-<target>.tar.gz` contains exactly those two regular executable siblings. Publish both target archives, `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh), not source trees or diagnostics. Pin builds, packaging, installer bytes, and verification to the immutable candidate commit, or the exact tagged commit for legacy releases, even when reusing archives. Verify the release tag resolves to that commit; candidate packaging does not require the tag to exist yet.
 
 Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on the packaged binaries on their native runner: CLI `--version` matches Cargo, and both `--help` commands succeed with usage. Do not require the helper to support `--version`. Record binary and archive sizes. For GNU Linux archives, verify both ELF executables use the x86_64 GNU loader and require no glibc symbol newer than 2.35. Also run version/help checks in a clean Ubuntu 22.04 container with only the declared runtime libraries; a dependency-rich build runner does not establish runtime compatibility.
 
@@ -124,7 +137,7 @@ Choose this version automatically; do not increment the previous fork version or
 - Preserve upstream GNU runtime choices, including the system allocator, locale handling, and PTY support; do not change Rust platform conditionals merely to mimic MUSL. GNU packages use system OpenSSL 3 and may use system liblzma. Keep the runtime package list in [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) aligned with actual ELF dependencies. Voice remains unbundled; this migration does not add an ALSA or GStreamer requirement.
 - Do not add platforms, DMGs, bundled resources, npm, R2, WinGet, or website/OpenAI-only publishing without an agreed intent change.
 
-### V8 dependency release
+#### V8 dependency release
 
 Build V8 separately from the CLI only when the required crate version, target, or baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) with tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35`. The suffix identifies the GNU-baseline artifact generation, including its matching macOS pair, without moving or replacing the old MUSL release. A manual branch run builds only by default; explicit `publish=true` builds and smokes first, then creates the tag and release at that commit. Tag pushes also publish. Never move a tag or replace published assets without approval. Reuse a verified fork V8 release when V8 inputs have not changed; if source, patches, build flags, or bindings change under the same crate version, ask how to version the dependency.
 
@@ -132,17 +145,13 @@ Build only sandbox + pointer-compression optimized pairs for macOS ARM64 and Lin
 
 Fork CI and CLI releases consume only the matching verified fork V8 release. For a new V8 version or artifact generation, publish and verify both target pairs before the first `main` push that consumes it. Check each downloaded asset's GitHub SHA-256 digest and the manifest's exact target names and hashes. Missing or bad assets fail without upstream fallback. The inherited upstream V8 action path remains for workflows outside fork CI.
 
-### Reuse and publish
+#### Reuse and publish
 
-Start an explicitly requested release by dispatching [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. This single durable workflow owns version selection, candidate creation, builds, publication, verification, and updating `main`; no later chat action or workflow triggered by a token-created push is required. Serialize release runs. Pin every build, installer, and verification checkout to the candidate commit. Ordinary branch dispatch remains build-only, and a `main` push never requests publication.
-
-The candidate lives at `agent/release-<run-id>`. Rerun failed jobs to continue after interruption; to resume from a new dispatch, set `publish_release=true` and `resume_run_id` to the original run ID. Reuse the frozen version and commit even if upstream has advanced. Never move a candidate or existing tag. A new candidate must use a free release tag; conflicts require owner input. Keep candidate branches for recovery. Existing `v*` tag pushes and tag dispatches can still publish without modifying `main`.
+Serialize release runs. Publication and remote `main` updates must finish within the durable workflow, without a later chat action or a workflow triggered by a token-created push. Existing `v*` tag pushes and tag dispatches can still publish without modifying `main`; their tagged commit must already have the correct Cargo version.
 
 Use [the artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) to reuse both unexpired, smoke-checked archives from the current dispatch or original candidate run. Legacy tag releases may reuse a successful same-repository push-to-`main` run at the exact tagged commit; wait for a matching active run rather than building concurrently, and fail if the wait expires. Build only when no usable archives remain. API errors are failures, not cache misses.
 
-Upload all four assets to a draft before publishing. Resume partial uploads only when existing names, sizes, and digests agree; never replace assets. Verify the tag commit, GitHub digests, checksum manifest, installer bytes, and both downloaded archives before publication. Publish normal and Latest even with an `alpha` suffix, then repeat metadata and native binary smoke checks on both release platforms. Only then merge the candidate into `main`. If publication already succeeded, retries verify the existing release and finish updating `main` without rebuilding or republishing.
-
-Before archive upload, run [the smoke check](../.github/scripts/smoke-codex-archive.py) on both packaged binaries on their native runner. The CLI's `--version` must match Cargo; both executables' `--help` must succeed and print usage. Do not demand `--version` from the helper. Record binary and archive sizes. These checks validate our packaging; they do not replace functional tests of changed code.
+Upload all four assets to a draft before publishing. Resume partial uploads only when existing names, sizes, and digests agree; never replace assets. Verify the tag commit, GitHub digests, checksum manifest, installer bytes, and both downloaded archives before publication. Publish normal and Latest even with an `alpha` suffix, then repeat metadata and native binary smoke checks on both release platforms. Only then merge the candidate into `origin/main`; preserve concurrent changes and stop on version conflicts rather than force-pushing. If publication already succeeded, retries verify the existing release and finish updating `origin/main` without rebuilding or republishing.
 
 Preserve these build constraints:
 
