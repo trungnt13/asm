@@ -47,6 +47,7 @@ fn turn(items: Vec<ThreadItem>) -> Turn {
         root_turn_id: None,
         items,
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,

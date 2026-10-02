@@ -34,7 +34,7 @@ impl ChatWidget {
             .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, /*nsecs*/ 0))
             .map(|timestamp| timestamp.with_timezone(&Local))
             .or_else(|| replay_kind.is_none().then(Local::now));
-        if completed_at.is_none() && elapsed_seconds.is_none() {
+        if completed_at.is_none() && elapsed_seconds.is_none() && turn.token_usage.is_none() {
             return None;
         }
         self.turn_lifecycle
@@ -43,7 +43,9 @@ impl ChatWidget {
         let cell = history_cell::FinalMessageSeparator::new(
             elapsed_seconds,
             /*runtime_metrics*/ None,
-        );
+        )
+        .with_token_usage(turn.token_usage.clone())
+        .with_session_id(self.thread_id);
         Some(match completed_at {
             Some(completed_at) => {
                 cell.with_completed_at(completed_at, crate::clock_format::ClockFormat::system())
