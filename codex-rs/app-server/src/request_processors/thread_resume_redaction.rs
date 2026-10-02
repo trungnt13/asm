@@ -235,6 +235,7 @@ mod tests {
             git_info: None,
             name: None,
             turns: vec![Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items,
