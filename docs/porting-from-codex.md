@@ -70,9 +70,9 @@ Pushing to `origin/main`, including `--force-with-lease`, has standing owner app
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `2635431edbd43279a4da9c1199456758fbbc8ad3`.
-- Commit date: 2026-10-01.
-- Subject: Add attachment owner lookup to the app-server (#50094).
+- Last incorporated upstream commit: `e7ea5f4a8658ebe49e879be933effed2340fa276`.
+- Commit date: 2026-10-02.
+- Subject: Add managed worktree tools to the TUI (#50148).
 
 Verify the upstream URL before fetching. Follow the requested sync method; otherwise merge into `main` to preserve published history and rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
