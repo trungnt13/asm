@@ -115,6 +115,18 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
         ];
         first.completed_at = Some(1_700_000_000);
         first.duration_ms = Some(125_000);
+        app.track_turn_agents(&ServerNotification::TurnStarted(
+            codex_app_server_protocol::TurnStartedNotification {
+                thread_id: thread_id.to_string(),
+                turn: turn("first", TurnStatus::InProgress, &[]),
+            },
+        ));
+        app.track_turn_agents(&ServerNotification::TurnCompleted(
+            codex_app_server_protocol::TurnCompletedNotification {
+                thread_id: thread_id.to_string(),
+                turn: first.clone(),
+            },
+        ));
         let mut second = turn("second", TurnStatus::InProgress, &[]);
         second.items = vec![computer("newer-call")];
         let turns = vec![first, second];
@@ -142,6 +154,11 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
             .iter()
             .filter(|cell| cell.as_any().is::<FinalMessageSeparator>())
             .count();
+        for cell in &cells {
+            if let Some(completion) = cell.as_any().downcast_ref::<FinalMessageSeparator>() {
+                assert!(completion.raw_lines()[0].to_string().ends_with(" • 0ag"));
+            }
+        }
         let visible_users = cells
             .iter()
             .filter(|cell| cell.as_any().is::<UserHistoryCell>())

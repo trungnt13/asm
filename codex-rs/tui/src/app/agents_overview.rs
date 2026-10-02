@@ -227,6 +227,11 @@ impl App {
                         }
                         thread.turns.clear();
                         self.agents_overview.threads.insert(thread_id, Some(thread));
+                        if self.turn_agent_counts.running.get(&thread_id).is_some_and(
+                            |(_, observed_during)| *observed_during != Some(request_id),
+                        ) {
+                            self.turn_agent_counts.running.remove(&thread_id);
+                        }
                     } else {
                         self.agents_overview.threads.entry(thread_id).or_default();
                     }
@@ -253,6 +258,7 @@ impl App {
                 self.track_agents_overview_notification(&notification);
             }
         }
+        self.sample_turn_agents();
         if std::mem::take(&mut self.agents_overview.refresh_pending)
             || (refill_succeeded
                 && (self.agents_overview.refill_count > 0
