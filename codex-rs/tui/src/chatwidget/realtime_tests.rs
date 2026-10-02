@@ -129,6 +129,7 @@ fn finish_turn(
                 root_turn_id: None,
                 items,
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status,
                 error: None,
                 started_at: None,
