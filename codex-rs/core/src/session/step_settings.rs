@@ -1,5 +1,6 @@
 //! Configured inputs retained independently of future thread settings.
 
+use crate::config::Config;
 use crate::config::Constrained;
 use crate::config::ConstraintError;
 use crate::config::ConstraintResult;
@@ -16,6 +17,10 @@ use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::MultiAgentVersion;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Model and execution settings selected for an individual model step within
@@ -181,6 +186,8 @@ impl ResolvedStepSettings {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModelInfoOverrides {
     pub(crate) context_window: Option<i64>,
+    // Keep model-specific child limits separate from the inherited scalar fallback.
+    pub(crate) subagent_context_windows: HashMap<String, i64>,
     pub(crate) auto_compact_token_limit: Option<i64>,
     pub(crate) tool_output_token_limit: Option<usize>,
     pub(crate) base_instructions: Option<String>,
@@ -190,6 +197,7 @@ impl From<ModelsManagerConfig> for ModelInfoOverrides {
     fn from(config: ModelsManagerConfig) -> Self {
         Self {
             context_window: config.model_context_window,
+            subagent_context_windows: HashMap::new(),
             auto_compact_token_limit: config.model_auto_compact_token_limit,
             tool_output_token_limit: config.tool_output_token_limit,
             base_instructions: config.base_instructions,
@@ -198,12 +206,34 @@ impl From<ModelsManagerConfig> for ModelInfoOverrides {
 }
 
 impl ModelInfoOverrides {
+    pub(crate) fn for_session(
+        config: &Config,
+        source: &SessionSource,
+        multi_agent_version: Option<MultiAgentVersion>,
+    ) -> Self {
+        let mut overrides = Self::from(config.to_models_manager_config());
+        if multi_agent_version == Some(MultiAgentVersion::V2)
+            && matches!(
+                source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            )
+        {
+            overrides.subagent_context_windows = config.subagents_model_context_windows.clone();
+        }
+        overrides
+    }
+
     pub(crate) fn models_manager_config(
         &self,
+        model: &str,
         personality: Option<Personality>,
     ) -> ModelsManagerConfig {
         ModelsManagerConfig {
-            model_context_window: self.context_window,
+            model_context_window: self
+                .subagent_context_windows
+                .get(model)
+                .copied()
+                .or(self.context_window),
             model_auto_compact_token_limit: self.auto_compact_token_limit,
             tool_output_token_limit: self.tool_output_token_limit,
             base_instructions: self.base_instructions.clone(),
@@ -247,7 +277,8 @@ impl StepSettings {
         models_manager: &dyn ModelsManager,
         overrides: &ModelInfoOverrides,
     ) -> ModelInfo {
-        let config = overrides.models_manager_config(self.personality);
+        let config =
+            overrides.models_manager_config(self.collaboration_mode.model(), self.personality);
         models_manager
             .get_model_info(self.collaboration_mode.model(), &config)
             .await

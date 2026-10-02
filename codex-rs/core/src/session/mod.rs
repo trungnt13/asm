@@ -48,6 +48,7 @@ use crate::parse_turn_item;
 use crate::realtime_conversation::RealtimeConversationManager;
 use crate::realtime_history::RealtimeEventOrder;
 use crate::session::step_context::StepContext;
+use crate::session::step_settings::ModelInfoOverrides;
 use crate::session::step_settings::ResolvedStepSettings;
 use crate::session::step_settings::StepSettings;
 use crate::session::turn_context::TurnEnvironment;
@@ -722,12 +723,21 @@ impl Session {
             );
         }
 
+        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
+            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
+        });
+        let model_info_overrides =
+            ModelInfoOverrides::for_session(&config, &session_source, multi_agent_version);
+
         // Resolve base instructions for the session. Priority order:
         // 1. config.base_instructions override
         // 2. conversation history => session_meta.base_instructions
         // 3. rendered instructions_template for current model
         let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .get_model_info(
+                model.as_str(),
+                &model_info_overrides.models_manager_config(&model, config.personality),
+            )
             .await;
         let auth = auth_manager.auth_cached();
         // Forked subagents keep their parent's activation with the copied history.
@@ -747,9 +757,6 @@ impl Session {
             token_budget::apply_model_defaults(Arc::make_mut(&mut config), &model_info);
         }
         let configured_config = Arc::clone(&config);
-        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
-            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
-        });
         let history_mode = conversation_history.get_history_mode(
             requested_history_mode.unwrap_or_else(|| thread_store.default_history_mode()),
         );
@@ -850,7 +857,7 @@ impl Session {
                 approvals_reviewer: config.approvals_reviewer,
             }),
             environments: environment_selections.clone(),
-            model_info_overrides: config.to_models_manager_config().into(),
+            model_info_overrides,
             developer_instructions: config.developer_instructions.clone(),
             base_instructions,
             permission_profile_state: session_permission_profile_state_from_config(&config)?,
