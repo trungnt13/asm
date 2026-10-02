@@ -307,6 +307,7 @@ impl App {
                     && !self.agents_overview.threads.get(&thread_id).is_some_and(Option::is_some) {
                     self.agents_overview.threads.insert(thread_id, Some(thread));
                     self.agents_overview.refresh_thread_ids.insert(thread_id);
+                    self.sample_turn_agents();
                 }
                 self.refresh_changed_agents_overview_threads(app_server);
                 self.repaint_agents_overview();
