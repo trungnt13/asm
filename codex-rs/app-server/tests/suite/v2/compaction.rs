@@ -331,7 +331,13 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
     )
     .await??;
     let completed = wait_for_context_compaction_completed(&mut mcp).await?;
-    wait_for_turn_completed(&mut mcp, &started.turn_id).await?;
+    let completed_turn: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    assert_eq!(completed_turn.turn.id, started.turn_id);
+    assert_eq!(completed_turn.turn.token_usage, raw_completed.usage);
 
     let ThreadItem::ContextCompaction { id: started_id } = started.item else {
         unreachable!("started item should be context compaction");

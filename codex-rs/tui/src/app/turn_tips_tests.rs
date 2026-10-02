@@ -198,7 +198,7 @@ async fn turn_tip_placements_and_completion_barrier() -> Result<()> {
         (false, 1, 80, 4),
     ] {
         let (mut app, mut events, _ops) = crate::app::tests::make_test_app_with_channels().await;
-        let thread = ThreadId::new();
+        let thread = ThreadId::from_string("019abc12-3456-7890-abcd-1234567890ab").unwrap();
         attach_thread(&mut app, thread);
         app.local_settings.tui.show_tooltips = true;
         app.local_settings.tui.animations = false;

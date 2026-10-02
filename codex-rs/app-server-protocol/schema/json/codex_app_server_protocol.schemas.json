@@ -25639,6 +25639,18 @@
           },
           "status": {
             "$ref": "#/definitions/v2/TurnStatus"
+          },
+          "tokenUsage": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/TokenUsageBreakdown"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Provider-reported token totals for this turn, including compaction, when available."
           }
         },
         "required": [
