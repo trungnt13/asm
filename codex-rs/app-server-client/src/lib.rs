@@ -1085,6 +1085,7 @@ mod tests {
         ServerNotification::TurnCompleted(codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread".to_string(),
             turn: codex_app_server_protocol::Turn {
+                token_usage: None,
                 id: "turn".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,

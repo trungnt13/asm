@@ -161,6 +161,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let turn = {
                 let state = thread_state.lock().await;
                 let mut turn = state.active_turn_snapshot().unwrap_or_else(|| Turn {
+                    token_usage: None,
                     id: payload.turn_id.clone(),
                     root_turn_id: payload.root_turn_id.clone(),
                     items: Vec::new(),
@@ -1314,6 +1315,7 @@ async fn handle_turn_plan_update(
 }
 
 struct TurnCompletionMetadata {
+    token_usage: Option<codex_app_server_protocol::TokenUsageBreakdown>,
     status: TurnStatus,
     root_turn_id: Option<String>,
     error: Option<TurnError>,
@@ -1345,6 +1347,7 @@ async fn emit_turn_completed_with_status(
             started_at: turn_completion_metadata.started_at,
             completed_at: turn_completion_metadata.completed_at,
             duration_ms: turn_completion_metadata.duration_ms,
+            token_usage: turn_completion_metadata.token_usage,
         },
     };
     outgoing
@@ -1531,6 +1534,7 @@ async fn handle_turn_complete(
             started_at: turn_summary.started_at,
             completed_at: turn_complete_event.completed_at,
             duration_ms: turn_complete_event.duration_ms,
+            token_usage: turn_summary.token_usage.map(Into::into),
         },
         outgoing,
     )
@@ -1562,6 +1566,7 @@ async fn handle_turn_interrupted(
             started_at: turn_summary.started_at,
             completed_at: turn_aborted_event.completed_at,
             duration_ms: turn_aborted_event.duration_ms,
+            token_usage: turn_summary.token_usage.map(Into::into),
         },
         outgoing,
     )
@@ -3463,6 +3468,22 @@ mod tests {
                     completed_at_ms: 0,
                 }),
             );
+            for (response_id, input_tokens) in [("response-1", 10), ("response-2", 25)] {
+                state.track_current_turn_event(
+                    &event_turn_id,
+                    &EventMsg::RawResponseCompleted(
+                        codex_protocol::protocol::RawResponseCompletedEvent {
+                            response_id: response_id.into(),
+                            token_usage: Some(codex_protocol::protocol::TokenUsage {
+                                input_tokens,
+                                total_tokens: input_tokens,
+                                ..Default::default()
+                            }),
+                            usage_metadata: None,
+                        },
+                    ),
+                );
+            }
             state.track_current_turn_event(&event_turn_id, &EventMsg::TurnComplete(event.clone()));
         }
 
@@ -3486,6 +3507,17 @@ mod tests {
                     [ThreadItem::AgentMessage { id, text, .. }]
                         if id == "msg-1" && text == "complete response"
                 ));
+                assert_eq!(
+                    n.turn.token_usage,
+                    Some(
+                        codex_protocol::protocol::TokenUsage {
+                            input_tokens: 35,
+                            total_tokens: 35,
+                            ..Default::default()
+                        }
+                        .into()
+                    )
+                );
                 assert_eq!(n.turn.error, None);
                 assert_eq!(n.turn.started_at, Some(42));
                 assert_eq!(n.turn.completed_at, Some(TEST_TURN_COMPLETED_AT));

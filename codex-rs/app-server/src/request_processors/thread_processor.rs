@@ -6184,6 +6184,7 @@ fn stored_turn_to_api_turn(
         .map(deserialize_stored_thread_item)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Turn {
+        token_usage: None,
         id: turn.turn_id,
         root_turn_id: turn.root_turn_id,
         items,
