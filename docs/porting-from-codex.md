@@ -21,17 +21,19 @@ Use ASM in the README heading, GitHub repository description and release titles,
 
 For runtime or UI edits, inspect all affected paths, including streaming and completed output. Make the smallest coherent change.
 
-Before Cargo runs in a new worktree, ensure sufficient disk space. Select a compatible existing cache with `CARGO_TARGET_DIR`, not an empty worktree-local cache. Keep the native target, toolchain, profile, flags, and cache stable. Cache reuse can still require recompilation.
+Before Cargo runs in a new worktree, ensure sufficient disk space. Select a compatible existing cache with `CARGO_TARGET_DIR`, not an empty worktree-local cache. Keep the native target, toolchain, profile, flags, and cache stable. Cache reuse can still require recompilation. Reuse matching verified fork [V8 artifacts](#v8-dependency-release); keep `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH` overrides stable with that cache.
 
-From `codex-rs`, build:
+From `codex-rs`, build both binaries from the same source, native target, and `dev-small` profile:
 
 ```bash
-cargo build -p codex-cli --bin codex --profile dev-small
+cargo build -p codex-cli -p codex-code-mode-host --bin codex --bin codex-code-mode-host --profile dev-small
 ```
 
-Prioritize this CLI build over other Cargo jobs. Serialize jobs that share a target directory. Verify which checkout produced the binary. During builds, inspect independent code and review affected tests or snapshots. Test executables are not the CLI.
+Prioritize this pair over other Cargo jobs. Serialize jobs that share a target directory. Keep executable siblings in `${CARGO_TARGET_DIR:-target}/dev-small`; verify which checkout produced them. During builds, inspect independent code and review affected tests or snapshots. Test executables are not these binaries.
 
-When safe, hand off the binary before automated checks finish. Report its verified absolute path, build time, a manual check, and pending checks. Rebuild after runtime edits. Never present an old binary as current. Get permission before replacing installed `codex`.
+For ordinary local runtime or UI checks, run `"${CARGO_TARGET_DIR:-target}/dev-small/codex" --no-daemon` from `codex-rs`. This uses the current embedded backend without changing or stopping a shared daemon; the sibling `codex-code-mode-host` supports code mode. Test daemon or remote behavior separately when it matters: `codex agents` and `--remote` cannot use `--no-daemon`.
+
+Before handoff, verify both executables exist, CLI `--version`, and `--help` for each. A help check does not prove model requests or tools work. When safe, hand off both before automated checks finish. Report their verified absolute paths, build time, a manual check, and pending checks. Rebuild both after runtime edits. Never present old binaries as current. Get permission before replacing installed `codex`.
 
 Use optimized or cross-platform local builds only on request or to reproduce affected behavior.
 
