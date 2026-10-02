@@ -167,6 +167,10 @@ Share one main/companion pair without nesting. Starting a companion from a paral
 
 Keep parallel pairing and transcript-display boundaries in ASM client-local state scoped to the app-server target. Read existing saved-side records as parallel chats without migrating files or rewriting history. Restore an open pair on resume; closing the selection must not delete its saved conversation. Do not use analytics source classification or false fork ancestry to encode UI relationships. Stock clients see ordinary threads through unchanged app-server APIs; their UI need not implement companion switching. Shared files and explicitly global configuration changes are not isolated between chats.
 
+### Recap session ID
+
+Append `Session: <id>` as the final dimmed line of manual and automatic TUI recaps, after the optional next action. Use the displayed conversation’s session ID, not the temporary recap-generation thread ID. Keep recap generation and timing unchanged.
+
 ### Copy session ID
 
 Offer `/copyid` to copy only the currently displayed session's ID directly through the existing clipboard path, without requiring `/status`, an assistant response, or a picker. Allow it while a task is running, in side conversations, and when viewing parent-owned subagents. Report missing IDs and clipboard failures; preserve `/copy` behavior and clipboard platform support.

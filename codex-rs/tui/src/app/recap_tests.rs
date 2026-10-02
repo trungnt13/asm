@@ -656,7 +656,10 @@ fn restored_history_never_reduces_observed_completed_turns() {
 #[test]
 fn recap_history_cell_uses_hanging_indent_and_right_padding() {
     let cell =
-        ThreadRecapHistoryCell::new("Automatic recaps stay compact on wide terminals.".to_string());
+        ThreadRecapHistoryCell::new("Automatic recaps stay compact on wide terminals.".to_string())
+            .with_session_id(
+                ThreadId::from_string("019abc12-3456-7890-abcd-1234567890ab").unwrap(),
+            );
     let lines = cell.display_lines(/*width*/ 56);
     assert!(lines.iter().all(|line| {
         line.style
@@ -673,9 +676,11 @@ fn recap_history_cell_uses_hanging_indent_and_right_padding() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    insta::assert_snapshot!(rendered, @r"
-      ↳ Recap: Automatic recaps stay compact on wide
-               terminals.
+    insta::assert_snapshot!(rendered, @"
+    ↳ Recap: Automatic recaps stay compact on wide
+             terminals.
+             Session: 019abc12-3456-7890-abcd-
+             1234567890ab
     ");
 }
 
@@ -882,7 +887,8 @@ fn recap_history_cell_preserves_line_breaks_and_optional_next() {
     let cell = ThreadRecapHistoryCell::new("Finished the parser.\nTwelve tests pass.".to_string())
         .with_next_action(Some(
             "Run focused tests and check the empty-input case.".to_string(),
-        ));
+        ))
+        .with_session_id(ThreadId::from_string("019abc12-3456-7890-abcd-1234567890ab").unwrap());
     let hyperlink_lines = cell.display_hyperlink_lines(/*width*/ 48);
     for line in &hyperlink_lines {
         let source = line.source.as_ref().expect("recap source");
@@ -930,6 +936,7 @@ fn recap_history_cell_preserves_line_breaks_and_optional_next() {
     Finished the parser.
     Twelve tests pass.
     Next: Run focused tests and check the empty-input case.
+    Session: 019abc12-3456-7890-abcd-1234567890ab
     ");
 }
 
@@ -959,26 +966,35 @@ async fn app_with_visible_thread(thread_id: ThreadId) -> App {
 
 #[tokio::test]
 async fn generated_recap_is_returned_for_synchronous_insertion() {
-    let thread_id = ThreadId::new();
-    let mut app = app_with_visible_thread(thread_id).await;
-    let (request, temporary_thread_id) = track_in_flight_recap(&mut app, thread_id);
+    for trigger in [RecapTrigger::Automatic, RecapTrigger::Manual] {
+        let thread_id = ThreadId::new();
+        let mut app = app_with_visible_thread(thread_id).await;
+        let (mut request, temporary_thread_id) = track_in_flight_recap(&mut app, thread_id);
 
-    let cell = app
-        .handle_generated_recap(
-            request,
-            temporary_thread_id,
-            Ok(serde_json::json!({ "summary": "  Continue with focused tests.  ", "next_action": null }).to_string()),
-        )
-        .expect("fresh recap");
+        request.trigger = trigger;
+        app.recap.in_flight_trigger = Some(trigger);
 
-    assert_eq!(app.recap.last_recapped_turn_count, Some(3));
-    assert_eq!(
-        cell.raw_lines()
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>(),
-        vec!["Conversation recap", "Continue with focused tests."]
-    );
+        let cell = app
+            .handle_generated_recap(
+                request,
+                temporary_thread_id,
+                Ok(serde_json::json!({ "summary": "  Continue with focused tests.  ", "next_action": null }).to_string()),
+            )
+            .expect("fresh recap");
+
+        assert_eq!(app.recap.last_recapped_turn_count, Some(3));
+        assert_eq!(
+            cell.raw_lines()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec![
+                "Conversation recap".to_string(),
+                "Continue with focused tests.".to_string(),
+                format!("Session: {thread_id}"),
+            ]
+        );
+    }
 }
 
 #[tokio::test]
