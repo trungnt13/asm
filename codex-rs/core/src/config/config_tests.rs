@@ -451,7 +451,7 @@ consolidation_reasoning_effort = "high"
 
 #[tokio::test]
 async fn goal_max_token_budget_requires_positive_integer() {
-    let config_toml = toml::from_str::<ConfigToml>("subagents_model_context_windows = { \"gpt-6-astra\" = 272000 }\n[goals]\nmax_goal_token_budget = 25000\n")
+    let config_toml = toml::from_str::<ConfigToml>("subagent_model_context_windows = { \"gpt-6-astra\" = 272000 }\n[goals]\nmax_goal_token_budget = 25000\n")
         .expect("positive goal token budget should deserialize");
     let config = Config::load_from_base_config_with_overrides(
         config_toml,
@@ -462,7 +462,7 @@ async fn goal_max_token_budget_requires_positive_integer() {
     .expect("positive goal token budget should load");
     assert_eq!(config.max_goal_token_budget, Some(25_000));
     assert_eq!(
-        config.subagents_model_context_windows,
+        config.subagent_model_context_windows,
         HashMap::from([("gpt-6-astra".to_string(), 272_000)])
     );
 
@@ -473,10 +473,10 @@ async fn goal_max_token_budget_requires_positive_integer() {
     )
     .await
     .expect("omitted child context windows should load");
-    assert_eq!(config.subagents_model_context_windows, HashMap::new());
+    assert_eq!(config.subagent_model_context_windows, HashMap::new());
 
     let mut config_toml = ConfigToml::default();
-    config_toml.subagents_model_context_windows.insert(
+    config_toml.subagent_model_context_windows.insert(
         "gpt-6-astra".to_string(),
         std::num::NonZeroU64::new(u64::MAX).expect("positive overflow value"),
     );
@@ -490,7 +490,7 @@ async fn goal_max_token_budget_requires_positive_integer() {
     assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
     assert_eq!(
         error.to_string(),
-        "subagents_model_context_windows[\"gpt-6-astra\"] must not exceed 9223372036854775807 tokens"
+        "subagent_model_context_windows[\"gpt-6-astra\"] must not exceed 9223372036854775807 tokens"
     );
 
     for invalid in ["0", "-1", "1.5", "\"100\""] {
