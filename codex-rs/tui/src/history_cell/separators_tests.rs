@@ -145,7 +145,7 @@ fn completion_wraps_metadata_and_preserves_unwrapped_raw_text() {
         },
         ..RuntimeMetricsSummary::default()
     }));
-    let cell = cell
+    let mut cell = cell
         .with_token_usage(Some(TokenUsageBreakdown {
             input_tokens: 12_400,
             cached_input_tokens: 9_800,
@@ -156,7 +156,9 @@ fn completion_wraps_metadata_and_preserves_unwrapped_raw_text() {
         }))
         .with_session_id(Some(
             ThreadId::from_string("019abc12-3456-7890-abcd-1234567890ab").unwrap(),
-        ));
+        ))
+        .with_turn_id("completed-turn".to_string());
+    cell.set_agent_count(Some(3));
     let lines = cell.display_lines(/*width*/ 24);
     let rendered = lines.iter().map(ToString::to_string).collect::<Vec<_>>();
 
@@ -166,10 +168,10 @@ fn completion_wraps_metadata_and_preserves_unwrapped_raw_text() {
     Local tools: 3 calls
     (2.5s) • 12.4k in •
     9.8k cc • 820|600 ou
-    • 019abc12-3456-7890-
-    abcd-1234567890ab
+    • 3ag • 019abc12-3456-
+    7890-abcd-1234567890ab
     ");
-    insta::assert_snapshot!(cell.raw_lines()[0].to_string(), @"Worked for 2m 5s • Sep 6, 2000 at 2:32 PM • Local tools: 3 calls (2.5s) • 12.4k in • 9.8k cc • 820|600 ou • 019abc12-3456-7890-abcd-1234567890ab");
+    insta::assert_snapshot!(cell.raw_lines()[0].to_string(), @"Worked for 2m 5s • Sep 6, 2000 at 2:32 PM • Local tools: 3 calls (2.5s) • 12.4k in • 9.8k cc • 820|600 ou • 3ag • 019abc12-3456-7890-abcd-1234567890ab");
     for width in [0, 1, 5, 24] {
         assert!(
             cell.display_lines(width)
@@ -181,7 +183,7 @@ fn completion_wraps_metadata_and_preserves_unwrapped_raw_text() {
 
 #[test]
 fn completion_renders_with_dim_default_colors() {
-    let cell: Box<dyn HistoryCell> = Box::new(
+    let mut cell =
         FinalMessageSeparator::new(/*elapsed_seconds*/ None, /*runtime_metrics*/ None)
             .with_completed_at(completed_at(), ClockFormat::TwelveHour)
             .with_token_usage(Some(TokenUsageBreakdown {
@@ -194,8 +196,10 @@ fn completion_renders_with_dim_default_colors() {
             }))
             .with_session_id(Some(
                 ThreadId::from_string("019abc12-3456-7890-abcd-1234567890ab").unwrap(),
-            )),
-    );
+            ))
+            .with_turn_id("completed-turn".to_string());
+    cell.set_agent_count(Some(3));
+    let cell: Box<dyn HistoryCell> = Box::new(cell);
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 160, /*height*/ 1,
     );
