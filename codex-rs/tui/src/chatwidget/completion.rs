@@ -45,7 +45,8 @@ impl ChatWidget {
             /*runtime_metrics*/ None,
         )
         .with_token_usage(turn.token_usage.clone())
-        .with_session_id(self.thread_id);
+        .with_session_id(self.thread_id)
+        .with_turn_id(turn.id.clone());
         Some(match completed_at {
             Some(completed_at) => {
                 cell.with_completed_at(completed_at, crate::clock_format::ClockFormat::system())
