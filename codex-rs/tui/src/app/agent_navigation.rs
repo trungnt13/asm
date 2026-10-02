@@ -62,7 +62,7 @@ pub(crate) struct AgentPickerModelSettings {
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) struct AgentPickerModelSettings {
     pub(crate) model: String,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
