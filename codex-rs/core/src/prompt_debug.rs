@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use codex_api::ResponsesApiRequest;
 use codex_exec_server::EnvironmentManager;
 use codex_exec_server::ExecServerRuntimeOptions;
 use codex_extension_api::ExtensionRegistry;
@@ -7,14 +8,20 @@ use codex_extension_api::UserInstructionsProvider;
 use codex_login::AuthManager;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::user_input::UserInput;
+use serde::Serialize;
+use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::client_common::Prompt;
 use crate::config::Config;
 use crate::resolve_installation_id;
+use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::session::session::Session;
+use crate::session::step_context::StepContext;
 use crate::session::turn::build_prompt;
 use crate::state_db_bridge::StateDbHandle;
 use crate::thread_manager::StartThreadOptions;
@@ -23,6 +30,7 @@ use crate::thread_manager::thread_store_from_config;
 
 /// Build the model-visible `input` list for a single debug turn.
 #[doc(hidden)]
+#[tracing::instrument(skip_all)]
 pub async fn build_prompt_input(
     mut config: Config,
     input: Vec<UserInput>,
@@ -73,7 +81,9 @@ pub async fn build_prompt_input(
         .start_thread(StartThreadOptions::new(config))
         .await?;
 
-    let output = build_prompt_input_from_session(&thread.thread.session, input).await;
+    let output = prepare_debug_prompt(&thread.thread.session, input)
+        .await
+        .map(|(prompt, _)| prompt.input);
     let shutdown = thread.thread.shutdown_and_wait().await;
     let _removed = thread_manager.remove_thread(&thread.thread_id).await;
 
@@ -81,10 +91,60 @@ pub async fn build_prompt_input(
     output
 }
 
-pub(crate) async fn build_prompt_input_from_session(
+/// Captures a standalone request before transport-specific finalization.
+#[derive(Serialize)]
+pub struct PromptRequestAudit {
+    schema_version: u32,
+    scope: &'static str,
+    limitations: [&'static str; 4],
+    base_instructions: BaseInstructions,
+    request: ResponsesApiRequest,
+}
+
+/// Captures a fresh thread without entering the inference loop.
+/// The caller owns thread startup and shutdown.
+#[doc(hidden)]
+#[tracing::instrument(skip_all)]
+pub async fn build_prompt_request_from_thread(
+    thread: &crate::CodexThread,
+    input: Vec<UserInput>,
+    output_schema: Option<Value>,
+) -> CodexResult<PromptRequestAudit> {
+    let sess = &thread.session;
+    let (mut prompt, step_context) = prepare_debug_prompt(sess, input).await?;
+    prompt.base_instructions = sess.get_prompt_base_instructions().await;
+    prompt.output_schema = output_schema;
+    let metadata = sess
+        .responses_metadata(step_context.as_ref(), CodexResponsesRequestKind::Turn)
+        .await;
+    let request = sess.services.model_client.build_responses_request(
+        &prompt,
+        &step_context.settings.model_info,
+        step_context.settings.reasoning_effort().cloned(),
+        step_context.settings.reasoning_summary,
+        step_context.settings.service_tier.clone(),
+        &metadata,
+        /*include_internal*/ false,
+    )?;
+    Ok(PromptRequestAudit {
+        schema_version: 1,
+        scope: "standalone_debug_turn",
+        limitations: [
+            "Fresh standalone turn; no resumed conversation history or inference request.",
+            "Turn hooks, queued-input dispatch and user-input-triggered skill/plugin injections are not run.",
+            "Tools reflect captured startup capabilities and selected persistence, not every configured or deferred tool.",
+            "Authentication-dependent request metadata, transport finalization and server-side additions are excluded.",
+        ],
+        base_instructions: prompt.base_instructions,
+        request,
+    })
+}
+
+#[tracing::instrument(skip_all)]
+async fn prepare_debug_prompt(
     sess: &Arc<Session>,
     input: Vec<UserInput>,
-) -> CodexResult<Vec<ResponseItem>> {
+) -> CodexResult<(Prompt, Arc<StepContext>)> {
     let turn_context = sess.new_default_turn().await;
     // Prompt debugging builds a standalone request without entering run_turn.
     let step_context = sess
@@ -110,5 +170,5 @@ pub(crate) async fn build_prompt_input_from_session(
     let base_instructions = sess.get_base_instructions().await;
     let prompt = build_prompt(prompt_input, step_context.as_ref(), base_instructions);
 
-    Ok(prompt.input)
+    Ok((prompt, step_context))
 }
