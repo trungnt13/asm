@@ -7,6 +7,16 @@ use chrono::TimeZone;
 use pretty_assertions::assert_eq;
 
 const COMPLETED_AT: i64 = 1_700_000_000;
+const SESSION_ID: &str = "019abc12-3456-7890-abcd-1234567890ab";
+const TURN_USAGE: codex_app_server_protocol::TokenUsageBreakdown =
+    codex_app_server_protocol::TokenUsageBreakdown {
+        input_tokens: 12_400,
+        cached_input_tokens: 9_800,
+        cache_write_input_tokens: 0,
+        output_tokens: 820,
+        reasoning_output_tokens: 600,
+        total_tokens: 13_220,
+    };
 
 fn completed_turn(duration_ms: Option<i64>, completed_at: Option<i64>) -> AppServerTurn {
     AppServerTurn {
@@ -75,7 +85,10 @@ async fn completion_follows_plain_and_streamed_tool_answers() {
             handle_agent_message_delta(&mut chat, "The change is ready.\n");
             chat.run_commit_tick();
         }
-        complete_turn(&mut chat, completed_turn(Some(125_000), Some(COMPLETED_AT)));
+        chat.thread_id = Some(ThreadId::from_string(SESSION_ID).unwrap());
+        let mut turn = completed_turn(Some(125_000), Some(COMPLETED_AT));
+        turn.token_usage = Some(TURN_USAGE);
+        complete_turn(&mut chat, turn);
 
         let text = drain_insert_history_normalized(&mut rx)
             .iter()
@@ -104,6 +117,7 @@ async fn completion_live_shows_known_durations_and_preserves_timestamp_fallback(
         (1_000, None, "Worked for 1s • "),
     ] {
         let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.thread_id = Some(ThreadId::from_string(SESSION_ID).unwrap());
         handle_turn_started(&mut chat, "turn-1");
         let turn = completed_turn(Some(duration_ms), completed_at);
         let before = Local::now();
@@ -115,7 +129,7 @@ async fn completion_live_shows_known_durations_and_preserves_timestamp_fallback(
             } else {
                 time.format(ClockFormat::system().time_format()).to_string()
             };
-            format!("{prefix}{time}")
+            format!("{prefix}{time} • {SESSION_ID}")
         });
         let label = completion_labels(&mut rx);
         assert!(possible.contains(&label), "{label:?}");
@@ -159,7 +173,7 @@ async fn completion_replay_preserves_metadata_and_input_without_live_side_effect
         ] {
             let (mut chat, mut rx, mut op_rx) =
                 make_chatwidget_manual(/*model_override*/ None).await;
-            chat.thread_id = Some(ThreadId::new());
+            chat.thread_id = Some(ThreadId::from_string(SESSION_ID).unwrap());
             handle_turn_started(&mut chat, "turn-1");
             if matches!(replay_kind, ReplayKind::ThreadSnapshot) {
                 chat.queue_user_message("Continue".into());
@@ -167,8 +181,16 @@ async fn completion_replay_preserves_metadata_and_input_without_live_side_effect
             let queued_input = chat.input_queue.queued_user_messages.clone();
             while op_rx.try_recv().is_ok() {}
             let mut turn = completed_turn(duration_ms, completed_at);
+            let mut expected_label = expected.clone();
+            if duration_ms == Some(125_000) {
+                turn.token_usage = Some(TURN_USAGE);
+                expected_label.push_str(" • 12.4k in • 9.8k cc • 820|600 ou");
+            }
+            if !expected_label.is_empty() {
+                expected_label.push_str(&format!(" • {SESSION_ID}"));
+            }
             chat.replay_thread_turns(vec![turn.clone()], replay_kind);
-            assert_eq!(completion_labels(&mut rx), expected);
+            assert_eq!(completion_labels(&mut rx), expected_label);
             assert_matches!(chat.pending_notification, None);
             assert_eq!(chat.input_queue.queued_user_messages, queued_input);
             assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
@@ -179,7 +201,11 @@ async fn completion_replay_preserves_metadata_and_input_without_live_side_effect
             complete_turn(&mut chat, turn.clone());
             assert_eq!(
                 completion_labels(&mut rx),
-                if expected.is_empty() { &done } else { "" }
+                if expected.is_empty() {
+                    format!("{done} • {SESSION_ID}")
+                } else {
+                    String::new()
+                }
             );
             complete_turn(&mut chat, turn);
             assert_eq!(completion_labels(&mut rx), "");
