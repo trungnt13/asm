@@ -1,15 +1,16 @@
 ---
 source: tui/src/app/recap_tests.rs
-assertion_line: 875
 expression: "format!(\"{buffer:?}\")"
 ---
 Buffer {
-    area: Rect { x: 0, y: 0, width: 48, height: 4 },
+    area: Rect { x: 0, y: 0, width: 48, height: 6 },
     content: [
         "  ↳ Recap: Finished the parser.                 ",
         "           Twelve tests pass.                   ",
         "           Next: Run focused tests and check    ",
         "           the empty-input case.                ",
+        "           Session: 019abc12-3456-7890-abcd-    ",
+        "           1234567890ab                         ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | ITALIC,
@@ -24,5 +25,9 @@ Buffer {
         x: 44, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | ITALIC,
         x: 32, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | ITALIC,
+        x: 44, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | ITALIC,
+        x: 23, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
