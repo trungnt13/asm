@@ -340,7 +340,6 @@ select_release_assets() {
     return 1
   fi
   asset="$package_asset"
-  install_layout="fork"
   download_url="$(release_url_for_asset "$asset" "$resolved_version")"
   checksum_url="$(release_url_for_asset "$checksum_asset" "$resolved_version")"
 }
@@ -607,7 +606,7 @@ cleanup_stale_install_artifacts() {
   find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -name '.staging.*' -exec rm -rf {} +
   find "$STANDALONE_ROOT" -mindepth 1 -maxdepth 1 -name '.current.*' -exec rm -f {} +
 
-  if [ "$DAEMON_ONLY" != "1" ] && [ -d "$BIN_DIR" ]; then
+  if [ -d "$BIN_DIR" ]; then
     find "$BIN_DIR" -mindepth 1 -maxdepth 1 -name '.codex.*' -exec rm -f {} +
   fi
 }
@@ -831,14 +830,12 @@ release_dir_is_complete() {
   release_dir="$1"
   expected_version="$2"
   expected_target="$3"
-  layout="$4"
 
   [ -d "$release_dir" ] &&
     [ "$(basename "$release_dir")" = "$expected_version-$expected_target" ] ||
     return 1
 
-  [ "$layout" = "fork" ] &&
-    [ -f "$release_dir/bin/codex" ] && [ -x "$release_dir/bin/codex" ] &&
+  [ -f "$release_dir/bin/codex" ] && [ -x "$release_dir/bin/codex" ] &&
     [ ! -L "$release_dir/bin/codex" ] &&
     [ -f "$release_dir/bin/codex-code-mode-host" ] &&
     [ -x "$release_dir/bin/codex-code-mode-host" ] &&
@@ -855,23 +852,11 @@ update_current_link() {
   replace_path_with_symlink "$CURRENT_LINK" "$release_dir" "$tmp_link"
 }
 
-release_codex_relative_path() {
-  release_dir="$1"
-
-  if [ -x "$release_dir/bin/codex" ]; then
-    printf 'bin/codex\n'
-  else
-    printf 'codex\n'
-  fi
-}
-
 update_visible_command() {
-  release_dir="$1"
   mkdir -p "$BIN_DIR"
   tmp_link="$BIN_DIR/.codex.$$"
-  codex_relative_path="$(release_codex_relative_path "$release_dir")"
 
-  replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/$codex_relative_path" "$tmp_link"
+  replace_path_with_symlink "$BIN_PATH" "$CURRENT_LINK/bin/codex" "$tmp_link"
 
   replace_path_with_symlink \
     "$CODE_MODE_HOST_BIN_PATH" \
@@ -902,7 +887,7 @@ case "$(uname -s)" in
     os="linux"
     ;;
   *)
-    echo "install.sh supports macOS and Linux. Use install.ps1 on Windows." >&2
+    echo "ASM installer supports macOS Apple Silicon and Linux x86_64 only." >&2
     exit 1
     ;;
 esac
@@ -944,9 +929,7 @@ fi
 step "Detected platform: $platform_label"
 step "Resolved version: $resolved_version"
 
-if [ "$DAEMON_ONLY" != "1" ]; then
-  detect_conflicting_install
-fi
+detect_conflicting_install
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
@@ -962,12 +945,8 @@ trap 'exit 143' TERM
 acquire_install_lock
 cleanup_stale_install_artifacts
 
-if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target" "$install_layout"; then
+if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"; then
   if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
-    if [ "$DAEMON_ONLY" = "1" ]; then
-      echo "Refusing to overwrite existing daemon release $release_dir." >&2
-      exit 1
-    fi
     warn "Found incomplete existing release at $release_dir; reinstalling."
   fi
 
@@ -990,13 +969,13 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   step "Installing ASM package to $release_dir"
   install_fork_release "$release_dir" "$archive_path"
 fi
-if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target" "$install_layout"; then
+if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"; then
   echo "Installed Codex command did not report expected version $resolved_version." >&2
   exit 1
 fi
 update_current_link "$release_dir"
 # Do not create auto-update-version: inherited runtime updaters target OpenAI.
-update_visible_command "$release_dir"
+update_visible_command
 add_to_path
 verify_visible_command
 release_install_lock

@@ -31,7 +31,6 @@ impl SideConversation {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct SideConversationStore {
     directory: PathBuf,
 }
