@@ -6,7 +6,7 @@ use codex_config::types::AltScreenMode;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption() {
+async fn list_spacing_stays_compact_on_completion_or_interruption() {
     let source = "1. One\n2. This item has enough words to wrap\n3. Three\n4. Four";
     let mut stages = Vec::new();
     for (enabled, alternate_screen) in [
@@ -119,17 +119,15 @@ async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption
                 };
                 let narrow = render(width);
                 let native = completed.display_hyperlink_lines(width);
-                if owned {
-                    assert_ne!(native, narrow);
-                }
+                assert_eq!(native, narrow);
                 let wide = render(/*width*/ 100);
                 assert_eq!(
                     render(width),
                     narrow,
-                    "width and spacing must both key the render cache"
+                    "rendering at a new width must preserve the narrow output"
                 );
                 let live = text(live);
-                assert_eq!(live.contains("wrap\n\n"), !owned);
+                assert!(!live.contains("wrap\n\n"));
                 let stage = format!(
                     "owned={owned}, plan={plan}\nStreaming:\n{live}\nCompleted:\n{}\nWide:\n{}",
                     text(crate::terminal_hyperlinks::visible_lines(narrow)),
