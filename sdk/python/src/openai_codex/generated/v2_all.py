@@ -11811,6 +11811,13 @@ class Turn(BaseModel):
         Field(alias="startedAt", description="Unix timestamp (in seconds) when the turn started."),
     ] = None
     status: TurnStatus
+    token_usage: Annotated[
+        TokenUsageBreakdown | None,
+        Field(
+            alias="tokenUsage",
+            description="Provider-reported token totals for this turn, including compaction, when available.",
+        ),
+    ] = None
 
 
 class TurnCompletedNotification(BaseModel):

@@ -22,6 +22,7 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
             })
             .collect(),
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status,
         error: None,
         started_at: None,

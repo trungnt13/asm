@@ -48,6 +48,7 @@ fn turn(status: TurnStatus) -> Turn {
         root_turn_id: None,
         items: Vec::new(),
         items_view: Default::default(),
+        token_usage: None,
         status,
         error: None,
         started_at: None,

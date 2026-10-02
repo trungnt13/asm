@@ -1036,6 +1036,7 @@ mod tests {
             &ServerNotification::TurnCompleted(TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
+                    token_usage: None,
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items: Vec::new(),

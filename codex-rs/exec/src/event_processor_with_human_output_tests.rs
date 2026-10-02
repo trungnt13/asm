@@ -423,6 +423,7 @@ fn turn_completed_recovers_final_message_from_turn_items() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -475,6 +476,7 @@ fn turn_completed_overwrites_stale_final_message_from_turn_items() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -528,6 +530,7 @@ fn turn_completed_preserves_streamed_final_message_when_turn_items_are_empty() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -574,6 +577,7 @@ fn turn_failed_clears_stale_final_message() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -621,6 +625,7 @@ fn turn_interrupted_clears_stale_final_message() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,

@@ -86,6 +86,7 @@ fn transcript_export_excludes_hidden_review_prompts_and_nested_duplicates() {
         root_turn_id: None,
         items,
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status,
         error: None,
         started_at: None,
