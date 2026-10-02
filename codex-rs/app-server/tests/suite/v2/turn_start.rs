@@ -1267,6 +1267,7 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
         anyhow::bail!("expected rawResponse/completed notification");
     };
 
+    let expected_usage = notification.usage.clone();
     assert_eq!(
         notification,
         RawResponseCompletedNotification {
@@ -1284,6 +1285,13 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
             }),
         }
     );
+
+    let completed: codex_app_server_protocol::TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    assert_eq!(completed.turn.token_usage, expected_usage);
 
     response_mock.single_request();
     Ok(())
