@@ -2052,6 +2052,103 @@ async fn collab_receiver_notification_caches_thread_without_app_server_read() {
             is_closed: false,
         })
     );
+
+    let parent = ThreadId::new();
+    let children: [ThreadId; 2] = std::array::from_fn(|_| ThreadId::new());
+    let started = turn_started_notification(parent, "v2-turn");
+    app.track_turn_agents(&started);
+    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(started)));
+    for kind in [
+        codex_app_server_protocol::SubAgentActivityKind::Started,
+        codex_app_server_protocol::SubAgentActivityKind::Started,
+        codex_app_server_protocol::SubAgentActivityKind::Completed,
+    ] {
+        for (index, child) in children.iter().enumerate() {
+            let item = ThreadItem::SubAgentActivity {
+                id: format!("activity-{kind:?}-{index}"),
+                kind,
+                agent_thread_id: child.to_string(),
+                agent_path: format!("/root/hello_{index}"),
+            };
+            for notification in [
+                ServerNotification::ItemStarted(ItemStartedNotification {
+                    thread_id: parent.to_string(),
+                    turn_id: "v2-turn".into(),
+                    started_at_ms: 0,
+                    item: item.clone(),
+                }),
+                ServerNotification::ItemCompleted(
+                    codex_app_server_protocol::ItemCompletedNotification {
+                        thread_id: parent.to_string(),
+                        turn_id: "v2-turn".into(),
+                        completed_at_ms: 0,
+                        item,
+                    },
+                ),
+            ] {
+                app.track_turn_agents(&notification);
+                app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
+                    notification,
+                )));
+            }
+        }
+    }
+    let completed = turn_completed_notification(parent, "v2-turn", TurnStatus::Completed);
+    app.track_turn_agents(&completed);
+    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(completed)));
+    assert_eq!(app.turn_agent_counts.count(parent, "v2-turn"), Some(2));
+    let mut tui = crate::tui::test_support::make_test_tui().expect("test terminal");
+    app.insert_history_cell(
+        &mut tui,
+        Box::new(
+            crate::history_cell::FinalMessageSeparator::new(
+                /*elapsed_seconds*/ Some(1),
+                /*runtime_metrics*/ None,
+            )
+            .with_session_id(Some(parent))
+            .with_turn_id("v2-turn".into()),
+        ),
+    );
+    let footer = app
+        .transcript_cells
+        .last()
+        .expect("inserted footer")
+        .raw_lines()
+        .last()
+        .expect("footer text")
+        .to_string();
+    assert!(
+        footer.ends_with(&format!(" • 2ag • {parent}")),
+        "footer: {footer}"
+    );
+
+    // A spawned child can remain running when another parent turn begins.
+    for turn_id in ["running-child-turn", "next-parent-turn"] {
+        app.track_turn_agents(&turn_started_notification(parent, turn_id));
+        // Interacted also represents idle send_message and must not imply running.
+        app.track_turn_agents(&ServerNotification::ItemCompleted(
+            codex_app_server_protocol::ItemCompletedNotification {
+                thread_id: parent.to_string(),
+                turn_id: turn_id.into(),
+                completed_at_ms: 0,
+                item: ThreadItem::SubAgentActivity {
+                    id: "idle-message".into(),
+                    kind: codex_app_server_protocol::SubAgentActivityKind::Interacted,
+                    agent_thread_id: children[1].to_string(),
+                    agent_path: "/root/hello_1".into(),
+                },
+            },
+        ));
+        if turn_id == "running-child-turn" {
+            app.track_turn_agents(&turn_started_notification(children[0], "child-followup"));
+        }
+        app.track_turn_agents(&turn_completed_notification(
+            parent,
+            turn_id,
+            TurnStatus::Completed,
+        ));
+        assert_eq!(app.turn_agent_counts.count(parent, turn_id), Some(1));
+    }
 }
 
 #[tokio::test]
