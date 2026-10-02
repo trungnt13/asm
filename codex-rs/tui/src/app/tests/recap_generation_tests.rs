@@ -184,9 +184,10 @@ stream_max_retries = 0
             .map(ToString::to_string)
             .collect::<Vec<_>>(),
         vec![
-            "Conversation recap",
-            "Finished parsing.",
-            "Next: Run focused tests.",
+            "Conversation recap".to_string(),
+            "Finished parsing.".to_string(),
+            "Next: Run focused tests.".to_string(),
+            format!("Session: {thread_id}"),
         ]
     );
 
