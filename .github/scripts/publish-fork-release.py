@@ -101,7 +101,7 @@ def verify_asset(path, asset):
 
 def verify_files(directory, installer):
     digests = {}
-    for name in ASSET_NAMES:
+    for name in (name for name in ASSET_NAMES if name != "SHA256SUMS"):
         with (directory / name).open("rb") as stream:
             digests[name] = hashlib.file_digest(stream, "sha256").hexdigest()
     checksums = {}
@@ -110,9 +110,7 @@ def verify_files(directory, installer):
         if not match or match.group(2) in checksums:
             raise ValueError("invalid or duplicate SHA256SUMS entry")
         checksums[match.group(2)] = match.group(1)
-    if checksums != {
-        name: digests[name] for name in ASSET_NAMES if name != "SHA256SUMS"
-    }:
+    if checksums != digests:
         raise ValueError("SHA256SUMS does not match the exact three payloads")
     if (directory / "install.sh").read_bytes() != installer:
         raise ValueError("installer differs from the candidate commit")
