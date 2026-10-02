@@ -1,11 +1,11 @@
 ---
 source: tui/src/app/tests/pagination_completion_tests.rs
-expression: "afternoon_clock.replace_all(&snapshots.join(\"\\n\\n--- next overlapping page ---\\n\\n\"),\n\"at 2:$1 PM\",)"
+expression: "afternoon_clock.replace_all(&snapshots.join(\"\\n\\n--- next overlapping page ---\\n\\n\").replace(&thread_id.to_string(),\n\"[session id]\"), \"at 2:$1 PM\",)"
 ---
 Earlier messages are available — press ⌃t to view the full transcript
 • Middle answer
 
-  Worked for 2m 5s • Sep 6, 2000 at 2:33 PM
+  Worked for 2m 5s • Sep 6, 2000 at 2:33 PM • [session id]
 
 --- next overlapping page ---
 
@@ -15,7 +15,7 @@ Earlier messages are available — press ⌃t to view the full transcript
 
 • Oldest answer
 
-  Worked for 2m 5s • Sep 6, 2000 at 2:32 PM
+  Worked for 2m 5s • Sep 6, 2000 at 2:32 PM • [session id]
 
 
 › Middle prompt
@@ -23,4 +23,4 @@ Earlier messages are available — press ⌃t to view the full transcript
 
 • Middle answer
 
-  Worked for 2m 5s • Sep 6, 2000 at 2:33 PM
+  Worked for 2m 5s • Sep 6, 2000 at 2:33 PM • [session id]

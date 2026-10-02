@@ -7,6 +7,7 @@ fn turn(id: &str, status: TurnStatus) -> Turn {
         root_turn_id: None,
         items: Vec::new(),
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status,
         error: None,
         started_at: None,
