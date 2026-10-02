@@ -238,10 +238,11 @@ impl App {
                 ));
             }
             if let Some(turn) = completed_turn
-                && let Some(completion) = self
+                && let Some(mut completion) = self
                     .chat_widget
                     .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
             {
+                completion.set_agent_count(self.turn_agent_counts.count(thread_id, &turn.id));
                 cells.push(Arc::new(completion));
             }
         }
