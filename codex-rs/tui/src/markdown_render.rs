@@ -88,7 +88,6 @@ mod web_links;
 use inline_directives::InlineDirectives;
 pub(crate) use inline_directives::followup_labels;
 pub(crate) use list_spacing::ListSpacing;
-use list_spacing::UniformList;
 use local_links::is_local_path_like_link;
 use local_links::render_local_link_target;
 use local_links::should_render_local_link_label;
@@ -455,7 +454,6 @@ struct Writer<'a, 'policy> {
     list_needs_blank_before_next_item: Vec<bool>,
     list_item_start_line_counts: Vec<usize>,
     list_spacing: ListSpacing,
-    uniform_lists: Vec<UniformList>,
     link: Option<LinkState>,
     needs_newline: bool,
     pending_marker_line: bool,
@@ -500,7 +498,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             list_needs_blank_before_next_item: Vec::new(),
             list_item_start_line_counts: Vec::new(),
             list_spacing: ListSpacing::default(),
-            uniform_lists: Vec::new(),
             link: None,
             needs_newline: false,
             pending_marker_line: false,
@@ -731,12 +728,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                 }
                 self.flush_current_line();
                 let start_line_count = self.list_item_start_line_counts.pop().unwrap_or_default();
-                if let Some(list) = self.uniform_lists.last_mut() {
-                    let rows = &self.text[start_line_count..];
-                    list.multiline |= rows.len() > 1
-                        || (rows.len() == 1
-                            && self.wrap_width.is_some_and(|width| rows[0].width() > width));
-                }
                 if self.text.len().saturating_sub(start_line_count) > 1
                     && let Some(needs_blank) = self.list_needs_blank_before_next_item.last_mut()
                 {
@@ -991,16 +982,10 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         self.flush_current_line();
         self.list_indices.push(index);
         self.list_needs_blank_before_next_item.push(false);
-        if self.list_spacing == ListSpacing::Uniform {
-            self.uniform_lists.push(UniformList::default());
-        }
     }
 
     fn end_list(&mut self) {
         self.flush_current_line();
-        if let Some(list) = self.uniform_lists.pop() {
-            list.finish(&mut self.text);
-        }
         self.list_indices.pop();
         self.list_needs_blank_before_next_item.pop();
         self.needs_newline = true;
@@ -1016,7 +1001,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         let separate = match self.list_spacing {
             ListSpacing::AfterMultiline => after_multiline,
             ListSpacing::Compact => false,
-            ListSpacing::Uniform => self.uniform_lists.last().is_some_and(|list| list.has_item),
         };
         if separate {
             let index = self.text.len();
@@ -1030,14 +1014,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                 source.copy = Some(std::sync::Arc::new(copy));
                 line.source = Some(source);
             }
-            if self.text.len() > index
-                && let Some(list) = self.uniform_lists.last_mut()
-            {
-                list.separators.push(index);
-            }
-        }
-        if let Some(list) = self.uniform_lists.last_mut() {
-            list.has_item = true;
         }
         self.list_item_start_line_counts.push(self.text.len());
         self.pending_marker_line = true;
