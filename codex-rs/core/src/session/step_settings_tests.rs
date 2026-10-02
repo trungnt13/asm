@@ -484,4 +484,80 @@ async fn model_resolution_preserves_startup_overrides_and_instruction_provenance
             },
         );
     }
+
+    let child_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        parent_thread_id: codex_protocol::ThreadId::new(),
+        depth: 1,
+        agent_path: Some("/root/worker".parse().unwrap()),
+        agent_nickname: None,
+        agent_role: None,
+    });
+    let mut settings = configured_settings();
+    settings.collaboration_mode = settings.collaboration_mode.with_updates(
+        Some("model-b".to_string()),
+        /*effort*/ None,
+        /*developer_instructions*/ None,
+    );
+    settings.personality = config.personality;
+    let baseline = settings
+        .resolve_model_info(&models_manager, &overrides)
+        .await;
+    for (source, version, mapped_window, scalar_window, expected_window) in [
+        (
+            SessionSource::Cli,
+            MultiAgentVersion::V2,
+            Some(32_000),
+            Some(160_000),
+            100_000,
+        ),
+        (
+            child_source.clone(),
+            MultiAgentVersion::V1,
+            Some(32_000),
+            Some(160_000),
+            100_000,
+        ),
+        (
+            SessionSource::SubAgent(SubAgentSource::Review),
+            MultiAgentVersion::V2,
+            Some(32_000),
+            Some(160_000),
+            100_000,
+        ),
+        (
+            child_source.clone(),
+            MultiAgentVersion::V2,
+            Some(32_000),
+            Some(160_000),
+            32_000,
+        ),
+        (
+            child_source.clone(),
+            MultiAgentVersion::V2,
+            Some(200_000),
+            Some(160_000),
+            100_000,
+        ),
+        (
+            child_source.clone(),
+            MultiAgentVersion::V2,
+            None,
+            Some(160_000),
+            100_000,
+        ),
+        (child_source, MultiAgentVersion::V2, None, None, 90_000),
+    ] {
+        config.model_context_window = scalar_window;
+        config.subagents_model_context_windows = mapped_window
+            .map(|window| HashMap::from([("model-b".to_string(), window)]))
+            .unwrap_or_default();
+        let overrides = ModelInfoOverrides::for_session(&config, &source, Some(version));
+        let resolved = settings
+            .resolve_model_info(&models_manager, &overrides)
+            .await;
+        let mut expected = baseline.clone();
+        expected.context_window = Some(expected_window);
+        assert_eq!(resolved, expected);
+        assert_eq!(config.model_context_window, scalar_window);
+    }
 }

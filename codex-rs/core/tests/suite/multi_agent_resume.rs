@@ -24,6 +24,7 @@ use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio::time::sleep;
@@ -206,7 +207,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
                 NESTED_CALL_ID,
                 COLLABORATION_NAMESPACE,
                 "spawn_agent",
-                r#"{"message":"inspect the nested repository","task_name":"grandchild","fork_turns":"none"}"#,
+                r#"{"message":"inspect the nested repository","task_name":"grandchild","fork_turns":"none","model":"gpt-6-astra"}"#,
             ),
             ev_completed("resp-worker-1"),
         ]),
@@ -269,6 +270,12 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     let initial_model_provider_base_url = format!("{}/v1", server.uri());
     let mut initial_builder = test_codex().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &initial_model_provider_base_url);
+        config.model_context_window = Some(240_000);
+        config.subagents_model_context_windows = HashMap::from([
+            (config.model.clone().expect("root model"), 120_000),
+            (ROLE_MODEL.to_string(), 160_000),
+            ("gpt-6.1-sol".to_string(), 2_000_000),
+        ]);
     });
     let initial = initial_builder.build_with_auto_env(&server).await?;
     let root_thread_id = initial.session_configured.thread_id;
@@ -317,6 +324,24 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    assert_eq!(
+        initial
+            .codex
+            .token_usage_info()
+            .await
+            .expect("root usage")
+            .model_context_window,
+        Some(228_000),
+        "matching subagent rules must not affect the root",
+    );
+    assert_eq!(
+        worker_thread
+            .token_usage_info()
+            .await
+            .expect("worker usage")
+            .model_context_window,
+        Some(152_000),
+    );
     assert!(initial_child_request.requests().iter().any(|request| {
         request.body_contains_text(INITIAL_TASK)
             && request.body_contains_text(ROLE_DEVELOPER_INSTRUCTIONS)
@@ -377,6 +402,23 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
 
     let grandchild = nested_mock.last_request().expect("grandchild").body_json();
     let nested_id = &grandchild["client_metadata"]["thread_id"];
+    let nested_thread_id =
+        codex_protocol::ThreadId::from_string(nested_id.as_str().expect("grandchild thread ID"))?;
+    let nested_thread = initial.thread_manager.get_thread(nested_thread_id).await?;
+    wait_for_event(nested_thread.as_ref(), |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert_eq!(
+        nested_thread
+            .token_usage_info()
+            .await
+            .expect("grandchild usage")
+            .model_context_window,
+        Some(228_000),
+        "an unmatched grandchild must retain the scalar fallback, not its parent's rule",
+    );
+    drop(nested_thread);
     let sibling_thread_id = initial
         .thread_manager
         .list_thread_ids()
@@ -448,6 +490,12 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     let resumed_model_provider_base_url = format!("{}/v1", server.uri());
     let mut resume_builder = test_codex().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &resumed_model_provider_base_url);
+        config.model_context_window = Some(240_000);
+        config.subagents_model_context_windows = HashMap::from([
+            (config.model.clone().expect("root model"), 120_000),
+            (ROLE_MODEL.to_string(), 200_000),
+            ("gpt-6.1-sol".to_string(), 2_000_000),
+        ]);
     });
     let resumed = resume_builder.restart(&server, &initial).await?;
     drop(initial);
@@ -537,6 +585,15 @@ openai_base_url = "{redirected_base_url}"
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    assert_eq!(
+        reloaded_worker
+            .token_usage_info()
+            .await
+            .expect("reloaded worker usage")
+            .model_context_window,
+        Some(190_000),
+        "cold reload must resolve the saved child model against the current rules",
+    );
     assert!(followup_child_request.requests().iter().any(|request| {
         request.body_contains_text(FOLLOWUP_TASK)
             && request.body_contains_text(ROLE_DEVELOPER_INSTRUCTIONS)
@@ -655,6 +712,50 @@ openai_base_url = "{redirected_base_url}"
         reloaded_worker_config.permission_profile,
     );
     assert_eq!(reloaded_worker_role_config, initial_worker_role_config);
+
+    for (model, expected_window) in [
+        ("gpt-6-astra", 228_000),
+        (ROLE_MODEL, 190_000),
+        ("gpt-6.1-sol", 828_400),
+    ] {
+        let switched_request = mount_sse_once_match(
+            &server,
+            move |request: &wiremock::Request| {
+                request_has_model(request, model) && body_contains(request, "switch worker model")
+            },
+            sse(vec![ev_completed("resp-switched-worker")]),
+        )
+        .await;
+        reloaded_worker
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "switch worker model".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    model: Some(model.to_string()),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(reloaded_worker.as_ref(), |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert_eq!(
+            switched_request.single_request().body_json()["model"],
+            model
+        );
+        assert_eq!(
+            reloaded_worker
+                .token_usage_info()
+                .await
+                .expect("switched worker usage")
+                .model_context_window,
+            Some(expected_window),
+            "model switches must resolve matching rules, scalar fallback, and catalog maximum",
+        );
+    }
 
     reloaded_worker.shutdown_and_wait().await?;
     assert!(
