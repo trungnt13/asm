@@ -397,7 +397,11 @@ impl App {
                 };
 
                 self.recap.mark_recapped(completed_turn_count);
-                Some(ThreadRecapHistoryCell::new(recap.summary).with_next_action(recap.next_action))
+                Some(
+                    ThreadRecapHistoryCell::new(recap.summary)
+                        .with_next_action(recap.next_action)
+                        .with_session_id(thread_id),
+                )
             }
             Err(error) => {
                 tracing::warn!(%thread_id, %error, "failed to generate thread recap");
