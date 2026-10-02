@@ -25,6 +25,7 @@ fn turn(id: &str, items: Vec<ThreadItem>) -> Turn {
         id: id.to_string(),
         items,
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,

@@ -128,6 +128,7 @@ fn finish_turn(
                 id: turn_id.to_string(),
                 items,
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status,
                 error: None,
                 started_at: None,

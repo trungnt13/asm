@@ -163,6 +163,7 @@ fn start_safety_buffering_test_turn(
             turn: AppServerTurn {
                 id: turn_id.to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -875,6 +876,7 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -922,6 +924,7 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Summary,
+                token_usage: None,
                 items: vec![item],
                 status: AppServerTurnStatus::Completed,
                 error: None,
@@ -959,6 +962,7 @@ async fn live_app_server_turn_started_sets_feedback_turn_id() {
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1539,6 +1543,7 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1574,6 +1579,7 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::Failed,
                 error: Some(AppServerTurnError {
@@ -1706,6 +1712,7 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1783,6 +1790,7 @@ async fn live_app_server_server_overloaded_error_renders_error() {
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1826,6 +1834,7 @@ async fn live_app_server_cyber_policy_error_renders_dedicated_notice() {
             turn: AppServerTurn {
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,

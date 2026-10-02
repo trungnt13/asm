@@ -2344,6 +2344,7 @@ async fn resume_picker_round_trip_preserves_each_threads_input() -> Result<()> {
                         turn: codex_app_server_protocol::Turn {
                             id: "turn-with-follow-up".to_string(),
                             items_view: codex_app_server_protocol::TurnItemsView::Full,
+                            token_usage: None,
                             items: Vec::new(),
                             status: codex_app_server_protocol::TurnStatus::InProgress,
                             error: None,

@@ -599,6 +599,7 @@ async fn owned_details_escape_interrupts_work_without_starting_backtrack() -> Re
             turn: codex_app_server_protocol::Turn {
                 id: "active-turn".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: codex_app_server_protocol::TurnStatus::InProgress,
                 error: None,

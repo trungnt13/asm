@@ -676,6 +676,7 @@ mod tests {
             turn: Turn {
                 id: turn_id.to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: TurnStatus::Completed,
                 error: None,
