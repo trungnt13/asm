@@ -271,7 +271,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     let mut initial_builder = test_codex().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &initial_model_provider_base_url);
         config.model_context_window = Some(240_000);
-        config.subagents_model_context_windows = HashMap::from([
+        config.subagent_model_context_windows = HashMap::from([
             (config.model.clone().expect("root model"), 120_000),
             (ROLE_MODEL.to_string(), 160_000),
             ("gpt-6.1-sol".to_string(), 2_000_000),
@@ -491,7 +491,7 @@ async fn cold_root_resume_restores_agent_identity_and_role_on_followup() -> Resu
     let mut resume_builder = test_codex().with_config(move |config| {
         configure_multi_agent_v2_with_role(config, &resumed_model_provider_base_url);
         config.model_context_window = Some(240_000);
-        config.subagents_model_context_windows = HashMap::from([
+        config.subagent_model_context_windows = HashMap::from([
             (config.model.clone().expect("root model"), 120_000),
             (ROLE_MODEL.to_string(), 200_000),
             ("gpt-6.1-sol".to_string(), 2_000_000),

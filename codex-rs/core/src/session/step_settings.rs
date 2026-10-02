@@ -218,7 +218,7 @@ impl ModelInfoOverrides {
                 SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
             )
         {
-            overrides.subagent_context_windows = config.subagents_model_context_windows.clone();
+            overrides.subagent_context_windows = config.subagent_model_context_windows.clone();
         }
         overrides
     }
