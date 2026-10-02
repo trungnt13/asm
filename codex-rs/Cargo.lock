@@ -2619,7 +2619,7 @@ dependencies = [
 
 [[package]]
 name = "codex-cloud-client"
-version = "0.0.0"
+version = "0.159.1-alpha.12.1"
 dependencies = [
  "anyhow",
  "async-stream",
