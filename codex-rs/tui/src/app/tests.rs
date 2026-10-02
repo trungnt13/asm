@@ -7378,6 +7378,7 @@ fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItem>) -> Turn 
         id: turn_id.to_string(),
         root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,
+        token_usage: None,
         items,
         status,
         error: None,
@@ -8973,6 +8974,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
+                    token_usage: None,
                     items: vec![ThreadItem::UserMessage {
                         id: "user-1".to_string(),
                         client_id: None,
@@ -8991,6 +8993,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     id: "turn-2".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
+                    token_usage: None,
                     items: vec![
                         ThreadItem::UserMessage {
                             id: "user-2".to_string(),
