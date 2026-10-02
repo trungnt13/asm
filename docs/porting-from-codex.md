@@ -213,7 +213,9 @@ Join segments with `·` without spaces. Use `CtxN%` for context used, `CtxN%left
 
 Offer opt-in `cache-hit-rate` in `/statusline` and `tui.status_line`. Show `CchN.N%`: cached input tokens divided by input tokens for the latest reported request in the current thread, rounded to one decimal. Never average across requests or use cumulative thread totals. Use existing usage data without new requests or API changes. Hide unknown or zero-input usage; keep defaults unchanged. Missing cache details remain indistinguishable from reported zero.
 
-### Subagent service tiers and picker
+### Subagent context windows, service tiers, and picker
+
+Allow optional top-level `subagents_model_context_windows = { "gpt-6-astra" = 272000, "gpt-6.1-sol" = 272000 }`. Values must be positive integers fitting `i64`. Apply exact model-ID matches only to V2 spawned children, using their final selected model throughout startup, model changes, and reload. Missing entries retain the existing scalar/model fallback. Keep the original `model_context_window` unchanged so a matched override cannot spill into unmatched grandchildren. Preserve model maximum clamping, usable-context headroom, and existing compaction settings. Keep root, review, and guardian sessions unchanged; add no app-server API or rollout fields.
 
 Allow `[subagent_service_tiers]`, such as `gpt-6-sol = { high = "fast" }`, keyed by the child's final model and effective effort after overrides and role settings. Matching rules override the root tier throughout the child's lifetime, including root tier changes; unmatched children inherit upstream behavior. Keep root requests unchanged. Reject unsupported matched tiers and fast overrides when fast mode is disabled. Do not add this policy to spawn arguments.
 
