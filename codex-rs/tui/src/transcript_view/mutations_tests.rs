@@ -380,6 +380,7 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
         id: "turn".to_owned(),
         items: vec![call, reasoning],
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,

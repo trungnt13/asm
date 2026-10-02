@@ -127,6 +127,7 @@ impl ChatWidget {
             let Turn {
                 id: turn_id,
                 items_view: _,
+                token_usage,
                 items,
                 status,
                 mut error,
@@ -225,6 +226,7 @@ impl ChatWidget {
                         turn: Turn {
                             id: turn_id,
                             items_view: codex_app_server_protocol::TurnItemsView::NotLoaded,
+                            token_usage,
                             items: Vec::new(),
                             status,
                             error,
