@@ -232,6 +232,7 @@ impl App {
                 .or_default();
         }
         self.track_agents_overview_notification(&notification);
+        self.track_turn_agents(&notification);
         // Retained blank sessions stay subscribed after their event channels are cleared.
         if let ServerNotification::ThreadSettingsUpdated(settings) = &notification
             && let Ok(thread_id) = ThreadId::from_string(&settings.thread_id)
