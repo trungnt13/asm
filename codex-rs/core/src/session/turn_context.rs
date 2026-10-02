@@ -781,8 +781,16 @@ impl TurnContext {
     ) -> Self {
         let mut config = (*self.config).clone();
         config.model = Some(model.clone());
+        let overrides = ModelInfoOverrides::for_session(
+            &config,
+            &self.session_source,
+            Some(self.multi_agent_version),
+        );
         let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .get_model_info(
+                model.as_str(),
+                &overrides.models_manager_config(&model, config.personality),
+            )
             .await;
         let supported_reasoning_levels = model_info
             .supported_reasoning_levels
