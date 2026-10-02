@@ -69,9 +69,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `e7ea5f4a8658ebe49e879be933effed2340fa276`.
+- Last incorporated upstream commit: `ca466061d64f0b44f416135c7fd06aa7af850bbc`.
 - Commit date: 2026-10-02.
-- Subject: Add managed worktree tools to the TUI (#50148).
+- Subject: Record Guardian V2 Decisions agreement and latency metrics (#50273).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
