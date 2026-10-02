@@ -749,6 +749,7 @@ mod tests {
                 })
                 .collect(),
             items_view: codex_app_server_protocol::TurnItemsView::Full,
+            token_usage: None,
             status,
             error: None,
             started_at: None,
