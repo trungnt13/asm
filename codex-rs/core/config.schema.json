@@ -7993,6 +7993,16 @@
       "description": "Child-only routing overrides, keyed by model and reasoning effort.",
       "type": "object"
     },
+    "subagents_model_context_windows": {
+      "additionalProperties": {
+        "format": "uint64",
+        "minimum": 1.0,
+        "type": "integer"
+      },
+      "default": {},
+      "description": "Model-specific context windows for V2 spawned children, in tokens.",
+      "type": "object"
+    },
     "suppress_unstable_features_warning": {
       "description": "Suppress warnings about unstable (under development) features.",
       "type": "boolean"
