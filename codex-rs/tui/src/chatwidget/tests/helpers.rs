@@ -1131,6 +1131,7 @@ pub(super) fn app_server_turn(
     AppServerTurn {
         id: turn_id.to_string(),
         items_view: codex_app_server_protocol::TurnItemsView::Full,
+        token_usage: None,
         items: Vec::new(),
         status,
         error,
@@ -1829,7 +1830,7 @@ pub(crate) fn normalize_completion_timestamps(
     }
     static COMPLETION_FOOTER: std::sync::LazyLock<regex_lite::Regex> = std::sync::LazyLock::new(
         || {
-            regex_lite::Regex::new(r"(?m)^(?P<indent>[ \t]*)(?P<duration>Worked for (?:<1s|(?:[0-9]+h )?(?:[0-9]+m )?[0-9]+s) • )?(?:[A-Z][a-z]{2} [0-9]{1,2}(?:, [0-9]{4})? at )?[0-9]{1,2}:[0-9]{2}(?: (?:AM|PM))?(?P<padding>[ \t]*)$")
+            regex_lite::Regex::new(r"(?m)^(?P<indent>[ \t]*)(?P<continuation>• )?(?P<duration>Worked for (?:<1s|(?:[0-9]+h )?(?:[0-9]+m )?[0-9]+s) • )?(?:[A-Z][a-z]{2} [0-9]{1,2}(?:, [0-9]{4})? at )?[0-9]{1,2}:[0-9]{2}(?: (?:AM|PM))?(?P<stats> •(?: [^\n]*?)?)?(?P<padding>[ \t]*)$")
                 .expect("valid completion footer pattern")
         },
     );
@@ -1842,7 +1843,11 @@ pub(crate) fn normalize_completion_timestamps(
             } else {
                 ""
             };
-            format!("{indent}{duration}[completion time]{padding}")
+            let stats = captures.name("stats").map_or("", |stats| stats.as_str());
+            let continuation = captures
+                .name("continuation")
+                .map_or("", |prefix| prefix.as_str());
+            format!("{indent}{continuation}{duration}[completion time]{stats}{padding}")
         })
         .into_owned()
 }
