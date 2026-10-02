@@ -4,6 +4,7 @@
 use super::App;
 use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
+use crate::multi_agents::sub_agent_activity_display;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::ThreadStatus;
@@ -17,6 +18,8 @@ use uuid::Uuid;
 pub(super) struct TurnAgentCounts {
     active: HashMap<ThreadId, ActiveTurnAgents>,
     completed: HashMap<(ThreadId, String), usize>,
+    // V2 spawn activity can arrive without a child thread metadata notification.
+    parents: HashMap<ThreadId, ThreadId>,
     // The refresh ID protects live activity received while a metadata read is in flight.
     pub(super) running: HashMap<ThreadId, (bool, Option<Uuid>)>,
 }
@@ -32,6 +35,23 @@ impl TurnAgentCounts {
             .get(&(thread_id, turn_id.to_owned()))
             .copied()
     }
+
+    fn record_active_agent(&mut self, agent_id: ThreadId) {
+        let mut ancestor = agent_id;
+        // Follow only subagent edges, bounding traversal in case ancestry contains a cycle.
+        for _ in 0..self.parents.len() {
+            let Some(parent_id) = self.parents.get(&ancestor) else {
+                break;
+            };
+            if *parent_id == agent_id {
+                break;
+            }
+            if let Some(turn) = self.active.get_mut(parent_id) {
+                turn.agents.insert(agent_id);
+            }
+            ancestor = *parent_id;
+        }
+    }
 }
 
 impl App {
@@ -43,6 +63,34 @@ impl App {
         };
         let refresh_id = self.agents_overview.request_id;
         let state = &mut self.turn_agent_counts;
+        let activity = match notification {
+            ServerNotification::ItemStarted(item) => Some((&item.turn_id, &item.item)),
+            ServerNotification::ItemCompleted(item) => Some((&item.turn_id, &item.item)),
+            _ => None,
+        }
+        .and_then(|(turn_id, item)| {
+            sub_agent_activity_display(item).map(|activity| (turn_id, activity))
+        });
+        if let Some((turn_id, activity)) = activity {
+            let agent_id = activity.thread_id;
+            if activity.is_running_hint {
+                state.parents.insert(agent_id, thread_id);
+                // A fast child may have finished before its parent's spawn item arrives.
+                state.running.entry(agent_id).or_insert((true, refresh_id));
+                if state
+                    .active
+                    .get(&thread_id)
+                    .is_none_or(|turn| &turn.turn_id == turn_id)
+                {
+                    state.record_active_agent(agent_id);
+                }
+            } else if !state.active.contains_key(&agent_id) {
+                // Do not stop a newer child turn because its earlier completion arrived late.
+                state.running.insert(agent_id, (false, refresh_id));
+            }
+            self.sample_turn_agents();
+            return;
+        }
         match notification {
             ServerNotification::TurnStarted(started) => {
                 if state
@@ -110,36 +158,35 @@ impl App {
     pub(super) fn sample_turn_agents(&mut self) {
         let state = &mut self.turn_agent_counts;
         let threads = &self.agents_overview.threads;
-        for (parent_id, turn) in &mut state.active {
-            for (agent_id, thread) in threads {
-                let Some(thread) = thread else { continue };
-                let running = state.running.get(agent_id).map_or_else(
-                    || matches!(thread.status, ThreadStatus::Active { .. }),
-                    |(running, _)| *running,
-                );
-                if agent_id == parent_id || !running {
-                    continue;
-                }
-                let mut ancestor = thread;
-                // Follow only subagent edges, bounding traversal in case ancestry contains a cycle.
-                for _ in 0..threads.len() {
-                    let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                        parent_thread_id,
-                        ..
-                    }) = &ancestor.source
-                    else {
-                        break;
-                    };
-                    if parent_thread_id == parent_id {
-                        turn.agents.insert(*agent_id);
-                        break;
-                    }
-                    let Some(Some(parent)) = threads.get(parent_thread_id) else {
-                        break;
-                    };
-                    ancestor = parent;
-                }
+        for (agent_id, thread) in threads {
+            if let Some(thread) = thread
+                && let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id, ..
+                }) = &thread.source
+            {
+                state.parents.insert(*agent_id, *parent_thread_id);
             }
+        }
+        let running_agents: Vec<_> = state
+            .parents
+            .keys()
+            .copied()
+            .filter(|agent_id| {
+                state.running.get(agent_id).map_or_else(
+                    || {
+                        threads
+                            .get(agent_id)
+                            .and_then(Option::as_ref)
+                            .is_some_and(|thread| {
+                                matches!(thread.status, ThreadStatus::Active { .. })
+                            })
+                    },
+                    |(running, _)| *running,
+                )
+            })
+            .collect();
+        for agent_id in running_agents {
+            state.record_active_agent(agent_id);
         }
     }
 }
