@@ -37,7 +37,8 @@ def verify(metadata: dict, directory: Path, target: str, version: str) -> None:
             actual = hashlib.file_digest(asset, "sha256").hexdigest()
         if actual != expected.removeprefix("sha256:"):
             raise ValueError(f"GitHub SHA-256 mismatch for {name}")
-        digests[name] = actual
+        if name != manifest:
+            digests[name] = actual
 
     lines = (directory / manifest).read_text(encoding="utf-8").splitlines()
     parsed = {}
