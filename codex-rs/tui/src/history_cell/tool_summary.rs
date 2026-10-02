@@ -3,7 +3,7 @@
 use codex_shell_command::bash::parse_shell_script_into_commands;
 use codex_shell_command::parse_command::extract_shell_command;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct ToolCallSummary {
     pub(crate) count: usize,
     pub(crate) running: bool,
