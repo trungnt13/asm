@@ -47,6 +47,7 @@ fn turn(status: TurnStatus) -> Turn {
         id: "turn".to_string(),
         items: Vec::new(),
         items_view: Default::default(),
+        token_usage: None,
         status,
         error: None,
         started_at: None,
