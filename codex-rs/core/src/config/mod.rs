@@ -641,6 +641,9 @@ pub struct Config {
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
 
+    /// Model-specific context windows for V2 spawned children, in tokens.
+    pub subagents_model_context_windows: HashMap<String, i64>,
+
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
 
@@ -3280,6 +3283,17 @@ impl Config {
 
         validate_model_providers(&cfg.model_providers)
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+        let subagents_model_context_windows = cfg.subagents_model_context_windows
+            .iter()
+            .map(|(model, tokens)| {
+                i64::try_from(tokens.get())
+                    .map(|tokens| (model.clone(), tokens))
+                    .map_err(|_| std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("subagents_model_context_windows[{model:?}] must not exceed {} tokens", i64::MAX),
+                    ))
+            })
+            .collect::<std::io::Result<HashMap<_, _>>>()?;
         if cfg.model_post_turn_compact_threshold_percent.is_some_and(|percent| percent > 100) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -4349,6 +4363,7 @@ impl Config {
             subagent_service_tiers: cfg.subagent_service_tiers,
             review_model,
             model_context_window: cfg.model_context_window,
+            subagents_model_context_windows,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: cfg
                 .model_auto_compact_token_limit_scope
