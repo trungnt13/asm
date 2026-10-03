@@ -7523,6 +7523,10 @@
       "description": "Whether to inject the `<environment_context>` user block.",
       "type": "boolean"
     },
+    "include_model_catalog_instructions": {
+      "description": "Include the generated spawn-model catalog in tool descriptions or context. Defaults to true. Disabling it preserves model and reasoning-effort arguments.",
+      "type": "boolean"
+    },
     "include_permissions_instructions": {
       "description": "Whether to inject the `<permissions instructions>` developer block.",
       "type": "boolean"
