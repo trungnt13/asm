@@ -6,6 +6,7 @@ use codex_core::build_prompt_request_from_thread;
 use codex_core::config::ConfigBuilder;
 use codex_core::config::ConfigOverrides;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_features::Feature;
 use codex_home::CodexHomeUserInstructionsProvider;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
@@ -86,7 +87,9 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
 
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    for use_responses_lite in [false, true] {
+    for (use_responses_lite, incremental_tools) in
+        [(false, false), (false, true), (true, false), (true, true)]
+    {
         let test = test_codex()
             .with_model("gpt-5.5")
             .with_model_info_override("gpt-5.5", move |model| {
@@ -94,9 +97,13 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
                 model.tool_mode = Some(ToolMode::Direct);
             })
             .with_user_instructions_provider(user_instructions_provider.clone())
-            .with_config(|config| {
+            .with_config(move |config| {
                 config.base_instructions = Some("Audit base instructions".to_string());
                 config.model_reasoning_effort = Some(ReasoningEffort::High);
+                config
+                    .features
+                    .set_enabled(Feature::IncrementalTools, incremental_tools)
+                    .expect("test config should allow incremental tools override");
             })
             .build_with_auto_env(&server)
             .await?;
@@ -152,16 +159,30 @@ async fn build_prompt_input_includes_context_and_user_message() -> Result<()> {
         let tools = if use_responses_lite {
             assert!(request.get("instructions").is_none());
             assert!(request.get("tools").is_none());
-            assert_eq!(request_input[0]["type"], "additional_tools");
-            assert_eq!(request_input[0]["role"], "developer");
-            assert_eq!(request_input[1]["role"], "developer");
+            let (tools_index, instructions_index) = if incremental_tools { (1, 0) } else { (0, 1) };
             assert_eq!(
-                request_input[1]["content"][0]["text"],
+                request_input
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item["type"] == "additional_tools")
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>(),
+                vec![tools_index]
+            );
+            assert_eq!(request_input[tools_index]["role"], "developer");
+            assert_eq!(request_input[instructions_index]["role"], "developer");
+            assert_eq!(
+                request_input[instructions_index]["content"][0]["text"],
                 "Audit base instructions"
             );
-            &request_input[0]["tools"]
+            &request_input[tools_index]["tools"]
         } else {
             assert_eq!(request["instructions"], "Audit base instructions");
+            assert!(
+                request_input
+                    .iter()
+                    .all(|item| item["type"] != "additional_tools")
+            );
             &request["tools"]
         };
         let exec_command = tools
