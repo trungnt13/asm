@@ -56,12 +56,6 @@ pub(crate) struct AgentNavigationState {
     pub(super) picker_refresh: Option<AgentPickerRefreshState>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AgentPickerModelSettings {
-    pub(crate) model: String,
-    pub(crate) reasoning_effort: Option<ReasoningEffort>,
-}
-
 #[derive(Debug)]
 pub(crate) struct AgentPickerModelSettings {
     pub(crate) model: String,
