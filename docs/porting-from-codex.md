@@ -181,6 +181,10 @@ Keep `debug prompt-input` unchanged. `debug prompt-request` exports versioned JS
 
 Default to ephemeral startup. Require `--allow-session-state` to create session records and initialize persistent state-backed tools; setup may opt in inside its isolated temporary home. Do not dispatch queued input. Label the export as a fresh standalone debug turn, not a live-session or exact transport capture. Report omitted history, turn hooks, input-triggered skill/plugin injections, uncaptured tools, authentication-dependent request metadata, and server-side additions. Do not send an inference request or claim startup is free of network or local-state effects. Audit output can contain sensitive instructions and tool content.
 
+### Model catalog instruction visibility
+
+Allow top-level `include_model_catalog_instructions`, default `true`. When false, omit the generated model, reasoning-effort, and service-tier listing from both spawn-tool descriptions and `<model_catalog>` context for V1 and V2. Omit guidance pointing to the suppressed catalog. Keep custom descriptions, tool arguments, model loading, and override validation unchanged. This controls inclusion independently of `model_catalog_in_context`, which controls placement, and `expose_spawn_agent_model_overrides`, which controls argument exposure. Preserve existing history and use the normal catalog invalidation path when a retained listing stops applying. Do not update setup-managed profiles before a supporting CLI is released.
+
 ### Saved forks, upstream sides, and parallel conversations
 
 - Preserve the parent's effective prompt-cache routing key for saved and temporary root forks, independently of thread/session identity. Persist it for resume and further forks. Keep old rollouts readable without ancestor lookups. Preserve upstream guardian/subagent routing. Shared routing does not guarantee backend cache hits.
