@@ -78,6 +78,7 @@ async fn configured_ctrl_space_submit_wins_over_transcript_selection() -> Result
                 ServerNotification::TurnStarted(TurnStartedNotification {
                     thread_id: thread_id.to_string(),
                     turn: Turn {
+                        token_usage: None,
                         id: "turn".into(),
                         items_view: TurnItemsView::Full,
                         items: Vec::new(),
