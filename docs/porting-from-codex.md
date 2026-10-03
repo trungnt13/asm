@@ -71,9 +71,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `ca466061d64f0b44f416135c7fd06aa7af850bbc`.
-- Commit date: 2026-10-02.
-- Subject: Record Guardian V2 Decisions agreement and latency metrics (#50273).
+- Last incorporated upstream commit: `55b6f282a810c3146a1f79c7c2e6e919cc0aa974`.
+- Commit date: 2026-10-03.
+- Subject: Keep MCP resource helpers available in code mode (#50546).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
