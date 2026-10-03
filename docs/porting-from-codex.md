@@ -71,9 +71,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `55b6f282a810c3146a1f79c7c2e6e919cc0aa974`.
+- Last incorporated upstream commit: `447eac3b81183b32c1a09f5fba9617abfacbebe3`.
 - Commit date: 2026-10-03.
-- Subject: Keep MCP resource helpers available in code mode (#50546).
+- Subject: Decode Windows Terminal's mapped Shift+Enter sequence (#50720).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
