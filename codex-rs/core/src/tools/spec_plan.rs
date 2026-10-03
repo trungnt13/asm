@@ -1502,6 +1502,9 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                         SpawnAgentToolOptions {
                             available_models: turn_context.available_models.clone(),
                             multi_agent_version: turn_context.multi_agent_version,
+                            include_model_catalog_instructions: turn_context
+                                .config
+                                .include_model_catalog_instructions,
                             model_catalog_in_context: turn_context
                                 .config
                                 .features
@@ -1590,6 +1593,9 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 SpawnAgentHandler::new(SpawnAgentToolOptions {
                     available_models: turn_context.available_models.clone(),
                     multi_agent_version: turn_context.multi_agent_version,
+                    include_model_catalog_instructions: turn_context
+                        .config
+                        .include_model_catalog_instructions,
                     model_catalog_in_context: turn_context
                         .config
                         .features

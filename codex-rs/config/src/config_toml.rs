@@ -266,6 +266,11 @@ pub struct ConfigToml {
     /// Whether to inject the `<collaboration_mode>` developer block.
     pub include_collaboration_mode_instructions: Option<bool>,
 
+    /// Include the generated spawn-model catalog in tool descriptions or context.
+    /// Defaults to true.
+    /// Disabling it preserves model and reasoning-effort arguments.
+    pub include_model_catalog_instructions: Option<bool>,
+
     /// Whether to inject the `<environment_context>` user block.
     pub include_environment_context: Option<bool>,
 
