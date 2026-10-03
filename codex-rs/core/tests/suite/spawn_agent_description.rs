@@ -151,6 +151,7 @@ async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) {
 }
 
 #[test_case(MultiAgentVersion::V1, false; "v1_default")]
+#[test_case(MultiAgentVersion::V1, true; "v1_context")]
 #[test_case(MultiAgentVersion::V2, false; "v2_default")]
 #[test_case(MultiAgentVersion::V2, true; "v2_context")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -159,13 +160,45 @@ async fn model_catalog_flag_controls_refresh(
     model_catalog_in_context: bool,
 ) -> Result<()> {
     // The V1 opt-in case also snapshots the full request history in scenarios.rs.
-    model_catalog_refresh_requests(multi_agent_version, model_catalog_in_context).await?;
+    let enabled = model_catalog_refresh_requests(
+        multi_agent_version,
+        model_catalog_in_context,
+        /*include_model_catalog_instructions*/ true,
+    )
+    .await?;
+    let disabled = model_catalog_refresh_requests(
+        multi_agent_version,
+        model_catalog_in_context,
+        /*include_model_catalog_instructions*/ false,
+    )
+    .await?;
+    let namespace = match multi_agent_version {
+        MultiAgentVersion::V1 => MULTI_AGENT_V1_NAMESPACE,
+        MultiAgentVersion::V2 => MULTI_AGENT_V2_NAMESPACE,
+        MultiAgentVersion::Disabled => unreachable!("this test requires spawning"),
+    };
+    let enabled_body = enabled[0].body_json();
+    let disabled_body = disabled[0].body_json();
+    let enabled_tool = namespace_child_tool(&enabled_body, namespace, SPAWN_AGENT_TOOL_NAME)
+        .expect("enabled spawn_agent tool");
+    let disabled_tool = namespace_child_tool(&disabled_body, namespace, SPAWN_AGENT_TOOL_NAME)
+        .expect("disabled spawn_agent tool");
+    assert_eq!(disabled_tool["parameters"], enabled_tool["parameters"]);
+    assert_eq!(
+        disabled_tool["parameters"]["properties"]["model"]["type"],
+        "string"
+    );
+    assert_eq!(
+        disabled_tool["parameters"]["properties"]["reasoning_effort"]["type"],
+        "string"
+    );
     Ok(())
 }
 
 pub(super) async fn model_catalog_refresh_requests(
     multi_agent_version: MultiAgentVersion,
     model_catalog_in_context: bool,
+    include_model_catalog_instructions: bool,
 ) -> Result<Vec<ResponsesRequest>> {
     let server = start_mock_server().await;
     mount_models_once(
@@ -242,6 +275,7 @@ pub(super) async fn model_catalog_refresh_requests(
                     .expect("enable context catalogs");
             }
             config.multi_agent_v2.hide_spawn_agent_metadata = false;
+            config.include_model_catalog_instructions = include_model_catalog_instructions;
             config.base_instructions = Some("Test model instructions.".to_string());
             config.include_environment_context = false;
         });
@@ -266,21 +300,22 @@ pub(super) async fn model_catalog_refresh_requests(
         &description
     };
 
-    assert!(
+    assert_eq!(
         listing.contains("- `visible-model`: Fast and capable"),
+        include_model_catalog_instructions,
         "expected visible model summary in model catalog: {catalog:?}"
     );
     assert_eq!(
         description.contains("Pick model overrides from the latest <model_catalog> listing."),
-        model_catalog_in_context
+        model_catalog_in_context && include_model_catalog_instructions
     );
     assert_eq!(
         catalog.contains("<model_catalog>"),
-        model_catalog_in_context
+        model_catalog_in_context && include_model_catalog_instructions
     );
     assert_eq!(
         description.contains("- `visible-model`: Fast and capable"),
-        !model_catalog_in_context
+        !model_catalog_in_context && include_model_catalog_instructions
     );
     let expected_inherited_model_guidance = if multi_agent_version == MultiAgentVersion::V2
         && model_catalog_in_context
@@ -300,12 +335,14 @@ pub(super) async fn model_catalog_refresh_requests(
         multi_agent_version == MultiAgentVersion::V1 || model_catalog_in_context,
         "expected model override usage guidance in spawn_agent description: {description:?}"
     );
-    assert!(
+    assert_eq!(
         listing.contains("Reasoning efforts: low, medium (default), high."),
+        include_model_catalog_instructions,
         "expected default reasoning effort in model catalog: {catalog:?}"
     );
-    assert!(
+    assert_eq!(
         listing.contains("Service tiers: priority."),
+        include_model_catalog_instructions,
         "expected service tier guidance in model catalog: {catalog:?}"
     );
     assert!(
@@ -331,7 +368,7 @@ pub(super) async fn model_catalog_refresh_requests(
         );
     }
 
-    // Only the opt-in path keeps the tool schema stable across a catalog refresh.
+    // Context placement and disabled catalog instructions both keep tools stable on refresh.
     let manager = test.thread_manager.get_models_manager();
     let mut refreshed = manager
         .raw_model_catalog(RefreshStrategy::Offline, test.config.http_client_factory())
@@ -366,7 +403,7 @@ pub(super) async fn model_catalog_refresh_requests(
         let response = mount_sse_once(&server, sse(vec![ev_completed(turn)])).await;
         test.submit_turn(turn).await?;
         let current = response.single_request();
-        if model_catalog_in_context {
+        if model_catalog_in_context || !include_model_catalog_instructions {
             assert_eq!(current.body_json()["tools"], body["tools"]);
         } else {
             let expected_tools = serde_json::to_string(&body["tools"])?
@@ -390,6 +427,71 @@ pub(super) async fn model_catalog_refresh_requests(
             expected_catalogs,
         );
         requests.push(current);
+    }
+    if model_catalog_in_context && include_model_catalog_instructions {
+        let home = test.home.clone();
+        let rollout_path = test
+            .session_configured
+            .rollout_path
+            .clone()
+            .expect("catalog thread should have a rollout path");
+        let initial_config = test.config.clone();
+        test.codex.shutdown_and_wait().await?;
+        let resumed_responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_completed("catalog-disabled-first")]),
+                sse(vec![ev_completed("catalog-disabled-second")]),
+            ],
+        )
+        .await;
+        let resumed = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_models_manager(manager)
+            .with_config(move |config| {
+                config.model = initial_config.model;
+                config.features = initial_config.features;
+                config.multi_agent_v2 = initial_config.multi_agent_v2;
+                config.base_instructions = initial_config.base_instructions;
+                config.include_environment_context = false;
+                config.include_model_catalog_instructions = false;
+            })
+            .resume(&server, home, rollout_path)
+            .await?;
+        resumed
+            .submit_turn("after disabling catalog instructions")
+            .await?;
+        resumed
+            .submit_turn("catalog instructions remain disabled")
+            .await?;
+        let mut previous_input = requests.last().unwrap().input();
+        for current in resumed_responses.requests() {
+            let current_body = current.body_json();
+            let spawn = namespace_child_tool(&current_body, namespace, SPAWN_AGENT_TOOL_NAME)
+                .expect("resumed spawn_agent tool");
+            let initial_spawn = namespace_child_tool(&body, namespace, SPAWN_AGENT_TOOL_NAME)
+                .expect("initial spawn_agent tool");
+            assert_eq!(spawn["parameters"], initial_spawn["parameters"]);
+            let description = spawn["description"].as_str().expect("spawn description");
+            assert!(!description.contains("<model_catalog>"));
+            assert!(!description.contains("Updated picker copy"));
+            assert!(current.input().starts_with(&previous_input));
+            let catalogs = current
+                .message_input_texts("developer")
+                .into_iter()
+                .filter(|text| text.starts_with("<model_catalog>"))
+                .collect::<Vec<_>>();
+            assert_eq!(catalogs.len(), expected_catalogs.len() + 1);
+            assert_eq!(&catalogs[..expected_catalogs.len()], &expected_catalogs);
+            assert!(
+                catalogs
+                    .last()
+                    .unwrap()
+                    .contains("The previous spawn_agent model catalog no longer applies.")
+            );
+            previous_input = current.input();
+        }
+        resumed.codex.shutdown_and_wait().await?;
     }
     Ok(requests)
 }
