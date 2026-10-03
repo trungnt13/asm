@@ -321,11 +321,11 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
     model.tool_mode = Some(ToolMode::Direct);
     let model_catalog_path = codex_home.path().join("model-catalog.json");
     std::fs::write(&model_catalog_path, serde_json::to_vec(&model_catalog)?)?;
-    for (command, enabled) in [
-        ("prompt-input", true),
-        ("prompt-input", false),
-        ("prompt-request", true),
-        ("prompt-request", false),
+    for (command, attribution_enabled, incremental_tools) in [
+        ("prompt-input", true, false),
+        ("prompt-input", false, false),
+        ("prompt-request", true, false),
+        ("prompt-request", false, true),
     ] {
         let mut cmd = codex_command(codex_home.path())?;
         cmd.env("NO_PROXY", "127.0.0.1,localhost")
@@ -345,7 +345,9 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
             .arg(format!(
                 "model_catalog_json={}",
                 serde_json::to_string(&model_catalog_path)?
-            ));
+            ))
+            .arg("-c")
+            .arg(format!("features.incremental_tools={incremental_tools}"));
         }
         cmd.args(["debug", command]);
         if command == "prompt-request" {
@@ -358,7 +360,7 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
         let prompt = String::from_utf8(output.stdout)?;
         assert_eq!(
             prompt.contains("Co-authored-by: Codex <noreply@openai.com>"),
-            enabled
+            attribution_enabled
         );
         assert!(!prompt.contains("attribution is disabled for the current workspace"));
         let prompt: Value = serde_json::from_str(&prompt)?;
@@ -374,10 +376,26 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
             let input = prompt["request"]["input"]
                 .as_array()
                 .expect("request input");
-            assert_eq!(input[0]["type"], "additional_tools");
-            let web_run = input[0]["tools"]
+            let (tools_index, instructions_index) = if incremental_tools { (1, 0) } else { (0, 1) };
+            assert_eq!(
+                input
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item["type"] == "additional_tools")
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>(),
+                vec![tools_index]
+            );
+            assert_eq!(input[tools_index]["role"], "developer");
+            assert_eq!(input[instructions_index]["role"], "developer");
+            assert_eq!(
+                input[instructions_index]["content"][0]["text"],
+                prompt["base_instructions"]["text"]
+            );
+            let tools = input[tools_index]["tools"]
                 .as_array()
-                .expect("request tool definitions")
+                .expect("request tool definitions");
+            let web_run = tools
                 .iter()
                 .find(|tool| tool["name"] == "web")
                 .and_then(|namespace| namespace["tools"].as_array())
@@ -395,9 +413,7 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
                 ("create_goal", json!(["objective"])),
                 ("update_goal", json!(["status"])),
             ] {
-                let goal_tool = input[0]["tools"]
-                    .as_array()
-                    .expect("request tool definitions")
+                let goal_tool = tools
                     .iter()
                     .flat_map(|tool| {
                         tool["tools"]
@@ -429,9 +445,26 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
                     _ => unreachable!("goal names are listed above"),
                 }
             }
-            assert_eq!(prompt["request"]["text"]["format"]["schema"], output_schema);
+            assert_eq!(
+                prompt["request"]["text"]["format"],
+                json!({
+                    "type": "json_schema",
+                    "name": "codex_output_schema",
+                    "strict": true,
+                    "schema": output_schema,
+                })
+            );
         }
     }
+    assert!(
+        server
+            .received_requests()
+            .await
+            .expect("mock request recording is enabled")
+            .iter()
+            .all(|request| !(request.method.as_str() == "POST"
+                && request.url.path().ends_with("/responses")))
+    );
     server.verify().await;
     Ok(())
 }
