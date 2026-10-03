@@ -739,6 +739,9 @@ pub struct Config {
     /// Whether to inject the `<collaboration_mode>` developer block.
     pub include_collaboration_mode_instructions: bool,
 
+    /// Include the generated spawn-model catalog without changing tool arguments.
+    pub include_model_catalog_instructions: bool,
+
     /// Whether to inject the `<skills_instructions>` developer block.
     pub include_skill_instructions: bool,
 
@@ -4089,6 +4092,8 @@ impl Config {
         let include_apps_instructions = cfg.include_apps_instructions.unwrap_or(true);
         let include_collaboration_mode_instructions =
             cfg.include_collaboration_mode_instructions.unwrap_or(true);
+        let include_model_catalog_instructions =
+            cfg.include_model_catalog_instructions.unwrap_or(true);
         let include_skill_instructions = cfg
             .skills
             .as_ref()
@@ -4409,6 +4414,7 @@ impl Config {
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,
+            include_model_catalog_instructions,
             include_skill_instructions,
             skill_max_context_tokens,
             cloud_skill_enabled,

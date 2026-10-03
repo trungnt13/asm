@@ -1920,6 +1920,7 @@ async fn model_catalog_refresh_preserves_tools_and_history() -> Result<()> {
     let requests = super::spawn_agent_description::model_catalog_refresh_requests(
         MultiAgentVersion::V1,
         /*model_catalog_in_context*/ true,
+        /*include_model_catalog_instructions*/ true,
     )
     .await?;
     insta::assert_snapshot!(context_snapshot::format_request_history_snapshot(
