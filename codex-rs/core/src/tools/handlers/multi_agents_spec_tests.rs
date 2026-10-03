@@ -73,11 +73,32 @@ fn spawn_agent_tool_v2_requires_task_name() {
     );
 }
 
-#[test]
-fn spawn_agent_catalog_description_preserves_generated_context() {
+#[test_case::test_case(true, false; "inline_catalog")]
+#[test_case::test_case(true, true; "context_catalog")]
+#[test_case::test_case(false, false; "inline_catalog_disabled")]
+#[test_case::test_case(false, true; "context_catalog_disabled")]
+fn spawn_agent_catalog_description_preserves_generated_context(
+    include_model_catalog_instructions: bool,
+    model_catalog_in_context: bool,
+) {
     let options = SpawnAgentToolOptions {
+        available_models: vec![serde_json::from_value(json!({
+            "id": "catalog-model",
+            "model": "catalog-model",
+            "display_name": "Catalog model",
+            "description": "Catalog model description.",
+            "default_reasoning_effort": "high",
+            "supported_reasoning_efforts": [{"effort": "high", "description": "High effort"}],
+            "service_tiers": [{"id": "priority", "name": "Priority", "description": "Priority tier"}],
+            "is_default": false,
+            "show_in_picker": true,
+            "supported_in_api": true
+        }))
+        .expect("model preset")],
         agent_type_description: "Available agent roles: explorer".to_string(),
         expose_spawn_agent_model_overrides: true,
+        include_model_catalog_instructions,
+        model_catalog_in_context,
         usage_hint_text: Some("Local usage hint.".to_string()),
         ..Default::default()
     };
@@ -87,7 +108,7 @@ fn spawn_agent_catalog_description_preserves_generated_context() {
         panic!("spawn_agent should be a function tool");
     };
     let ToolSpec::Function(mut configured_tool) =
-        create_spawn_agent_tool_v2(options, Some("Catalog spawning guidance."))
+        create_spawn_agent_tool_v2(options.clone(), Some("Catalog spawning guidance."))
     else {
         panic!("spawn_agent should be a function tool");
     };
@@ -99,7 +120,26 @@ fn spawn_agent_catalog_description_preserves_generated_context() {
     assert!(
         configured_tool
             .description
-            .contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE)
+            .contains(if model_catalog_in_context {
+                SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2
+            } else {
+                SPAWN_AGENT_INHERITED_MODEL_GUIDANCE
+            })
+    );
+    for catalog_text in [
+        "Available model overrides",
+        "`catalog-model`",
+        "Reasoning efforts: high (default).",
+        "Service tiers: priority.",
+    ] {
+        assert_eq!(
+            configured_tool.description.contains(catalog_text),
+            include_model_catalog_instructions && !model_catalog_in_context
+        );
+    }
+    assert_eq!(
+        configured_tool.description.contains("<model_catalog>"),
+        include_model_catalog_instructions && model_catalog_in_context
     );
     assert!(configured_tool.description.ends_with("Local usage hint."));
     assert!(
@@ -109,15 +149,34 @@ fn spawn_agent_catalog_description_preserves_generated_context() {
     );
     configured_tool.description = default_tool.description.clone();
     assert_eq!(configured_tool, default_tool);
+    let ToolSpec::Function(mut catalog_enabled_tool) = create_spawn_agent_tool_v2(
+        SpawnAgentToolOptions {
+            include_model_catalog_instructions: true,
+            ..options
+        },
+        /*description_override*/ None,
+    ) else {
+        panic!("spawn_agent should be a function tool");
+    };
+    catalog_enabled_tool.description = default_tool.description.clone();
+    assert_eq!(catalog_enabled_tool, default_tool);
 }
 
-#[test]
-fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
+#[test_case::test_case(true, false; "inline_catalog")]
+#[test_case::test_case(true, true; "context_catalog")]
+#[test_case::test_case(false, false; "inline_catalog_disabled")]
+#[test_case::test_case(false, true; "context_catalog_disabled")]
+fn spawn_agent_tool_v1_keeps_legacy_fork_context_field(
+    include_model_catalog_instructions: bool,
+    model_catalog_in_context: bool,
+) {
     let tool = create_spawn_agent_tool_v1(SpawnAgentToolOptions {
         agent_type_description: "role help".to_string(),
         expose_agent_type: true,
         hide_agent_type_model_reasoning: false,
         expose_spawn_agent_model_overrides: true,
+        include_model_catalog_instructions,
+        model_catalog_in_context,
         usage_hint_text: None,
         ..Default::default()
     });
@@ -126,11 +185,23 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
         panic!("spawn_agent v1 should be a namespace tool");
     };
     assert_eq!(namespace.name, MULTI_AGENT_V1_NAMESPACE);
-    let Some(ResponsesApiNamespaceTool::Function(ResponsesApiTool { parameters, .. })) =
-        namespace.tools.first()
+    let Some(ResponsesApiNamespaceTool::Function(ResponsesApiTool {
+        description,
+        parameters,
+        ..
+    })) = namespace.tools.first()
     else {
         panic!("spawn_agent should be a namespace function tool");
     };
+    assert_eq!(
+        description.contains("No picker-visible model overrides are currently loaded."),
+        include_model_catalog_instructions && !model_catalog_in_context
+    );
+    assert_eq!(
+        description.contains("<model_catalog>"),
+        include_model_catalog_instructions && model_catalog_in_context
+    );
+    assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert_eq!(
         parameters.schema_type.clone(),
         Some(JsonSchemaType::Single(JsonSchemaPrimitiveType::Object))
@@ -163,9 +234,12 @@ fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
     assert!(!properties.contains_key("service_tier"));
 }
 
-#[test_case::test_case(false; "inline_catalog")]
-#[test_case::test_case(true; "context_catalog")]
+#[test_case::test_case(true, false; "inline_catalog")]
+#[test_case::test_case(true, true; "context_catalog")]
+#[test_case::test_case(false, false; "inline_catalog_disabled")]
+#[test_case::test_case(false, true; "context_catalog_disabled")]
 fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden(
+    include_model_catalog_instructions: bool,
     model_catalog_in_context: bool,
 ) {
     let tool = create_spawn_agent_tool_v2(
@@ -174,6 +248,7 @@ fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden(
             expose_agent_type: false,
             hide_agent_type_model_reasoning: true,
             expose_spawn_agent_model_overrides: true,
+            include_model_catalog_instructions,
             model_catalog_in_context,
             usage_hint_text: None,
             ..Default::default()
@@ -199,6 +274,10 @@ fn spawn_agent_tool_keeps_model_controls_when_spawn_metadata_is_hidden(
     assert!(properties.contains_key("reasoning_effort"));
     assert!(!properties.contains_key("service_tier"));
     assert!(!description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
+    assert_eq!(
+        description.contains("<model_catalog>"),
+        include_model_catalog_instructions && model_catalog_in_context
+    );
     assert_eq!(
         description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2),
         model_catalog_in_context
