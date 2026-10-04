@@ -54,6 +54,66 @@ Do not modify files, source, git state, permissions, configuration, or any other
 
 impl App {
     #[tracing::instrument(skip_all)]
+    pub(super) async fn parallel_navigation_target_available(
+        &mut self,
+        app_server: &mut AppServerSession,
+        parent_thread_id: ThreadId,
+        side_thread_id: ThreadId,
+        target_thread_id: ThreadId,
+    ) -> Result<bool> {
+        // Cached replay channels are not evidence that the other saved thread still exists.
+        // Read only metadata on explicit navigation; never attach the parent during restore.
+        let error = match app_server
+            .thread_read(target_thread_id, /*include_turns*/ false)
+            .await
+        {
+            Ok(_) => return Ok(true),
+            Err(error) => error,
+        };
+        let missing = error.chain().any(|cause| {
+            let Some(TypedRequestError::Server { method, source }) =
+                cause.downcast_ref::<TypedRequestError>()
+            else {
+                return false;
+            };
+            method == "thread/read"
+                && source.code == -32600
+                && [
+                    format!("thread not loaded: {target_thread_id}"),
+                    format!("no rollout found for thread id {target_thread_id}"),
+                    format!("no rollout found for conversation id {target_thread_id}"),
+                ]
+                .contains(&source.message)
+        });
+        if !missing {
+            return Err(error);
+        }
+
+        if let Err(error) = self.close_side_selection(parent_thread_id, side_thread_id) {
+            self.chat_widget.add_error_message(format!(
+                "Failed to clear unavailable parallel navigation: {error}"
+            ));
+        }
+        // Keep the child record and its transcript boundary even when its parent is gone.
+        self.side_threads.remove(&side_thread_id);
+        self.agent_navigation.remove(target_thread_id);
+        self.primary_thread_id = self.current_displayed_thread_id();
+        self.primary_session_configured = if let Some(channel) = self
+            .primary_thread_id
+            .and_then(|thread_id| self.thread_event_channels.get(&thread_id))
+        {
+            channel.store.lock().await.session.clone()
+        } else {
+            None
+        };
+        self.sync_active_agent_label();
+        self.chat_widget.add_error_message(format!(
+            "Parallel navigation was closed because thread {target_thread_id} no longer exists. The current conversation remains open."
+        ));
+        Ok(false)
+    }
+
+    #[tracing::instrument(skip_all)]
     pub(super) async fn close_parallel_conversation(
         &mut self,
         tui: &mut tui::Tui,
@@ -61,6 +121,23 @@ impl App {
         parent_thread_id: ThreadId,
         side_thread_id: ThreadId,
     ) -> bool {
+        match self
+            .parallel_navigation_target_available(
+                app_server,
+                parent_thread_id,
+                side_thread_id,
+                parent_thread_id,
+            )
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => return false,
+            Err(error) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to return to parent: {error}"));
+                return true;
+            }
+        }
         if let Err(error) = self.interrupt_side_thread(app_server, side_thread_id).await {
             self.chat_widget.add_error_message(error);
             return true;
