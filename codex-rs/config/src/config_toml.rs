@@ -271,6 +271,11 @@ pub struct ConfigToml {
     /// Disabling it preserves model and reasoning-effort arguments.
     pub include_model_catalog_instructions: Option<bool>,
 
+    /// Include the Copyright compliance subsection in the local `web.run` description.
+    /// Defaults to true.
+    /// Other quotation and word limits remain unchanged.
+    pub include_web_search_copyright_compliance: Option<bool>,
+
     /// Whether to inject the `<environment_context>` user block.
     pub include_environment_context: Option<bool>,
 
