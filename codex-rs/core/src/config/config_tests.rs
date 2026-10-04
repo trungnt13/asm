@@ -12008,6 +12008,7 @@ async fn prompt_instruction_blocks_can_be_disabled_from_config() -> std::io::Res
         .build()
         .await?;
     assert!(defaults.include_model_catalog_instructions);
+    assert!(defaults.include_web_search_copyright_compliance);
 
     std::fs::write(
         codex_home.path().join(CONFIG_TOML_FILE),
@@ -12015,6 +12016,7 @@ async fn prompt_instruction_blocks_can_be_disabled_from_config() -> std::io::Res
 include_apps_instructions = false
 include_collaboration_mode_instructions = false
 include_model_catalog_instructions = false
+include_web_search_copyright_compliance = false
 include_environment_context = false
 include_environment_context_time = false
 
@@ -12033,9 +12035,21 @@ include_instructions = false
     assert!(!config.include_apps_instructions);
     assert!(!config.include_collaboration_mode_instructions);
     assert!(!config.include_model_catalog_instructions);
+    assert!(!config.include_web_search_copyright_compliance);
     assert!(!config.include_skill_instructions);
     assert!(!config.include_environment_context);
     assert!(!config.include_environment_context_time);
+
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        "include_web_search_copyright_compliance = true",
+    )?;
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .fallback_cwd(Some(codex_home.path().to_path_buf()))
+        .build()
+        .await?;
+    assert!(config.include_web_search_copyright_compliance);
     Ok(())
 }
 
