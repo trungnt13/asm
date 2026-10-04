@@ -279,6 +279,7 @@ async fn new_config(
         include_apps_instructions: false,
         include_collaboration_mode_instructions: false,
         include_model_catalog_instructions: true,
+        include_web_search_copyright_compliance: true,
         include_skill_instructions: false,
         skill_max_context_tokens: None,
         cloud_skill_enabled: false,
