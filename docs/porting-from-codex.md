@@ -97,7 +97,7 @@ Leave other inherited workflows unchanged unless the task authorizes changes. Ch
 1. Require an explicit release request. Select the repository explicitly, for example with `gh ... -R trungnt13/asm`. Before pushing source to `origin/main`, verify the V8 prerequisite below. Release the intended commit from `origin/main`, not unpushed local work. Candidates build or reuse their own archives; do not wait for postmerge builds.
 2. Dispatch [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. The workflow owns version selection, candidate creation, builds, publication, verification, and remote `main` updates. Do not repeat these steps manually. Ordinary branch dispatch is build-only. A `main` push does not request publication.
 3. After interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Keep the original version and commit even if upstream advances. Report failures that need owner decisions. Do not invent versions or replace tags.
-4. Verify `release`, both `verify_native` jobs, and `sync_main` succeeded for that candidate. Legacy `v*` tag pushes and dispatches can publish. Require publication and both native checks. Skip `sync_main` for legacy releases. Inspect that run's recorded checks and current release metadata. Do not repeat successful checks on unchanged artifacts. A green build-only run, pushed tag, or version label does not prove publication.
+4. A platform is available as soon as its checked archive and platform checksum manifest are published. The whole release is complete only when `release`, both `verify_native` jobs, and `sync_main` succeeded for that candidate. Legacy `v*` tag pushes and dispatches can publish. Require publication and both native checks. Skip `sync_main` for legacy releases. Inspect that run's recorded checks and current release metadata. Do not repeat successful checks on unchanged artifacts. A green build-only run, pushed tag, or version label does not prove publication.
 5. Fetch the result. Fast-forward local `main` only when safe. Preserve local edits and concurrent commits. Report the released commit, upstream baseline, checks, and remote/local integration status, including blocked updates.
 
 ### Workflow requirements
@@ -114,16 +114,18 @@ These requirements govern release code, not a second manual release procedure.
 
 Keep the fork release workflow separate from upstream. Use GitHub-hosted runners:
 
-| Platform | Target | Runner | Timeout |
+| Platform | Target | Runner | Build timeout |
 | --- | --- | --- | --- |
 | macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 180 minutes |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 90 minutes |
 
+Legacy artifact lookup has a 190-minute step limit. Its wait guard is 150 minutes for macOS and 185 minutes for Linux. A timeout fails rather than starting a duplicate build. Only legacy tag jobs allow 360 minutes total for lookup, build, and checks. Candidate jobs allow the build limit plus 15 minutes for publication; the actual build keeps the limits above. Fresh candidates do not wait for postmerge builds.
+
 Ubuntu 22.04 / glibc 2.35 is the Linux minimum. Keep Linux builds and native smoke jobs on that baseline. Changing only the target triple on a newer runner is insufficient. Before runner retirement in April 2027, move this environment into an Ubuntu 22.04 container on a supported runner. Do not raise the runtime minimum.
 
 - Use optimized `--release`, never `dev-small`. Set `CARGO_PROFILE_RELEASE_STRIP=debuginfo`. Retain function symbols and optimization settings. Fix pipeline timeouts without weakening the profile. Upstream tests do not justify more symbol or dependency removal.
-- Build `codex` and `codex-code-mode-host` from one commit, target, and profile. Each `codex-<target>.tar.gz` must contain exactly these two regular executable siblings. Publish both archives, `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh), not source trees or diagnostics.
-- Pin builds, packaging, installer bytes, and verification to the immutable candidate commit SHA, including archive reuse. For legacy releases, use the exact tagged commit SHA. Verify the release tag resolves to that commit. Candidate packaging can precede tag creation.
+- Build `codex` and `codex-code-mode-host` from one commit, target, and profile. Each `codex-<target>.tar.gz` must contain exactly these two regular executable siblings. The completed release has six assets: both archives, `SHA256SUMS-<target>` for each target, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Do not publish source trees or diagnostics. Each platform manifest covers its archive and the pinned installer.
+- Pin builds, packaging, installer bytes, payload checks, and archive reuse to the immutable candidate commit SHA. Pin orchestration scripts to the dispatch SHA; preserve those bytes before checking out the candidate. Never fetch newer controls mid-run. For legacy releases, use the exact tagged commit SHA. Verify the release tag resolves to that commit. Candidate packaging can precede tag creation.
 - Before upload, run [native package smoke checks](../.github/scripts/smoke-codex-archive.py). CLI `--version` must match Cargo. Both `--help` commands must succeed with usage. Do not require helper `--version`. Record binary and archive sizes.
 - For GNU Linux, verify both ELF executables use the x86_64 GNU loader and no glibc symbols newer than 2.35. Run version/help checks in a clean Ubuntu 22.04 container with only declared runtime libraries. The build runner alone does not prove compatibility.
 
@@ -151,17 +153,19 @@ Build V8 separately only when its crate version, target, or baseline lacks a ver
 
 Serialize release runs. The workflow must finish without later chat actions or workflows triggered by token-created pushes. Legacy tags must already have the correct Cargo version.
 
-Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) for both unexpired, smoke-checked archives from the current dispatch or original candidate run. Legacy tags can reuse successful same-repository push-to-`main` archives at the exact tagged commit SHA. Wait for a matching active run instead of concurrent builds. Fail if the wait expires. Build only without usable archives. Treat API errors as failures, not cache misses.
+Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target for unexpired, smoke-checked archives from the current dispatch or original candidate run. Do not wait for the other platform or rebuild a published, ready platform. Legacy tags can reuse successful target jobs from same-repository push-to-`main` archives at the exact tagged commit SHA. Wait for a matching active run instead of concurrent builds. Fail if the wait expires. Build only without usable archives. Treat API errors as failures, not cache misses.
 
-1. Upload all four assets to a draft. Resume partial uploads only when existing names, sizes, and digests agree. Never replace assets.
-2. Before publication, verify tag commit, GitHub digests, manifest, installer bytes, and both downloaded archives.
-3. Publish normal and Latest, including `alpha` versions. Repeat metadata and native binary smoke checks on both platforms.
-4. Only after verification, merge the candidate into `origin/main`. Preserve concurrent changes. Stop on version conflicts; do not force-push.
-5. If already published, verify the existing release and finish the `origin/main` update. Do not rebuild or republish.
+1. Create the pinned tag, draft release, and common installer once. Never move the tag, replace assets, or change the candidate. Resume existing uploads only when names, sizes, and digests agree.
+2. Each platform builds or reuses its own archive, passes native package checks, and uploads it independently. Verify the uploaded archive and installer against GitHub digests, then smoke the downloaded archive. Upload `SHA256SUMS-<target>` last; it is the readiness marker.
+3. Publish a normal, non-draft release when the first platform is ready, including `alpha` versions. Keep it **not Latest** while incomplete. Append the other platform's checked assets to the same release. Published payloads are immutable by fork policy; GitHub's immutable-release feature must not be enabled for this append-only flow. Never change that repository setting automatically.
+4. After both platforms are verified, append the aggregate manifest for old installers, verify all six assets, and mark the release Latest. Keep both final native checks. Only then merge the candidate into `origin/main`; preserve concurrent changes and stop on version conflicts. Do not force-push.
+5. On resume, verify ready platforms and finish only missing work. If an archive was uploaded before its readiness marker, recover and verify those exact release bytes rather than rebuild, even if Actions artifacts expired. A partial public release is not complete. Completed legacy four-asset releases remain valid; candidates whose pinned installer lacks platform manifests keep the old all-platform publication flow.
+
+Deploy platform-aware `tngo-workflow/setup.py` selection before the first partial release. It selects the highest published version ready for the host; macOS must not select a Linux-only release. The installer itself keeps default Latest selection; explicit `--release` can install a ready platform before completion. Existing in-flight runs keep their frozen publication policy.
 
 Preserve these build constraints:
 
-- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64 and Linux x86_64 GNU. Verify GitHub SHA-256 digests and `SHA256SUMS` before installing the two-binary archive.
+- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64 and Linux x86_64 GNU. Verify GitHub SHA-256 digests and the host `SHA256SUMS-<target>` before installing the two-binary archive. Use legacy `SHA256SUMS` only when the host manifest is absent, never after an invalid digest or manifest.
 - Reject unsupported targets and Linux without glibc 2.35+ before metadata downloads or install-state changes. Select only GNU Linux archives, without MUSL fallback. Historical MUSL-only releases require their original installer. GNU updates use separate target-qualified package directories. Preserve old MUSL packages and shared config/state.
 - Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, install locking, and safe `current` selection. Store packages under `packages/asm-standalone`. Leave upstream packages and update markers unchanged. Keep the shared Codex config/state home and `codex` command.
 - Only the owner installs updates externally. Do not fetch OpenAI/CDN or legacy npm packages. Do not support daemon-only installation. Do not write `auto-update-version`. Disable built-in update checks, prompts, commands, and daemon update loops regardless of upstream settings or markers. Neither CLI nor daemon can download or install upstream releases. Preserve ordinary daemon startup/restart independently of updates.
