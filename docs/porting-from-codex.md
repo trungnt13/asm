@@ -172,6 +172,10 @@ Optional `macos_concurrency_experiment` compares cold builds of one commit on `m
 
 ## Intentional behavior differences
 
+### Account-security setup reminder
+
+Do not fetch or display the optional Daybreak account-security setup reminder in ASM, including after reconnect or account refresh. Suppress loaded reminder events too. Keep authentication, account-security enforcement, approvals, account email, and backend usage banners unchanged. Retain upstream reminder rendering and its checks for easier syncs. Do not weaken security requirements.
+
 ### Standalone request audit
 
 Keep `debug prompt-input` unchanged. `debug prompt-request` exports versioned JSON with effective base instructions and the production request representation, including ordered input, full advertised tool definitions, Responses Lite prefixes, and optional output schema. Reuse the app-server extension installer and request builder; do not add audit work to normal inference paths.
