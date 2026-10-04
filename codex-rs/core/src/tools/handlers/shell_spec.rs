@@ -17,7 +17,6 @@ pub fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec {
     create_exec_command_tool_with_environment_id(
         options,
         /*include_environment_id*/ false,
-        /*include_shell_parameter*/ true,
         /*include_windows_shell_guidance*/ cfg!(windows),
     )
 }
@@ -25,7 +24,6 @@ pub fn create_exec_command_tool(options: CommandToolOptions) -> ToolSpec {
 pub(crate) fn create_exec_command_tool_with_environment_id(
     options: CommandToolOptions,
     include_environment_id: bool,
-    include_shell_parameter: bool,
     include_windows_shell_guidance: bool,
 ) -> ToolSpec {
     let yield_time_ms_description = if cfg!(windows) {
