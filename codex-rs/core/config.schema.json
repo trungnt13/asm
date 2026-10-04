@@ -7612,7 +7612,7 @@
       "description": "Whether to inject the `<environment_context>` user block.",
       "type": "boolean"
     },
-    "include_model_catalog_instructions": {
+    "include_model_catalog_in_spawn_agent_list": {
       "description": "Include the generated spawn-model catalog in tool descriptions or context. Defaults to true. Disabling it preserves model and reasoning-effort arguments.",
       "type": "boolean"
     },

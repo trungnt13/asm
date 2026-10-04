@@ -269,7 +269,7 @@ pub struct ConfigToml {
     /// Include the generated spawn-model catalog in tool descriptions or context.
     /// Defaults to true.
     /// Disabling it preserves model and reasoning-effort arguments.
-    pub include_model_catalog_instructions: Option<bool>,
+    pub include_model_catalog_in_spawn_agent_list: Option<bool>,
 
     /// Include the Copyright compliance subsection in the local `web.run` description.
     /// Defaults to true.
