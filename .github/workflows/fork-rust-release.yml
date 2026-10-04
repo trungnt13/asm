@@ -36,7 +36,8 @@ jobs:
       tag: ${{ steps.candidate.outputs.tag }}
       candidate_ref: ${{ steps.candidate.outputs.candidate_ref }}
       publish: ${{ steps.candidate.outputs.publish }}
-      published: ${{ steps.candidate.outputs.published }}
+      complete: ${{ steps.candidate.outputs.complete }}
+      staged: ${{ steps.candidate.outputs.staged }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -55,15 +56,23 @@ jobs:
           fi
           python3 .github/scripts/prepare-fork-release.py prepare
           cat "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Initialize draft and pinned installer once
+        if: ${{ steps.candidate.outputs.staged == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.candidate.outputs.tag }}
+          RELEASE_SHA: ${{ steps.candidate.outputs.sha }}
+        run: python3 .github/scripts/publish-fork-release.py initialize
 
   build:
-    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.published != 'true' && (needs.find_postmerge.result == 'skipped' || (needs.find_postmerge.result == 'success' && needs.find_postmerge.outputs.reuse != 'true')) }}
-    needs: [prepare, find_postmerge]
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.complete != 'true' }}
+    needs: prepare
     name: Build ${{ matrix.target }} (jobs ${{ matrix.jobs }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: ${{ needs.prepare.outputs.publish == 'true' && (needs.prepare.outputs.candidate_ref == '' && 360 || matrix.publish_timeout) || matrix.timeout }}
     permissions:
-      contents: read
+      actions: read
+      contents: write
     defaults:
       run:
         working-directory: codex-rs
@@ -74,28 +83,64 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","timeout":180,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","timeout":180,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","timeout":180,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-22.04","timeout":90,"target":"x86_64-unknown-linux-gnu","jobs":0}]') }}
+        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-22.04","timeout":90,"publish_timeout":105,"target":"x86_64-unknown-linux-gnu","jobs":0}]') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+          ref: ${{ github.sha }}
+      - name: Save dispatch-pinned release controls
+        working-directory: .
+        run: cp .github/scripts/{publish-fork-release.py,find-postmerge-artifacts.sh} "$RUNNER_TEMP/"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          targets: ${{ matrix.target }}
-
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
-        name: Install Python for artifact verification
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 2
+      - name: Install Python for artifact verification
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.11'
+      - name: Inspect or recover this platform's publication
+        id: platform
+        if: ${{ needs.prepare.outputs.staged == 'true' }}
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          TARGET: ${{ matrix.target }}
+        run: python3 "$RUNNER_TEMP/publish-fork-release.py" restore-target
+      - name: Find this platform's exact-candidate archive
+        timeout-minutes: 190
+        id: find
+        if: ${{ needs.prepare.outputs.publish == 'true' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' }}
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: ${{ needs.prepare.outputs.candidate_ref }}
+          TARGET: ${{ matrix.target }}
+        run: bash "$RUNNER_TEMP/find-postmerge-artifacts.sh"
+      - name: Reuse this platform's archive
+        if: ${{ steps.find.outputs.reuse == 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codex-${{ matrix.target }}
+          path: dist
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.find.outputs.run_id }}
+          github-token: ${{ github.token }}
 
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+      - if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
+        uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - if: ${{ contains(matrix.target, 'linux-gnu') && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         name: Install GNU build tools
         run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-gnu-build-tools.sh"
 
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+      - if: ${{ contains(matrix.target, 'linux-gnu') && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         name: Disable aws-lc jitter entropy
         shell: bash
         run: |
@@ -106,12 +151,15 @@ jobs:
           echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
 
       - name: Configure rusty_v8 artifacts
+        if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
           repository: trungnt13/asm
 
       - name: Build ASM with resource sampling
+        timeout-minutes: ${{ matrix.timeout }}
+        if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
@@ -148,6 +196,7 @@ jobs:
           cargo build "${build_args[@]}"
 
       - name: Create archive
+        if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -163,14 +212,16 @@ jobs:
           tar -C "$release_dir" -czf "$archive" codex codex-code-mode-host
 
       - name: Smoke packaged ASM
+        if: ${{ steps.platform.outputs.uploaded != 'true' }}
         env:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/diagnostics"
           python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-${TARGET}.log"
 
       - name: Smoke packaged ASM on clean Ubuntu 22.04
-        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        if: ${{ contains(matrix.target, 'linux-gnu') && steps.platform.outputs.uploaded != 'true' }}
         env:
           TARGET: ${{ matrix.target }}
         run: |
@@ -179,11 +230,22 @@ jobs:
           bash "${GITHUB_WORKSPACE}/.github/scripts/smoke-ubuntu-archive.sh" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" "$version" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-ubuntu-${TARGET}.log"
 
       - name: Upload archive
+        if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && (steps.find.outputs.reuse != 'true' || steps.find.outputs.run_id != github.run_id) }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: ${{ matrix.jobs == 0 && format('codex-{0}', matrix.target) || format('experiment-codex-{0}-jobs-{1}', matrix.target, matrix.jobs) }}
           path: dist/codex-${{ matrix.target }}.tar.gz
           if-no-files-found: error
+
+      - name: Publish this verified platform immediately
+        if: ${{ needs.prepare.outputs.staged == 'true' }}
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+          TARGET: ${{ matrix.target }}
+        run: python3 "$RUNNER_TEMP/publish-fork-release.py" publish-target
 
       - name: Upload build diagnostics
         if: ${{ always() }}
@@ -197,35 +259,10 @@ jobs:
             codex-rs/target/cargo-timings/cargo-timing*.html
           if-no-files-found: warn
 
-  find_postmerge:
-    name: Find verified candidate archives
-    needs: prepare
-    if: ${{ needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.published != 'true' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 190
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      reuse: ${{ steps.find.outputs.reuse }}
-      run_id: ${{ steps.find.outputs.run_id }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 2
-      - name: Find exact-candidate archives
-        id: find
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANDIDATE_REF: ${{ needs.prepare.outputs.candidate_ref }}
-        run: bash .github/scripts/find-postmerge-artifacts.sh
-
   release:
-    name: Publish and verify immutable release
-    needs: [prepare, find_postmerge, build]
-    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.publish == 'true' && (needs.prepare.outputs.published == 'true' || (needs.find_postmerge.result == 'success' && (needs.find_postmerge.outputs.reuse == 'true' || needs.build.result == 'success'))) }}
+    name: Complete and verify immutable release
+    needs: [prepare, build]
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.publish == 'true' && (needs.prepare.outputs.complete == 'true' || needs.build.result == 'success') }}
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -235,29 +272,35 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Save dispatch-pinned publisher
+        run: cp .github/scripts/publish-fork-release.py "$RUNNER_TEMP/"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
           ref: ${{ needs.prepare.outputs.sha }}
       - name: Download macOS archive
-        if: ${{ needs.prepare.outputs.published != 'true' }}
+        if: ${{ needs.prepare.outputs.staged != 'true' && needs.prepare.outputs.complete != 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codex-aarch64-apple-darwin
           path: dist
           repository: ${{ github.repository }}
-          run-id: ${{ needs.find_postmerge.outputs.reuse == 'true' && needs.find_postmerge.outputs.run_id || github.run_id }}
+          run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
 
       - name: Download Linux archive
-        if: ${{ needs.prepare.outputs.published != 'true' }}
+        if: ${{ needs.prepare.outputs.staged != 'true' && needs.prepare.outputs.complete != 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: codex-x86_64-unknown-linux-gnu
           path: dist
           repository: ${{ github.repository }}
-          run-id: ${{ needs.find_postmerge.outputs.reuse == 'true' && needs.find_postmerge.outputs.run_id || github.run_id }}
+          run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
 
       - name: Create checksum manifest
-        if: ${{ needs.prepare.outputs.published != 'true' }}
+        if: ${{ needs.prepare.outputs.staged != 'true' && needs.prepare.outputs.complete != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -272,12 +315,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
-          ALREADY_PUBLISHED: ${{ needs.prepare.outputs.published }}
+          ALREADY_COMPLETE: ${{ needs.prepare.outputs.complete }}
+          STAGED: ${{ needs.prepare.outputs.staged }}
         run: |
-          if [[ "$ALREADY_PUBLISHED" == true ]]; then
-            python3 .github/scripts/publish-fork-release.py verify
+          if [[ "$STAGED" == true ]]; then
+            python3 "$RUNNER_TEMP/publish-fork-release.py" finalize
+          elif [[ "$ALREADY_COMPLETE" == true ]]; then
+            python3 "$RUNNER_TEMP/publish-fork-release.py" verify
           else
-            python3 .github/scripts/publish-fork-release.py publish
+            python3 "$RUNNER_TEMP/publish-fork-release.py" publish
           fi
 
   verify_native:
