@@ -908,6 +908,9 @@ pub struct Config {
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     pub mcp_servers: Constrained<HashMap<String, McpServerConfig>>,
 
+    /// Enable built-in MCP resource helpers without changing server connections.
+    pub mcp_resource_tools_enabled: bool,
+
     /// Trusted IdP shared by all permitted EMA MCP registrations.
     pub mcp_enterprise_managed_auth: Option<McpEnterpriseManagedAuthConfig>,
 
@@ -4428,6 +4431,7 @@ impl Config {
                 ),
             },
             mcp_servers,
+            mcp_resource_tools_enabled: cfg.mcp_resource_tools_enabled.unwrap_or(true),
             non_prefixed_mcp_tool_servers,
             mcp_enterprise_managed_auth,
             // The config.toml omits "_mode" because it's a config file. However, "_mode"
