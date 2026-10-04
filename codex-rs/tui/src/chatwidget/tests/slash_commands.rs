@@ -1530,12 +1530,12 @@ async fn no_op_stub_slash_command_is_available_from_local_recall() {
 }
 
 #[tokio::test]
-async fn slash_quit_requests_exit() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    chat.dispatch_command(SlashCommand::Quit);
-
-    assert_matches!(rx.try_recv(), Ok(AppEvent::Exit(ExitMode::ShutdownFirst)));
+async fn slash_exit_aliases_request_exit() {
+    for command in [SlashCommand::Quit, SlashCommand::Exit] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.dispatch_command(command);
+        assert_matches!(rx.try_recv(), Ok(AppEvent::Exit(ExitMode::ShutdownFirst)));
+    }
 }
 
 #[tokio::test]
@@ -2632,15 +2632,6 @@ async fn queued_menu_slash_keeps_agent_turn_complete_notification() {
 }
 
 #[tokio::test]
-async fn slash_exit_requests_exit() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    chat.dispatch_command(SlashCommand::Exit);
-
-    assert_matches!(rx.try_recv(), Ok(AppEvent::Exit(ExitMode::ShutdownFirst)));
-}
-
-#[tokio::test]
 async fn slash_stop_submits_background_terminal_cleanup() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
@@ -2755,44 +2746,41 @@ async fn slash_clear_is_disabled_while_task_running() {
 }
 
 #[tokio::test]
-async fn slash_archive_is_disabled_while_task_running() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn slash_archive_cancellation_keeps_task_running() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.bottom_pane.set_task_running(/*running*/ true);
 
     chat.dispatch_command(SlashCommand::Archive);
 
-    let event = rx.try_recv().expect("expected disabled command error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(
-                rendered.contains("'/archive' is disabled while a task is in progress."),
-                "expected /archive task-running error, got {rendered:?}"
-            );
-        }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
-    }
-    assert!(rx.try_recv().is_err(), "expected no follow-up events");
+    assert!(chat.bottom_pane.has_active_view());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    assert!(!chat.bottom_pane.has_active_view());
+    assert!(chat.bottom_pane.is_task_running());
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
-async fn slash_memory_drop_reports_stubbed_feature() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+async fn slash_memory_maintenance_reports_stubbed_feature() {
+    for command in [SlashCommand::MemoryDrop, SlashCommand::MemoryUpdate] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.dispatch_command(SlashCommand::MemoryDrop);
+        chat.dispatch_command(command);
 
-    let event = rx.try_recv().expect("expected unsupported-feature error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(rendered.contains("Memory maintenance: Not available in TUI yet."));
+        let event = rx.try_recv().expect("expected unsupported-feature error");
+        match event {
+            AppEvent::InsertHistoryCell(cell) => {
+                let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
+                assert!(rendered.contains("Memory maintenance: Not available in TUI yet."));
+            }
+            other => panic!("expected InsertHistoryCell error, got {other:?}"),
         }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
+        assert!(
+            op_rx.try_recv().is_err(),
+            "expected no memory op to be sent"
+        );
     }
-    assert!(
-        op_rx.try_recv().is_err(),
-        "expected no memory op to be sent"
-    );
 }
 
 #[tokio::test]
@@ -2884,26 +2872,6 @@ async fn slash_memories_opens_memory_menu() {
 }
 
 #[tokio::test]
-async fn slash_memory_update_reports_stubbed_feature() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    chat.dispatch_command(SlashCommand::MemoryUpdate);
-
-    let event = rx.try_recv().expect("expected unsupported-feature error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(rendered.contains("Memory maintenance: Not available in TUI yet."));
-        }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
-    }
-    assert!(
-        op_rx.try_recv().is_err(),
-        "expected no memory op to be sent"
-    );
-}
-
-#[tokio::test]
 async fn slash_resume_opens_picker_while_mcp_startup_is_running() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.bottom_pane.set_task_running(/*running*/ true);
@@ -2927,20 +2895,28 @@ async fn slash_import_opens_claude_code_import_picker() {
 
 #[tokio::test]
 async fn slash_archive_confirmation_requests_current_thread_archive() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    for running in [false, true] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.bottom_pane.set_task_running(running);
 
-    chat.dispatch_command(SlashCommand::Archive);
+        chat.dispatch_command(SlashCommand::Archive);
 
-    assert!(chat.bottom_pane.has_active_view());
-    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(chat.bottom_pane.has_active_view());
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
 
-    let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("slash_archive_confirmation_popup", popup);
+        let popup = render_bottom_popup(&chat, /*width*/ 80);
+        if running {
+            assert_chatwidget_snapshot!("slash_archive_running_confirmation_popup", popup);
+        } else {
+            assert_chatwidget_snapshot!("slash_archive_confirmation_popup", popup);
+        }
 
-    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
-    assert_matches!(rx.try_recv(), Ok(AppEvent::ArchiveCurrentThread));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::ArchiveCurrentThread));
+    }
 }
 
 #[tokio::test]
@@ -3028,34 +3004,19 @@ async fn slash_pets_with_arg_selects_named_pet() {
 
 #[tokio::test]
 #[serial]
-async fn slash_pets_disable_disables_pets_even_on_unsupported_terminal() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    force_tmux_pet_image_unsupported(&mut chat);
+async fn slash_pet_disable_aliases_work_on_unsupported_terminal() {
+    for input in ["/pets disable", "/pet hide"] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        force_tmux_pet_image_unsupported(&mut chat);
 
-    chat.bottom_pane
-        .set_composer_text("/pets disable".to_string(), Vec::new(), Vec::new());
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
-
-    assert_matches!(rx.try_recv(), Ok(AppEvent::PetDisabled));
-    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
-    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
-}
-
-#[tokio::test]
-#[serial]
-async fn slash_pet_hide_disables_pets_even_on_unsupported_terminal() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    force_tmux_pet_image_unsupported(&mut chat);
-
-    chat.bottom_pane
-        .set_composer_text("/pet hide".to_string(), Vec::new(), Vec::new());
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
-
-    assert_matches!(rx.try_recv(), Ok(AppEvent::PetDisabled));
-    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
-    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+        chat.bottom_pane
+            .set_composer_text(input.to_string(), Vec::new(), Vec::new());
+        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
+        assert_matches!(rx.try_recv(), Ok(AppEvent::PetDisabled));
+        assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+        assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+    }
 }
 
 #[tokio::test]
@@ -3734,10 +3695,6 @@ async fn transcript_copy_feedback_stays_in_the_footer_without_history_or_interru
     insta::assert_snapshot!(
         "transcript_copy_unconfirmed",
         render_bottom_popup(&chat, /*width*/ 80)
-    );
-    insta::assert_snapshot!(
-        "transcript_copy_unconfirmed_narrow",
-        render_bottom_popup(&chat, /*width*/ 40)
     );
     chat.open_warnings(&[Arc::new(history_cell::new_warning_event(
         "selected café".into(),

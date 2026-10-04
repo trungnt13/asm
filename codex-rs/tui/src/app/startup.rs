@@ -829,6 +829,8 @@ See the Codex keymap documentation for supported actions and examples."
         #[cfg(not(debug_assertions))]
         let upgrade_version = crate::updates::get_upgrade_version(&config);
 
+        let agents_overview =
+            agents_overview::AgentsOverviewState::new(local_settings.tui.agents_overview_grouping);
         let mut app = Self {
             feature_write_lock: Arc::default(),
             model_catalog,
@@ -905,7 +907,7 @@ See the Codex keymap documentation for supported actions and examples."
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
             turn_agent_counts: Default::default(),
-            agents_overview: Default::default(),
+            agents_overview,
             side_threads: HashMap::new(),
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
