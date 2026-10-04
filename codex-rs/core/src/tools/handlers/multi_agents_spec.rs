@@ -31,7 +31,7 @@ pub struct SpawnAgentToolOptions {
     pub hide_agent_type_model_reasoning: bool,
     pub expose_spawn_agent_model_overrides: bool,
     pub multi_agent_version: MultiAgentVersion,
-    pub include_model_catalog_instructions: bool,
+    pub include_model_catalog_in_spawn_agent_list: bool,
     pub model_catalog_in_context: bool,
     pub usage_hint_text: Option<String>,
 }
@@ -45,7 +45,7 @@ impl Default for SpawnAgentToolOptions {
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: false,
             multi_agent_version: MultiAgentVersion::Disabled,
-            include_model_catalog_instructions: true,
+            include_model_catalog_in_spawn_agent_list: true,
             model_catalog_in_context: false,
             usage_hint_text: None,
         }
@@ -70,7 +70,7 @@ impl Default for WaitAgentTimeoutOptions {
 }
 
 pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
-    let available_models_description = (options.include_model_catalog_instructions
+    let available_models_description = (options.include_model_catalog_in_spawn_agent_list
         && !options.model_catalog_in_context
         && !options.hide_agent_type_model_reasoning)
         .then(|| {
@@ -95,7 +95,8 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
             name: "spawn_agent".to_string(),
             description: spawn_agent_tool_description(
                 available_models_description.as_deref(),
-                options.include_model_catalog_instructions && options.model_catalog_in_context,
+                options.include_model_catalog_in_spawn_agent_list
+                    && options.model_catalog_in_context,
                 inherited_model_guidance,
                 return_value_description,
                 options.usage_hint_text,
@@ -112,7 +113,7 @@ pub fn create_spawn_agent_tool_v2(
     options: SpawnAgentToolOptions,
     description_override: Option<&str>,
 ) -> ToolSpec {
-    let available_models_description = (options.include_model_catalog_instructions
+    let available_models_description = (options.include_model_catalog_in_spawn_agent_list
         && !options.model_catalog_in_context
         && options.expose_spawn_agent_model_overrides)
         .then(|| {
@@ -146,7 +147,7 @@ pub fn create_spawn_agent_tool_v2(
         name: "spawn_agent".to_string(),
         description: spawn_agent_tool_description_v2(
             available_models_description.as_deref(),
-            options.include_model_catalog_instructions && options.model_catalog_in_context,
+            options.include_model_catalog_in_spawn_agent_list && options.model_catalog_in_context,
             options
                 .expose_spawn_agent_model_overrides
                 .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
