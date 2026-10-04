@@ -7186,15 +7186,25 @@ pane = { selected = "console", expanded = false }
     Ok(())
 }
 
+#[test_case::test_case("", true; "resource_helpers_default")]
+#[test_case::test_case("mcp_resource_tools_enabled = true", true; "resource_helpers_enabled")]
+#[test_case::test_case("mcp_resource_tools_enabled = false", false; "resource_helpers_disabled")]
 #[tokio::test]
-async fn to_mcp_config_preserves_apps_feature_from_config() -> std::io::Result<()> {
+async fn to_mcp_config_preserves_apps_feature_from_config(
+    config_contents: &str,
+    expected_resource_tools_enabled: bool,
+) -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let mut config = Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
+        toml::from_str::<ConfigToml>(config_contents).expect("valid MCP resource tools config"),
         ConfigOverrides::default(),
         codex_home.abs(),
     )
     .await?;
+    assert_eq!(
+        config.mcp_resource_tools_enabled,
+        expected_resource_tools_enabled
+    );
     let plugins_manager =
         plugins_manager_for_config(&config, auth_manager_from_optional_auth(/*auth*/ None));
 
