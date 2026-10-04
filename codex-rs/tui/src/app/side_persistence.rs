@@ -15,8 +15,9 @@ impl App {
         let pair = match store.pair(thread_id) {
             Ok(pair) => pair,
             Err(error) => {
-                self.chat_widget
-                    .add_error_message(format!("Could not restore side navigation: {error}"));
+                self.chat_widget.add_error_message(format!(
+                    "Could not restore parallel navigation: {error}. Opening this session as an ordinary chat; inherited history may be visible."
+                ));
                 return;
             }
         };
