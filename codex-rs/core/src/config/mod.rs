@@ -742,6 +742,9 @@ pub struct Config {
     /// Include the generated spawn-model catalog without changing tool arguments.
     pub include_model_catalog_instructions: bool,
 
+    /// Include the Copyright compliance subsection in the local `web.run` description.
+    pub include_web_search_copyright_compliance: bool,
+
     /// Whether to inject the `<skills_instructions>` developer block.
     pub include_skill_instructions: bool,
 
@@ -4415,6 +4418,9 @@ impl Config {
             include_apps_instructions,
             include_collaboration_mode_instructions,
             include_model_catalog_instructions,
+            include_web_search_copyright_compliance: cfg
+                .include_web_search_copyright_compliance
+                .unwrap_or(true),
             include_skill_instructions,
             skill_max_context_tokens,
             cloud_skill_enabled,
