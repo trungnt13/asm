@@ -120,7 +120,6 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
                 exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
             },
             self.options.include_environment_id,
-            self.options.include_shell_parameter,
             self.options.include_windows_shell_guidance,
         );
         let mut spec = match self.lifetime {
