@@ -163,13 +163,13 @@ async fn model_catalog_flag_controls_refresh(
     let enabled = model_catalog_refresh_requests(
         multi_agent_version,
         model_catalog_in_context,
-        /*include_model_catalog_instructions*/ true,
+        /*include_model_catalog_in_spawn_agent_list*/ true,
     )
     .await?;
     let disabled = model_catalog_refresh_requests(
         multi_agent_version,
         model_catalog_in_context,
-        /*include_model_catalog_instructions*/ false,
+        /*include_model_catalog_in_spawn_agent_list*/ false,
     )
     .await?;
     let namespace = match multi_agent_version {
@@ -198,7 +198,7 @@ async fn model_catalog_flag_controls_refresh(
 pub(super) async fn model_catalog_refresh_requests(
     multi_agent_version: MultiAgentVersion,
     model_catalog_in_context: bool,
-    include_model_catalog_instructions: bool,
+    include_model_catalog_in_spawn_agent_list: bool,
 ) -> Result<Vec<ResponsesRequest>> {
     let server = start_mock_server().await;
     mount_models_once(
@@ -275,7 +275,8 @@ pub(super) async fn model_catalog_refresh_requests(
                     .expect("enable context catalogs");
             }
             config.multi_agent_v2.hide_spawn_agent_metadata = false;
-            config.include_model_catalog_instructions = include_model_catalog_instructions;
+            config.include_model_catalog_in_spawn_agent_list =
+                include_model_catalog_in_spawn_agent_list;
             config.base_instructions = Some("Test model instructions.".to_string());
             config.include_environment_context = false;
         });
@@ -302,20 +303,20 @@ pub(super) async fn model_catalog_refresh_requests(
 
     assert_eq!(
         listing.contains("- `visible-model`: Fast and capable"),
-        include_model_catalog_instructions,
+        include_model_catalog_in_spawn_agent_list,
         "expected visible model summary in model catalog: {catalog:?}"
     );
     assert_eq!(
         description.contains("Pick model overrides from the latest <model_catalog> listing."),
-        model_catalog_in_context && include_model_catalog_instructions
+        model_catalog_in_context && include_model_catalog_in_spawn_agent_list
     );
     assert_eq!(
         catalog.contains("<model_catalog>"),
-        model_catalog_in_context && include_model_catalog_instructions
+        model_catalog_in_context && include_model_catalog_in_spawn_agent_list
     );
     assert_eq!(
         description.contains("- `visible-model`: Fast and capable"),
-        !model_catalog_in_context && include_model_catalog_instructions
+        !model_catalog_in_context && include_model_catalog_in_spawn_agent_list
     );
     let expected_inherited_model_guidance = if multi_agent_version == MultiAgentVersion::V2
         && model_catalog_in_context
@@ -337,12 +338,12 @@ pub(super) async fn model_catalog_refresh_requests(
     );
     assert_eq!(
         listing.contains("Reasoning efforts: low, medium (default), high."),
-        include_model_catalog_instructions,
+        include_model_catalog_in_spawn_agent_list,
         "expected default reasoning effort in model catalog: {catalog:?}"
     );
     assert_eq!(
         listing.contains("Service tiers: priority."),
-        include_model_catalog_instructions,
+        include_model_catalog_in_spawn_agent_list,
         "expected service tier guidance in model catalog: {catalog:?}"
     );
     assert!(
@@ -403,7 +404,7 @@ pub(super) async fn model_catalog_refresh_requests(
         let response = mount_sse_once(&server, sse(vec![ev_completed(turn)])).await;
         test.submit_turn(turn).await?;
         let current = response.single_request();
-        if model_catalog_in_context || !include_model_catalog_instructions {
+        if model_catalog_in_context || !include_model_catalog_in_spawn_agent_list {
             assert_eq!(current.body_json()["tools"], body["tools"]);
         } else {
             let expected_tools = serde_json::to_string(&body["tools"])?
@@ -428,7 +429,7 @@ pub(super) async fn model_catalog_refresh_requests(
         );
         requests.push(current);
     }
-    if model_catalog_in_context && include_model_catalog_instructions {
+    if model_catalog_in_context && include_model_catalog_in_spawn_agent_list {
         let home = test.home.clone();
         let rollout_path = test
             .session_configured
@@ -454,7 +455,7 @@ pub(super) async fn model_catalog_refresh_requests(
                 config.multi_agent_v2 = initial_config.multi_agent_v2;
                 config.base_instructions = initial_config.base_instructions;
                 config.include_environment_context = false;
-                config.include_model_catalog_instructions = false;
+                config.include_model_catalog_in_spawn_agent_list = false;
             })
             .resume(&server, home, rollout_path)
             .await?;
