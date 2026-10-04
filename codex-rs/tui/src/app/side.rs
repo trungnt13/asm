@@ -448,6 +448,18 @@ impl App {
             return Ok(());
         };
 
+        if state.kind == CompanionKind::Parallel
+            && !self
+                .parallel_navigation_target_available(
+                    app_server,
+                    state.parent_thread_id,
+                    side_thread_id,
+                    target_thread_id,
+                )
+                .await?
+        {
+            return Ok(());
+        }
         self.select_agent_thread(tui, app_server, target_thread_id)
             .await?;
         if self.active_thread_id == Some(target_thread_id)

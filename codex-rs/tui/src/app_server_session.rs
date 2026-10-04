@@ -1267,7 +1267,7 @@ impl AppServerSession {
             .await;
         let mut response: ThreadReadResponse = match response {
             Ok(mut response) => {
-                if let Some(side) = self.side_conversation(thread_id)? {
+                if let Some(side) = self.side_conversation(thread_id) {
                     side.trim_turns(&mut response.thread.turns);
                 }
                 return Ok(response.thread);

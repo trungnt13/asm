@@ -14,16 +14,16 @@ impl AppServerSession {
         self
     }
 
-    pub(super) fn side_conversation(
-        &self,
-        thread_id: ThreadId,
-    ) -> Result<Option<SideConversation>> {
-        self.side_conversations
-            .as_ref()
-            .map(|store| store.side(thread_id))
-            .transpose()
-            .map(Option::flatten)
-            .map_err(Into::into)
+    pub(super) fn side_conversation(&self, thread_id: ThreadId) -> Option<SideConversation> {
+        match self.side_conversations.as_ref()?.side(thread_id) {
+            Ok(side) => side,
+            Err(error) => {
+                // Pairing is optional UI state, never a prerequisite for reading server history.
+                // Restoring the pair separately surfaces the metadata error in the chat.
+                tracing::warn!(%thread_id, %error, "could not read parallel navigation metadata; showing ordinary thread history");
+                None
+            }
+        }
     }
 
     #[tracing::instrument(skip_all)]
