@@ -2860,6 +2860,7 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
     // The first request may legally see either Starting or Ready; the wait makes step two ready.
     let first_tools = tool_names(&requests[0].body_json());
     assert!(first_tools.contains(&"wait_for_environment".to_string()));
+    assert!(first_tools.contains(&"exec_command".to_string()));
     let first_user_context = requests[0].message_input_texts("user");
     let first_environment_context = first_user_context
         .iter()
