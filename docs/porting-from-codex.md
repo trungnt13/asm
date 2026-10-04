@@ -71,9 +71,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `447eac3b81183b32c1a09f5fba9617abfacbebe3`.
-- Commit date: 2026-10-03.
-- Subject: Decode Windows Terminal's mapped Shift+Enter sequence (#50720).
+- Last incorporated upstream commit: `afb436df8b70bb5bc57b86d9a3e829968988cd21`.
+- Commit date: 2026-10-04.
+- Subject: Honor server reasoning summary defaults in new TUI threads (#50811).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
