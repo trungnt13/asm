@@ -385,7 +385,9 @@ impl Session {
             spawn_tool.is_some_and(|name| step_context.tool_router.exposes_tool(&name));
         world_state.add_section(
             if model_overrides_available
-                && turn_context.config.include_model_catalog_instructions
+                && turn_context
+                    .config
+                    .include_model_catalog_in_spawn_agent_list
                 && turn_context
                     .config
                     .features

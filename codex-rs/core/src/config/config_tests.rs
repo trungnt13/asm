@@ -12017,7 +12017,7 @@ async fn prompt_instruction_blocks_can_be_disabled_from_config() -> std::io::Res
         .fallback_cwd(Some(codex_home.path().to_path_buf()))
         .build()
         .await?;
-    assert!(defaults.include_model_catalog_instructions);
+    assert!(defaults.include_model_catalog_in_spawn_agent_list);
     assert!(defaults.include_web_search_copyright_compliance);
 
     std::fs::write(
@@ -12025,7 +12025,7 @@ async fn prompt_instruction_blocks_can_be_disabled_from_config() -> std::io::Res
         r#"include_permissions_instructions = false
 include_apps_instructions = false
 include_collaboration_mode_instructions = false
-include_model_catalog_instructions = false
+include_model_catalog_in_spawn_agent_list = false
 include_web_search_copyright_compliance = false
 include_environment_context = false
 include_environment_context_time = false
@@ -12044,7 +12044,7 @@ include_instructions = false
     assert!(!config.include_permissions_instructions);
     assert!(!config.include_apps_instructions);
     assert!(!config.include_collaboration_mode_instructions);
-    assert!(!config.include_model_catalog_instructions);
+    assert!(!config.include_model_catalog_in_spawn_agent_list);
     assert!(!config.include_web_search_copyright_compliance);
     assert!(!config.include_skill_instructions);
     assert!(!config.include_environment_context);

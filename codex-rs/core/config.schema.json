@@ -7711,7 +7711,7 @@
       "description": "Whether environment context includes the current date and timezone.",
       "type": "boolean"
     },
-    "include_model_catalog_instructions": {
+    "include_model_catalog_in_spawn_agent_list": {
       "description": "Include the generated spawn-model catalog in tool descriptions or context. Defaults to true. Disabling it preserves model and reasoning-effort arguments.",
       "type": "boolean"
     },
