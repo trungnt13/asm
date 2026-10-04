@@ -1303,7 +1303,9 @@ impl App {
             }
             AppEvent::SecuritySetupLoaded { request_id, identity, notice } => {
                 tracing::debug!(current = request_id == self.chat_widget.security_setup_request_id, "handling security setup notice");
-                if request_id == self.chat_widget.security_setup_request_id {
+                if crate::security_setup::REMINDERS_ENABLED
+                    && request_id == self.chat_widget.security_setup_request_id
+                {
                     self.chat_widget.show_security_setup(identity, notice);
                 }
             }
