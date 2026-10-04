@@ -73,10 +73,13 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
             .map(|state| state.history_mode),
         Some(ThreadHistoryMode::Legacy),
     );
+    let inherited_turns = server
+        .thread_read(side, /*include_turns*/ true)
+        .await?
+        .turns;
+    assert!(!inherited_turns.is_empty());
     server.save_side_conversation(parent, side).await?;
-    let stored = server
-        .side_conversation(side)?
-        .expect("saved side boundary");
+    let stored = server.side_conversation(side).expect("saved side boundary");
     assert_eq!((stored.parent, stored.side), (parent, side));
     assert!(stored.last_inherited_turn.is_some());
     assert_eq!(
@@ -92,7 +95,7 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
     let resumed = server
         .resume_thread(
             &settings,
-            config,
+            config.clone(),
             side,
             ResumeModelSettings::PreserveExistingThread,
         )
@@ -101,6 +104,44 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
     assert!(resumed.session.daybreak_enabled);
     let parent = server.thread_read(parent, /*include_turns*/ true).await?;
     assert!(!parent.turns.is_empty());
+    server.shutdown().await?;
+
+    let record = home
+        .path()
+        .join("asm-side-conversations/local")
+        .join(format!("side-{side}.json"));
+    for invalid_record in [b"{".to_vec(), vec![b' '; 4097]] {
+        std::fs::write(&record, invalid_record)?;
+        let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
+        assert_eq!(
+            server
+                .thread_read(side, /*include_turns*/ true)
+                .await?
+                .turns,
+            inherited_turns,
+        );
+        let resumed = server
+            .resume_thread(
+                &settings,
+                config.clone(),
+                side,
+                ResumeModelSettings::PreserveExistingThread,
+            )
+            .await?;
+        assert_eq!(resumed.turns, inherited_turns);
+        server.shutdown().await?;
+    }
+
+    std::fs::remove_file(&record)?;
+    std::fs::create_dir(&record)?;
+    let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
+    assert_eq!(
+        server
+            .thread_read(side, /*include_turns*/ true)
+            .await?
+            .turns,
+        inherited_turns,
+    );
     server.shutdown().await?;
     Ok(())
 }
