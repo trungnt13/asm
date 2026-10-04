@@ -7717,6 +7717,10 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "mcp_resource_tools_enabled": {
+      "description": "Enable the built-in MCP resource listing and reading tools. Defaults to true. Disabling them leaves MCP server connections and other tools unchanged.",
+      "type": "boolean"
+    },
     "mcp_servers": {
       "additionalProperties": {
         "$ref": "#/definitions/RawMcpServerConfig"
