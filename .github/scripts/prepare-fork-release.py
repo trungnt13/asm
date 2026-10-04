@@ -162,7 +162,7 @@ def validate_candidate(revision):
     return base
 
 
-def published_candidate(tag, revision):
+def complete_candidate(tag, revision):
     tag_sha = remote_ref(f"refs/tags/{tag}")
     release = api(f"repos/{REPOSITORY}/releases/tags/{tag}", allow_missing=True)
     if tag_sha:
@@ -172,11 +172,20 @@ def published_candidate(tag, revision):
     if release and not release["draft"]:
         if not tag_sha:
             raise ValueError("Published release has no matching remote tag")
-        return True
+        names = {asset["name"] for asset in release.get("assets", [])}
+        legacy = {
+            "codex-aarch64-apple-darwin.tar.gz",
+            "codex-x86_64-unknown-linux-gnu.tar.gz",
+            "SHA256SUMS", "install.sh",
+        }
+        staged = legacy | {
+            "SHA256SUMS-aarch64-apple-darwin", "SHA256SUMS-x86_64-unknown-linux-gnu",
+        }
+        return names in (legacy, staged)
     return False
 
 
-def output(revision, tag="", candidate_ref="", published=False, publish=False):
+def output(revision, tag="", candidate_ref="", complete=False, publish=False):
     print(
         f"Release source: {revision}; tag: {tag or '(build only)'}; candidate: {candidate_ref or '(none)'}"
     )
@@ -185,8 +194,13 @@ def output(revision, tag="", candidate_ref="", published=False, publish=False):
             "sha": revision,
             "tag": tag,
             "candidate_ref": candidate_ref,
-            "published": str(published).lower(),
+            "complete": str(complete).lower(),
             "publish": str(publish).lower(),
+            "staged": str(
+                publish and "SHA256SUMS-$vendor_target" in git_file(
+                    revision, "scripts/install/install.sh"
+                )
+            ).lower(),
         }.items():
             print(f"{key}={value}", file=stream)
 
@@ -208,7 +222,7 @@ def prepare():
         if tag != f"v{version(revision)}":
             raise ValueError("Tag does not agree with Cargo version")
         output(
-            revision, tag, published=published_candidate(tag, revision), publish=True
+            revision, tag, complete=complete_candidate(tag, revision), publish=True
         )
         return
     if reference != "refs/heads/main":
@@ -266,7 +280,7 @@ def prepare():
         git("push", "origin", f"HEAD:{candidate_ref}")
     tag = f"v{version(revision)}"
     output(
-        revision, tag, candidate_ref, published_candidate(tag, revision), publish=True
+        revision, tag, candidate_ref, complete_candidate(tag, revision), publish=True
     )
 
 
@@ -282,8 +296,8 @@ def sync_main():
     if git("rev-parse", "FETCH_HEAD^{commit}") != revision:
         raise ValueError("Candidate branch no longer matches published commit")
     base = validate_candidate(revision)
-    if tag != f"v{version(revision)}" or not published_candidate(tag, revision):
-        raise ValueError("Candidate release is not published")
+    if tag != f"v{version(revision)}" or not complete_candidate(tag, revision):
+        raise ValueError("Candidate release is not complete")
     for _ in range(3):
         git("fetch", "--no-tags", "origin", "refs/heads/main")
         main_sha = git("rev-parse", "FETCH_HEAD^{commit}")
