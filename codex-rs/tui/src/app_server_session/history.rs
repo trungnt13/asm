@@ -267,7 +267,7 @@ impl AppServerSession {
             })
             .await
             .wrap_err("failed to load a bounded thread history page")?;
-        if let Some(side) = self.side_conversation(thread_id)? {
+        if let Some(side) = self.side_conversation(thread_id) {
             trim_side_turn_page(&mut page, side.last_inherited_turn.as_deref());
         }
         Ok(page)
@@ -347,7 +347,7 @@ impl AppServerSession {
     ) -> Result<()> {
         let thread_id = ThreadId::from_string(&thread.id)
             .wrap_err("invalid thread id in bounded history response")?;
-        let side = self.side_conversation(thread_id)?;
+        let side = self.side_conversation(thread_id);
         if thread.history_mode == ThreadHistoryMode::Legacy {
             if thread.turns.is_empty() {
                 thread.turns = Box::pin(self.thread_read(thread_id, /*include_turns*/ true))
