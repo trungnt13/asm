@@ -276,7 +276,7 @@ async fn new_config(
         include_permissions_instructions: false,
         include_apps_instructions: false,
         include_collaboration_mode_instructions: false,
-        include_model_catalog_instructions: true,
+        include_model_catalog_in_spawn_agent_list: true,
         include_web_search_copyright_compliance: true,
         include_skill_instructions: false,
         skill_max_context_tokens: None,
