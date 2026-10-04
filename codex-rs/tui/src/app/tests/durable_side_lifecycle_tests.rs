@@ -167,5 +167,85 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     assert!(Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
     assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
     assert!(app.side_threads.is_empty());
+
+    // A deleted leaf must not leave the parent toggling to an unavailable saved child.
+    let deleted_pair = store.side(first_id)?.expect("saved first child record");
+    store.save(&deleted_pair)?;
+    app.restore_side_conversation(parent_id);
+    server.thread_delete(first_id).await?;
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    assert_eq!(
+        (
+            app.current_displayed_thread_id(),
+            app.primary_thread_id,
+            app.side_threads.is_empty(),
+            store.pair(parent_id)?,
+            store.side(first_id)?,
+        ),
+        (
+            Some(parent_id),
+            Some(parent_id),
+            true,
+            None,
+            Some(deleted_pair)
+        ),
+    );
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
+
+    // Legacy forks copy history, so deleting their parent does not break that saved history.
+    let orphan_pair = store.side(second_id)?.expect("saved second child record");
+    let orphan_path = server
+        .thread_read(second_id, /*include_turns*/ false)
+        .await?
+        .path
+        .expect("saved child rollout");
+    let orphan_history = std::fs::read_to_string(&orphan_path)?;
+    assert!(orphan_history.contains("Parent history must remain saved"));
+    store.save(&orphan_pair)?;
+    server.thread_delete(parent_id).await?;
+    assert_eq!(std::fs::read_to_string(&orphan_path)?, orphan_history);
+    let orphan = server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            second_id,
+            crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+        )
+        .await?;
+    Box::pin(app.replace_chat_widget_with_app_server_thread(
+        &mut tui,
+        orphan,
+        ThreadAttachPresentation::SessionLineage,
+        /*initial_user_message*/ None,
+    ))
+    .await?;
+    assert_eq!(app.active_side_parent_thread_id(), Some(parent_id));
+    for _ in 0..2 {
+        assert!(!Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
+        assert_eq!(
+            (
+                app.current_displayed_thread_id(),
+                app.primary_thread_id,
+                app.primary_session_configured
+                    .as_ref()
+                    .map(|session| session.thread_id),
+                app.side_threads.is_empty(),
+                app.chat_widget.parallel_conversation_active(),
+                app.chat_widget.side_conversation_active(),
+            ),
+            (
+                Some(second_id),
+                Some(second_id),
+                Some(second_id),
+                true,
+                false,
+                false
+            ),
+        );
+    }
+    assert_eq!(store.pair(parent_id)?, None);
+    assert_eq!(store.side(second_id)?, Some(orphan_pair));
+    assert!(std::fs::read_to_string(&orphan_path)?.starts_with(&orphan_history));
     Ok(())
 }
