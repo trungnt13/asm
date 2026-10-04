@@ -180,7 +180,7 @@ parse_release_metadata() {
           key = ""
         } else if (char == "}") {
           if (object_depth == asset_object_depth) {
-            if (asset_name != "" && asset_digest != "") {
+            if (asset_name != "") {
               print "asset\t" asset_name "\t" asset_digest
             }
             asset_object_depth = 0
@@ -311,7 +311,10 @@ release_asset_digest_or_empty() {
 release_asset_exists() {
   asset="$1"
 
-  release_asset_digest_or_empty "$asset" >/dev/null 2>&1
+  printf '%s\n' "$release_metadata" | awk -F '\t' -v asset="$asset" '
+    $1 == "asset" && $2 == asset { found = 1 }
+    END { exit !found }
+  '
 }
 
 release_asset_digest() {
@@ -328,7 +331,10 @@ release_asset_digest() {
 
 select_release_assets() {
   package_asset="codex-$vendor_target.tar.gz"
-  checksum_asset="SHA256SUMS"
+  checksum_asset="SHA256SUMS-$vendor_target"
+  if ! release_asset_exists "$checksum_asset"; then
+    checksum_asset="SHA256SUMS"
+  fi
   if [ "$vendor_target" = "x86_64-unknown-linux-gnu" ] &&
     ! release_asset_exists "$package_asset" &&
     release_asset_exists "codex-x86_64-unknown-linux-musl.tar.gz"; then
@@ -336,7 +342,7 @@ select_release_assets() {
     return 1
   fi
   if ! release_asset_exists "$package_asset" || ! release_asset_exists "$checksum_asset"; then
-    echo "Missing ASM release archive ($package_asset) or SHA256SUMS for $resolved_version." >&2
+    echo "Missing ASM release archive ($package_asset) or $checksum_asset for $resolved_version." >&2
     return 1
   fi
   asset="$package_asset"
@@ -957,6 +963,21 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   checksum_digest="$(release_asset_digest "$checksum_asset")"
   download_file "$checksum_url" "$checksum_path"
   verify_archive_digest "$checksum_path" "$checksum_digest"
+  if [ "$checksum_asset" != SHA256SUMS ]; then
+    if ! awk -v archive="$asset" '
+      NF != 2 || length($1) != 64 || $1 ~ /[^0-9a-fA-F]/ ||
+        ($2 != archive && $2 != "install.sh") || seen[$2]++ { invalid = 1 }
+      END { exit invalid || NR != 2 || !seen[archive] || !seen["install.sh"] }
+    ' "$checksum_path"; then
+      echo "Invalid platform checksum manifest: $checksum_asset." >&2
+      exit 1
+    fi
+    installer_digest="$(package_archive_digest install.sh "$checksum_path")"
+    [ "$installer_digest" = "$(release_asset_digest install.sh)" ] || {
+      echo "ASM installer metadata and platform checksum manifest disagree." >&2
+      exit 1
+    }
+  fi
   expected_digest="$(package_archive_digest "$asset" "$checksum_path")"
   release_digest="$(release_asset_digest "$asset")"
   [ "$expected_digest" = "$release_digest" ] || {
