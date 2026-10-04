@@ -1,4 +1,4 @@
-//! Exercises the authenticated reminder transport against a local HTTP fixture.
+//! Verifies ASM suppresses optional reminders without changing account behavior.
 use super::disconnect::serve_reconnect_requests;
 use super::*;
 use crate::app_server_session::ThreadParamsMode;
@@ -15,8 +15,7 @@ use serde_json::json;
 use tokio::net::TcpListener;
 
 #[tokio::test]
-async fn security_setup_fetch_with_default_features_uses_authenticated_codex_endpoint() -> Result<()>
-{
+async fn security_setup_disabled_preserves_account_email_and_backend_banners() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let backend = wiremock::MockServer::start().await;
     app.config.chatgpt_base_url = backend.uri();
@@ -37,22 +36,8 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
     app_test_support::mount_workspace_routing(&backend).await;
     let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
     wiremock::Mock::given(wiremock::matchers::path("/wham/security-setup"))
-        .and(wiremock::matchers::header(
-            "authorization",
-            "Bearer test-token",
-        ))
-        .and(wiremock::matchers::header("ChatGPT-Account-ID", "account"))
-        .and(wiremock::matchers::header(
-            "User-Agent",
-            codex_login::default_client::get_codex_user_agent(),
-        ))
-        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
-            "notice": {
-                "title": "Keep using Daybreak mode", "description": "Set up security.",
-                "action": {"label": "Set up security", "url": "https://chatgpt.com/cyber"}
-            }
-        })))
-        .expect(3)
+        .respond_with(wiremock::ResponseTemplate::new(200))
+        .expect(0)
         .mount(&backend)
         .await;
     let request_id = app.chat_widget.security_setup_request_id;
@@ -64,29 +49,18 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
     );
     app.replace_chat_widget(ChatWidget::new_with_app_event(init));
     assert_eq!(app.chat_widget.security_setup_request_id, request_id);
-    crate::security_setup::prefetch(&app.config, &server, app.app_event_tx.clone(), request_id);
-    let notice = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if let AppEvent::SecuritySetupLoaded {
-                request_id: actual,
-                identity,
-                notice,
-            } = events.recv().await.unwrap()
-            {
-                assert_eq!(actual, request_id);
-                assert_eq!(
-                    identity,
-                    Identity {
-                        account: "account".into(),
-                        user: "user".into()
-                    }
-                );
-                break notice;
-            }
-        }
-    })
-    .await?;
-    assert!(notice.valid());
+    let (tx, mut reminder_events) = mpsc::unbounded_channel();
+    crate::security_setup::prefetch(&app.config, &server, AppEventSender::new(tx), request_id);
+    // No task retains the sender: suppression happens before auth or HTTP requests.
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), reminder_events.recv())
+            .await?
+            .is_none()
+    );
+    let notice: crate::security_setup::Notice = serde_json::from_value(json!({
+        "title": "Set up security for Daybreak mode", "description": "Set up security.",
+        "action": {"label": "Set up security", "url": "https://chatgpt.com/cyber"}
+    }))?;
     let identity = Identity {
         account: "account".into(),
         user: "user".into(),
@@ -101,9 +75,6 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
         },
     )
     .await?;
-    assert!(render_bottom_popup(&app.chat_widget, /*width*/ 70).contains("Set up security"));
-    app.chat_widget
-        .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     assert!(!render_bottom_popup(&app.chat_widget, /*width*/ 70).contains("Set up security"));
 
     // Reconnect can emit AccountUpdated for the same identity more than once.
@@ -142,26 +113,13 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
             /*initial_user_message*/ None,
         );
         app.replace_chat_widget(ChatWidget::new_with_app_event(init));
-        let event = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut security_notice = None;
-            let mut email_loaded = false;
+        tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let event = events.recv().await.unwrap();
+                assert!(!matches!(event, AppEvent::SecuritySetupLoaded { .. }));
                 if matches!(event, AppEvent::AccountEmailLoaded { .. }) {
                     app.handle_event(&mut tui, &mut server, event).await?;
-                    email_loaded = true;
-                } else if let AppEvent::SecuritySetupLoaded {
-                    request_id: actual,
-                    identity: actual_identity,
-                    ..
-                } = &event
-                {
-                    assert_eq!(*actual, request_id);
-                    assert_eq!(actual_identity, &identity);
-                    security_notice = Some(event);
-                }
-                if email_loaded && let Some(event) = security_notice.take() {
-                    break Result::<AppEvent>::Ok(event);
+                    break Result::<()>::Ok(());
                 }
             }
         })
@@ -182,16 +140,58 @@ async fn security_setup_fetch_with_default_features_uses_authenticated_codex_end
                 plan: None,
             })
         );
-        app.handle_event(&mut tui, &mut server, event).await?;
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::SecuritySetupLoaded {
+                request_id,
+                identity: identity.clone(),
+                notice: notice.clone(),
+            },
+        )
+        .await?;
         assert!(!render_bottom_popup(&app.chat_widget, /*width*/ 70).contains("Set up security"));
     }
+    app.chat_widget.set_model("test-model-a");
+    let response = codex_app_server_protocol::GetAccountRateLimitsResponse {
+        ordinary_usage_allowed: None,
+        account_id: Some("account".into()),
+        rate_limit_upsell: Some(json!({
+            "banner_type": "selected_model_limit", "model_slug": "test-model-a",
+            "title": "Selected model usage exhausted", "description": "Switch models.",
+            "presentation": "dismissible", "ctas": [],
+        })),
+        rate_limits: serde_json::from_value(json!({}))?,
+        rate_limits_by_limit_id: None,
+        rate_limit_reset_credits: None,
+    };
+    app.chat_widget.update_backend_banner(&response);
+    assert!(
+        render_bottom_popup(&app.chat_widget, /*width*/ 70)
+            .contains("Selected model usage exhausted")
+    );
+    let request_id = app.chat_widget.security_setup_request_id;
+    app.handle_event(
+        &mut tui,
+        &mut server,
+        AppEvent::SecuritySetupLoaded {
+            request_id,
+            identity,
+            notice,
+        },
+    )
+    .await?;
+    assert!(
+        render_bottom_popup(&app.chat_widget, /*width*/ 70)
+            .contains("Selected model usage exhausted")
+    );
     backend.verify().await;
     server.shutdown().await?;
     Ok(())
 }
 
 #[tokio::test]
-async fn security_setup_skips_fetch_when_server_auth_does_not_match_saved_login() -> Result<()> {
+async fn security_setup_disabled_skips_auth_status_and_http_requests() -> Result<()> {
     for (auth_method, auth_token) in [
         (
             Some(AuthMode::ChatgptAuthTokens),
@@ -199,6 +199,7 @@ async fn security_setup_skips_fetch_when_server_auth_does_not_match_saved_login(
         ),
         (Some(AuthMode::ChatgptAuthTokens), Some("saved-token")),
         (Some(AuthMode::Chatgpt), Some("other-account-token")),
+        (Some(AuthMode::Chatgpt), Some("saved-token")),
         (Some(AuthMode::Chatgpt), None),
         (None, None),
     ] {
@@ -262,7 +263,7 @@ async fn security_setup_skips_fetch_when_server_auth_does_not_match_saved_login(
         backend.verify().await;
         server.shutdown().await?;
         let methods = daemon.await??;
-        assert!(methods.iter().any(|method| method == "getAuthStatus"));
+        assert!(!methods.iter().any(|method| method == "getAuthStatus"));
     }
     Ok(())
 }
