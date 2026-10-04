@@ -7659,6 +7659,10 @@
       "description": "Whether to inject the `<permissions instructions>` developer block.",
       "type": "boolean"
     },
+    "include_web_search_copyright_compliance": {
+      "description": "Include the Copyright compliance subsection in the local `web.run` description. Defaults to true. Other quotation and word limits remain unchanged.",
+      "type": "boolean"
+    },
     "instructions": {
       "description": "System instructions.",
       "type": "string"
