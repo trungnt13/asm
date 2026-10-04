@@ -43,12 +43,12 @@ const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[tokio::test]
 async fn standalone_web_search_round_trips_output() -> Result<()> {
-    assert_standalone_web_search_round_trips_output(WebSearchProvider::ChatGpt).await
+    assert_standalone_web_search_copyright_settings(WebSearchProvider::ChatGpt).await
 }
 
 #[tokio::test]
 async fn standalone_web_search_round_trips_output_for_custom_provider() -> Result<()> {
-    assert_standalone_web_search_round_trips_output(WebSearchProvider::CustomResponses).await
+    assert_standalone_web_search_copyright_settings(WebSearchProvider::CustomResponses).await
 }
 
 #[derive(Clone, Copy)]
@@ -57,9 +57,47 @@ enum WebSearchProvider {
     CustomResponses,
 }
 
-async fn assert_standalone_web_search_round_trips_output(
+async fn assert_standalone_web_search_copyright_settings(
     provider: WebSearchProvider,
 ) -> Result<()> {
+    let mut default_web_run: Option<Value> = None;
+    for copyright_config in [
+        "",
+        "include_web_search_copyright_compliance = true",
+        "include_web_search_copyright_compliance = false",
+    ] {
+        let web_run =
+            assert_standalone_web_search_round_trips_output(provider, copyright_config).await?;
+        let description = web_run["description"]
+            .as_str()
+            .context("web.run description should be present")?;
+        assert!(description.contains("- **Limit on verbatim quotes:**"));
+        assert!(description.contains("- **Word limits:**"));
+        if let Some(default_web_run) = &default_web_run {
+            let mut expected_web_run = default_web_run.clone();
+            if copyright_config.ends_with("false") {
+                let expected_description = default_web_run["description"]
+                    .as_str()
+                    .context("default description should be present")?
+                    .split_once("- **Copyright compliance:**\n")
+                    .context("default description should contain copyright subsection")?
+                    .0;
+                expected_web_run["description"] = json!(expected_description);
+            }
+            assert_eq!(web_run, expected_web_run);
+        } else {
+            assert!(description.contains("- **Copyright compliance:**\n"));
+            assert!(description.ends_with("and you link to the source.\n"));
+            default_web_run = Some(web_run.clone());
+        }
+    }
+    Ok(())
+}
+
+async fn assert_standalone_web_search_round_trips_output(
+    provider: WebSearchProvider,
+    copyright_config: &str,
+) -> Result<Value> {
     let call_id = "web-run-1";
     let expected_model_id = "model-id-from-search-context";
     let search_context = json!({
@@ -107,6 +145,7 @@ async fn assert_standalone_web_search_round_trips_output(
     let codex_home = TempDir::new()?;
     let config = MockResponsesConfig::new(&server.uri())
         .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
+        .with_root_config(copyright_config)
         .enable_feature(Feature::StandaloneWebSearch)
         .with_provider_config("supports_websockets = false");
     let config = match provider {
@@ -352,7 +391,7 @@ async fn assert_standalone_web_search_round_trips_output(
         .collect();
     assert_eq!(persisted_web_searches, vec![&expected_completed_item]);
 
-    Ok(())
+    Ok(web_run)
 }
 
 async fn wait_for_web_search_started(mcp: &mut TestAppServer) -> Result<ItemStartedNotification> {
