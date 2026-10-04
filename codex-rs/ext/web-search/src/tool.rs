@@ -41,10 +41,17 @@ use crate::schema::commands_schema;
 pub(crate) const WEB_NAMESPACE: &str = "web";
 pub(crate) const RUN_TOOL_NAME: &str = "run";
 const WEB_RUN_DESCRIPTION: &str = include_str!("../web_run_description.md");
+// Match the complete terminal subsection so upstream changes cannot remove unrelated text.
+const COPYRIGHT_COMPLIANCE_SUBSECTION: &str = r#"- **Copyright compliance:**
+  - You must avoid providing full articles, long verbatim passages, or extensive direct quotes due to copyright concerns.
+  - If the user asked for a verbatim quote, the response should provide a short compliant excerpt and then answer with paraphrases and summaries.
+  - Again, this limit does not apply to reddit content, as long as it's appropriately indicated that those are direct quotes and you link to the source.
+"#;
 const RESULTS_PAYLOAD_BYTES_METRIC: &str = "codex.web_search.results.payload_bytes";
 
 pub(crate) struct WebSearchTool {
     pub(crate) session_id: String,
+    pub(crate) include_copyright_compliance: bool,
     pub(crate) http_client_factory: HttpClientFactory,
     pub(crate) provider: SharedModelProvider,
     pub(crate) settings: SearchSettings,
@@ -63,12 +70,26 @@ impl<'call> ToolExecutor<ToolCall<'call>> for WebSearchTool {
             Err(err) => panic!("search command schema should parse: {err}"),
         };
 
+        let description = if self.include_copyright_compliance {
+            WEB_RUN_DESCRIPTION
+        } else {
+            match WEB_RUN_DESCRIPTION.strip_suffix(COPYRIGHT_COMPLIANCE_SUBSECTION) {
+                Some(description) => description,
+                None => {
+                    tracing::warn!(
+                        "web.run Copyright compliance subsection changed; retaining full description"
+                    );
+                    WEB_RUN_DESCRIPTION
+                }
+            }
+        };
+
         ToolSpec::Namespace(ResponsesApiNamespace {
             name: WEB_NAMESPACE.to_string(),
             description: default_namespace_description(WEB_NAMESPACE),
             tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
                 name: RUN_TOOL_NAME.to_string(),
-                description: WEB_RUN_DESCRIPTION.to_string(),
+                description: description.to_string(),
                 strict: false,
                 parameters,
                 output_schema: None,
