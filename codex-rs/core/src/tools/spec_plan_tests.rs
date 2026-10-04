@@ -1219,6 +1219,74 @@ async fn sleep_tool_stays_direct_and_outside_code_mode() {
 
 #[tokio::test]
 async fn mcp_and_tool_search_follow_direct_and_deferred_tool_exposure() {
+    let resource_tools = [
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+    ];
+    for mode in [ToolMode::Direct, ToolMode::CodeMode, ToolMode::CodeModeOnly] {
+        let mut plans = Vec::new();
+        for resource_tools_enabled in [true, false] {
+            let mut plan = probe_with(
+                |turn| {
+                    set_feature(turn, Feature::CodeMode, mode != ToolMode::Direct);
+                    set_feature(turn, Feature::CodeModeOnly, mode == ToolMode::CodeModeOnly);
+                    update_config(turn, |config| {
+                        config.mcp_resource_tools_enabled = resource_tools_enabled;
+                    });
+                },
+                ToolPlanInputs {
+                    tool_runtimes: vec![mcp_runtime(
+                        "direct",
+                        "mcp__direct",
+                        "lookup",
+                        ToolExposure::Direct,
+                    )],
+                    ..ToolPlanInputs::default()
+                },
+            )
+            .await;
+            let resources_registered = resource_tools_enabled && mode == ToolMode::CodeModeOnly;
+            plan.assert_registered_contains(&[
+                &ToolName::namespaced("mcp__direct", "lookup").to_string()
+            ]);
+            plan.assert_visible_lacks(&resource_tools);
+            for name in resource_tools {
+                assert_eq!(
+                    plan.registered_names
+                        .iter()
+                        .any(|registered| registered == name),
+                    resources_registered,
+                );
+                assert_eq!(
+                    plan.code_mode_tool_names.contains_key(name),
+                    resources_registered,
+                );
+                if mode != ToolMode::Direct {
+                    let ToolSpec::Freeform(exec) =
+                        plan.visible_spec(codex_code_mode::PUBLIC_TOOL_NAME)
+                    else {
+                        panic!("expected code mode exec tool");
+                    };
+                    assert_eq!(exec.description.contains(name), resources_registered);
+                }
+            }
+            // Everything outside the three resource tools must keep the same definitions.
+            plan.registered_names
+                .retain(|name| !resource_tools.contains(&name.as_str()));
+            plan.exposures
+                .retain(|name, _| !resource_tools.contains(&name.as_str()));
+            plan.code_mode_tool_names
+                .retain(|name, _| !resource_tools.contains(&name.as_str()));
+            if mode == ToolMode::CodeModeOnly {
+                plan.visible_specs
+                    .retain(|spec| spec.name() != codex_code_mode::PUBLIC_TOOL_NAME);
+            }
+            plans.push(plan);
+        }
+        assert_eq!(plans[0], plans[1]);
+    }
+
     let direct_mcp = probe_with(
         |_| {},
         ToolPlanInputs {

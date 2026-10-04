@@ -195,6 +195,10 @@ Default to ephemeral startup. Require `--allow-session-state` to create session 
 
 Allow top-level `include_model_catalog_instructions`, default `true`. When false, omit the generated model, reasoning-effort, and service-tier listing from both spawn-tool descriptions and `<model_catalog>` context for V1 and V2. Omit guidance pointing to the suppressed catalog. Keep custom descriptions, tool arguments, model loading, and override validation unchanged. This controls inclusion independently of `model_catalog_in_context`, which controls placement, and `expose_spawn_agent_model_overrides`, which controls argument exposure. Preserve existing history and use the normal catalog invalidation path when a retained listing stops applying. Do not update setup-managed profiles before a supporting CLI is released.
 
+### MCP resource tools
+
+Allow top-level `mcp_resource_tools_enabled`, default `true`. When false, do not register the built-in `list_mcp_resources`, `list_mcp_resource_templates`, or `read_mcp_resource` helpers. Remove their callable entries and generated declarations from direct tools, Code Mode, and `ALL_TOOLS`. Preserve existing registration conditions when enabled. Keep MCP connections, other server tools, apps, plugins, and shared TypeScript preamble settings independent. Apply on config loading without new live-reload behavior or history rewrites. Do not update setup-managed profiles before a supporting CLI is released.
+
 ### Web search copyright instruction visibility
 
 Allow top-level `include_web_search_copyright_compliance`, default `true`. When false, omit only the terminal Copyright compliance subsection from the local `web.run` tool description. Keep preceding quotation and word limits, tool arguments, execution, search modes, and history unchanged. If the expected subsection changes or is no longer terminal, warn and retain the full description rather than risk removing unrelated instructions. Apply to standalone web search in cached, indexed, and live modes; do not change hosted `web_search` instructions or model safeguards. Do not update setup-managed profiles before a supporting CLI is released.
