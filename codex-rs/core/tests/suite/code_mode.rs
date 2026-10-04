@@ -673,8 +673,13 @@ async fn run_code_mode_turn_with_rmcp_model(
     model: &'static str,
 ) -> Result<(TestCodex, ResponseMock)> {
     run_code_mode_turn_with_rmcp_config(
-        server, prompt, code, model, /*code_mode_only*/ false,
+        server,
+        prompt,
+        code,
+        model,
+        /*code_mode_only*/ false,
         /*non_prefixed_mcp_tool_names*/ false,
+        |_| {},
     )
     .await
 }
@@ -692,6 +697,7 @@ async fn run_code_mode_turn_with_rmcp_mode(
         "test-gpt-5.1-codex",
         code_mode_only,
         /*non_prefixed_mcp_tool_names*/ false,
+        |_| {},
     )
     .await
 }
@@ -703,6 +709,7 @@ async fn run_code_mode_turn_with_rmcp_config(
     model: &'static str,
     code_mode_only: bool,
     non_prefixed_mcp_tool_names: bool,
+    configure: impl FnOnce(&mut Config) + Send + 'static,
 ) -> Result<(TestCodex, ResponseMock)> {
     let rmcp_test_server_bin = stdio_server_bin()?;
     let mut builder = test_codex().with_model(model).with_config(move |config| {
@@ -753,6 +760,7 @@ async fn run_code_mode_turn_with_rmcp_config(
             .mcp_servers
             .set(servers)
             .expect("test mcp servers should accept any configuration");
+        configure(config);
     });
     let test = builder.build(server).await?;
     wait_for_mcp_server(&test.codex, "rmcp").await?;
@@ -7508,8 +7516,15 @@ text(`echo=${result.structuredContent?.echo ?? "missing"}`);
     Ok(())
 }
 
+#[test_case(true, false; "resources_enabled_code_mode")]
+#[test_case(false, false; "resources_disabled_code_mode")]
+#[test_case(true, true; "resources_enabled_code_mode_only")]
+#[test_case(false, true; "resources_disabled_code_mode_only")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exposes_mcp_tools_on_global_tools_object() -> Result<()> {
+async fn code_mode_exposes_mcp_tools_on_global_tools_object(
+    resource_tools_enabled: bool,
+    code_mode_only: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
@@ -7517,18 +7532,30 @@ async fn code_mode_exposes_mcp_tools_on_global_tools_object() -> Result<()> {
 const { content, structuredContent, isError } = await tools.mcp__rmcp__echo({
   message: "ping",
 });
-text(
-  `hasEcho=${String(Object.keys(tools).includes("mcp__rmcp__echo"))}\n` +
-    `echoType=${typeof tools.mcp__rmcp__echo}\n` +
-    `echo=${structuredContent?.echo ?? "missing"}\n` +
-    `isError=${String(isError)}\n` +
-    `contentLength=${content.length}`
-);
+text(JSON.stringify({
+  hasEcho: Object.keys(tools).includes("mcp__rmcp__echo"),
+  echoType: typeof tools.mcp__rmcp__echo,
+  echo: structuredContent?.echo ?? "missing",
+  isError,
+  contentLength: content.length,
+  resources: ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].map(name => ({
+    name,
+    listed: ALL_TOOLS.some(tool => tool.name === name),
+    type: typeof tools[name],
+  })),
+}));
 "#;
 
-    let (_test, second_mock) =
-        run_code_mode_turn_with_rmcp(&server, "use exec to inspect the global tools object", code)
-            .await?;
+    let (_test, second_mock) = run_code_mode_turn_with_rmcp_config(
+        &server,
+        "use exec to inspect the global tools object",
+        code,
+        "test-gpt-5.1-codex",
+        code_mode_only,
+        /*non_prefixed_mcp_tool_names*/ false,
+        move |config| config.mcp_resource_tools_enabled = resource_tools_enabled,
+    )
+    .await?;
 
     let req = second_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
@@ -7537,14 +7564,49 @@ text(
         Some(false),
         "exec global rmcp access failed unexpectedly: {output}"
     );
+    let parsed: Value = serde_json::from_str(&output)?;
+    let resource_names = [
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+    ];
+    let resources = resource_names.map(|name| {
+        serde_json::json!({
+            "name": name,
+            "listed": resource_tools_enabled,
+            "type": if resource_tools_enabled { "function" } else { "undefined" },
+        })
+    });
     assert_eq!(
-        output,
-        "hasEcho=true
-echoType=function
-echo=ECHOING: ping
-isError=false
-contentLength=0"
+        parsed,
+        serde_json::json!({
+            "hasEcho": true,
+            "echoType": "function",
+            "echo": "ECHOING: ping",
+            "isError": false,
+            "contentLength": 0,
+            "resources": resources,
+        })
     );
+    let body = req.body_json();
+    let direct_names = tool_names(&body);
+    let exec_description = body["tools"]
+        .as_array()
+        .expect("request should contain tools")
+        .iter()
+        .find(|tool| tool["name"] == "exec")
+        .and_then(|tool| tool["description"].as_str())
+        .expect("exec should remain available");
+    for name in resource_names {
+        assert_eq!(
+            direct_names.iter().any(|tool| tool == name),
+            resource_tools_enabled && !code_mode_only
+        );
+        assert_eq!(
+            exec_description.contains(name),
+            resource_tools_enabled && code_mode_only
+        );
+    }
 
     Ok(())
 }
@@ -7570,6 +7632,7 @@ text(JSON.stringify({
         "test-gpt-5.1-codex",
         /*code_mode_only*/ false,
         /*non_prefixed_mcp_tool_names*/ true,
+        |_| {},
     )
     .await?;
 
@@ -7944,18 +8007,41 @@ text(`echo=${result.structuredContent.echo}`);
     Ok(())
 }
 
+#[test_case(true, false; "resources_default_code_mode")]
+#[test_case(true, true; "resources_enabled_code_mode_only")]
+#[test_case(false, true; "resources_disabled_code_mode_only")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn code_mode_exports_all_tools_metadata_for_builtin_tools() -> Result<()> {
+async fn code_mode_exports_all_tools_metadata_for_builtin_tools(
+    resource_tools_enabled: bool,
+    code_mode_only: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
     let code = r#"
 const tool = ALL_TOOLS.find(({ name }) => name === "view_image");
-text(JSON.stringify(tool));
+text(JSON.stringify({
+  tool,
+  resources: ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"].map(name => ({
+    name,
+    listed: ALL_TOOLS.some(tool => tool.name === name),
+    type: typeof tools[name],
+  })),
+}));
 "#;
 
-    let (_test, second_mock) =
-        run_code_mode_turn(&server, "use exec to inspect ALL_TOOLS", code).await?;
+    let (_test, second_mock) = run_code_mode_turn_with_config(
+        &server,
+        "use exec to inspect ALL_TOOLS",
+        code,
+        move |config| {
+            config.mcp_resource_tools_enabled = resource_tools_enabled;
+            if code_mode_only {
+                let _ = config.features.enable(Feature::CodeModeOnly);
+            }
+        },
+    )
+    .await?;
 
     let req = second_mock.single_request();
     let (output, success) = custom_tool_output_body_and_success(&req, "call-1");
@@ -7970,12 +8056,39 @@ text(JSON.stringify(tool));
             .expect("exec ALL_TOOLS lookup should emit JSON"),
     )?;
     assert_eq!(
-        parsed,
+        parsed["tool"],
         serde_json::json!({
             "name": "view_image",
             "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.\n\nexec tool declaration:\n```ts\ndeclare const tools: { view_image(args: {\n  // Local filesystem path to an image file.\n  path: string;\n}): Promise<{\n  // Image detail hint returned by view_image. Returns `high` for default resized behavior or `original` when original resolution is preserved.\n  detail: \"high\" | \"original\";\n  // Data URL for the loaded image.\n  image_url: string;\n}>; };\n```",
         })
     );
+
+    let resources_registered = resource_tools_enabled && code_mode_only;
+    let resource_names = [
+        "list_mcp_resources",
+        "list_mcp_resource_templates",
+        "read_mcp_resource",
+    ];
+    let resources = resource_names.map(|name| {
+        serde_json::json!({
+            "name": name,
+            "listed": resources_registered,
+            "type": if resources_registered { "function" } else { "undefined" },
+        })
+    });
+    assert_eq!(parsed["resources"], serde_json::json!(resources));
+    let body = req.body_json();
+    let exec_description = body["tools"]
+        .as_array()
+        .expect("request should contain tools")
+        .iter()
+        .find(|tool| tool["name"] == "exec")
+        .and_then(|tool| tool["description"].as_str())
+        .expect("exec should remain available");
+    for name in resource_names {
+        assert!(!tool_names(&body).iter().any(|tool| tool == name));
+        assert_eq!(exec_description.contains(name), resources_registered);
+    }
 
     Ok(())
 }
