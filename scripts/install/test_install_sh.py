@@ -23,6 +23,8 @@ def write_release(
     *,
     helper: bool = True,
     bad_checksum: bool = False,
+    platform_manifest: bool = False,
+    invalid_manifest_digest: bool = False,
 ) -> tuple[Path, Path, Path]:
     source = root / f"source-{version}"
     source.mkdir(exist_ok=True)
@@ -45,8 +47,13 @@ def write_release(
             if path.exists():
                 tar.add(path, arcname=name)
     archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    manifest = root / f"{version}-SHA256SUMS"
-    manifest.write_text(f"{'0' * 64 if bad_checksum else archive_digest}  {asset}\n")
+    manifest_name = f"SHA256SUMS-{target}" if platform_manifest else "SHA256SUMS"
+    manifest = root / f"{version}-{manifest_name}"
+    contents = f"{'0' * 64 if bad_checksum else archive_digest}  {asset}\n"
+    installer_digest = hashlib.sha256(INSTALL_SCRIPT.read_bytes()).hexdigest()
+    if platform_manifest:
+        contents += f"{installer_digest}  install.sh\n"
+    manifest.write_text(contents)
     manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
     metadata = root / f"{version}-metadata.json"
     metadata.write_text(
@@ -55,7 +62,14 @@ def write_release(
                 "tag_name": f"v{version}",
                 "assets": [
                     {"name": asset, "digest": f"sha256:{archive_digest}"},
-                    {"name": "SHA256SUMS", "digest": f"sha256:{manifest_digest}"},
+                    {
+                        "name": manifest_name,
+                        "digest": "invalid" if invalid_manifest_digest else f"sha256:{manifest_digest}",
+                    },
+                    {"name": "install.sh", "digest": f"sha256:{installer_digest}"},
+                    *([
+                        {"name": "SHA256SUMS", "digest": f"sha256:{manifest_digest}"}
+                    ] if platform_manifest else []),
                 ],
             }
         )
@@ -90,7 +104,7 @@ case "$url" in
   https://api.github.com/repos/trungnt13/asm/releases/*)
     [ "$TEST_METADATA_FAILURE" = 0 ] || exit 22
     source="$TEST_METADATA" ;;
-  https://github.com/trungnt13/asm/releases/download/*/SHA256SUMS)
+  https://github.com/trungnt13/asm/releases/download/*/SHA256SUMS*)
     source="$TEST_MANIFEST" ;;
   https://github.com/trungnt13/asm/releases/download/*/codex-*.tar.gz)
     source="$TEST_ARCHIVE" ;;
@@ -158,52 +172,56 @@ class InstallShTest(unittest.TestCase):
             self.assertFalse((root / "codex-home").exists())
 
     def test_latest_installs_pair_and_reinstall_reuses_it(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            files = write_release(root, VERSION, "x86_64-unknown-linux-gnu")
-            upstream_marker = (
-                root / "codex-home/packages/standalone/auto-update-version"
-            )
-            upstream_marker.parent.mkdir(parents=True)
-            upstream_marker.write_text("upstream-release")
-            first, requests = run_installer(root, "latest", files)
-            self.assertEqual(first.returncode, 0, first.stderr)
-            self.assertEqual(
-                requests,
-                [
-                    "https://api.github.com/repos/trungnt13/asm/releases/latest",
-                    f"https://github.com/trungnt13/asm/releases/download/v{VERSION}/SHA256SUMS",
-                    f"https://github.com/trungnt13/asm/releases/download/v{VERSION}/codex-x86_64-unknown-linux-gnu.tar.gz",
-                ],
-            )
-            current = root / "codex-home/packages/asm-standalone/current"
-            self.assertEqual(
-                current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
-            )
-            for name in ("codex", "codex-code-mode-host"):
-                self.assertEqual(
-                    (root / "install-bin" / name).resolve(),
-                    current.resolve() / "bin" / name,
+        for platform_manifest in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                files = write_release(
+                    root, VERSION, "x86_64-unknown-linux-gnu",
+                    platform_manifest=platform_manifest,
                 )
-            self.assertFalse(
-                (
-                    root / "codex-home/packages/asm-standalone/auto-update-version"
-                ).exists()
-            )
-            self.assertEqual(upstream_marker.read_text(), "upstream-release")
-            second, requests = run_installer(root, "latest", files, release_arg=VERSION)
-            self.assertEqual(second.returncode, 0, second.stderr)
-            self.assertEqual(
-                requests,
-                [
-                    f"https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}"
-                ],
-            )
-            self.assertEqual(
-                current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
-            )
-            self.assertEqual(upstream_marker.read_text(), "upstream-release")
-
+                manifest_name = "SHA256SUMS-x86_64-unknown-linux-gnu" if platform_manifest else "SHA256SUMS"
+                upstream_marker = (
+                    root / "codex-home/packages/standalone/auto-update-version"
+                )
+                upstream_marker.parent.mkdir(parents=True)
+                upstream_marker.write_text("upstream-release")
+                first, requests = run_installer(root, "latest", files)
+                self.assertEqual(first.returncode, 0, first.stderr)
+                self.assertEqual(
+                    requests,
+                    [
+                        "https://api.github.com/repos/trungnt13/asm/releases/latest",
+                        f"https://github.com/trungnt13/asm/releases/download/v{VERSION}/{manifest_name}",
+                        f"https://github.com/trungnt13/asm/releases/download/v{VERSION}/codex-x86_64-unknown-linux-gnu.tar.gz",
+                    ],
+                )
+                current = root / "codex-home/packages/asm-standalone/current"
+                self.assertEqual(
+                    current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
+                )
+                for name in ("codex", "codex-code-mode-host"):
+                    self.assertEqual(
+                        (root / "install-bin" / name).resolve(),
+                        current.resolve() / "bin" / name,
+                    )
+                self.assertFalse(
+                    (
+                        root / "codex-home/packages/asm-standalone/auto-update-version"
+                    ).exists()
+                )
+                self.assertEqual(upstream_marker.read_text(), "upstream-release")
+                second, requests = run_installer(root, "latest", files, release_arg=VERSION)
+                self.assertEqual(second.returncode, 0, second.stderr)
+                self.assertEqual(
+                    requests,
+                    [
+                        f"https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}"
+                    ],
+                )
+                self.assertEqual(
+                    current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
+                )
+                self.assertEqual(upstream_marker.read_text(), "upstream-release")
     def test_bad_checksum_and_missing_helper_keep_current_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -215,6 +233,11 @@ class InstallShTest(unittest.TestCase):
             for options, message in (
                 ({"bad_checksum": True}, "metadata and SHA256SUMS disagree"),
                 ({"helper": False}, "must contain codex and codex-code-mode-host only"),
+                ({"platform_manifest": True, "bad_checksum": True}, "metadata and SHA256SUMS disagree"),
+                (
+                    {"platform_manifest": True, "invalid_manifest_digest": True},
+                    "Could not find SHA-256 digest",
+                ),
             ):
                 files = write_release(
                     root, NEXT_VERSION, "x86_64-unknown-linux-gnu", **options
@@ -320,7 +343,7 @@ class InstallShTest(unittest.TestCase):
                 tempfile.TemporaryDirectory() as directory,
             ):
                 root = Path(directory)
-                files = write_release(root, VERSION, "aarch64-apple-darwin")
+                files = write_release(root, VERSION, "aarch64-apple-darwin", platform_manifest=True)
                 result, requests = run_installer(
                     root,
                     VERSION,
