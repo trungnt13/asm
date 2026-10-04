@@ -1,4 +1,4 @@
-"""Resume immutable fork publication, verifying a draft before making it Latest."""
+"""Publish checked platforms without replacing assets; promote complete releases."""
 
 import argparse
 import hashlib
@@ -17,7 +17,9 @@ ASSET_NAMES = (
     "SHA256SUMS",
     "install.sh",
 )
-ROOT = Path(__file__).resolve().parents[2]
+TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-gnu")
+PLATFORM_MANIFESTS = tuple(f"SHA256SUMS-{target}" for target in TARGETS)
+ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path(__file__).resolve().parents[2]))
 
 
 def api(repository, endpoint, *, payload=None, optional=False):
@@ -78,11 +80,21 @@ def verify_tag(repository, tag, sha, *, create=False):
 def asset_metadata(release, *, complete):
     assets = release.get("assets", [])
     by_name = {asset["name"]: asset for asset in assets}
-    if len(by_name) != len(assets) or not set(by_name) <= set(ASSET_NAMES):
+    if (
+        len(by_name) != len(assets)
+        or not set(by_name) <= set(ASSET_NAMES + PLATFORM_MANIFESTS)
+    ):
         raise ValueError("release has duplicate or unexpected assets")
-    if complete and set(by_name) != set(ASSET_NAMES):
-        raise ValueError("release does not contain the exact four required assets")
+    if complete and set(by_name) not in (
+        set(ASSET_NAMES), set(ASSET_NAMES + PLATFORM_MANIFESTS)
+    ):
+        raise ValueError("release must contain exactly four legacy or six staged assets")
     return by_name
+
+
+def file_digest(path):
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def verify_asset(path, asset):
@@ -93,74 +105,196 @@ def verify_asset(path, asset):
     digest = asset.get("digest", "")
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise ValueError(f"missing GitHub SHA-256 digest for {path.name}")
-    with path.open("rb") as stream:
-        actual = hashlib.file_digest(stream, "sha256").hexdigest()
+    actual = file_digest(path)
     if path.stat().st_size != asset["size"] or digest != f"sha256:{actual}":
         raise ValueError(f"GitHub size or SHA-256 mismatch for {path.name}")
 
 
 def verify_files(directory, installer):
-    digests = {}
-    for name in (name for name in ASSET_NAMES if name != "SHA256SUMS"):
-        with (directory / name).open("rb") as stream:
-            digests[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-    checksums = {}
-    for line in (directory / "SHA256SUMS").read_text(encoding="utf-8").splitlines():
-        match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.-]+)", line)
-        if not match or match.group(2) in checksums:
-            raise ValueError("invalid or duplicate SHA256SUMS entry")
-        checksums[match.group(2)] = match.group(1)
-    if checksums != digests:
-        raise ValueError("SHA256SUMS does not match the exact three payloads")
+    names = {entry.name for entry in directory.iterdir()}
+    payloads = names - {"SHA256SUMS", *PLATFORM_MANIFESTS}
+    digests = {
+        name: file_digest(directory / name)
+        for name in payloads
+    }
+    for manifest in names - payloads:
+        checksums = {}
+        for line in (directory / manifest).read_text(encoding="utf-8").splitlines():
+            match = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.-]+)", line)
+            if not match or match.group(2) in checksums:
+                raise ValueError(f"invalid or duplicate {manifest} entry")
+            checksums[match.group(2)] = match.group(1)
+        expected = digests
+        if manifest != "SHA256SUMS":
+            archive = f"codex-{manifest.removeprefix('SHA256SUMS-')}.tar.gz"
+            expected = {name: digests[name] for name in (archive, "install.sh")}
+        if checksums != expected:
+            raise ValueError(f"{manifest} does not match its exact payloads")
     if (directory / "install.sh").read_bytes() != installer:
         raise ValueError("installer differs from the candidate commit")
-    for name in ASSET_NAMES[:2]:
+    for name in payloads - {"install.sh"}:
         subprocess.run(
-            [
-                sys.executable,
-                ROOT / ".github/scripts/smoke-codex-archive.py",
-                directory / name,
-                "--inspect-only",
-            ],
-            check=True,
+            [sys.executable, ROOT / ".github/scripts/smoke-codex-archive.py",
+             directory / name, "--inspect-only"], check=True,
         )
 
 
-def verify_remote(repository, tag, sha, release, installer, *, published):
+def verify_remote(repository, tag, sha, release, installer, *, published,
+                  target=None, require_latest=True):
     verify_tag(repository, tag, sha)
     if release.get("tag_name") != tag or release.get("prerelease") is not False:
         raise ValueError("release tag or normal-release flag is incorrect")
     if published:
         if release.get("draft") is not False:
             raise ValueError("release is still a draft")
-        latest = api(repository, "releases/latest")
-        if latest["id"] != release["id"]:
-            raise ValueError("release is not Latest; not editing a published release")
-    elif release.get("draft") is not True:
+        if require_latest and api(repository, "releases/latest")["id"] != release["id"]:
+            raise ValueError("release is not Latest")
+    elif published is False and release.get("draft") is not True:
         raise ValueError("expected a draft before publication")
-    assets = asset_metadata(release, complete=True)
+    assets = asset_metadata(release, complete=target is None)
+    names = tuple(assets) if target is None else (
+        f"codex-{target}.tar.gz", "install.sh", f"SHA256SUMS-{target}",
+    )
     with tempfile.TemporaryDirectory(prefix="asm-release-verify-") as temporary_dir:
         directory = Path(temporary_dir)
-        for name in ASSET_NAMES:
+        for name in names:
             with (directory / name).open("wb") as output:
                 subprocess.run(
-                    [
-                        "gh",
-                        "api",
-                        f"repos/{repository}/releases/assets/{assets[name]['id']}",
-                        "-H",
-                        "Accept: application/octet-stream",
-                    ],
-                    stdout=output,
-                    check=True,
+                    ["gh", "api", f"repos/{repository}/releases/assets/{assets[name]['id']}",
+                     "-H", "Accept: application/octet-stream"], stdout=output, check=True,
                 )
             verify_asset(directory / name, assets[name])
         verify_files(directory, installer)
 
 
+def upload_missing(repository, tag, release, directory, names):
+    assets = asset_metadata(release, complete=False)
+    for name in names:
+        if name in assets:
+            verify_asset(directory / name, assets[name])
+        else:
+            subprocess.run(["gh", "release", "upload", tag, str(directory / name),
+                            "-R", repository], check=True)
+    return api(repository, f"releases/{release['id']}")
+
+
+def initialize(repository, tag, sha, release, installer):
+    verify_tag(repository, tag, sha, create=True)
+    if release is None:
+        release = api(repository, "releases", payload={
+            "tag_name": tag, "target_commitish": sha, "name": f"ASM {tag}",
+            "body": (
+                "ASM is a personal fork of OpenAI Codex. Each archive contains "
+                "`codex` and `codex-code-mode-host`. Platform checksum assets mark "
+                "packages ready for installation; Latest requires both platforms. "
+                "Use install.sh for external updates. macOS ARM64 is unsigned and "
+                "unnotarized. Linux x86_64 requires glibc 2.35+, system OpenSSL 3 "
+                "and XZ libraries. Use host rg, a system shell, and bwrap when "
+                f"sandboxing requires it.\n\nSource commit: {sha}"
+            ),
+            "generate_release_notes": True, "draft": True, "prerelease": False,
+            "make_latest": "false",
+        })
+    if release.get("tag_name") != tag or release.get("prerelease") is not False:
+        raise ValueError("existing release has incompatible metadata")
+    with tempfile.TemporaryDirectory(prefix="asm-installer-") as temporary_dir:
+        directory = Path(temporary_dir)
+        (directory / "install.sh").write_bytes(installer)
+        return upload_missing(repository, tag, release, directory, ("install.sh",))
+
+
+def publish_target(repository, tag, sha, release, installer, target):
+    if release is None:
+        raise ValueError("initialize the candidate before platform publication")
+    verify_tag(repository, tag, sha)
+    if release.get("tag_name") != tag or release.get("prerelease") is not False:
+        raise ValueError("existing release has incompatible metadata")
+    manifest = f"SHA256SUMS-{target}"
+    assets = asset_metadata(release, complete=False)
+    if manifest not in assets:
+        directory = ROOT / "dist"
+        archive = f"codex-{target}.tar.gz"
+        (directory / "install.sh").write_bytes(installer)
+        digests = {name: file_digest(directory / name)
+                   for name in (archive, "install.sh")}
+        (directory / manifest).write_text(
+            "".join(f"{digest}  {name}\n" for name, digest in digests.items())
+        )
+        verify_files(directory, installer)
+        release = upload_missing(repository, tag, release, directory, (archive,))
+        # Download and smoke the uploaded bytes before appending the readiness marker.
+        with tempfile.TemporaryDirectory(prefix="asm-uploaded-") as temporary_dir:
+            downloaded = Path(temporary_dir)
+            for name in (archive, "install.sh"):
+                asset = asset_metadata(release, complete=False)[name]
+                with (downloaded / name).open("wb") as output:
+                    subprocess.run(["gh", "api", f"repos/{repository}/releases/assets/{asset['id']}",
+                                    "-H", "Accept: application/octet-stream"], stdout=output, check=True)
+                verify_asset(downloaded / name, asset)
+                verify_asset(directory / name, asset)
+            subprocess.run([sys.executable, ROOT / ".github/scripts/smoke-codex-archive.py",
+                            downloaded / archive], cwd=ROOT / "codex-rs", check=True)
+            if target == "x86_64-unknown-linux-gnu":
+                subprocess.run(["bash", ROOT / ".github/scripts/smoke-ubuntu-archive.sh",
+                                downloaded / archive, tag.removeprefix("v")], cwd=ROOT, check=True)
+        release = upload_missing(repository, tag, release, directory, (manifest,))
+    verify_remote(repository, tag, sha, release, installer, published=None,
+                  target=target, require_latest=False)
+    verified_assets = asset_metadata(release, complete=False)
+    if release.get("draft"):
+        api(repository, f"releases/{release['id']}",
+            payload={"draft": False, "prerelease": False, "make_latest": "false"})
+    release = api(repository, f"releases/{release['id']}")
+    verify_tag(repository, tag, sha)
+    current_assets = asset_metadata(release, complete=False)
+    if release.get("draft") is not False or release.get("prerelease") is not False:
+        raise ValueError("platform release was not published as a normal release")
+    for name in (f"codex-{target}.tar.gz", "install.sh", manifest):
+        if any(
+            current_assets.get(name, {}).get(field) != verified_assets[name].get(field)
+            for field in ("id", "name", "size", "digest", "state")
+        ):
+            raise ValueError(f"verified asset {name} changed during publication")
+    print(f"Published verified {target} for {tag}; existing assets preserved")
+
+
+def finalize(repository, tag, sha, release, installer):
+    if release is None or release.get("draft") is not False:
+        raise ValueError("platform publication must complete before finalization")
+    assets = asset_metadata(release, complete=False)
+    if set(assets) == set(ASSET_NAMES):
+        verify_remote(repository, tag, sha, release, installer, published=True)
+        return  # Completed legacy releases remain unchanged.
+    if not set(PLATFORM_MANIFESTS) <= set(assets):
+        raise ValueError("both platform readiness manifests are required")
+    digests = {}
+    for target in TARGETS:
+        verify_remote(repository, tag, sha, release, installer, published=True,
+                      target=target, require_latest=False)
+    for name in (*ASSET_NAMES[:2], "install.sh"):
+        digest = assets[name].get("digest", "")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+            raise ValueError(f"missing GitHub SHA-256 digest for {name}")
+        digests[name] = digest.removeprefix("sha256:")
+    with tempfile.TemporaryDirectory(prefix="asm-finalize-") as temporary_dir:
+        directory = Path(temporary_dir)
+        (directory / "SHA256SUMS").write_text(
+            "".join(f"{digest}  {name}\n" for name, digest in digests.items())
+        )
+        release = upload_missing(repository, tag, release, directory, ("SHA256SUMS",))
+    verify_remote(repository, tag, sha, release, installer, published=True, require_latest=False)
+    release = api(repository, f"releases/{release['id']}", payload={"make_latest": "true"})
+    verify_remote(repository, tag, sha, release, installer, published=True)
+    print(f"Promoted complete verified release {tag} to Latest at {sha}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("publish", "verify"))
+    parser.add_argument(
+        "command", choices=(
+            "initialize", "restore-target", "publish-target", "finalize", "publish", "verify",
+        )
+    )
     arguments = parser.parse_args()
     if not os.environ.get("GH_TOKEN"):
         raise ValueError("GH_TOKEN is required")
@@ -183,6 +317,41 @@ def main():
         ["git", "show", f"{sha}:scripts/install/install.sh"], cwd=ROOT
     )
     release = release_for_tag(repository, tag)
+    if arguments.command == "initialize":
+        initialize(repository, tag, sha, release, installer)
+        return
+    if arguments.command in {"restore-target", "publish-target"}:
+        target = os.environ["TARGET"]
+        if target not in TARGETS:
+            raise ValueError("unsupported publication target")
+        if arguments.command == "restore-target":
+            uploaded = recovered = False
+            if release is not None:
+                verify_tag(repository, tag, sha)
+                if release.get("tag_name") != tag or release.get("prerelease") is not False:
+                    raise ValueError("existing release has incompatible metadata")
+                assets = asset_metadata(release, complete=False)
+                uploaded = f"SHA256SUMS-{target}" in assets
+                archive = f"codex-{target}.tar.gz"
+                if not uploaded and archive in assets:
+                    directory = ROOT / "dist"
+                    directory.mkdir(exist_ok=True)
+                    with (directory / archive).open("wb") as output:
+                        subprocess.run([
+                            "gh", "api", f"repos/{repository}/releases/assets/{assets[archive]['id']}",
+                            "-H", "Accept: application/octet-stream",
+                        ], stdout=output, check=True)
+                    verify_asset(directory / archive, assets[archive])
+                    recovered = True
+            with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
+                print(f"uploaded={str(uploaded).lower()}", file=stream)
+                print(f"recovered={str(recovered).lower()}", file=stream)
+        else:
+            publish_target(repository, tag, sha, release, installer, target)
+        return
+    if arguments.command == "finalize":
+        finalize(repository, tag, sha, release, installer)
+        return
     if arguments.command == "verify":
         if release is None:
             raise ValueError("release has not been published")
