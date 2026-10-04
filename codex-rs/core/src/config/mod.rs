@@ -739,7 +739,7 @@ pub struct Config {
     pub include_collaboration_mode_instructions: bool,
 
     /// Include the generated spawn-model catalog without changing tool arguments.
-    pub include_model_catalog_instructions: bool,
+    pub include_model_catalog_in_spawn_agent_list: bool,
 
     /// Include the Copyright compliance subsection in the local `web.run` description.
     pub include_web_search_copyright_compliance: bool,
@@ -4081,8 +4081,8 @@ impl Config {
         let include_apps_instructions = cfg.include_apps_instructions.unwrap_or(true);
         let include_collaboration_mode_instructions =
             cfg.include_collaboration_mode_instructions.unwrap_or(true);
-        let include_model_catalog_instructions =
-            cfg.include_model_catalog_instructions.unwrap_or(true);
+        let include_model_catalog_in_spawn_agent_list =
+            cfg.include_model_catalog_in_spawn_agent_list.unwrap_or(true);
         let include_skill_instructions = cfg
             .skills
             .as_ref()
@@ -4403,7 +4403,7 @@ impl Config {
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,
-            include_model_catalog_instructions,
+            include_model_catalog_in_spawn_agent_list,
             include_web_search_copyright_compliance: cfg
                 .include_web_search_copyright_compliance
                 .unwrap_or(true),
