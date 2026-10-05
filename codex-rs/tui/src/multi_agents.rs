@@ -4,7 +4,9 @@
 //! picker entries, and the fast-switch keyboard shortcuts. Higher-level coordination, such as
 //! deciding which thread becomes active or when a thread closes, stays in [`crate::app::App`].
 
+use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
+use crate::history_cell::ToolCallSummary;
 use crate::render::line_utils::prefix_lines;
 use crate::style::accent_color;
 use crate::text_formatting::truncate_text;
@@ -306,17 +308,63 @@ pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentAc
     })
 }
 
-pub(crate) fn sub_agent_activity_history_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
+#[derive(Debug)]
+pub(crate) struct SubAgentActivityHistoryCell {
+    preview: PlainHistoryCell,
+    id: String,
+    kind: SubAgentActivityKind,
+    agent_path: String,
+}
+
+impl HistoryCell for SubAgentActivityHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.preview.display_lines(width)
+    }
+
+    fn raw_lines(&self) -> Vec<Line<'static>> {
+        self.preview.raw_lines()
+    }
+
+    fn activity_ids(&self) -> Vec<String> {
+        if self.kind == SubAgentActivityKind::Interacted {
+            vec![format!("subagent:{}", self.id)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        // Each interaction is emitted once after a successful send_message or followup_task.
+        (self.kind == SubAgentActivityKind::Interacted).then(|| ToolCallSummary {
+            count: 1,
+            running: false,
+            names: vec![self.agent_path.clone()],
+        })
+    }
+
+    fn activity_disclosure(&self, _width: u16) -> Option<crate::history_cell::ActivityDisclosure> {
+        None
+    }
+}
+
+pub(crate) fn sub_agent_activity_history_cell(
+    item: &ThreadItem,
+) -> Option<SubAgentActivityHistoryCell> {
     let ThreadItem::SubAgentActivity {
-        kind, agent_path, ..
+        id,
+        kind,
+        agent_path,
+        ..
     } = item
     else {
         return None;
     };
-    Some(collab_event(
-        sub_agent_activity_title(*kind, agent_path),
-        Vec::new(),
-    ))
+    Some(SubAgentActivityHistoryCell {
+        preview: collab_event(sub_agent_activity_title(*kind, agent_path), Vec::new()),
+        id: id.clone(),
+        kind: *kind,
+        agent_path: agent_path.clone(),
+    })
 }
 
 fn sub_agent_activity_title(kind: SubAgentActivityKind, agent_path: &str) -> Line<'static> {
