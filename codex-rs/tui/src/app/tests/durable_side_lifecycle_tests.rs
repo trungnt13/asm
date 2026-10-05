@@ -130,15 +130,59 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             .try_recv()
             .is_ok()
     );
-    // A temporary side replaces the companion slot, not the saved conversation.
     let store = crate::side_conversations::SideConversationStore::new(
         &app.config.codex_home,
         &app.app_server_target,
     );
+    let open_pair = store.side(second_id)?.expect("saved parallel record");
+    let parent_selection = store.pair(parent_id)?;
+    let first_record = store.side(first_id)?;
+    for thread_id in [second_id, parent_id] {
+        Box::pin(app.select_agent_thread(&mut tui, &mut server, thread_id)).await?;
+        Box::pin(app.start_companion_conversation(
+            &mut tui,
+            &mut server,
+            thread_id,
+            CompanionKind::Side,
+            Some("Keep this inline side question".into()),
+        ))
+        .await?;
+        assert_eq!(
+            (
+                app.current_displayed_thread_id(),
+                app.side_threads
+                    .get(&second_id)
+                    .map(|state| (state.parent_thread_id, state.kind)),
+                app.side_threads.len(),
+                store.pair(parent_id)?,
+                store.side(second_id)?,
+                store.side(first_id)?,
+                app.chat_widget.composer_text_with_pending(),
+            ),
+            (
+                Some(thread_id),
+                Some((parent_id, CompanionKind::Parallel)),
+                1,
+                parent_selection.clone(),
+                Some(open_pair.clone()),
+                first_record.clone(),
+                "Keep this inline side question".to_string(),
+            ),
+        );
+        app.chat_widget.apply_external_edit(String::new());
+    }
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, second_id)).await?;
+    assert!(Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
+    assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
+    assert!(app.side_threads.is_empty());
+    assert_eq!(store.pair(parent_id)?, None);
+    assert_eq!(store.side(second_id)?, Some(open_pair));
+
+    // Closed saved chats remain on disk but no longer block a temporary side.
     Box::pin(app.start_companion_conversation(
         &mut tui,
         &mut server,
-        second_id,
+        parent_id,
         CompanionKind::Side,
         /*user_message*/ None,
     ))
@@ -150,6 +194,15 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     assert!(temporary.ephemeral);
     assert!(app.chat_widget.side_conversation_active());
     assert!(!app.chat_widget.parallel_conversation_active());
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        temporary_id,
+        CompanionKind::Parallel,
+        /*user_message*/ None,
+    ))
+    .await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(temporary_id));
     assert_eq!(app.active_side_parent_thread_id(), Some(parent_id));
     assert_eq!(store.side(temporary_id)?, None);
     assert_eq!(store.pair(parent_id)?, None);
