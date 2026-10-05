@@ -405,6 +405,85 @@
         }
       ]
     },
+    "AutoRenameConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AutoRenameContext"
+            }
+          ],
+          "default": "user_message"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "first_trigger": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AutoRenameFirstTrigger"
+            }
+          ],
+          "default": "first_user_message"
+        },
+        "instructions": {
+          "default": null,
+          "description": "Additional naming guidance, limited to 512 UTF-8 bytes.",
+          "type": "string"
+        },
+        "max_context_bytes": {
+          "default": null,
+          "description": "Source-text budget from 128 to 8192 bytes, separate from additional instructions. Omission retains the original source-text budget.",
+          "format": "uint",
+          "maximum": 8192.0,
+          "minimum": 128.0,
+          "type": "integer"
+        },
+        "max_title_chars": {
+          "default": null,
+          "format": "uint",
+          "maximum": 128.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "type": "string"
+        },
+        "reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": null
+        },
+        "recent_message_limit": {
+          "default": null,
+          "format": "uint",
+          "maximum": 32.0,
+          "minimum": 1.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "AutoRenameContext": {
+      "enum": [
+        "user_message",
+        "recent_conversation"
+      ],
+      "type": "string"
+    },
+    "AutoRenameFirstTrigger": {
+      "enum": [
+        "first_user_message",
+        "first_completed_turn"
+      ],
+      "type": "string"
+    },
     "AutoReviewToml": {
       "properties": {
         "circuit_break_action": {
@@ -6834,6 +6913,14 @@
       ],
       "default": null,
       "description": "Machine-local realtime audio device preferences used by realtime voice."
+    },
+    "auto_rename": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AutoRenameConfig"
+        }
+      ],
+      "description": "One-time automatic naming in the TUI; Desktop naming is unaffected."
     },
     "auto_review": {
       "allOf": [
