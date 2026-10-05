@@ -147,6 +147,11 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional prebuilt zsh executable instead of fetching from a manifest.",
     )
+    zsh_source.add_argument(
+        "--no-zsh",
+        action="store_true",
+        help="Omit the optional patched zsh resource and use the system shell.",
+    )
     parser.add_argument(
         "--codex-command-runner-bin",
         type=Path,
@@ -229,7 +234,11 @@ def assemble_package(args: argparse.Namespace) -> Path:
         entrypoint_bin=source_outputs.entrypoint_bin,
         code_mode_host_bin=source_outputs.code_mode_host_bin,
         rg_bin=resolve_rg_bin(spec, args.rg_bin),
-        zsh_bin=resolve_zsh_bin(spec, args.zsh_manifest, zsh_bin=args.zsh_bin),
+        zsh_bin=(
+            None
+            if args.no_zsh
+            else resolve_zsh_bin(spec, args.zsh_manifest, zsh_bin=args.zsh_bin)
+        ),
         bwrap_bin=source_outputs.bwrap_bin,
         codex_command_runner_bin=source_outputs.codex_command_runner_bin,
         codex_windows_sandbox_setup_bin=source_outputs.codex_windows_sandbox_setup_bin,
