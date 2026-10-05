@@ -1620,6 +1620,38 @@ async fn ignore_same_thread_resume_reports_noop_for_current_thread() {
         "Already viewing {}.",
         test_path_display("/tmp/project")
     )));
+
+    let child_id = ThreadId::new();
+    let child_session = test_thread_session(child_id, test_path_buf("/tmp/project"));
+    app.thread_event_channels.insert(
+        child_id,
+        ThreadEventChannel::new_with_session(
+            THREAD_EVENT_CHANNEL_CAPACITY,
+            child_session.clone(),
+            Vec::new(),
+        ),
+    );
+    app.primary_thread_id = Some(thread_id);
+    app.side_threads
+        .insert(child_id, SideThreadState::parallel(thread_id));
+    for current_id in [thread_id, child_id] {
+        if current_id == child_id {
+            app.clear_active_thread().await;
+            app.chat_widget.handle_thread_session(child_session.clone());
+            app.activate_thread_channel(child_id).await;
+        }
+        while app_event_rx.try_recv().is_ok() {}
+        assert!(
+            !app.ignore_same_thread_resume(&crate::resume_picker::SessionTarget {
+                path: Some(test_path_buf("/tmp/project")),
+                thread_id: current_id,
+                cwd: None,
+                history_mode: None,
+            }),
+            "resuming an open pair must exit parallel mode, even for the displayed session"
+        );
+        assert!(app_event_rx.try_recv().is_err());
+    }
 }
 
 #[tokio::test]

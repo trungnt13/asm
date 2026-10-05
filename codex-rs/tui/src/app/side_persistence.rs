@@ -1,4 +1,4 @@
-//! Restore local side navigation without attaching or starting work in the other thread.
+//! Close local pairing selections without deleting saved conversations.
 
 use super::*;
 use crate::side_conversations::SideConversationStore;
@@ -8,39 +8,6 @@ impl App {
         SideConversationStore::new(&self.config.codex_home, &self.app_server_target)
             .close_selection(parent, side)?;
         Ok(())
-    }
-
-    pub(super) fn restore_side_conversation(&mut self, thread_id: ThreadId) {
-        let store = SideConversationStore::new(&self.config.codex_home, &self.app_server_target);
-        let pair = match store.pair(thread_id) {
-            Ok(pair) => pair,
-            Err(error) => {
-                self.chat_widget.add_error_message(format!(
-                    "Could not restore parallel navigation: {error}. Opening this session as an ordinary chat; inherited history may be visible."
-                ));
-                return;
-            }
-        };
-        let Some(pair) = pair else { return };
-        self.side_threads.clear();
-        self.side_threads
-            .insert(pair.side, SideThreadState::parallel(pair.parent));
-        self.primary_thread_id = Some(pair.parent);
-        if thread_id == pair.side {
-            // A parent is attached only after explicit navigation. Never resume its goal merely
-            // because its saved side was opened, and never use the side's settings for the parent.
-            self.primary_session_configured = None;
-        }
-        self.upsert_agent_picker_thread(
-            pair.parent,
-            /*agent_nickname*/ None,
-            /*agent_role*/ None,
-            /*is_closed*/ false,
-        );
-        self.upsert_agent_picker_thread(
-            pair.side, /*agent_nickname*/ None, /*agent_role*/ None,
-            /*is_closed*/ false,
-        );
     }
 }
 
