@@ -71,9 +71,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `afb436df8b70bb5bc57b86d9a3e829968988cd21`.
+- Last incorporated upstream commit: `7f892275e31002f0422477c6219189284560e689`.
 - Commit date: 2026-10-04.
-- Subject: Honor server reasoning summary defaults in new TUI threads (#50811).
+- Subject: Isolate tracing in the strict third-party tool deferral test (#50977).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
