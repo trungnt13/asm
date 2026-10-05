@@ -205,6 +205,10 @@ impl App {
     ) -> bool {
         if self.active_thread_id != Some(target_session.thread_id)
             || self
+                .side_threads
+                .values()
+                .any(|state| state.kind == CompanionKind::Parallel)
+            || self
                 .thread_event_channels
                 .get(&target_session.thread_id)
                 .is_some_and(|channel| channel.attachment() != ThreadEventAttachment::Live)
@@ -1614,7 +1618,6 @@ impl App {
         self.agents_overview.hidden_threads.remove(&thread_id);
         self.agents_overview.threads.entry(thread_id).or_default();
         self.primary_session_configured = Some(session.clone());
-        self.restore_side_conversation(thread_id);
         self.upsert_agent_picker_thread(
             thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
             /*is_closed*/ false,
