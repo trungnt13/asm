@@ -235,6 +235,7 @@ impl HistoryCell for ExecCell {
         }
         Some(ToolCallSummary {
             count: self.group.calls.len(),
+            count_key: None,
             running: self.is_active(),
             names,
         })
