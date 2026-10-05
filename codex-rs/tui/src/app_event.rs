@@ -363,6 +363,7 @@ pub(crate) enum AppEvent {
     },
     /// Register a hidden title-generation thread started in the background.
     ThreadTitleStarted {
+        max_title_chars: usize,
         cancellation: CancellationToken,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
@@ -372,6 +373,7 @@ pub(crate) enum AppEvent {
     },
     /// Route a hidden title request to its automatic rename or editable prompt.
     GeneratedThreadTitle {
+        max_title_chars: usize,
         cancellation: CancellationToken,
         thread_id: ThreadId,
         temporary_thread_id: ThreadId,
