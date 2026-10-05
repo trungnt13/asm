@@ -7,6 +7,8 @@ set windows-shell := ["python", "-c", 'import os, runpy; runpy.run_path(os.envir
 
 rust_min_stack := "8388608" # 8 MiB
 python := if os_family() == "windows" { "python" } else { "python3" }
+local_profile_dir := if env("CI", "") == "" { "dev-small" } else { "debug" }
+cargo_target_dir := env("CARGO_TARGET_DIR", "target")
 
 # Display help
 help:
@@ -15,11 +17,11 @@ help:
 # `codex`
 alias c := codex
 codex *args:
-    cargo run --bin codex -- {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --bin codex -- {args}
 
 # `codex exec`
 exec *args:
-    cargo run --bin codex -- exec {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --bin codex -- exec {args}
 
 # Start `codex exec-server` and run codex-tui.
 [no-cd]
@@ -30,11 +32,11 @@ tui-with-exec-server *args:
 
 # Run the CLI version of the file-search crate.
 file-search *args:
-    cargo run --bin codex-file-search -- {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --bin codex-file-search -- {args}
 
 # Run the standalone code-mode host from source.
 code-mode-host *args:
-    cargo run --bin codex-code-mode-host -- {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --bin codex-code-mode-host -- {args}
 
 # Assemble a local Codex package.
 [no-cd]
@@ -43,8 +45,8 @@ assemble-codex-package *args:
 
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
-    cargo build -p codex-cli
-    cargo run -p codex-app-server-test-client -- --codex-bin ./target/debug/codex {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" build -p codex-cli
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-app-server-test-client -- --codex-bin "{{ cargo_target_dir }}/{{ local_profile_dir }}/codex" {args}
 
 # Format the justfile, Rust, Bazel/Starlark, Python SDK code, and Python scripts.
 fmt:
@@ -55,10 +57,10 @@ fmt-check:
     @{{ python }} ../scripts/format.py --check
 
 fix *args:
-    cargo clippy --fix --tests --allow-dirty {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" clippy --fix --tests --allow-dirty {args}
 
 clippy *args:
-    cargo clippy --tests {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" clippy --tests {args}
 
 [unix]
 install:
@@ -85,11 +87,11 @@ install:
 # there should be no need to add `--all-features`.
 [unix]
 test *args:
-    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local cargo nextest run --no-fail-fast "$@"
+    RUST_MIN_STACK={{ rust_min_stack }} NEXTEST_PROFILE=local {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" nextest run --no-fail-fast "$@"
 
 [windows]
 test *args:
-    $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; cargo nextest run --no-fail-fast @($args | Select-Object -Skip 1)
+    $env:RUST_MIN_STACK = "{{ rust_min_stack }}"; $env:NEXTEST_PROFILE = "local"; {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" nextest run --no-fail-fast @($args | Select-Object -Skip 1)
 
 # Run from the repository root so scripts that resolve paths from `cwd` see
 # the same layout they use in GitHub Actions.
@@ -171,15 +173,15 @@ build-for-release:
 
 # Regenerate the json schema for config.toml from the current config types.
 write-config-schema:
-    cargo run -p codex-config-schema --bin codex-write-config-schema
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-config-schema --bin codex-write-config-schema
 
 # Regenerate app-server protocol schemas and the Python SDK derived from them.
 write-app-server-schema *args:
     {{ python }} app-server-protocol/scripts/write_schema_fixtures.py {args}
 
 [no-cd]
-write-hooks-schema:
-    cargo run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
+write-hooks-schema *args:
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --manifest-path {{ justfile_directory() }}/codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures {args}
 
 # Run the argument-comment Dylint checks across codex-rs.
 [no-cd]
@@ -198,8 +200,8 @@ argument-comment-lint-from-source *args:
 # Tail logs from the state SQLite database
 [unix]
 log *args:
-    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p codex-cli --bin logs_client -- "$@"
+    if [ "${1:-}" = "--" ]; then shift; fi; {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-cli --bin logs_client -- "$@"
 
 [windows]
 log *args:
-    $forwarded_args = @($args | Select-Object -Skip 1); if ($forwarded_args.Count -gt 0 -and $forwarded_args[0] -eq "--") { $forwarded_args = @($forwarded_args | Select-Object -Skip 1) }; cargo run -p codex-cli --bin logs_client -- @forwarded_args
+    $forwarded_args = @($args | Select-Object -Skip 1); if ($forwarded_args.Count -gt 0 -and $forwarded_args[0] -eq "--") { $forwarded_args = @($forwarded_args | Select-Object -Skip 1) }; {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-cli --bin logs_client -- @forwarded_args
