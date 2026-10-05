@@ -6,6 +6,8 @@ use codex_shell_command::parse_command::extract_shell_command;
 #[derive(Clone)]
 pub(crate) struct ToolCallSummary {
     pub(crate) count: usize,
+    /// Shared begin/end previews count once within each displayed group.
+    pub(crate) count_key: Option<String>,
     pub(crate) running: bool,
     pub(crate) names: Vec<String>,
 }
