@@ -45,8 +45,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           targets: ${{ matrix.target }}
-      - if: ${{ contains(matrix.target, 'linux-gnu') }}
-        name: Install Python for artifact verification
+      - name: Install Python for package assembly and verification
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: '3.11'
@@ -90,6 +89,11 @@ jobs:
           done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            cargo build --locked --release --target "$TARGET" --bin bwrap
+            CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
+            export CODEX_BWRAP_SHA256
+          fi
           cargo build --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings
 
       - name: Create archive
@@ -98,14 +102,17 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="target/${TARGET}/release"
-          binary="${release_dir}/codex"
-          helper="${release_dir}/codex-code-mode-host"
           archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
-
-          [[ -x "$binary" ]] || { echo "Missing executable: $binary" >&2; exit 1; }
-          [[ -x "$helper" ]] || { echo "Missing executable: $helper" >&2; exit 1; }
-          mkdir -p "$(dirname "$archive")"
-          tar -C "$release_dir" -czf "$archive" codex codex-code-mode-host
+          resource_args=()
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            resource_args+=(--bwrap-bin "${release_dir}/bwrap")
+          fi
+          CODEX_REPO_ROOT="$GITHUB_WORKSPACE" python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" \
+            --target "$TARGET" --cargo-profile release --no-zsh \
+            --entrypoint-bin "${release_dir}/codex" \
+            --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
+            --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
+            --archive-output "$archive" "${resource_args[@]}" --force
 
       - name: Smoke packaged ASM
         env:
