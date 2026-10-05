@@ -362,6 +362,7 @@ impl HistoryCell for McpToolCallCell {
         }
         Some(ToolCallSummary {
             count: 1,
+            count_key: None,
             running: self.duration.is_none(),
             names: vec![format!(
                 "{}/{}",
