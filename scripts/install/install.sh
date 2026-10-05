@@ -802,29 +802,131 @@ handle_conflicting_install() {
   fi
 }
 
+validate_package_manifest() {
+  manifest_path="$1"
+  expected_version="$2"
+  expected_target="$3"
+
+  [ -f "$manifest_path" ] && [ ! -L "$manifest_path" ] &&
+    [ "$(wc -c <"$manifest_path")" -le 4096 ] || return 1
+  # The canonical manifest is a small flat object with literal names/values.
+  # Parse its grammar rather than accepting matching fields in malformed JSON.
+  LC_ALL=C awk -v version="$expected_version" -v target="$expected_target" '
+    function skip_space() { sub(/^[ \t\r\n]*/, "", rest) }
+    function take_string( token) {
+      skip_space()
+      if (!match(rest, /^"[^"\\]*"/)) { invalid = 1; return "" }
+      token = substr(rest, 2, RLENGTH - 2)
+      rest = substr(rest, RLENGTH + 1)
+      return token
+    }
+    { document = document $0 "\n" }
+    END {
+      expected["version"] = version
+      expected["target"] = target
+      expected["variant"] = "codex"
+      expected["entrypoint"] = "bin/codex"
+      expected["resourcesDir"] = "codex-resources"
+      expected["pathDir"] = "codex-path"
+      rest = document
+      skip_space()
+      if (substr(rest, 1, 1) != "{") exit 1
+      rest = substr(rest, 2)
+      while (!invalid) {
+        key = take_string()
+        if (invalid || seen[key]++) exit 1
+        skip_space()
+        if (substr(rest, 1, 1) != ":") exit 1
+        rest = substr(rest, 2)
+        skip_space()
+        if (key == "layoutVersion") {
+          if (substr(rest, 1, 1) != "1") exit 1
+          rest = substr(rest, 2)
+        } else {
+          value = take_string()
+          if (!(key in expected) || value != expected[key]) exit 1
+        }
+        skip_space()
+        separator = substr(rest, 1, 1)
+        rest = substr(rest, 2)
+        if (separator == "}") break
+        if (separator != ",") exit 1
+      }
+      skip_space()
+      if (invalid || rest != "" || !seen["layoutVersion"]) exit 1
+      for (key in expected) if (!seen[key]) exit 1
+    }
+  ' "$manifest_path"
+}
+
+package_files_are_complete() {
+  package_dir="$1"
+  expected_version="$2"
+  expected_target="$3"
+
+  for directory in bin codex-path codex-resources; do
+    [ -d "$package_dir/$directory" ] &&
+      [ ! -L "$package_dir/$directory" ] || return 1
+  done
+  executable_paths="bin/codex bin/codex-code-mode-host codex-path/rg"
+  if [ "$expected_target" = "x86_64-unknown-linux-gnu" ]; then
+    executable_paths="$executable_paths codex-resources/bwrap"
+  fi
+  for executable in $executable_paths; do
+    [ -f "$package_dir/$executable" ] &&
+      [ ! -L "$package_dir/$executable" ] &&
+      [ -x "$package_dir/$executable" ] || return 1
+  done
+  validate_package_manifest "$package_dir/codex-package.json" "$expected_version" "$expected_target" &&
+    [ "$(version_from_binary "$package_dir/bin/codex")" = "$expected_version" ]
+}
+
 install_fork_release() {
   release_dir="$1"
   archive_path="$2"
   stage_release="$RELEASES_DIR/.staging.$(basename "$release_dir").$$"
 
-  # Reject unexpected paths before extraction or changing the selected install.
-  members="$(tar -tzf "$archive_path")" || return 1
-  [ "$members" = "codex
-codex-code-mode-host" ] || {
-    echo "ASM archive must contain codex and codex-code-mode-host only." >&2
+  # Check names AND member types before extraction: even an allowed path could
+  # otherwise be a link or device that writes outside the staging directory.
+  tar -tzf "$archive_path" >"$tmp_dir/archive-members" || return 1
+  tar -tvzf "$archive_path" >"$tmp_dir/archive-types" || return 1
+  if ! LC_ALL=C awk -v target="$vendor_target" '
+    BEGIN {
+      required["bin/"] = "d"
+      required["codex-path/"] = "d"
+      required["codex-resources/"] = "d"
+      required["codex-package.json"] = "-"
+      required["bin/codex"] = "-"
+      required["bin/codex-code-mode-host"] = "-"
+      required["codex-path/rg"] = "-"
+      if (target == "x86_64-unknown-linux-gnu") required["codex-resources/bwrap"] = "-"
+    }
+    NR == FNR {
+      if (!($0 in required) || members[$0]++) invalid = 1
+      next
+    }
+    {
+      name = $NF
+      if (!(name in required) || types[name]++ ||
+          substr($1, 1, 1) != required[name]) invalid = 1
+    }
+    END {
+      for (name in required) if (members[name] != 1 || types[name] != 1) invalid = 1
+      exit invalid
+    }
+  ' "$tmp_dir/archive-members" "$tmp_dir/archive-types"; then
+    echo "ASM archive must contain a complete canonical package with regular files only. Reinstall a newer ASM release; old two-binary releases require their original installer." >&2
     return 1
-  }
+  fi
   mkdir -p "$RELEASES_DIR"
   rm -rf "$stage_release"
-  mkdir -p "$stage_release/bin"
-  tar -xzf "$archive_path" -C "$stage_release/bin"
-  for binary in codex codex-code-mode-host; do
-    if [ ! -f "$stage_release/bin/$binary" ] || [ -L "$stage_release/bin/$binary" ] ||
-      [ ! -x "$stage_release/bin/$binary" ]; then
-      echo "Invalid ASM executable: $binary" >&2
-      return 1
-    fi
-  done
+  mkdir "$stage_release"
+  tar -xzf "$archive_path" -C "$stage_release"
+  if ! package_files_are_complete "$stage_release" "$resolved_version" "$vendor_target"; then
+    echo "Invalid ASM package metadata or required executables." >&2
+    rm -rf "$stage_release"
+    return 1
+  fi
   ln -s "bin/codex" "$stage_release/codex"
   if [ -e "$release_dir" ] || [ -L "$release_dir" ]; then
     rm -rf "$release_dir"
@@ -837,18 +939,10 @@ release_dir_is_complete() {
   expected_version="$2"
   expected_target="$3"
 
-  [ -d "$release_dir" ] &&
+  [ -d "$release_dir" ] && [ ! -L "$release_dir" ] &&
     [ "$(basename "$release_dir")" = "$expected_version-$expected_target" ] ||
     return 1
-
-  [ -f "$release_dir/bin/codex" ] && [ -x "$release_dir/bin/codex" ] &&
-    [ ! -L "$release_dir/bin/codex" ] &&
-    [ -f "$release_dir/bin/codex-code-mode-host" ] &&
-    [ -x "$release_dir/bin/codex-code-mode-host" ] &&
-    [ ! -L "$release_dir/bin/codex-code-mode-host" ] || return 1
-
-  installed_version="$(version_from_binary "$release_dir/bin/codex" || version_from_binary "$release_dir/codex" || true)"
-  [ "$installed_version" = "$expected_version" ]
+  package_files_are_complete "$release_dir" "$expected_version" "$expected_target"
 }
 
 update_current_link() {
@@ -959,7 +1053,7 @@ if ! release_dir_is_complete "$release_dir" "$resolved_version" "$vendor_target"
   archive_path="$tmp_dir/$asset"
   checksum_path="$tmp_dir/$checksum_asset"
 
-  step "Downloading ASM CLI and helper"
+  step "Downloading complete ASM package"
   checksum_digest="$(release_asset_digest "$checksum_asset")"
   download_file "$checksum_url" "$checksum_path"
   verify_archive_digest "$checksum_path" "$checksum_digest"
@@ -1020,5 +1114,5 @@ esac
 
 printf 'ASM CLI %s installed successfully.\n' "$resolved_version"
 step "Use this ASM installer for manual updates; the inherited in-app updater targets OpenAI."
-step "Use host-provided rg and a system shell where those features require them."
+step "The package includes rg and required platform resources; use a system shell."
 maybe_launch_codex_now
