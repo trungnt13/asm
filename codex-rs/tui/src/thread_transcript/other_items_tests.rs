@@ -231,4 +231,44 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
         );
         assert_eq!(projected[0].activity_disclosure(/*width*/ 80), None);
     }
+    let wait = ThreadItem::CollabAgentToolCall {
+        id: "restored-wait".to_owned(),
+        tool: codex_app_server_protocol::CollabAgentTool::Wait,
+        status: codex_app_server_protocol::CollabAgentToolCallStatus::Completed,
+        sender_thread_id: "01912345-1234-7123-8123-123456789abc".to_string(),
+        receiver_thread_ids: Vec::new(),
+        prompt: None,
+        model: None,
+        reasoning_effort: None,
+        agents_states: HashMap::new(),
+    };
+    let projected = cells(wait, &cwd);
+    assert_eq!(projected.len(), 1);
+    let summary = projected[0].tool_call_summary().unwrap();
+    assert_eq!(
+        (
+            summary.count,
+            summary.count_key,
+            summary.running,
+            summary.names
+        ),
+        (
+            1,
+            Some("agent-wait:restored-wait".to_string()),
+            false,
+            vec!["wait_agent".to_string()]
+        )
+    );
+    assert_eq!(
+        projected[0].activity_ids(),
+        vec!["agent-wait:restored-wait".to_string()]
+    );
+    assert_eq!(
+        projected[0]
+            .raw_lines()
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>(),
+        vec!["• Finished waiting", "  └ No agents completed yet"]
+    );
 }

@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Weak;
 
 use crate::history_cell::ToolCallSummary;
@@ -154,12 +155,16 @@ impl TranscriptView {
         }
         let mut summary = ToolCallSummary {
             count: 0,
+            count_key: None,
             names: Vec::new(),
             running: false,
         };
+        let mut counted = HashSet::new();
         for cell in members {
             if let Some(member) = self.collapsed_tools.summary(cell) {
-                summary.count += member.count;
+                if member.count_key.is_none_or(|key| counted.insert(key)) {
+                    summary.count += member.count;
+                }
                 summary.running |= member.running;
                 for name in member.names {
                     if !summary.names.contains(&name) {
