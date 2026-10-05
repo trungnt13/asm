@@ -2869,6 +2869,7 @@ impl App {
                     .await;
             }
             AppEvent::ThreadTitleStarted {
+                max_title_chars,
                 cancellation,
                 thread_id,
                 destination,
@@ -2882,11 +2883,13 @@ impl App {
                     destination,
                     prompt,
                     effort,
+                    max_title_chars,
                     result,
                     cancellation,
                 );
             }
             AppEvent::GeneratedThreadTitle {
+                max_title_chars,
                 cancellation,
                 thread_id,
                 temporary_thread_id,
@@ -2903,7 +2906,9 @@ impl App {
                 match destination {
                     ThreadTitleDestination::Automatic => {
                         if let Ok(response) = result
-                            && let Some(title) = super::thread_title::parse_thread_title(&response)
+                            && let Some(title) = super::thread_title::parse_thread_title(
+                                &response, max_title_chars,
+                            )
                             && let Ok(thread) = app_server
                                 .thread_read(thread_id, /*include_turns*/ false)
                                 .await
@@ -2922,7 +2927,9 @@ impl App {
                     ThreadTitleDestination::RenameSuggestion { request_id } => {
                         let suggestion = result
                             .ok()
-                            .and_then(|response| super::thread_title::parse_thread_title(&response));
+                            .and_then(|response| super::thread_title::parse_thread_title(
+                                &response, max_title_chars,
+                            ));
 
                         self.chat_widget.apply_thread_name_suggestion(
                             thread_id,
