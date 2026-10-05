@@ -80,7 +80,11 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
             )));
         }
         item @ ThreadItem::CollabAgentToolCall { .. } => {
-            if let Some(cell) = multi_agents::tool_call_history_cell(
+            if let Some(cell) = multi_agents::AgentWaitHistory::default()
+                .cell(&item, |_| multi_agents::AgentMetadata::default())
+            {
+                cells.push(Arc::new(cell));
+            } else if let Some(cell) = multi_agents::tool_call_history_cell(
                 &item,
                 /*cached_spawn_request*/ None,
                 |_| multi_agents::AgentMetadata::default(),
