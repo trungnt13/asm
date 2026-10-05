@@ -4,10 +4,11 @@ import argparse
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from codex_package.cli import parse_package_version
+from codex_package.cli import parse_args, parse_package_version
 
 
 class PackageVersionTest(unittest.TestCase):
@@ -21,6 +22,11 @@ class PackageVersionTest(unittest.TestCase):
         ):
             with self.subTest(version=version):
                 self.assertEqual(parse_package_version(version), version)
+
+        with patch.object(sys, "argv", ["build_codex_package.py", "--no-zsh"]):
+            self.assertTrue(parse_args().no_zsh)
+        with patch.object(sys, "argv", ["build_codex_package.py"]):
+            self.assertFalse(parse_args().no_zsh)
 
     def test_rejects_versions_the_runtime_cannot_parse(self) -> None:
         for version in (
