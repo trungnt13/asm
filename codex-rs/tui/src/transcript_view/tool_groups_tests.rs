@@ -7,6 +7,8 @@ use crate::transcript_view::tests::cell;
 use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
 use codex_app_server_protocol::CommandExecutionSource;
+use codex_app_server_protocol::SubAgentActivityKind;
+use codex_app_server_protocol::ThreadItem;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -35,6 +37,22 @@ pub(super) fn completed(
         Duration::ZERO,
     ));
     Arc::new(call)
+}
+
+pub(super) fn subagent(
+    id: &str,
+    kind: SubAgentActivityKind,
+    agent_path: &str,
+) -> Arc<dyn HistoryCell> {
+    Arc::new(
+        crate::multi_agents::sub_agent_activity_history_cell(&ThreadItem::SubAgentActivity {
+            id: id.to_owned(),
+            kind,
+            agent_thread_id: "01912345-1234-7123-8123-123456789abc".to_owned(),
+            agent_path: agent_path.to_owned(),
+        })
+        .unwrap(),
+    )
 }
 
 #[test]
@@ -98,8 +116,89 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
     assert!(recollapsed.contains("▸ Ran 4 tool calls (glab, curl, jq)"));
     assert!(recollapsed.contains("jq"));
     assert!(!recollapsed.contains("fourth result"));
+    let mut mixed_cells = vec![
+        subagent("contact-1", SubAgentActivityKind::Interacted, "/root/a"),
+        completed(
+            "mixed-first",
+            "glab api first",
+            "first output",
+            /*exit_code*/ 0,
+        ),
+        subagent("contact-2", SubAgentActivityKind::Interacted, "/root/a"),
+        completed(
+            "mixed-second",
+            "curl endpoint",
+            "second output",
+            /*exit_code*/ 0,
+        ),
+        subagent("contact-3", SubAgentActivityKind::Interacted, "/root/b"),
+    ];
+    let mut mixed_view = TranscriptView::default();
+    mixed_view.set_collapse_tool_calls(/*enabled*/ true);
+    let mixed_collapsed = text(&render(
+        &mut mixed_view,
+        &mixed_cells,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert!(mixed_collapsed.contains("▸ Ran 5 tool calls (/root/a, glab, curl, /root/b)"));
+    assert!(!mixed_collapsed.contains("Interacted with"));
+    assert!(!mixed_collapsed.contains("first output"));
+    mixed_view.handle_key(
+        KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE),
+        &mixed_cells,
+    );
+    mixed_view.handle_key(
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &mixed_cells,
+    );
+    let mixed_expanded = text(&render(
+        &mut mixed_view,
+        &mixed_cells,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    let expected_previews = mixed_cells
+        .iter()
+        .flat_map(|member| member.compact_hyperlink_lines(/*width*/ 72))
+        .map(|line| line.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(mixed_expanded.contains(&expected_previews));
+    assert_eq!(
+        mixed_expanded.matches("Interacted with `/root/a`").count(),
+        2
+    );
+    mixed_cells.push(subagent(
+        "contact-4",
+        SubAgentActivityKind::Interacted,
+        "/root/b",
+    ));
+    let mixed_appended = text(&render(
+        &mut mixed_view,
+        &mixed_cells,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert!(mixed_appended.contains("▾ Ran 6 tool calls (/root/a, glab, curl, /root/b)"));
+    assert_eq!(
+        mixed_appended.matches("Interacted with `/root/b`").count(),
+        2
+    );
+    mixed_view.handle_key(
+        KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        &mixed_cells,
+    );
+    let mixed_recollapsed = text(&render(
+        &mut mixed_view,
+        &mixed_cells,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert!(!mixed_recollapsed.contains("Interacted with"));
+    assert!(mixed_recollapsed.contains("▸ Ran 6 tool calls (/root/a, glab, curl, /root/b)"));
     insta::assert_snapshot!(format!(
-        "collapsed\n{collapsed}\n\nexpanded\n{expanded}\n\nappended\n{appended}\n\ncollapsed after append\n{recollapsed}"
+        "collapsed\n{collapsed}\n\nexpanded\n{expanded}\n\nappended\n{appended}\n\ncollapsed after append\n{recollapsed}\n\nmixed collapsed\n{mixed_collapsed}\n\nmixed expanded\n{mixed_expanded}\n\nmixed appended\n{mixed_appended}\n\nmixed recollapsed\n{mixed_recollapsed}"
     ));
 }
 
@@ -112,6 +211,7 @@ fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
             "first result",
             /*exit_code*/ 0,
         ),
+        subagent("contact-1", SubAgentActivityKind::Interacted, "/root/a"),
         completed(
             "second",
             "curl endpoint",
@@ -119,6 +219,10 @@ fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
             /*exit_code*/ 0,
         ),
     ];
+    let mut original_cells = cells.clone();
+    original_cells[1] = Arc::new(crate::history_cell::PlainHistoryCell::new(
+        cells[1].display_lines(/*width*/ 72),
+    ));
     for (enabled, detailed, mode) in [
         (false, false, HistoryRenderMode::Rich),
         (true, false, HistoryRenderMode::Raw),
@@ -126,7 +230,12 @@ fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
     ] {
         let mut baseline = TranscriptView::default();
         baseline.set_presentation(detailed, mode);
-        let expected = render(&mut baseline, &cells, /*width*/ 72, /*height*/ 24);
+        let expected = render(
+            &mut baseline,
+            &original_cells,
+            /*width*/ 72,
+            /*height*/ 24,
+        );
         let mut configured = TranscriptView::default();
         configured.set_collapse_tool_calls(enabled);
         configured.set_presentation(detailed, mode);
@@ -157,12 +266,25 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
             "hidden second",
             /*exit_code*/ 0,
         ),
+        subagent("contact-1", SubAgentActivityKind::Interacted, "/root/a"),
         cell("Assistant message between tools"),
         completed(
             "failed",
             "false",
             "failure diagnostic",
             /*exit_code*/ 1,
+        ),
+        subagent("contact-2", SubAgentActivityKind::Interacted, "/root/b"),
+        subagent("start-1", SubAgentActivityKind::Started, "/root/started"),
+        subagent(
+            "complete-1",
+            SubAgentActivityKind::Completed,
+            "/root/completed",
+        ),
+        subagent(
+            "interrupt-1",
+            SubAgentActivityKind::Interrupted,
+            "/root/interrupted",
         ),
         completed("third", "jq .", "hidden third", /*exit_code*/ 0),
         completed(
@@ -179,6 +301,10 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
     ));
     assert!(rendered.contains("Assistant message between tools"));
     assert!(rendered.contains("failure diagnostic"));
+    assert!(rendered.contains("Started `/root/started`"));
+    assert!(rendered.contains("Completed `/root/completed`"));
+    assert!(rendered.contains("Interrupted `/root/interrupted`"));
+    assert!(!rendered.contains("Interacted with"));
     assert!(!rendered.contains("hidden first"));
     assert!(!rendered.contains("hidden fourth"));
     let names = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
