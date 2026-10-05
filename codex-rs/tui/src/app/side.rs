@@ -779,6 +779,13 @@ impl App {
             .is_some_and(|state| state.kind == CompanionKind::Side)
         {
             Some(SIDE_ALREADY_OPEN_MESSAGE)
+        } else if kind == CompanionKind::Side
+            && self
+                .side_threads
+                .values()
+                .any(|state| state.kind == CompanionKind::Parallel)
+        {
+            Some(super::parallel::SIDE_WHILE_PARALLEL_OPEN_MESSAGE)
         } else {
             None
         }
