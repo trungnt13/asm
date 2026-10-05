@@ -69,3 +69,13 @@ fn oversized_metadata_is_rejected_without_unbounded_reads() -> std::io::Result<(
     assert!(store.side(record.side).is_err());
     Ok(())
 }
+
+impl SideConversationStore {
+    pub(crate) fn pair(&self, thread: ThreadId) -> std::io::Result<Option<SideConversation>> {
+        if let Some(side) = self.side(thread)? {
+            return Ok(Some(side));
+        }
+        let record = self.read(&self.directory.join(format!("parent-{thread}.json")))?;
+        Ok(record.filter(|record| record.parent == thread && record.side != thread))
+    }
+}
