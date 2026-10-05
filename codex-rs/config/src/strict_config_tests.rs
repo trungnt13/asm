@@ -132,6 +132,60 @@ fn strict_config_accepts_tui_notification_settings() {
             None
         );
     }
+    let config: ConfigToml = toml::from_str(
+        r#"
+[auto_rename]
+enabled = false
+model = "title-model"
+reasoning_effort = "low"
+first_trigger = "first_completed_turn"
+context = "recent_conversation"
+max_context_bytes = 8192
+recent_message_limit = 8
+max_title_chars = 64
+instructions = "Name the concrete task"
+"#,
+    )
+    .expect("automatic naming config");
+    assert_eq!(
+        config.auto_rename,
+        Some(crate::AutoRenameConfig {
+            enabled: false,
+            model: Some("title-model".to_string()),
+            reasoning_effort: Some(codex_protocol::openai_models::ReasoningEffort::Low),
+            first_trigger: crate::AutoRenameFirstTrigger::FirstCompletedTurn,
+            context: crate::AutoRenameContext::RecentConversation,
+            max_context_bytes: Some(8192),
+            recent_message_limit: Some(8),
+            max_title_chars: Some(64),
+            instructions: Some("Name the concrete task".to_string()),
+        })
+    );
+    for field in [
+        "model = ' '",
+        "first_trigger = 'unknown'",
+        "context = 'unknown'",
+        "max_context_bytes = 0",
+        "max_context_bytes = 127",
+        "max_context_bytes = 8193",
+        "recent_message_limit = 0",
+        "recent_message_limit = 33",
+        "max_title_chars = 0",
+        "max_title_chars = 129",
+        "auto_update_interval_turns = 5",
+    ] {
+        assert!(
+            toml::from_str::<ConfigToml>(&format!("[auto_rename]\n{field}")).is_err(),
+            "{field}"
+        );
+    }
+    assert!(
+        toml::from_str::<ConfigToml>(&format!(
+            "[auto_rename]\ninstructions = '{}'",
+            "x".repeat(/*n*/ 513)
+        ))
+        .is_err()
+    );
 }
 
 #[test]
