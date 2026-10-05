@@ -63,14 +63,6 @@ impl SideConversationStore {
         Ok(record.filter(|record| record.side == side && record.parent != side))
     }
 
-    pub(crate) fn pair(&self, thread: ThreadId) -> std::io::Result<Option<SideConversation>> {
-        if let Some(side) = self.side(thread)? {
-            return Ok(Some(side));
-        }
-        let record = self.read(&self.directory.join(format!("parent-{thread}.json")))?;
-        Ok(record.filter(|record| record.parent == thread && record.side != thread))
-    }
-
     pub(crate) fn save(&self, record: &SideConversation) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.directory)?;
         let _lock = self.lock_parent(record.parent)?;
