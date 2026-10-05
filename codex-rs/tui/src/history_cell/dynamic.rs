@@ -184,6 +184,7 @@ impl HistoryCell for DynamicToolCallCell {
         }
         Some(ToolCallSummary {
             count: 1,
+            count_key: None,
             running: data.is_active(),
             names: vec![data.name.clone()],
         })
