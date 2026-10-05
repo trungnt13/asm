@@ -29,6 +29,9 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use std::collections::HashSet;
 
+mod wait_history;
+pub(crate) use wait_history::AgentWaitHistory;
+
 const COLLAB_PROMPT_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_ERROR_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_RESPONSE_PREVIEW_GRAPHEMES: usize = 240;
@@ -337,6 +340,7 @@ impl HistoryCell for SubAgentActivityHistoryCell {
         // Each interaction is emitted once after a successful send_message or followup_task.
         (self.kind == SubAgentActivityKind::Interacted).then(|| ToolCallSummary {
             count: 1,
+            count_key: None,
             running: false,
             names: vec![self.agent_path.clone()],
         })
@@ -344,6 +348,10 @@ impl HistoryCell for SubAgentActivityHistoryCell {
 
     fn activity_disclosure(&self, _width: u16) -> Option<crate::history_cell::ActivityDisclosure> {
         None
+    }
+
+    fn supports_individual_disclosure(&self) -> bool {
+        false
     }
 }
 
