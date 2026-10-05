@@ -86,6 +86,16 @@ fn bounds_the_entire_title_prompt_for_dense_unicode() {
             prompt.len(),
             message.chars().next()
         );
+        let settings = codex_config::AutoRenameConfig {
+            max_context_bytes: Some(8192),
+            max_title_chars: Some(128),
+            instructions: Some("x".repeat(/*n*/ 512)),
+            ..Default::default()
+        };
+        let source = message.repeat(/*n*/ 10);
+        let prompt = super::super::auto_rename::automatic_title_prompt(&settings, &source);
+        assert!(prompt.len() <= 9500);
+        assert!(prompt.is_char_boundary(prompt.len()));
     }
 }
 
@@ -133,10 +143,12 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
                 .await?;
         }
         let displayed_thread = (app.chat_widget.thread_id(), app.chat_widget.thread_name());
+        app.local_settings.auto_rename.max_title_chars = Some(5);
         app.handle_event(
             &mut tui,
             &mut app_server,
             AppEvent::GeneratedThreadTitle {
+                max_title_chars: THREAD_TITLE_MAX_CHARS,
                 cancellation: CancellationToken::new(),
                 thread_id,
                 temporary_thread_id: codex_protocol::ThreadId::new(),
@@ -180,7 +192,16 @@ async fn slash_rename_generates_editable_title_through_embedded_app_server()
 
 #[tokio::test]
 async fn automatic_thread_title_generates_without_a_provisional_name() -> color_eyre::Result<()> {
-    check_thread_title_generation(TitleScenario::Automatic).await
+    for scenario in [
+        TitleScenario::Automatic,
+        TitleScenario::Configured,
+        TitleScenario::CompletedTurn,
+        TitleScenario::CompletedTurnUserMessage,
+        TitleScenario::Disabled,
+    ] {
+        check_thread_title_generation(scenario).await?;
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -196,6 +217,10 @@ async fn overview_rename_cancels_running_thread_title() -> color_eyre::Result<()
 #[derive(Clone, Copy)]
 enum TitleScenario {
     Automatic,
+    Configured,
+    CompletedTurn,
+    CompletedTurnUserMessage,
+    Disabled,
     Suggestion,
     ManualRename,
     OverviewRename,
@@ -203,6 +228,17 @@ enum TitleScenario {
 
 async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::Result<()> {
     let automatic = !matches!(scenario, TitleScenario::Suggestion);
+    let configured = matches!(
+        scenario,
+        TitleScenario::Configured
+            | TitleScenario::CompletedTurn
+            | TitleScenario::CompletedTurnUserMessage
+    );
+    let completed_turn = matches!(
+        scenario,
+        TitleScenario::CompletedTurn | TitleScenario::CompletedTurnUserMessage
+    );
+    let disabled = matches!(scenario, TitleScenario::Disabled);
     let cancel = matches!(
         scenario,
         TitleScenario::ManualRename | TitleScenario::OverviewRename
@@ -251,6 +287,25 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         ..ModelProviderInfo::default()
     };
 
+    app.local_settings.auto_rename = codex_config::AutoRenameConfig {
+        enabled: !disabled,
+        model: configured.then(|| "gpt-5.1".to_string()),
+        reasoning_effort: configured.then_some(codex_protocol::openai_models::ReasoningEffort::Low),
+        first_trigger: if completed_turn {
+            codex_config::AutoRenameFirstTrigger::FirstCompletedTurn
+        } else {
+            codex_config::AutoRenameFirstTrigger::FirstUserMessage
+        },
+        context: if configured && !matches!(scenario, TitleScenario::CompletedTurnUserMessage) {
+            codex_config::AutoRenameContext::RecentConversation
+        } else {
+            codex_config::AutoRenameContext::UserMessage
+        },
+        max_context_bytes: configured.then_some(/*t*/ 8192),
+        recent_message_limit: configured.then_some(3),
+        max_title_chars: configured.then_some(/*t*/ 12),
+        instructions: configured.then(|| "Name the concrete authentication problem".to_string()),
+    };
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let started = app_server.start_thread(&app.config).await?;
@@ -270,7 +325,11 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         .push(Turn {
             id: "existing-turn".to_string(),
             root_turn_id: None,
-            items: vec![title_user_message("user-message", "Fix the login timeout")],
+            items: if completed_turn {
+                Vec::new()
+            } else {
+                vec![title_user_message("user-message", "Fix the login timeout")]
+            },
             items_view: Default::default(),
             token_usage: None,
             status: TurnStatus::Completed,
@@ -281,6 +340,18 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         });
     while event_rx.try_recv().is_ok() {}
 
+    if completed_turn {
+        app.enqueue_thread_notification(
+            thread_id,
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "existing-turn".to_string(),
+                item: title_user_message("user-message", "Fix the login timeout"),
+                completed_at_ms: 0,
+            }),
+        )
+        .await?;
+    }
     if automatic {
         for _ in 0..2 {
             app.handle_active_thread_event(
@@ -296,6 +367,50 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                 ))),
             )
             .await?;
+        }
+        if disabled {
+            assert!(app.pending_thread_titles.is_empty());
+            assert!(response.requests().is_empty());
+            app_server.shutdown().await?;
+            return Ok(());
+        }
+        if completed_turn {
+            assert!(app.pending_thread_titles.is_empty());
+            for status in [
+                TurnStatus::Interrupted,
+                TurnStatus::Failed,
+                TurnStatus::Completed,
+            ] {
+                app.handle_active_thread_event(
+                    &mut tui,
+                    &mut app_server,
+                    ThreadBufferedEvent::Notification(Box::new(ServerNotification::TurnCompleted(
+                        codex_app_server_protocol::TurnCompletedNotification {
+                            thread_id: thread_id.to_string(),
+                            turn: Turn {
+                                id: "existing-turn".to_string(),
+                                items: vec![title_agent_message(
+                                    "answer",
+                                    "Auth retries cause the timeout",
+                                    Some(MessagePhase::FinalAnswer),
+                                )],
+                                items_view: Default::default(),
+                                token_usage: None,
+                                status: status.clone(),
+                                error: None,
+                                started_at: None,
+                                completed_at: None,
+                                duration_ms: None,
+                            },
+                        },
+                    ))),
+                )
+                .await?;
+                assert_eq!(
+                    app.pending_thread_titles.is_empty(),
+                    status != TurnStatus::Completed
+                );
+            }
         }
         assert_eq!(app.chat_widget.thread_name(), None);
         assert!(render_bottom_popup(&app.chat_widget, /*width*/ 120).contains('⠋'));
@@ -343,6 +458,9 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                 if let AppEvent::ThreadTitleStarted { result, .. } = event.as_ref() {
                     temporary_thread_id =
                         Some(result.as_ref().expect("hidden title thread").clone());
+                    if configured {
+                        app.local_settings.auto_rename.max_title_chars = Some(64);
+                    }
                 }
                 generated |= matches!(event.as_ref(), AppEvent::GeneratedThreadTitle { .. });
                 app.handle_event(&mut tui, &mut app_server, *event).await?;
@@ -374,7 +492,12 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                     TitleScenario::OverviewRename => {
                         AppEvent::RenameAgentsOverviewThread { thread_id, name }
                     }
-                    TitleScenario::Automatic | TitleScenario::Suggestion => unreachable!(),
+                    TitleScenario::Automatic
+                    | TitleScenario::Configured
+                    | TitleScenario::CompletedTurn
+                    | TitleScenario::CompletedTurnUserMessage
+                    | TitleScenario::Disabled
+                    | TitleScenario::Suggestion => unreachable!(),
                 };
                 app.handle_event(&mut tui, &mut app_server, event).await?;
                 assert!(app.pending_thread_titles.is_empty());
@@ -398,6 +521,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     if automatic {
         let expected_name = if cancel {
             "Keep this title"
+        } else if configured {
+            "Fix login ti"
         } else {
             "Fix login timeout"
         };
@@ -437,6 +562,21 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             .contains("Fix the login timeout")
     );
 
+    if configured {
+        let body = request.body_json();
+        assert_eq!(body["model"], "gpt-5.1");
+        assert_eq!(body["reasoning"]["effort"], "low");
+        assert_eq!(
+            body["text"]["format"]["schema"]["properties"]["title"]["maxLength"],
+            12
+        );
+        let prompt = request.message_input_texts("user").join("\n");
+        assert!(prompt.contains("Name the concrete authentication problem"));
+        assert_eq!(
+            prompt.contains("Auth retries cause the timeout"),
+            matches!(scenario, TitleScenario::CompletedTurn)
+        );
+    }
     app_server.shutdown().await?;
     Ok(())
 }
@@ -476,6 +616,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         destination,
         "prompt".to_string(),
         /*effort*/ None,
+        THREAD_TITLE_MAX_CHARS,
         Ok(temporary_thread_id.to_string()),
         cancellation.clone(),
     );
@@ -485,6 +626,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         &mut tui,
         &mut app_server,
         AppEvent::GeneratedThreadTitle {
+            max_title_chars: THREAD_TITLE_MAX_CHARS,
             cancellation,
             thread_id,
             temporary_thread_id,
@@ -527,7 +669,7 @@ fn recent_conversation_messages_escape_markup_and_ignore_commentary() {
     ];
 
     assert_eq!(
-        recent_conversation_messages(&items),
+        recent_conversation_messages(&items, /*settings*/ None),
         Some(
             "<conversation>\n<message role=\"user\">Investigate &lt;flaky&gt; &amp; slow tests</message>\n<message role=\"user\">Fix &gt; flaky tests</message>\n<message role=\"assistant\">Tests now pass</message>\n</conversation>"
                 .to_string()
@@ -544,7 +686,7 @@ fn recent_conversation_messages_strip_ide_context_before_escaping() {
     let items = vec![title_user_message("user-1", &user_message)];
 
     assert_eq!(
-        recent_conversation_messages(&items),
+        recent_conversation_messages(&items, /*settings*/ None),
         Some(
             "<conversation>\n<message role=\"user\">Fix &lt;login&gt; &amp; retries</message>\n</conversation>"
                 .to_string()
@@ -564,23 +706,46 @@ fn recent_conversation_messages_keep_only_the_latest_substantive_items() {
         .join("\n");
 
     assert_eq!(
-        recent_conversation_messages(&items),
+        recent_conversation_messages(&items, /*settings*/ None),
         Some(format!(
             "<conversation>\n{expected_messages}\n</conversation>"
         ))
+    );
+    let settings = codex_config::AutoRenameConfig {
+        context: codex_config::AutoRenameContext::RecentConversation,
+        max_context_bytes: Some(8192),
+        recent_message_limit: Some(3),
+        ..Default::default()
+    };
+    assert_eq!(recent_conversation_messages(&items, Some(&settings)), Some(
+        "<conversation>\n<message role=\"user\">message-0</message>\n<message role=\"user\">message-8</message>\n<message role=\"user\">message-9</message>\n</conversation>".to_string()
+    ));
+    let settings = codex_config::AutoRenameConfig {
+        recent_message_limit: Some(1),
+        ..settings
+    };
+    assert_eq!(
+        recent_conversation_messages(&items, Some(&settings)),
+        Some(
+            "<conversation>\n<message role=\"user\">message-9</message>\n</conversation>"
+                .to_string()
+        )
     );
 }
 
 #[test]
 fn recent_conversation_messages_require_substantive_content() {
-    assert_eq!(recent_conversation_messages(&[]), None);
+    assert_eq!(recent_conversation_messages(&[], /*settings*/ None), None);
 
     let items = vec![
         title_user_message("blank", " \n\t "),
         title_agent_message("commentary", "Thinking", Some(MessagePhase::Commentary)),
     ];
 
-    assert_eq!(recent_conversation_messages(&items), None);
+    assert_eq!(
+        recent_conversation_messages(&items, /*settings*/ None),
+        None
+    );
 }
 
 #[test]
@@ -625,7 +790,8 @@ fn recent_conversation_prompt_preserves_latest_user_request_and_complete_markup(
             Some(MessagePhase::FinalAnswer),
         ),
     ];
-    let conversation = recent_conversation_messages(&items).expect("substantive conversation");
+    let conversation =
+        recent_conversation_messages(&items, /*settings*/ None).expect("substantive conversation");
     let prompt = recent_conversation_thread_title_prompt(&conversation);
 
     assert!(prompt.len() <= THREAD_TITLE_PROMPT_MAX_BYTES);
@@ -645,7 +811,8 @@ fn recent_conversation_prompt_never_splits_an_escaped_markup_entity() {
         "user",
         &"<&>".repeat(THREAD_TITLE_PROMPT_MAX_BYTES),
     )];
-    let conversation = recent_conversation_messages(&items).expect("substantive conversation");
+    let conversation =
+        recent_conversation_messages(&items, /*settings*/ None).expect("substantive conversation");
     let prompt = recent_conversation_thread_title_prompt(&conversation);
 
     assert!(prompt.len() <= THREAD_TITLE_PROMPT_MAX_BYTES);
@@ -665,7 +832,10 @@ fn recent_conversation_prompt_never_splits_an_escaped_markup_entity() {
 #[test]
 fn normalizes_generated_title_whitespace() {
     assert_eq!(
-        parse_thread_title(r#"{"title":"  Fix  \n\t login   errors  "}"#),
+        parse_thread_title(
+            r#"{"title":"  Fix  \n\t login   errors  "}"#,
+            THREAD_TITLE_MAX_CHARS
+        ),
         Some("Fix login errors".to_string())
     );
 }
@@ -681,7 +851,7 @@ fn removes_wrapping_quotes_and_trailing_punctuation_from_generated_titles() {
         let response = serde_json::json!({ "title": title }).to_string();
 
         assert_eq!(
-            parse_thread_title(&response),
+            parse_thread_title(&response, THREAD_TITLE_MAX_CHARS),
             Some("Fix login errors".to_string()),
             "response: {response}"
         );
@@ -697,7 +867,7 @@ fn preserves_meaningful_leading_punctuation_in_generated_titles() {
         let response = serde_json::json!({ "title": title }).to_string();
 
         assert_eq!(
-            parse_thread_title(&response),
+            parse_thread_title(&response, THREAD_TITLE_MAX_CHARS),
             Some(expected.to_string()),
             "response: {response}"
         );
@@ -721,7 +891,11 @@ fn rejects_invalid_or_empty_generated_titles() {
         r#"{"title":""}"#,
         r#"{"title":"  \t  "}"#,
     ] {
-        assert_eq!(parse_thread_title(response), None, "response: {response}");
+        assert_eq!(
+            parse_thread_title(response, THREAD_TITLE_MAX_CHARS),
+            None,
+            "response: {response}"
+        );
     }
 }
 
@@ -730,7 +904,10 @@ fn truncates_generated_titles_without_splitting_unicode() {
     let expected = "🚀".repeat(THREAD_TITLE_MAX_CHARS);
     let response = serde_json::json!({ "title": format!("{expected}x") }).to_string();
 
-    assert_eq!(parse_thread_title(&response), Some(expected));
+    assert_eq!(
+        parse_thread_title(&response, THREAD_TITLE_MAX_CHARS),
+        Some(expected)
+    );
 }
 
 fn title_user_message(id: &str, text: &str) -> ThreadItem {
@@ -785,6 +962,7 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         ThreadTitleDestination::Automatic,
         "prompt".to_string(),
         /*effort*/ None,
+        THREAD_TITLE_MAX_CHARS,
         Err("startup failed".to_string()),
         CancellationToken::new(),
     );
@@ -795,6 +973,7 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         suggestion,
         "prompt".to_string(),
         /*effort*/ None,
+        THREAD_TITLE_MAX_CHARS,
         Ok("invalid-thread-id".to_string()),
         CancellationToken::new(),
     );
@@ -831,6 +1010,7 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         &mut tui,
         &mut app_server,
         AppEvent::GeneratedThreadTitle {
+            max_title_chars: THREAD_TITLE_MAX_CHARS,
             cancellation: CancellationToken::new(),
             thread_id,
             temporary_thread_id: codex_protocol::ThreadId::new(),

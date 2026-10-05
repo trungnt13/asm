@@ -183,6 +183,17 @@ Optional `macos_concurrency_experiment` compares cold builds of one commit on `m
 
 ### Installer boundaries
 
+### TUI automatic session names
+
+`[auto_rename]` controls one-time automatic naming in the TUI only. It does not change Desktop naming, the conversation model, stored history, explicit names, or `/rename` suggestions. Omission preserves upstream defaults: enabled, first user message, user-message context, existing model selection and effort, 36 title characters, and a 960-byte total prompt.
+
+- `enabled` defaults to true. `model` and `reasoning_effort` override only title generation; omitted values retain existing selection. An explicit model must be preserved by the server; unavailable models fail rather than silently falling back. Custom provider models need not appear in the catalog.
+- `first_trigger` accepts `first_user_message` (default) or `first_completed_turn`. Completed-turn naming ignores failed and interrupted turns. `context` accepts `user_message` (default) or `recent_conversation`, which includes the initial request and recent substantive user/assistant messages, excluding commentary and tool output.
+- `max_context_bytes` accepts 128–8192 bytes of source text, separate from instructions. Omission retains the original source-text budget. `recent_message_limit` accepts 1–32 (default 8), including the initial request; a limit of 1 keeps only the latest message. Tight byte budgets drop earlier messages to preserve complete markup. `max_title_chars` accepts 1–128 (default 36).
+- `instructions` adds naming guidance within 512 UTF-8 bytes. Preserve fixed output rules and bound the complete prompt to 9500 bytes. **P0 manual review:** opt-in larger budgets can exceed 1000 tokens; never exceed the 10K-token item limit.
+
+Keep background generation, manual-name precedence, cancellation, and originating-thread checks. Once a name is saved, do not automatically revise it. Recurring updates and `auto_update_interval_turns` are deferred; do not add inactive config fields.
+
 ### Account-security setup reminder
 
 Do not fetch or display the optional Daybreak account-security setup reminder in ASM, including after reconnect or account refresh. Suppress loaded reminder events too. Keep authentication, account-security enforcement, approvals, account email, and backend usage banners unchanged. Retain upstream reminder rendering and its checks for easier syncs. Do not weaken security requirements.
