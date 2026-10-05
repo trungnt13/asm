@@ -6,6 +6,8 @@ use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
 use crate::transcript_view::tool_groups::tests::completed;
 use crate::transcript_view::tool_groups::tests::subagent;
+use crate::transcript_view::tool_groups::tests::wait_item;
+use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::SubAgentActivityKind;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
@@ -126,6 +128,52 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
     ));
     assert!(latest.contains("Ran 3 tool calls (/root/older, /root/a, /root/b)"));
     assert!(latest.contains("Interacted with `/root/older`"));
+
+    let mut waits = crate::multi_agents::AgentWaitHistory::default();
+    let begin: Arc<dyn HistoryCell> = Arc::new(
+        waits
+            .cell(
+                &wait_item("pinned-wait", CollabAgentToolCallStatus::InProgress),
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+    );
+    let end: Arc<dyn HistoryCell> = Arc::new(
+        waits
+            .cell(
+                &wait_item("pinned-wait", CollabAgentToolCallStatus::Completed),
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+    );
+    let mut wait_cells = vec![end];
+    let mut wait_view = TranscriptView::default();
+    wait_view.set_collapse_tool_calls(/*enabled*/ true);
+    render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    );
+    wait_view.held_reading = Some(wait_view.capture_snapshot(&wait_cells));
+    wait_cells.insert(/*index*/ 0, begin);
+    wait_view.history_loaded(&wait_cells, 0..1);
+    let pinned = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert!(!pinned.contains("Ran 0"));
+    assert!(pinned.contains("Ran 1 tool call (wait_agent)"));
+    wait_view.jump_to_latest();
+    let latest = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert_eq!(latest.matches("Ran 1 tool call (wait_agent)").count(), 1);
 }
 
 #[test]

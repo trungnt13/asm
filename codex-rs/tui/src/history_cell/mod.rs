@@ -275,6 +275,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         Some(ActivityDisclosure::Generic)
     }
 
+    /// Separate group-only identities from cells with their own disclosure controls.
+    fn supports_individual_disclosure(&self) -> bool {
+        true
+    }
+
     fn display_lines_for_mode(&self, width: u16, mode: HistoryRenderMode) -> Vec<Line<'static>> {
         match mode {
             HistoryRenderMode::Rich => visible_lines(self.display_hyperlink_lines(width)),
