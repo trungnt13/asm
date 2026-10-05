@@ -191,6 +191,12 @@ jobs:
           done) >> "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
+          # A resumed immutable candidate retains its original package contract.
+          if [[ "$TARGET" == *-linux-gnu ]] && grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+            cargo build --locked --release --target "$TARGET" --bin bwrap
+            CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
+            export CODEX_BWRAP_SHA256
+          fi
           build_args=(--locked --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings)
           if [[ "$BUILD_JOBS" != 0 ]]; then build_args+=(--jobs "$BUILD_JOBS"); fi
           cargo build "${build_args[@]}"
@@ -202,14 +208,23 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="target/${TARGET}/release"
-          binary="${release_dir}/codex"
-          helper="${release_dir}/codex-code-mode-host"
           archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
-
-          [[ -x "$binary" ]] || { echo "Missing executable: $binary" >&2; exit 1; }
-          [[ -x "$helper" ]] || { echo "Missing executable: $helper" >&2; exit 1; }
-          mkdir -p "$(dirname "$archive")"
-          tar -C "$release_dir" -czf "$archive" codex codex-code-mode-host
+          # This selects the pinned candidate's contract, never a validation fallback.
+          if grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+            resource_args=()
+            if [[ "$TARGET" == *-linux-gnu ]]; then
+              resource_args+=(--bwrap-bin "${release_dir}/bwrap")
+            fi
+            CODEX_REPO_ROOT="$GITHUB_WORKSPACE" python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" \
+              --target "$TARGET" --cargo-profile release --no-zsh \
+              --entrypoint-bin "${release_dir}/codex" \
+              --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
+              --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
+              --archive-output "$archive" "${resource_args[@]}" --force
+          else
+            mkdir -p "$(dirname "$archive")"
+            tar -C "$release_dir" -czf "$archive" codex codex-code-mode-host
+          fi
 
       - name: Smoke packaged ASM
         if: ${{ steps.platform.outputs.uploaded != 'true' }}
