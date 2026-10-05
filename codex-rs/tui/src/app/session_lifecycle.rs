@@ -1420,6 +1420,14 @@ impl App {
             && self.chat_widget.thread_id() == Some(resumed_thread_id))
         .then(|| self.chat_widget.capture_thread_input_state())
         .flatten();
+        // Keep the selected thread's new subscription while dropping its parallel UI role.
+        if self
+            .side_threads
+            .get(&resumed_thread_id)
+            .is_some_and(|state| state.kind == CompanionKind::Parallel)
+        {
+            self.side_threads.remove(&resumed_thread_id);
+        }
         self.detach_current_thread_for_navigation(app_server, Some(resumed_thread_id))
             .await;
         self.local_settings = local_settings;
