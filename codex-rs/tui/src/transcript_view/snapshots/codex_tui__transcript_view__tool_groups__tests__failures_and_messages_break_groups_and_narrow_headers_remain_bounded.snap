@@ -1,6 +1,6 @@
 ---
 source: tui/src/transcript_view/tool_groups_tests.rs
-expression: "format!(\"barriers\\n{rendered}\\n\\nnarrow\\n{narrow_rendered}\")"
+expression: "format!(\"barriers\\n{rendered}\\n\\nnarrow\\n{narrow_rendered}\\n\\nsplit wait\\n{split}\")"
 ---
 barriers
 ▸ Ran 3 tool calls (glab, curl, /root/a)
@@ -34,3 +34,17 @@ Assistant message between tools
 
 narrow
 ▸ Ran 6 tool calls (+6 more)
+
+
+
+
+
+
+
+
+split wait
+▸ Ran 1 tool call (wait_agent)
+
+Assistant message during wait
+
+▸ Ran 1 tool call (wait_agent)
