@@ -24,6 +24,11 @@ pub(super) const PARALLEL_NO_STARTED_CONVERSATION_MESSAGE: &str = concat!(
     "Send a message first, then try /parallel again."
 );
 
+pub(super) const SIDE_WHILE_PARALLEL_OPEN_MESSAGE: &str = concat!(
+    "'/side' and '/btw' are unavailable while a parallel conversation is open. ",
+    "Switch to the parallel chat and press Ctrl+C to close it first."
+);
+
 pub(super) const PARALLEL_BOUNDARY_PROMPT: &str = r#"Parallel conversation boundary.
 
 Everything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.
