@@ -19,7 +19,6 @@ impl AppServerSession {
             Ok(side) => side,
             Err(error) => {
                 // Pairing is optional UI state, never a prerequisite for reading server history.
-                // Restoring the pair separately surfaces the metadata error in the chat.
                 tracing::warn!(%thread_id, %error, "could not read parallel navigation metadata; showing ordinary thread history");
                 None
             }
