@@ -251,7 +251,7 @@ Keep Markdown paragraphs, code blocks, and list items adjacent during streaming 
 
 ### Collapsed tool calls
 
-`[tui] collapse_tool_calls = true` is opt-in; default `false`. In rich fullscreen transcripts, collapse consecutive shell, MCP, and dynamic tool calls into one summary row. Show the count and distinct command/tool names in first-use order. Replace overflowing names with `+N more`. Other activity types and chat messages separate groups. Keep the active tool in a separate short row until committed history includes it.
+`[tui] collapse_tool_calls = true` is opt-in; default `false`. In rich fullscreen transcripts, collapse consecutive shell, MCP, dynamic tool calls, and routine V2 subagent interactions into one summary row. Show the count and distinct command/tool names or target agent paths in first-use order. Count each successful subagent message or follow-up once. Replace overflowing names with `+N more`. Subagent starts, completions, interruptions, other activity types, and chat messages separate groups. Keep the active tool in a separate short row until committed history includes it.
 
 Expansion restores original previews in order. Keep failures and approval requests visible. Preserve execution, model-visible history, raw output, and the full transcript. When disabled, preserve existing rendering.
 
