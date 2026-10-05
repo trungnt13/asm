@@ -17,6 +17,7 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::UserInput;
+use codex_config::AutoRenameConfig;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -29,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 pub(super) const THREAD_TITLE_MAX_CHARS: usize = 36;
 const THREAD_TITLE_MODEL: &str = "gpt-5.6-luna";
 pub(super) const THREAD_TITLE_PROMPT_MAX_BYTES: usize = 960;
-const THREAD_TITLE_RECENT_MESSAGES: usize = 8;
+pub(super) const THREAD_TITLE_RECENT_MESSAGES: usize = 8;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -98,7 +99,18 @@ impl App {
         } else {
             self.chat_widget.current_model().to_string()
         };
-        let effort = (model == THREAD_TITLE_MODEL).then_some(ReasoningEffort::Low);
+        let automatic_settings = (destination == ThreadTitleDestination::Automatic)
+            .then_some(&self.local_settings.auto_rename);
+        let max_title_chars = automatic_settings
+            .and_then(|settings| settings.max_title_chars)
+            .unwrap_or(THREAD_TITLE_MAX_CHARS);
+        let model = automatic_settings
+            .and_then(|settings| settings.model.clone())
+            .unwrap_or(model);
+        let effort = automatic_settings
+            .and_then(|settings| settings.reasoning_effort.clone())
+            .or_else(|| (model == THREAD_TITLE_MODEL).then_some(ReasoningEffort::Low));
+        let explicit_model = automatic_settings.and_then(|settings| settings.model.clone());
         let config = self.chat_widget.config_ref();
         let options = TemporaryStructuredThreadOptions {
             thread_source: ThreadSource::Feature("thread_title".to_string()),
@@ -114,12 +126,21 @@ impl App {
 
         let event_sender = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = start_temporary_thread(&request_handle, options)
-                .await
-                .map(|thread| thread.thread.id)
-                .map_err(|error| error.to_string());
+            let result = match start_temporary_thread(&request_handle, options).await {
+                Ok(thread)
+                    if explicit_model
+                        .as_ref()
+                        .is_some_and(|model| *model != thread.model) =>
+                {
+                    unsubscribe_temporary_thread(&request_handle, thread.thread.id).await;
+                    Err("title-generation server did not preserve the configured model".to_string())
+                }
+                Ok(thread) => Ok(thread.thread.id),
+                Err(error) => Err(error.to_string()),
+            };
 
             event_sender.send(AppEvent::ThreadTitleStarted {
+                max_title_chars,
                 cancellation,
                 thread_id,
                 destination,
@@ -139,6 +160,7 @@ impl App {
         destination: ThreadTitleDestination,
         prompt: String,
         effort: Option<ReasoningEffort>,
+        max_title_chars: usize,
         result: Result<String, String>,
         cancellation: CancellationToken,
     ) {
@@ -185,7 +207,7 @@ impl App {
                 request_handle,
                 temporary_thread_id_text,
                 prompt,
-                thread_title_output_schema(),
+                thread_title_output_schema(max_title_chars),
                 effort,
                 receiver,
                 cancellation.clone(),
@@ -194,6 +216,7 @@ impl App {
             .map_err(|error| error.to_string());
 
             event_sender.send(AppEvent::GeneratedThreadTitle {
+                max_title_chars,
                 cancellation,
                 thread_id,
                 temporary_thread_id,
@@ -242,6 +265,7 @@ impl App {
                         Some(&notification.item)
                     }))
                     .filter(|item| seen.insert(item.id().to_string())),
+                /*settings*/ None,
             )
         };
 
@@ -261,14 +285,14 @@ impl App {
 }
 
 /// Constrain generated metadata to one nonempty title within the display limit.
-pub(super) fn thread_title_output_schema() -> Value {
+pub(super) fn thread_title_output_schema(max_title_chars: usize) -> Value {
     json!({
         "type": "object",
         "properties": {
             "title": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": THREAD_TITLE_MAX_CHARS,
+                "maxLength": max_title_chars,
             },
         },
         "required": ["title"],
@@ -276,10 +300,10 @@ pub(super) fn thread_title_output_schema() -> Value {
     })
 }
 
-fn thread_title_instructions() -> String {
+pub(super) fn thread_title_instructions(max_title_chars: usize) -> String {
     format!(
         "Generate a concise, single-line task title of at most \
-  {THREAD_TITLE_MAX_CHARS} characters and under five words where possible. \
+  {max_title_chars} characters and under five words where possible. \
   Start with an imperative verb. Capitalize only the first word unless the \
   user's language, proper nouns, acronyms, or code terms require otherwise. \
   Preserve ticket references exactly. Write in the user's language. \
@@ -290,7 +314,7 @@ fn thread_title_instructions() -> String {
 
 /// Build a bounded title request without truncating a Unicode character.
 pub(super) fn thread_title_prompt(user_message: &str) -> String {
-    let instructions = thread_title_instructions();
+    let instructions = thread_title_instructions(THREAD_TITLE_MAX_CHARS);
     let prefix = format!("{instructions}\n\nUser prompt:\n");
     let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
     let user_message = user_message
@@ -304,44 +328,68 @@ pub(super) fn thread_title_prompt(user_message: &str) -> String {
 }
 
 /// Format recent substantive messages chronologically without trusting their markup.
-pub(super) fn recent_conversation_messages<'a, I>(items: I) -> Option<String>
+pub(super) fn recent_conversation_messages<'a, I>(
+    items: I,
+    settings: Option<&AutoRenameConfig>,
+) -> Option<String>
 where
     I: IntoIterator<Item = &'a ThreadItem>,
     I::IntoIter: DoubleEndedIterator,
 {
-    let mut messages = items
-        .into_iter()
-        .rev()
-        .filter_map(|item| match item {
-            ThreadItem::UserMessage { content, .. } => {
-                let text = content
-                    .iter()
-                    .filter_map(|input| match input {
-                        UserInput::Text { text, .. } => {
-                            Some(crate::ide_context::extract_prompt_request_with_offset(text).0)
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                (!text.trim().is_empty()).then_some(("user", text))
-            }
-            ThreadItem::AgentMessage { text, phase, .. }
-                if !matches!(phase, Some(MessagePhase::Commentary)) && !text.trim().is_empty() =>
-            {
-                Some(("assistant", text.clone()))
-            }
-            _ => None,
+    let message_limit = settings
+        .and_then(|settings| settings.recent_message_limit)
+        .unwrap_or(THREAD_TITLE_RECENT_MESSAGES);
+    let extract_message = |item: &ThreadItem| match item {
+        ThreadItem::UserMessage { content, .. } => {
+            let text = content
+                .iter()
+                .filter_map(|input| match input {
+                    UserInput::Text { text, .. } => {
+                        Some(crate::ide_context::extract_prompt_request_with_offset(text).0)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.trim().is_empty()).then_some(("user", text))
+        }
+        ThreadItem::AgentMessage { text, phase, .. }
+            if !matches!(phase, Some(MessagePhase::Commentary)) && !text.trim().is_empty() =>
+        {
+            Some(("assistant", text.clone()))
+        }
+        _ => None,
+    };
+    let mut items = items.into_iter();
+    let first_user_message = settings.and_then(|_| {
+        items.by_ref().find_map(|item| {
+            matches!(item, ThreadItem::UserMessage { .. })
+                .then(|| extract_message(item))
+                .flatten()
         })
-        .take(THREAD_TITLE_RECENT_MESSAGES)
+    });
+    let mut messages = items
+        .rev()
+        .filter_map(extract_message)
+        .take(message_limit)
+        .collect::<Vec<_>>();
+    messages.reverse();
+    if let Some(first) = first_user_message
+        && (message_limit > 1 || messages.is_empty())
+    {
+        if messages.len() == message_limit {
+            messages.remove(/*index*/ 0);
+        }
+        messages.insert(/*index*/ 0, first);
+    }
+    let mut messages = messages
+        .into_iter()
         .map(|(role, text)| {
             let escaped = text
                 .trim()
                 .replace('&', "&amp;")
                 .replace('<', "&lt;")
                 .replace('>', "&gt;");
-
             (role, escaped)
         })
         .collect::<Vec<_>>();
@@ -350,17 +398,29 @@ where
         return None;
     }
 
-    messages.reverse();
-
-    let conversation_bytes = THREAD_TITLE_PROMPT_MAX_BYTES
-        .saturating_sub(recent_conversation_thread_title_prompt("").len());
-    let markup_bytes = "<conversation>\n".len()
-        + "\n</conversation>".len()
-        + messages.len().saturating_sub(/*rhs*/ 1)
-        + messages
-            .iter()
-            .map(|(role, _)| "<message role=\"\"></message>".len() + role.len())
-            .sum::<usize>();
+    let conversation_bytes = settings.map_or_else(
+        || {
+            THREAD_TITLE_PROMPT_MAX_BYTES
+                .saturating_sub(recent_conversation_thread_title_prompt("").len())
+        },
+        super::auto_rename::automatic_context_bytes,
+    );
+    let markup_size = |messages: &[(&str, String)]| {
+        "<conversation>\n".len()
+            + "\n</conversation>".len()
+            + messages.len().saturating_sub(/*rhs*/ 1)
+            + messages
+                .iter()
+                .map(|(role, _)| "<message role=\"\"></message>".len() + role.len())
+                .sum::<usize>()
+    };
+    while messages.len() > 1 && markup_size(&messages) >= conversation_bytes {
+        messages.remove(/*index*/ 0);
+    }
+    let markup_bytes = markup_size(&messages);
+    if markup_bytes >= conversation_bytes {
+        return None;
+    }
     let message_bytes = conversation_bytes.saturating_sub(markup_bytes) / messages.len();
     let content_bytes = messages.iter().map(|(_, text)| text.len()).sum::<usize>();
     let should_truncate = content_bytes > conversation_bytes.saturating_sub(markup_bytes);
@@ -392,7 +452,7 @@ where
 
 /// Bound the entire suggestion prompt while preserving complete Unicode characters.
 pub(super) fn recent_conversation_thread_title_prompt(conversation: &str) -> String {
-    let instructions = thread_title_instructions();
+    let instructions = thread_title_instructions(THREAD_TITLE_MAX_CHARS);
     let prefix = format!(
         "{instructions}\n\
 Prioritize the current task and latest substantive user request.\n\n\
@@ -410,7 +470,7 @@ Recent conversation messages:\n"
 }
 
 /// Normalize a generated title and truncate it without splitting Unicode characters.
-pub(super) fn parse_thread_title(response: &str) -> Option<String> {
+pub(super) fn parse_thread_title(response: &str, max_title_chars: usize) -> Option<String> {
     if !response.trim_start().starts_with('{') {
         return None;
     }
@@ -433,7 +493,7 @@ pub(super) fn parse_thread_title(response: &str) -> Option<String> {
         return None;
     }
 
-    Some(normalized.chars().take(THREAD_TITLE_MAX_CHARS).collect())
+    Some(normalized.chars().take(max_title_chars).collect())
 }
 
 #[cfg(test)]
