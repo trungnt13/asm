@@ -35,6 +35,10 @@ For ordinary local runtime or UI checks, run `"${CARGO_TARGET_DIR:-target}/dev-s
 
 Before handoff, verify both executables exist, CLI `--version`, and `--help` for each. A help check does not prove model requests or tools work. When safe, hand off both before automated checks finish. Report their verified absolute paths, build time, a manual check, and pending checks. Rebuild both after runtime edits. Never present old binaries as current. Get permission before replacing installed `codex`.
 
+Ordinary local `just` Cargo recipes, schema generators, source runners, package assembly, and VS Code Rust checks use `dev-small`. Keep its profile settings unchanged. Where a command accepts Cargo options, explicit `--profile`, nextest `--cargo-profile`, and `--release` selections take priority. Nextest's `--profile` selects test-runner settings, not a Cargo build profile. CI, benchmarks, and source-built Dylint keep their existing profiles. The npm hooks generator uses the same `just` recipe.
+
+Plain Cargo does not inherit this local default. Pass `--profile dev-small` to direct local build/run/check/clippy commands; use `just test` for tests. VS Code run/test buttons and inherited Windows setup and sandbox smoke utilities retain their existing profiles. Do not delete an old cache while builds or editor processes use it. Published releases remain optimized `--release`.
+
 Use optimized or cross-platform local builds only on request or to reproduce affected behavior.
 
 ### Validate narrowly

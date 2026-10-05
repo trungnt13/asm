@@ -18,6 +18,7 @@ is_sourced() {
 setup_remote_env() {
   local container_name
   local codex_binary_path
+  local profile_dir
   local container_ip
   local remote_codex_path
   local remote_exec_server_pid
@@ -25,7 +26,14 @@ setup_remote_env() {
   local remote_exec_server_stdout_path
 
   container_name="${CODEX_TEST_REMOTE_ENV_CONTAINER_NAME:-codex-remote-test-env-local-$(date +%s)-${RANDOM}}"
-  codex_binary_path="${CARGO_TARGET_DIR:-${REPO_ROOT}/codex-rs/target}/debug/codex"
+  profile_dir="dev-small"
+  if [[ -n "${CI:-}" ]]; then
+    profile_dir="debug"
+  fi
+  codex_binary_path="${CARGO_TARGET_DIR:-target}/${profile_dir}/codex"
+  if [[ "${codex_binary_path}" != /* ]]; then
+    codex_binary_path="${REPO_ROOT}/codex-rs/${codex_binary_path}"
+  fi
 
   if ! command -v docker >/dev/null 2>&1; then
     echo "docker is required (Colima or Docker Desktop)" >&2
@@ -44,7 +52,7 @@ setup_remote_env() {
 
   (
     cd "${REPO_ROOT}/codex-rs"
-    cargo build -p codex-cli --bin codex
+    python3 "${REPO_ROOT}/scripts/local-cargo.py" build -p codex-cli --bin codex
   )
 
   if [[ ! -f "${codex_binary_path}" ]]; then
