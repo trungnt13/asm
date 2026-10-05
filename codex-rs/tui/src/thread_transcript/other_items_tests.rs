@@ -187,4 +187,48 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
     << Code review finished: No findings >>
     • Context compacted
     ");
+
+    for (kind, title) in [
+        (SubAgentActivityKind::Interacted, "Interacted with"),
+        (SubAgentActivityKind::Started, "Started"),
+        (SubAgentActivityKind::Completed, "Completed"),
+        (SubAgentActivityKind::Interrupted, "Interrupted"),
+    ] {
+        let projected = cells(
+            ThreadItem::SubAgentActivity {
+                id: "activity-1".to_string(),
+                kind,
+                agent_thread_id: "01912345-1234-7123-8123-123456789abc".to_string(),
+                agent_path: "/root/reviewer".to_string(),
+            },
+            &cwd,
+        );
+        assert_eq!(projected.len(), 1);
+        assert_eq!(
+            projected[0]
+                .raw_lines()
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>(),
+            vec![format!("• {title} `/root/reviewer`")],
+        );
+        let interacted = kind == SubAgentActivityKind::Interacted;
+        assert_eq!(
+            projected[0].activity_ids(),
+            if interacted {
+                vec!["subagent:activity-1".to_string()]
+            } else {
+                Vec::new()
+            },
+        );
+        assert_eq!(
+            projected[0].tool_call_summary().map(|summary| (
+                summary.count,
+                summary.running,
+                summary.names
+            )),
+            interacted.then(|| (1, false, vec!["/root/reviewer".to_string()])),
+        );
+        assert_eq!(projected[0].activity_disclosure(/*width*/ 80), None);
+    }
 }

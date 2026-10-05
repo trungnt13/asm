@@ -1377,6 +1377,82 @@ async fn live_app_server_sub_agent_activity_renders_once() {
     assert_eq!(cells.len(), 1);
     let rendered = lines_to_single_string(&cells[0]);
     assert_chatwidget_snapshot!("app_server_sub_agent_activity_renders_once", rendered);
+
+    for replay_kind in [None, Some(ReplayKind::ThreadSnapshot)] {
+        for (kind, title) in [
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Interacted,
+                "Interacted with",
+            ),
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Started,
+                "Started",
+            ),
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Completed,
+                "Completed",
+            ),
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Interrupted,
+                "Interrupted",
+            ),
+        ] {
+            let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+            let activity = AppServerThreadItem::SubAgentActivity {
+                id: "activity-2".to_string(),
+                kind,
+                agent_thread_id: ThreadId::new().to_string(),
+                agent_path: "/root/researcher".to_string(),
+            };
+            chat.handle_server_notification(
+                ServerNotification::ItemStarted(ItemStartedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    started_at_ms: 0,
+                    item: activity.clone(),
+                }),
+                replay_kind,
+            );
+            chat.handle_server_notification(
+                ServerNotification::ItemCompleted(ItemCompletedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    completed_at_ms: 0,
+                    item: activity,
+                }),
+                replay_kind,
+            );
+            let mut cells = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = event {
+                    cells.push(cell);
+                }
+            }
+            assert_eq!(cells.len(), 1);
+            assert_eq!(
+                lines_to_single_string(&cells[0].display_lines(/*width*/ 80)),
+                format!("• {title} `/root/researcher`\n"),
+            );
+            let interacted = kind == codex_app_server_protocol::SubAgentActivityKind::Interacted;
+            assert_eq!(
+                cells[0].activity_ids(),
+                if interacted {
+                    vec!["subagent:activity-2".to_string()]
+                } else {
+                    Vec::new()
+                },
+            );
+            assert_eq!(
+                cells[0].tool_call_summary().map(|summary| (
+                    summary.count,
+                    summary.running,
+                    summary.names
+                )),
+                interacted.then(|| (1, false, vec!["/root/researcher".to_string()])),
+            );
+            assert_eq!(cells[0].activity_disclosure(/*width*/ 80), None);
+        }
+    }
 }
 
 #[tokio::test]
