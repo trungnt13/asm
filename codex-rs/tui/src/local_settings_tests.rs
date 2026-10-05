@@ -99,6 +99,13 @@ async fn local_load_preserves_defaults_and_resolved_overrides() -> anyhow::Resul
     for config_text in [
         "",
         r#"
+[auto_rename]
+enabled = false
+model = "gpt-5.2"
+first_trigger = "first_completed_turn"
+context = "recent_conversation"
+max_context_bytes = 8192
+
 [tui]
 animations = false
 show_tooltips = false
