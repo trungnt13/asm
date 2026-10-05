@@ -5,6 +5,8 @@ use crate::transcript_view::tests::cell;
 use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
 use crate::transcript_view::tool_groups::tests::completed;
+use crate::transcript_view::tool_groups::tests::subagent;
+use codex_app_server_protocol::SubAgentActivityKind;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 
@@ -67,6 +69,63 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
         &mut view, &cells, /*width*/ 72, /*height*/ 20,
     ));
     assert!(latest.contains("Ran 3 tool calls (curl, git, glab)"));
+
+    let mut contacts = vec![
+        subagent("contact-1", SubAgentActivityKind::Interacted, "/root/a"),
+        subagent("contact-2", SubAgentActivityKind::Interacted, "/root/b"),
+    ];
+    let mut contact_view = TranscriptView::default();
+    contact_view.set_collapse_tool_calls(/*enabled*/ true);
+    let collapsed = text(&render(
+        &mut contact_view,
+        &contacts,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert!(collapsed.contains("Ran 2 tool calls (/root/a, /root/b)"));
+    assert!(!collapsed.contains("Interacted with"));
+    let y = contact_view
+        .visible
+        .iter()
+        .position(|row| row.index == 0 && row.row == 0)
+        .unwrap() as u16;
+    assert!(contact_view.toggle_disclosure_at(&contacts, /*column*/ 0, y));
+    let opened = text(&render(
+        &mut contact_view,
+        &contacts,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert!(opened.contains("Interacted with `/root/a`"));
+    assert!(opened.contains("Interacted with `/root/b`"));
+    contact_view.held_reading = Some(contact_view.capture_snapshot(&contacts));
+    contacts.insert(
+        /*index*/ 0,
+        subagent(
+            "older-contact",
+            SubAgentActivityKind::Interacted,
+            "/root/older",
+        ),
+    );
+    contact_view.history_loaded(&contacts, 0..1);
+    let pinned = text(&render(
+        &mut contact_view,
+        &contacts,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert_eq!(pinned.matches("Ran 2 tool calls").count(), 1);
+    assert_eq!(pinned.matches("Interacted with `/root/a`").count(), 1);
+    assert_eq!(pinned.matches("Interacted with `/root/b`").count(), 1);
+    contact_view.jump_to_latest();
+    let latest = text(&render(
+        &mut contact_view,
+        &contacts,
+        /*width*/ 72,
+        /*height*/ 20,
+    ));
+    assert!(latest.contains("Ran 3 tool calls (/root/older, /root/a, /root/b)"));
+    assert!(latest.contains("Interacted with `/root/older`"));
 }
 
 #[test]
