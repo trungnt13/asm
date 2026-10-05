@@ -5210,15 +5210,26 @@ async fn side_start_block_message_rejects_temporary_but_allows_parallel_replacem
     assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 
     app.active_thread_id = Some(side_thread_id);
-    assert_eq!(
-        app.side_start_block_message(CompanionKind::Side),
-        Some(
-            "A side conversation is already open. Press ctrl + c to return before starting another."
-        )
-    );
+    for kind in [CompanionKind::Side, CompanionKind::Parallel] {
+        assert_eq!(
+            app.side_start_block_message(kind),
+            Some(
+                "A side conversation is already open. Press ctrl + c to return before starting another."
+            )
+        );
+    }
     app.side_threads
         .insert(side_thread_id, SideThreadState::parallel(parent_thread_id));
-    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
+    for thread_id in [parent_thread_id, side_thread_id] {
+        app.active_thread_id = Some(thread_id);
+        assert_eq!(
+            app.side_start_block_message(CompanionKind::Side),
+            Some(
+                "'/side' and '/btw' are unavailable while a parallel conversation is open. Switch to the parallel chat and press Ctrl+C to close it first."
+            )
+        );
+        assert_eq!(app.side_start_block_message(CompanionKind::Parallel), None);
+    }
 
     app.side_threads.remove(&side_thread_id);
     assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
