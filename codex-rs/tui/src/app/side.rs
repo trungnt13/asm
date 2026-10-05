@@ -956,9 +956,9 @@ impl App {
                 }
                 self.side_threads.insert(
                     child_thread_id,
-                    SideThreadState {
-                        kind,
-                        ..SideThreadState::new(parent_thread_id)
+                    match kind {
+                        CompanionKind::Side => SideThreadState::new(parent_thread_id),
+                        CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
                     },
                 );
                 // `thread/started` is delivered after the fork response; seed navigation before
