@@ -3,9 +3,14 @@
 use super::*;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
+use crate::multi_agents::AgentWaitHistory;
 use crate::transcript_view::tests::cell;
 use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
+use codex_app_server_protocol::CollabAgentState;
+use codex_app_server_protocol::CollabAgentStatus;
+use codex_app_server_protocol::CollabAgentTool;
+use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::SubAgentActivityKind;
 use codex_app_server_protocol::ThreadItem;
@@ -37,6 +42,20 @@ pub(super) fn completed(
         Duration::ZERO,
     ));
     Arc::new(call)
+}
+
+pub(super) fn wait_item(id: &str, status: CollabAgentToolCallStatus) -> ThreadItem {
+    ThreadItem::CollabAgentToolCall {
+        id: id.to_owned(),
+        tool: CollabAgentTool::Wait,
+        status,
+        sender_thread_id: "01912345-1234-7123-8123-123456789abc".to_owned(),
+        receiver_thread_ids: Vec::new(),
+        prompt: None,
+        model: None,
+        reasoning_effort: None,
+        agents_states: HashMap::new(),
+    }
 }
 
 pub(super) fn subagent(
@@ -197,14 +216,131 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
     ));
     assert!(!mixed_recollapsed.contains("Interacted with"));
     assert!(mixed_recollapsed.contains("▸ Ran 6 tool calls (/root/a, glab, curl, /root/b)"));
+    let mut waits = AgentWaitHistory::default();
+    let mut wait_cells = vec![
+        completed(
+            "wait-command",
+            "git status",
+            "command output",
+            /*exit_code*/ 0,
+        ),
+        Arc::new(
+            waits
+                .cell(
+                    &wait_item("wait-1", CollabAgentToolCallStatus::InProgress),
+                    |_| crate::multi_agents::AgentMetadata::default(),
+                )
+                .unwrap(),
+        ),
+    ];
+    let mut wait_view = TranscriptView::default();
+    wait_view.set_collapse_tool_calls(/*enabled*/ true);
+    let wait_running = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert!(wait_running.contains("Running 2 tool calls (git, wait_agent)"));
+    wait_cells.push(Arc::new(
+        waits
+            .cell(
+                &wait_item("wait-1", CollabAgentToolCallStatus::Completed),
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+    ));
+    let wait_collapsed = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert!(wait_collapsed.contains("Ran 2 tool calls (git, wait_agent)"));
+    assert!(!wait_collapsed.contains("Running"));
+    assert!(!wait_collapsed.contains("waiting"));
+    wait_view.handle_key(KeyCode::F(4).into(), &wait_cells);
+    wait_view.handle_key(KeyCode::Enter.into(), &wait_cells);
+    let wait_expanded = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert!(
+        wait_expanded
+            .contains("• Waiting for agents\n• Finished waiting\n  └ No agents completed yet")
+    );
+    for status in [
+        CollabAgentToolCallStatus::InProgress,
+        CollabAgentToolCallStatus::Completed,
+    ] {
+        wait_cells.push(Arc::new(
+            waits
+                .cell(&wait_item("wait-2", status), |_| {
+                    crate::multi_agents::AgentMetadata::default()
+                })
+                .unwrap(),
+        ));
+    }
+    let wait_appended = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert!(wait_appended.contains("Ran 3 tool calls (git, wait_agent)"));
+    assert_eq!(wait_appended.matches("No agents completed yet").count(), 2);
+    wait_view.set_collapse_tool_calls(/*enabled*/ false);
+    let disabled = text(&render(
+        &mut wait_view,
+        &wait_cells,
+        /*width*/ 72,
+        /*height*/ 16,
+    ));
+    assert!(disabled.contains("Waiting for agents"));
+    // The preceding command keeps its own disclosure; wait previews have no standalone controls.
+    let disabled_waits = disabled.split_once("Waiting for agents").unwrap().1;
+    assert!(!disabled_waits.contains("Show less"));
+    assert!(!disabled_waits.contains("Show details"));
+
+    let mut pending = AgentWaitHistory::default();
+    let pending_cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(
+        pending
+            .cell(
+                &wait_item("unfinished", CollabAgentToolCallStatus::InProgress),
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+    )];
+    let mut pending_view = TranscriptView::default();
+    pending_view.set_collapse_tool_calls(/*enabled*/ true);
+    assert!(
+        text(&render(
+            &mut pending_view,
+            &pending_cells,
+            /*width*/ 72,
+            /*height*/ 12
+        ))
+        .contains("Running 1 tool call")
+    );
+    pending.clear();
+    let stopped = text(&render(
+        &mut pending_view,
+        &pending_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert!(stopped.contains("Waiting for agents"));
+    assert!(!stopped.contains("Running"));
     insta::assert_snapshot!(format!(
-        "collapsed\n{collapsed}\n\nexpanded\n{expanded}\n\nappended\n{appended}\n\ncollapsed after append\n{recollapsed}\n\nmixed collapsed\n{mixed_collapsed}\n\nmixed expanded\n{mixed_expanded}\n\nmixed appended\n{mixed_appended}\n\nmixed recollapsed\n{mixed_recollapsed}"
+        "collapsed\n{collapsed}\n\nexpanded\n{expanded}\n\nappended\n{appended}\n\ncollapsed after append\n{recollapsed}\n\nmixed collapsed\n{mixed_collapsed}\n\nmixed expanded\n{mixed_expanded}\n\nmixed appended\n{mixed_appended}\n\nmixed recollapsed\n{mixed_recollapsed}\n\nwait running\n{wait_running}\n\nwait collapsed\n{wait_collapsed}\n\nwait expanded\n{wait_expanded}\n\nwait appended\n{wait_appended}\n\nwait stopped\n{stopped}"
     ));
 }
 
 #[test]
 fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
-    let cells = vec![
+    let mut cells = vec![
         completed(
             "first",
             "glab api first",
@@ -219,10 +355,25 @@ fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
             /*exit_code*/ 0,
         ),
     ];
+    let mut waits = AgentWaitHistory::default();
+    for status in [
+        CollabAgentToolCallStatus::InProgress,
+        CollabAgentToolCallStatus::Completed,
+    ] {
+        cells.push(Arc::new(
+            waits
+                .cell(&wait_item("wait-1", status), |_| {
+                    crate::multi_agents::AgentMetadata::default()
+                })
+                .unwrap(),
+        ));
+    }
     let mut original_cells = cells.clone();
-    original_cells[1] = Arc::new(crate::history_cell::PlainHistoryCell::new(
-        cells[1].display_lines(/*width*/ 72),
-    ));
+    for index in [1, 3, 4] {
+        original_cells[index] = Arc::new(crate::history_cell::PlainHistoryCell::new(
+            cells[index].display_lines(/*width*/ 72),
+        ));
+    }
     for (enabled, detailed, mode) in [
         (false, false, HistoryRenderMode::Rich),
         (true, false, HistoryRenderMode::Raw),
@@ -330,5 +481,112 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
     ));
     assert!(narrow_rendered.contains("more"));
     assert!(!narrow_rendered.contains("hidden"));
-    insta::assert_snapshot!(format!("barriers\n{rendered}\n\nnarrow\n{narrow_rendered}"));
+    let mut waits = AgentWaitHistory::default();
+    let begin: Arc<dyn HistoryCell> = Arc::new(
+        waits
+            .cell(
+                &wait_item("split", CollabAgentToolCallStatus::InProgress),
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+    );
+    let end: Arc<dyn HistoryCell> = Arc::new(
+        waits
+            .cell(
+                &wait_item("split", CollabAgentToolCallStatus::Completed),
+                |_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap(),
+    );
+    let split_cells = vec![begin, cell("Assistant message during wait"), end];
+    let split = text(&render(
+        &mut view,
+        &split_cells,
+        /*width*/ 72,
+        /*height*/ 12,
+    ));
+    assert_eq!(split.matches("Ran 1 tool call (wait_agent)").count(), 2);
+    assert!(!split.contains("Ran 0"));
+    assert!(!split.contains("Running"));
+    assert!(split.contains("Assistant message during wait"));
+    for (status, states) in [
+        (
+            CollabAgentToolCallStatus::Completed,
+            HashMap::from([(
+                "01912345-1234-7123-8123-123456789abc".to_owned(),
+                CollabAgentState {
+                    status: CollabAgentStatus::Completed,
+                    message: Some("Meaningful result".to_owned()),
+                },
+            )]),
+        ),
+        (CollabAgentToolCallStatus::Failed, HashMap::new()),
+        (CollabAgentToolCallStatus::Interrupted, HashMap::new()),
+    ] {
+        let mut terminal = wait_item("visible", status);
+        let ThreadItem::CollabAgentToolCall { agents_states, .. } = &mut terminal else {
+            unreachable!()
+        };
+        *agents_states = states;
+        let begin: Arc<dyn HistoryCell> = Arc::new(
+            waits
+                .cell(
+                    &wait_item("visible", CollabAgentToolCallStatus::InProgress),
+                    |_| crate::multi_agents::AgentMetadata::default(),
+                )
+                .unwrap(),
+        );
+        let mut failure_view = TranscriptView::default();
+        failure_view.set_collapse_tool_calls(/*enabled*/ true);
+        let mut visible_cells = vec![Arc::clone(&begin)];
+        render(
+            &mut failure_view,
+            &visible_cells,
+            /*width*/ 72,
+            /*height*/ 12,
+        );
+        failure_view.handle_key(KeyCode::F(4).into(), &visible_cells);
+        failure_view.handle_key(KeyCode::Enter.into(), &visible_cells);
+        assert!(
+            text(&render(
+                &mut failure_view,
+                &visible_cells,
+                /*width*/ 72,
+                /*height*/ 12
+            ))
+            .contains("▾ Running 1 tool call")
+        );
+        let end: Arc<dyn HistoryCell> = Arc::new(
+            waits
+                .cell(&terminal, |_| crate::multi_agents::AgentMetadata::default())
+                .unwrap(),
+        );
+        assert!(begin.tool_call_summary().is_none());
+        assert!(end.tool_call_summary().is_none());
+        visible_cells.push(end);
+        let visible = text(&render(
+            &mut failure_view,
+            &visible_cells,
+            /*width*/ 72,
+            /*height*/ 12,
+        ));
+        assert!(visible.contains("Waiting for agents"));
+        assert!(visible.contains("Finished waiting"));
+        assert!(!visible.contains("wait_agent"));
+        assert!(!visible.contains("Show less"));
+        assert!(!visible.contains("Show details"));
+        assert!(begin.activity_ids().is_empty());
+        if matches!(
+            &terminal,
+            ThreadItem::CollabAgentToolCall {
+                status: CollabAgentToolCallStatus::Completed,
+                ..
+            }
+        ) {
+            assert!(visible.contains("Meaningful result"));
+        }
+    }
+    insta::assert_snapshot!(format!(
+        "barriers\n{rendered}\n\nnarrow\n{narrow_rendered}\n\nsplit wait\n{split}"
+    ));
 }
