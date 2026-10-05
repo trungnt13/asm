@@ -1548,6 +1548,113 @@ async fn live_app_server_collab_wait_items_render_history() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_chatwidget_snapshot!("app_server_collab_wait_items_render_history", combined);
+
+    for replay_kind in [None, Some(ReplayKind::ThreadSnapshot)] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        let mut wait = AppServerThreadItem::CollabAgentToolCall {
+            id: "routine-wait".to_owned(),
+            tool: AppServerCollabAgentTool::Wait,
+            status: AppServerCollabAgentToolCallStatus::InProgress,
+            sender_thread_id: sender_thread_id.to_string(),
+            receiver_thread_ids: Vec::new(),
+            prompt: None,
+            model: None,
+            reasoning_effort: None,
+            agents_states: HashMap::new(),
+        };
+        chat.handle_server_notification(
+            ServerNotification::ItemStarted(ItemStartedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                started_at_ms: 0,
+                item: wait.clone(),
+            }),
+            replay_kind,
+        );
+        let mut cells = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                cells.push(cell);
+            }
+        }
+        assert_eq!(cells.len(), 1);
+        assert!(cells[0].tool_call_summary().unwrap().running);
+        let AppServerThreadItem::CollabAgentToolCall { status, .. } = &mut wait else {
+            unreachable!()
+        };
+        *status = AppServerCollabAgentToolCallStatus::Completed;
+        chat.handle_server_notification(
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                completed_at_ms: 0,
+                item: wait,
+            }),
+            replay_kind,
+        );
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                cells.push(cell);
+            }
+        }
+        assert_eq!(cells.len(), 2);
+        for cell in &cells {
+            let summary = cell.tool_call_summary().unwrap();
+            assert_eq!(
+                (
+                    summary.count,
+                    summary.count_key,
+                    summary.running,
+                    summary.names
+                ),
+                (
+                    1,
+                    Some("agent-wait:routine-wait".to_string()),
+                    false,
+                    vec!["wait_agent".to_string()]
+                )
+            );
+            assert_eq!(
+                cell.activity_ids(),
+                vec!["agent-wait:routine-wait".to_string()]
+            );
+            assert_eq!(cell.activity_disclosure(/*width*/ 80), None);
+        }
+        assert_eq!(
+            cells
+                .iter()
+                .flat_map(|cell| cell.raw_lines())
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                "• Waiting for agents",
+                "• Finished waiting",
+                "  └ No agents completed yet"
+            ]
+        );
+
+        // An unfinished wait must stop grouping when its parent turn is interrupted.
+        let item = AppServerThreadItem::CollabAgentToolCall {
+            id: "unfinished-wait".to_string(),
+            tool: AppServerCollabAgentTool::Wait,
+            status: AppServerCollabAgentToolCallStatus::InProgress,
+            sender_thread_id: sender_thread_id.to_string(),
+            receiver_thread_ids: Vec::new(),
+            prompt: None,
+            model: None,
+            reasoning_effort: None,
+            agents_states: HashMap::new(),
+        };
+        chat.on_collab_agent_tool_call(item);
+        let unfinished = loop {
+            if let AppEvent::InsertHistoryCell(cell) = rx.try_recv().unwrap() {
+                break cell;
+            }
+        };
+        assert!(unfinished.tool_call_summary().unwrap().running);
+        handle_turn_interrupted(&mut chat, "turn-1");
+        assert!(unfinished.tool_call_summary().is_none());
+    }
 }
 
 #[tokio::test]
