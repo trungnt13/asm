@@ -23,6 +23,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LocalSettings {
+    pub(crate) auto_rename: codex_config::AutoRenameConfig,
     pub(crate) audio: Result<codex_config::config_toml::RealtimeAudioToml, String>,
     pub(crate) tui: Tui,
     pub(crate) transcript_mode: TranscriptMode,
@@ -49,6 +50,13 @@ impl LocalSettings {
         screen_reader_default: crate::motion::MotionMode,
     ) -> Self {
         let mut settings = Self {
+            auto_rename: config
+                .config_layer_stack
+                .effective_config()
+                .get("auto_rename")
+                .cloned()
+                .map(|value| value.try_into().expect("validated auto_rename settings"))
+                .unwrap_or_default(),
             audio: Ok(Default::default()),
             transcript_mode: TranscriptMode::resolve(
                 config.tui_fullscreen_transcript,
@@ -125,6 +133,7 @@ impl LocalSettings {
         tui.session_picker_view = Some(tui.session_picker_view.unwrap_or_default());
         tui.screen_reader_detection_done = None;
         let mut settings = Self {
+            auto_rename: config.auto_rename.clone().unwrap_or_default(),
             audio: Ok(Default::default()),
             transcript_mode: TranscriptMode::resolve(
                 tui.fullscreen_transcript,

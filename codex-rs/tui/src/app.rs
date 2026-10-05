@@ -238,6 +238,7 @@ mod model_defaults;
 mod new_session;
 mod turn_tips;
 pub(crate) use new_session::has_launch_setting;
+mod auto_rename;
 mod clipboard;
 mod footer_selection;
 mod native_history;
