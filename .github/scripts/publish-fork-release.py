@@ -185,12 +185,14 @@ def initialize(repository, tag, sha, release, installer):
             "tag_name": tag, "target_commitish": sha, "name": f"ASM {tag}",
             "body": (
                 "ASM is a personal fork of OpenAI Codex. Each archive contains "
-                "`codex` and `codex-code-mode-host`. Platform checksum assets mark "
+                "the `codex` CLI and its `codex-code-mode-host` helper. Install "
+                "the entire package with its pinned install.sh. Platform checksum assets mark "
                 "packages ready for installation; Latest requires both platforms. "
                 "Use install.sh for external updates. macOS ARM64 is unsigned and "
                 "unnotarized. Linux x86_64 requires glibc 2.35+, system OpenSSL 3 "
-                "and XZ libraries. Use host rg, a system shell, and bwrap when "
-                f"sandboxing requires it.\n\nSource commit: {sha}"
+                "and XZ libraries; packages with bundled Bubblewrap also need libcap. "
+                "Use a system shell.\n\n"
+                f"Source commit: {sha}"
             ),
             "generate_release_notes": True, "draft": True, "prerelease": False,
             "make_latest": "false",
@@ -375,14 +377,14 @@ def main():
                 "body": (
                     "ASM is a personal fork of OpenAI Codex. Each archive contains "
                     "the `codex` CLI and its `codex-code-mode-host` helper. Use "
-                    "`install.sh` to install both and for manual updates. Updates "
-                    "are installed externally; in-app updates are disabled. Host "
-                    "`rg` and a system shell are required for relevant features.\n\n"
+                    "`install.sh` to install the package and for manual updates. Updates "
+                    "are installed externally; in-app updates are disabled. A system "
+                    "shell is required for relevant features.\n\n"
                     "The macOS ARM64 binary is unsigned and unnotarized. The Linux "
                     "x86_64 binary requires Ubuntu 22.04 or newer (glibc 2.35), with "
-                    "host OpenSSL 3 and XZ libraries. The archive does not include "
-                    "bundled Bubblewrap; install `bwrap` on the host when Linux "
-                    f"sandboxing requires it.\n\nSource commit: {sha}"
+                    "host OpenSSL 3 and XZ libraries; packages with bundled Bubblewrap "
+                    "also need libcap.\n\n"
+                    f"Source commit: {sha}"
                 ),
                 "generate_release_notes": True,
                 "draft": True,
