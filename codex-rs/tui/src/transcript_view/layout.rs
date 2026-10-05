@@ -176,7 +176,10 @@ impl TranscriptView {
         }
         let mode = self.mode;
         let ids = cell.activity_ids();
-        let disclosure = !self.detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
+        let disclosure = !self.detailed
+            && mode == HistoryRenderMode::Rich
+            && !ids.is_empty()
+            && cell.supports_individual_disclosure();
         let manually_expanded = self.disclosure.is_expanded(&ids);
         let expanded = disclosure && (full_content || manually_expanded);
         if manually_expanded {
