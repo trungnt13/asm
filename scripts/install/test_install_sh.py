@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -25,27 +26,74 @@ def write_release(
     bad_checksum: bool = False,
     platform_manifest: bool = False,
     invalid_manifest_digest: bool = False,
+    missing_resource: str | None = None,
+    bad_metadata: str | dict[str, object] | None = None,
+    archive_member: tuple[str, bytes] | None = None,
+    old_layout: bool = False,
 ) -> tuple[Path, Path, Path]:
     source = root / f"source-{version}"
-    source.mkdir(exist_ok=True)
-    if not helper:
-        (source / "codex-code-mode-host").unlink(missing_ok=True)
-    codex = source / "codex"
+    if source.exists():
+        shutil.rmtree(source)
+    for directory in ("bin", "codex-path", "codex-resources"):
+        (source / directory).mkdir(parents=True, exist_ok=True)
+    codex = source / "bin/codex"
     codex.write_text(
         f'#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli {version}"\n'
     )
     codex.chmod(0o755)
+    executable_paths = ["codex-path/rg"]
     if helper:
-        host = source / "codex-code-mode-host"
-        host.write_text('#!/bin/sh\necho "Usage: codex-code-mode-host"\n')
-        host.chmod(0o755)
+        executable_paths.append("bin/codex-code-mode-host")
+    if "linux" in target:
+        executable_paths.append("codex-resources/bwrap")
+    for name in executable_paths:
+        path = source / name
+        path.write_text(f'#!/bin/sh\necho "Usage: {path.name}"\n')
+        path.chmod(0o755)
+    if missing_resource:
+        (source / missing_resource).unlink()
+    metadata_contents = json.dumps({
+        "layoutVersion": 1,
+        "version": version,
+        "target": target,
+        "variant": "codex",
+        "entrypoint": "bin/codex",
+        "resourcesDir": "codex-resources",
+        "pathDir": "codex-path",
+    })
+    if isinstance(bad_metadata, dict):
+        metadata_fields = json.loads(metadata_contents)
+        metadata_fields.update(bad_metadata)
+        metadata_contents = json.dumps(metadata_fields)
+    elif bad_metadata is not None:
+        metadata_contents = (
+            bad_metadata if bad_metadata.startswith("{")
+            else metadata_contents.replace('"codex-path"', json.dumps(bad_metadata))
+        )
+    (source / "codex-package.json").write_text(metadata_contents)
     asset = f"codex-{target}.tar.gz"
     archive = root / f"{version}-{asset}"
     with tarfile.open(archive, "w:gz") as tar:
-        for name in ("codex", "codex-code-mode-host"):
-            path = source / name
-            if path.exists():
-                tar.add(path, arcname=name)
+        if old_layout:
+            for name in ("codex", "codex-code-mode-host"):
+                tar.add(source / "bin" / name, arcname=name)
+        else:
+            for path in sorted(source.rglob("*")):
+                name = str(path.relative_to(source))
+                if archive_member and name == archive_member[0]:
+                    continue
+                tar.add(path, arcname=name, recursive=False)
+        if archive_member:
+            name, kind = archive_member
+            member = tarfile.TarInfo(name)
+            member.type = kind
+            if kind != tarfile.REGTYPE:
+                if kind in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+                    member.linkname = "../../escaped"
+                tar.addfile(member)
+            else:
+                member.size = 6
+                tar.addfile(member, io.BytesIO(b"unsafe"))
     archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     manifest_name = f"SHA256SUMS-{target}" if platform_manifest else "SHA256SUMS"
     manifest = root / f"{version}-{manifest_name}"
@@ -222,6 +270,16 @@ class InstallShTest(unittest.TestCase):
                     current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
                 )
                 self.assertEqual(upstream_marker.read_text(), "upstream-release")
+                for path in ("codex-package.json", "codex-path/rg", "codex-resources/bwrap"):
+                    self.assertTrue((current / path).is_file())
+                # An old or damaged same-version install must be repaired, not reused.
+                for missing in ("codex-package.json", "codex-path/rg", "codex-resources/bwrap"):
+                    (current / missing).unlink()
+                    repaired, requests = run_installer(root, VERSION, files)
+                    self.assertEqual(repaired.returncode, 0, repaired.stderr)
+                    self.assertEqual(len(requests), 3)
+                    self.assertTrue((current / missing).is_file())
+
     def test_bad_checksum_and_missing_helper_keep_current_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -232,7 +290,25 @@ class InstallShTest(unittest.TestCase):
             selected = current.resolve()
             for options, message in (
                 ({"bad_checksum": True}, "metadata and SHA256SUMS disagree"),
-                ({"helper": False}, "must contain codex and codex-code-mode-host only"),
+                ({"helper": False}, "must contain a complete canonical package"),
+                ({"missing_resource": "codex-path/rg"}, "must contain a complete canonical package"),
+                ({"missing_resource": "codex-resources/bwrap"}, "must contain a complete canonical package"),
+                ({"old_layout": True}, "Reinstall a newer ASM release"),
+                ({"bad_metadata": "../elsewhere"}, "Invalid ASM package metadata"),
+                ({"bad_metadata": "{}"}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"layoutVersion": 2}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"layoutVersion": "1"}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"version": VERSION}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"target": "aarch64-apple-darwin"}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"variant": "codex-app-server"}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"entrypoint": "codex"}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"resourcesDir": "other"}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": {"unknown": "field"}}, "Invalid ASM package metadata"),
+                ({"bad_metadata": '{"layoutVersion":1,}'}, "Invalid ASM package metadata"),
+                ({"archive_member": ("codex-path/rg", tarfile.SYMTYPE)}, "must contain a complete canonical package"),
+                ({"archive_member": ("bin/codex", tarfile.LNKTYPE)}, "must contain a complete canonical package"),
+                ({"archive_member": ("codex-resources/bwrap", tarfile.CHRTYPE)}, "must contain a complete canonical package"),
+                ({"archive_member": ("../escaped", tarfile.REGTYPE)}, "must contain a complete canonical package"),
                 ({"platform_manifest": True, "bad_checksum": True}, "metadata and SHA256SUMS disagree"),
                 (
                     {"platform_manifest": True, "invalid_manifest_digest": True},
@@ -307,7 +383,7 @@ class InstallShTest(unittest.TestCase):
             (old_release / "bin").mkdir(parents=True)
             for name in ("codex", "codex-code-mode-host"):
                 shutil.copy2(
-                    root / f"source-{VERSION}" / name, old_release / "bin" / name
+                    root / f"source-{VERSION}" / "bin" / name, old_release / "bin" / name
                 )
             (old_release / "codex").symlink_to("bin/codex")
             current = package_root / "current"
