@@ -105,6 +105,7 @@ impl ChatWidget {
             self.review.recent_auto_review_denials = RecentAutoReviewDenials::default();
             self.clear_thread_usage_state();
         }
+        self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
         self.clear_safety_buffering();
         self.thread_name = session.thread_name.clone();
@@ -328,6 +329,7 @@ impl ChatWidget {
         self.on_task_complete(
             /*last_agent_message*/ None, /*completion*/ None, /*from_replay*/ true,
         );
+        self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
         self.review = Default::default();
         self.transcript.take_active_cell();

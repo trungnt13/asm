@@ -133,6 +133,14 @@ impl ChatWidget {
             None
         };
 
+        let metadata = &self.collab_agent_metadata;
+        if let Some(cell) = self.agent_wait_history.cell(&item, |thread_id| {
+            metadata.get(&thread_id).cloned().unwrap_or_default()
+        }) {
+            self.on_collab_event(cell);
+            return;
+        }
+
         if let Some(cell) = multi_agents::tool_call_history_cell(
             &item,
             cached_spawn_request.as_ref(),
