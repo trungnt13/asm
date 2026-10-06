@@ -4,6 +4,7 @@ use super::App;
 use super::thread_events::ThreadBufferedEvent;
 use super::thread_title::THREAD_TITLE_MAX_CHARS;
 use super::thread_title::THREAD_TITLE_PROMPT_MAX_BYTES;
+use super::thread_title::TitleWordLimit;
 use super::thread_title::recent_conversation_messages;
 use super::thread_title::thread_title_instructions;
 use crate::app_event::AutoRenameRequest;
@@ -355,12 +356,15 @@ impl App {
 
 pub(super) fn automatic_title_prefix(settings: &AutoRenameConfig) -> String {
     let max_title_chars = settings.max_title_chars.unwrap_or(THREAD_TITLE_MAX_CHARS);
-    let mut prefix = thread_title_instructions(max_title_chars);
-    if let Some(instructions) = &settings.instructions
-        && !instructions.trim().is_empty()
+    let word_limit = settings
+        .max_title_words
+        .map_or(TitleWordLimit::DefaultGuidance, TitleWordLimit::AtMost);
+    let mut prefix = thread_title_instructions(max_title_chars, word_limit);
+    if let Some(guidance) = &settings.additional_naming_guidance
+        && !guidance.trim().is_empty()
     {
         prefix.push_str("\nAdditional naming guidance:\n");
-        prefix.push_str(instructions.trim());
+        prefix.push_str(guidance.trim());
     }
     match settings.context {
         AutoRenameContext::UserMessage => prefix.push_str("\n\nUser prompt:\n"),
