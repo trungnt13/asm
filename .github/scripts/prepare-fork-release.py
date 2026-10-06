@@ -53,45 +53,36 @@ def api(path, *arguments, allow_missing=False):
 
 
 def upstream_prereleases():
-    query = (
-        'query($cursor:String){repository(owner:"openai",name:"codex"){'
-        "releases(first:100,after:$cursor){nodes{tagName publishedAt isDraft isPrerelease}"
-        "pageInfo{endCursor hasNextPage}}}}"
-    )
-    cursor = None
-    seen_cursors = set()
-    while True:
-        arguments = ["-f", f"query={query}"]
-        if cursor:
-            arguments.extend(["-f", f"cursor={cursor}"])
-        response = api("graphql", *arguments)
-        if response.get("errors"):
-            raise RuntimeError(
-                f"GitHub GraphQL release lookup failed: {response['errors']}"
-            )
-        repository = (response.get("data") or {}).get("repository")
-        releases = repository.get("releases") if repository else None
-        if not releases or not isinstance(releases.get("nodes"), list):
-            raise ValueError("GitHub GraphQL returned no release metadata")
-        for release in releases["nodes"]:
-            if (
-                release["isPrerelease"]
-                and not release["isDraft"]
-                and release["tagName"].startswith("rust-v")
-                and release["publishedAt"]
-            ):
-                yield release
-        pagination = releases["pageInfo"]
-        if not isinstance(pagination.get("hasNextPage"), bool):
-            raise TypeError("GitHub GraphQL returned invalid release pagination")
-        if not pagination["hasNextPage"]:
-            return
-        cursor = pagination.get("endCursor")
-        if not isinstance(cursor, str) or not cursor or cursor in seen_cursors:
-            raise ValueError(
-                "GitHub GraphQL returned a missing or repeated release cursor"
-            )
-        seen_cursors.add(cursor)
+    for line in git(
+        "ls-remote",
+        "--tags",
+        "--refs",
+        "https://github.com/openai/codex.git",
+        "rust-v*",
+    ).splitlines():
+        _, reference = line.split()
+        match = re.fullmatch(
+            r"refs/tags/rust-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-"
+            r"([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)"
+            r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+            reference,
+        )
+        if not match:
+            continue
+        identifiers = match[4].split(".")
+        if any(
+            value.isdigit() and len(value) > 1 and value[0] == "0"
+            for value in identifiers
+        ):
+            continue
+        precedence = (
+            tuple(int(value) for value in match.groups()[:3]),
+            tuple(
+                (0, int(value)) if value.isdigit() else (1, value)
+                for value in identifiers
+            ),
+        )
+        yield precedence, reference.removeprefix("refs/tags/")
 
 
 def version(revision):
@@ -244,10 +235,10 @@ def prepare():
     else:
         if resume_run_id:
             raise ValueError("Requested candidate run does not exist")
-        releases = list(upstream_prereleases())
-        if not releases:
-            raise ValueError("No published upstream Rust prerelease found")
-        upstream = max(releases, key=lambda release: release["publishedAt"])["tagName"]
+        tags = list(upstream_prereleases())
+        if not tags:
+            raise ValueError("No upstream Rust prerelease tag found")
+        upstream = max(tags, key=lambda tag: tag[0])[1]
         match = re.fullmatch(r"rust-v(\d+)\.(\d+)\.(\d+)(-.+)", upstream)
         if not match:
             raise ValueError(f"Unsupported upstream prerelease tag: {upstream}")
