@@ -409,7 +409,7 @@ pub struct ConfigToml {
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
 
-    /// One-time automatic naming in the TUI; Desktop naming is unaffected.
+    /// Automatic naming in the TUI; Desktop naming is unaffected.
     pub auto_rename: Option<crate::AutoRenameConfig>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the

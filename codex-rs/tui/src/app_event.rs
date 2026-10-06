@@ -254,10 +254,17 @@ pub(crate) enum TranscriptExportDestination {
     File(PathBuf),
 }
 
+/// Capture naming ownership and update policy before background generation.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AutoRenameRequest {
+    pub(crate) expected_name: Option<String>,
+    pub(crate) update_policy: codex_config::AutoRenameUpdatePolicy,
+}
+
 /// Deliver a generated title to its originating automatic rename or editable prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ThreadTitleDestination {
-    /// Name the thread only if the user has not already named it.
+    /// Apply a title only while the initiating client's naming ownership is unchanged.
     Automatic,
     /// Prefill only the still-active rename prompt with the matching request ID.
     RenameSuggestion { request_id: Uuid },
@@ -354,8 +361,13 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         request_id: Uuid,
     },
+    StopAutomaticThreadTitles {
+        thread_id: ThreadId,
+        stopped: tokio::sync::oneshot::Sender<()>,
+    },
     /// Register a hidden title-generation thread started in the background.
     ThreadTitleStarted {
+        auto_rename: AutoRenameRequest,
         max_title_chars: usize,
         cancellation: CancellationToken,
         thread_id: ThreadId,
@@ -366,6 +378,7 @@ pub(crate) enum AppEvent {
     },
     /// Route a hidden title request to its automatic rename or editable prompt.
     GeneratedThreadTitle {
+        auto_rename: AutoRenameRequest,
         max_title_chars: usize,
         cancellation: CancellationToken,
         thread_id: ThreadId,
