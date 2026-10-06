@@ -323,13 +323,13 @@ async fn saved_nested_fork_retains_cache_routing_on_resume_without_ancestors() -
             ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
             StartThreadOptions {
                 environments: Some(
-            test.codex
-                .environment_selections()
-                .await
-                .into_iter()
-                .map(TurnEnvironmentSelection::into_request)
-                .collect(),
-        ),
+                    test.codex
+                        .environment_selections()
+                        .await
+                        .into_iter()
+                        .map(TurnEnvironmentSelection::into_request)
+                        .collect(),
+                ),
                 ..StartThreadOptions::new(test.config.clone())
             },
             parent_path.clone(),
@@ -346,13 +346,13 @@ async fn saved_nested_fork_retains_cache_routing_on_resume_without_ancestors() -
             ForkSnapshot::TruncateBeforeNthUserMessage(usize::MAX),
             StartThreadOptions {
                 environments: Some(
-            test.codex
-                .environment_selections()
-                .await
-                .into_iter()
-                .map(TurnEnvironmentSelection::into_request)
-                .collect(),
-        ),
+                    test.codex
+                        .environment_selections()
+                        .await
+                        .into_iter()
+                        .map(TurnEnvironmentSelection::into_request)
+                        .collect(),
+                ),
                 ..StartThreadOptions::new(test.config.clone())
             },
             first_path.clone(),
