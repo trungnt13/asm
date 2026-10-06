@@ -34,7 +34,7 @@ pub struct AutoRenameConfig {
     pub context: AutoRenameContext,
     pub auto_update: bool,
     pub auto_update_interval_turns: NonZeroUsize,
-    /// Source-text budget from 128 to 8192 bytes, separate from additional instructions.
+    /// Source-text budget from 128 to 8192 bytes, separate from additional naming guidance.
     /// Omission retains the original source-text budget.
     #[serde(deserialize_with = "deserialize_context_bytes")]
     #[schemars(range(min = 128, max = 8192))]
@@ -45,9 +45,12 @@ pub struct AutoRenameConfig {
     #[serde(deserialize_with = "deserialize_title_chars")]
     #[schemars(range(min = 1, max = 128))]
     pub max_title_chars: Option<usize>,
+    /// Request at most this many words without truncating generated titles.
+    /// Omission retains the default soft word-count guidance.
+    pub max_title_words: Option<NonZeroUsize>,
     /// Additional naming guidance, limited to 512 UTF-8 bytes.
-    #[serde(deserialize_with = "deserialize_instructions")]
-    pub instructions: Option<String>,
+    #[serde(deserialize_with = "deserialize_additional_naming_guidance")]
+    pub additional_naming_guidance: Option<String>,
 }
 
 impl Default for AutoRenameConfig {
@@ -64,7 +67,8 @@ impl Default for AutoRenameConfig {
             max_context_bytes: None,
             recent_message_limit: None,
             max_title_chars: None,
-            instructions: None,
+            max_title_words: None,
+            additional_naming_guidance: None,
         }
     }
 }
@@ -109,14 +113,16 @@ where
     deserialize_limit(deserializer, /*maximum*/ 128)
 }
 
-fn deserialize_instructions<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+fn deserialize_additional_naming_guidance<'de, D>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let value = Option::<String>::deserialize(deserializer)?;
     if value.as_ref().is_some_and(|value| value.len() > 512) {
         return Err(serde::de::Error::custom(
-            "auto_rename.instructions must not exceed 512 UTF-8 bytes",
+            "auto_rename.additional_naming_guidance must not exceed 512 UTF-8 bytes",
         ));
     }
     Ok(value)
