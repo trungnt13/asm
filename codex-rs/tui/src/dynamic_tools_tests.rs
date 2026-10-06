@@ -464,6 +464,39 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
         json!({"threadId": target, "title": "Renamed task"})
     );
 
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let event_tx = AppEventSender::new(event_tx);
+    let (_status_sender, status_receiver) = broadcast::channel(/*capacity*/ 8);
+    let same_name = execute(
+        server.request_handle(),
+        DynamicToolCallParams {
+            thread_id: source.clone(),
+            turn_id: "persisted-turn".to_string(),
+            call_id: "rename-same".to_string(),
+            namespace: Some(NAMESPACE.to_string()),
+            tool: "set_thread_title".to_string(),
+            arguments: json!({"threadId": target, "title": "Renamed task"}),
+        },
+        ThreadStartParams::default(),
+        status_receiver,
+        Some(&event_tx),
+    );
+    let stop = async {
+        let event = event_rx.recv().await.expect("manual title intent");
+        let AppEvent::StopAutomaticThreadTitles { thread_id, stopped } = event else {
+            panic!("manual title intent expected");
+        };
+        assert_eq!(thread_id.to_string(), target);
+        stopped
+            .send(())
+            .expect("title request waiting for acknowledgement");
+    };
+    let (renamed, ()) = tokio::join!(same_name, stop);
+    assert_eq!(
+        response_json(renamed),
+        json!({"threadId": target, "title": "Renamed task"})
+    );
+
     let forked = response_json(
         call_tool(&server, &source, "fork_thread", json!({"threadId": target})).await,
     );

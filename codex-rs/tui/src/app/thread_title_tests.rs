@@ -25,6 +25,7 @@ use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
 use core_test_support::responses;
 use crossterm::event::KeyCode;
@@ -141,6 +142,24 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             app_server
                 .thread_set_name(thread_id, name.to_string())
                 .await?;
+            let pending = app
+                .pending_thread_titles
+                .get(&(thread_id, ThreadTitleDestination::Automatic))
+                .expect("pending title")
+                .clone();
+            app.handle_app_server_event(
+                &app_server,
+                AppServerEvent::ServerNotification(Box::new(
+                    ServerNotification::ThreadNameUpdated(
+                        codex_app_server_protocol::ThreadNameUpdatedNotification {
+                            thread_id: thread_id.to_string(),
+                            thread_name: Some(name.to_string()),
+                        },
+                    ),
+                )),
+            )
+            .await;
+            assert!(pending.is_cancelled());
         }
         let displayed_thread = (app.chat_widget.thread_id(), app.chat_widget.thread_name());
         app.local_settings.auto_rename.max_title_chars = Some(5);
@@ -148,6 +167,10 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             &mut tui,
             &mut app_server,
             AppEvent::GeneratedThreadTitle {
+                auto_rename: crate::app_event::AutoRenameRequest {
+                    update_policy: codex_config::AutoRenameUpdatePolicy::UntilManual,
+                    ..Default::default()
+                },
                 max_title_chars: THREAD_TITLE_MAX_CHARS,
                 cancellation: CancellationToken::new(),
                 thread_id,
@@ -179,9 +202,434 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             )
             .await?;
         assert_eq!(resumed.session.thread_name, expected_name);
+        assert_eq!(
+            app.automatic_thread_titles.contains_key(&thread_id),
+            manual_name.is_none()
+        );
+        if manual_name.is_none() {
+            app.handle_app_server_event(
+                &app_server,
+                AppServerEvent::ServerNotification(Box::new(
+                    ServerNotification::ThreadNameUpdated(
+                        codex_app_server_protocol::ThreadNameUpdatedNotification {
+                            thread_id: thread_id.to_string(),
+                            thread_name: Some("Generated title".to_string()),
+                        },
+                    ),
+                )),
+            )
+            .await;
+            assert!(app.automatic_thread_titles.contains_key(&thread_id));
+            app.select_agent_thread(&mut tui, &mut app_server, thread_id)
+                .await?;
+            assert!(app.automatic_thread_titles.contains_key(&thread_id));
+            app.resume_target_session(
+                &mut tui,
+                &mut app_server,
+                crate::resume_picker::SessionTarget {
+                    path: None,
+                    thread_id,
+                    cwd: None,
+                    history_mode: None,
+                },
+            )
+            .await?;
+            assert!(!app.automatic_thread_titles.contains_key(&thread_id));
+            assert_eq!(
+                app_server
+                    .thread_read(thread_id, /*include_turns*/ false)
+                    .await?
+                    .name,
+                Some("Generated title".to_string())
+            );
+        }
+
         app_server.shutdown().await?;
     }
+
+    let mut app = make_test_app().await;
+    app.local_settings.auto_rename.update_policy =
+        codex_config::AutoRenameUpdatePolicy::UntilManual;
+    app.local_settings.auto_rename.auto_update_interval_turns =
+        std::num::NonZeroUsize::new(/*n*/ 2).expect("positive interval");
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let started = app_server.start_thread(&app.config).await?;
+    let thread_id = started.session.thread_id;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.replace_chat_widget_with_app_server_thread(
+        &mut tui,
+        started,
+        ThreadAttachPresentation::SessionLineage,
+        /*initial_user_message*/ None,
+    )
+    .await?;
+    let user = serde_json::from_str(
+        r#"{"type":"message","role":"user","content":[{"type":"input_text","text":"Initial request"}]}"#,
+    )?;
+    app_server
+        .thread_inject_items(thread_id, vec![user])
+        .await?;
+    app.local_settings.auto_rename.auto_update_interval_turns =
+        std::num::NonZeroUsize::new(/*n*/ 1).expect("positive interval");
+    let initial_text = format!("Initial request {}", "🚀".repeat(/*n*/ 3000));
+    let initial_event = ThreadBufferedEvent::Notification(Box::new(
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "initial-inflight".to_string(),
+            item: title_user_message("initial-user", &initial_text),
+            completed_at_ms: 0,
+        }),
+    ));
+    let prompt = app
+        .automatic_thread_title_prompt(&initial_event)
+        .await
+        .expect("initial title request");
+    assert!(prompt.prompt.len() <= 960);
+    app.pending_thread_titles.insert(
+        (thread_id, ThreadTitleDestination::Automatic),
+        CancellationToken::new(),
+    );
+    let prior_completion = title_completion_event(
+        &mut app,
+        thread_id,
+        "initial-inflight",
+        TurnStatus::Completed,
+        /*user_message*/ None,
+    )
+    .await?;
+    assert!(
+        app.automatic_thread_title_prompt(&prior_completion)
+            .await
+            .is_none()
+    );
+    let newer_text = format!("Latest pending request {}", "🚀".repeat(/*n*/ 3000));
+    let newer_event = ThreadBufferedEvent::Notification(Box::new(
+        ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "newer-inflight".to_string(),
+            item: title_user_message("newer-user", &newer_text),
+            completed_at_ms: 0,
+        }),
+    ));
+    assert!(
+        app.automatic_thread_title_prompt(&newer_event)
+            .await
+            .is_none()
+    );
+    app.ensure_thread_channel(thread_id)
+        .store
+        .lock()
+        .await
+        .buffer
+        .clear();
+    app.finish_thread_title_generation(thread_id, ThreadTitleDestination::Automatic);
+    app.save_automatic_thread_title(
+        &mut app_server,
+        thread_id,
+        "Initial title".to_string(),
+        prompt.request,
+    )
+    .await;
+    let completion = title_completion_event(
+        &mut app,
+        thread_id,
+        "newer-inflight",
+        TurnStatus::Completed,
+        /*user_message*/ None,
+    )
+    .await?;
+    app.local_settings.auto_rename.max_context_bytes = Some(8192);
+    let prompt = app
+        .automatic_thread_title_prompt(&completion)
+        .await
+        .expect("newer user retained before initial ownership grant");
+    let source = prompt
+        .prompt
+        .split_once("User prompt:\n")
+        .expect("source")
+        .1;
+    assert!(source.starts_with("Latest pending request"));
+    assert!(source.len() <= 8192 && source.is_char_boundary(source.len()));
+    assert!(
+        app.automatic_thread_title_prompt(&prior_completion)
+            .await
+            .is_none()
+    );
+    app.local_settings.auto_rename.max_context_bytes = None;
+    let ThreadBufferedEvent::Notification(notification) = &completion else {
+        panic!("completion notification");
+    };
+    let ServerNotification::TurnCompleted(turn) = notification.as_ref() else {
+        panic!("completed turn");
+    };
+    let mut snapshot = turn.turn.clone();
+    snapshot.id = "long-turn".to_string();
+    snapshot.items = vec![
+        title_user_message("earlier-user", "Earlier request"),
+        title_agent_message(
+            "earlier-answer",
+            "Earlier answer",
+            Some(MessagePhase::FinalAnswer),
+        ),
+    ];
+    app.ensure_thread_channel(thread_id)
+        .store
+        .lock()
+        .await
+        .turns
+        .push(snapshot);
+    app.local_settings.auto_rename.context = codex_config::AutoRenameContext::RecentConversation;
+    let mut completion = title_completion_event(
+        &mut app,
+        thread_id,
+        "long-turn",
+        TurnStatus::Completed,
+        Some("Latest evicted request"),
+    )
+    .await?;
+    for (id, text) in [
+        ("answer-1", "Intermediate answer"),
+        ("answer-2", "Final answer"),
+    ] {
+        app.enqueue_thread_notification(
+            thread_id,
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "long-turn".to_string(),
+                item: title_agent_message(id, text, Some(MessagePhase::FinalAnswer)),
+                completed_at_ms: 0,
+            }),
+        )
+        .await?;
+    }
+    if let ThreadBufferedEvent::Notification(notification) = &mut completion
+        && let ServerNotification::TurnCompleted(turn) = notification.as_mut()
+    {
+        turn.turn.items = vec![title_agent_message(
+            "answer-2",
+            "Final answer",
+            Some(MessagePhase::FinalAnswer),
+        )];
+    }
+    let prompt = app
+        .automatic_thread_title_prompt(&completion)
+        .await
+        .expect("evicted user restored to recent context")
+        .prompt;
+    let earlier = prompt
+        .find("Earlier answer")
+        .expect("earlier assistant context");
+    let user = prompt.find("Latest evicted request").expect("user context");
+    let first_answer = prompt
+        .find("Intermediate answer")
+        .expect("first assistant context");
+    let final_answer = prompt
+        .find("Final answer")
+        .expect("final assistant context");
+    assert!(earlier < user && user < first_answer && first_answer < final_answer);
+    app.local_settings.auto_rename.context = codex_config::AutoRenameContext::UserMessage;
+    app.local_settings.auto_rename.auto_update_interval_turns =
+        std::num::NonZeroUsize::new(/*n*/ 2).expect("positive interval");
+    assert!(app.automatic_thread_titles.contains_key(&thread_id));
+    for (id, status, user, expected) in [
+        ("turn-1", TurnStatus::Completed, true, false),
+        ("turn-1", TurnStatus::Completed, true, false),
+        ("failed", TurnStatus::Failed, true, false),
+        ("interrupted", TurnStatus::Interrupted, true, false),
+        ("helper", TurnStatus::Completed, false, false),
+        ("turn-2", TurnStatus::Completed, true, true),
+    ] {
+        let user_text = user.then(|| format!("Latest task {id}"));
+        let event =
+            title_completion_event(&mut app, thread_id, id, status, user_text.as_deref()).await?;
+        let prompt = app.automatic_thread_title_prompt(&event).await;
+        assert_eq!(prompt.is_some(), expected, "{id}");
+        if let Some(prompt) = prompt {
+            assert!(prompt.prompt.contains("Latest task turn-2"));
+        }
+    }
+    let pending = CancellationToken::new();
+    app.pending_thread_titles.insert(
+        (thread_id, ThreadTitleDestination::Automatic),
+        pending.clone(),
+    );
+    for id in ["turn-3", "turn-4"] {
+        let event = title_completion_event(
+            &mut app,
+            thread_id,
+            id,
+            TurnStatus::Completed,
+            Some("Latest task while pending"),
+        )
+        .await?;
+        assert!(app.automatic_thread_title_prompt(&event).await.is_none());
+    }
+    app.finish_thread_title_generation(thread_id, ThreadTitleDestination::Automatic);
+    let request = crate::app_event::AutoRenameRequest {
+        expected_name: Some("Initial title".to_string()),
+        update_policy: codex_config::AutoRenameUpdatePolicy::UntilManual,
+    };
+    app.save_automatic_thread_title(
+        &mut app_server,
+        thread_id,
+        "Updated title".to_string(),
+        request.clone(),
+    )
+    .await;
+    assert_eq!(
+        app_server
+            .thread_read(thread_id, /*include_turns*/ false)
+            .await?
+            .name,
+        Some("Updated title".to_string())
+    );
+    let event = title_completion_event(
+        &mut app,
+        thread_id,
+        "turn-5",
+        TurnStatus::Completed,
+        Some("Latest task"),
+    )
+    .await?;
+    assert!(app.automatic_thread_title_prompt(&event).await.is_some());
+    app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::GeneratedThreadTitle {
+            auto_rename: crate::app_event::AutoRenameRequest {
+                expected_name: Some("Updated title".to_string()),
+                ..request
+            },
+            max_title_chars: THREAD_TITLE_MAX_CHARS,
+            cancellation: CancellationToken::new(),
+            thread_id,
+            temporary_thread_id: ThreadId::new(),
+            destination: ThreadTitleDestination::Automatic,
+            result: Err("generation failed".to_string()),
+        },
+    )
+    .await?;
+    assert!(app.automatic_thread_titles.contains_key(&thread_id));
+    let event = title_completion_event(
+        &mut app,
+        thread_id,
+        "turn-6",
+        TurnStatus::Completed,
+        Some("Latest task"),
+    )
+    .await?;
+    assert!(app.automatic_thread_title_prompt(&event).await.is_none());
+    let event = title_completion_event(
+        &mut app,
+        thread_id,
+        "turn-7",
+        TurnStatus::Completed,
+        Some("Latest task"),
+    )
+    .await?;
+    assert!(app.automatic_thread_title_prompt(&event).await.is_some());
+    let request = crate::app_event::AutoRenameRequest {
+        expected_name: Some("Updated title".to_string()),
+        update_policy: codex_config::AutoRenameUpdatePolicy::UntilManual,
+    };
+    // A matching generated title consumes the interval without another index record.
+    let index_path = app.config.codex_home.join("session_index.jsonl");
+    let before = std::fs::read(&index_path)?;
+    app.save_automatic_thread_title(
+        &mut app_server,
+        thread_id,
+        "Updated title".to_string(),
+        request.clone(),
+    )
+    .await;
+    assert_eq!(std::fs::read(&index_path)?, before);
+    assert!(app.automatic_thread_titles.contains_key(&thread_id));
+    app.try_submit_active_thread_op_via_app_server(
+        &mut app_server,
+        thread_id,
+        &AppCommand::SetThreadName {
+            name: "Updated title".to_string(),
+        },
+    )
+    .await?;
+    assert!(!app.automatic_thread_titles.contains_key(&thread_id));
+    let event = title_completion_event(
+        &mut app,
+        thread_id,
+        "turn-8",
+        TurnStatus::Completed,
+        Some("Latest task"),
+    )
+    .await?;
+    assert!(app.automatic_thread_title_prompt(&event).await.is_none());
+    app.save_automatic_thread_title(
+        &mut app_server,
+        thread_id,
+        "Must not overwrite".to_string(),
+        request,
+    )
+    .await;
+    assert_eq!(
+        app_server
+            .thread_read(thread_id, /*include_turns*/ false)
+            .await?
+            .name,
+        Some("Updated title".to_string())
+    );
+    app_server.shutdown().await?;
     Ok(())
+}
+
+#[tracing::instrument(skip_all)]
+async fn title_completion_event(
+    app: &mut crate::app::App,
+    thread_id: ThreadId,
+    turn_id: &str,
+    status: TurnStatus,
+    user_message: Option<&str>,
+) -> color_eyre::Result<ThreadBufferedEvent> {
+    if let Some(text) = user_message {
+        let notification = ServerNotification::ItemCompleted(ItemCompletedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            item: title_user_message(&format!("{turn_id}-user"), text),
+            completed_at_ms: 0,
+        });
+        app.enqueue_thread_notification(thread_id, notification.clone())
+            .await?;
+        let _ = app
+            .automatic_thread_title_prompt(&ThreadBufferedEvent::Notification(Box::new(
+                notification,
+            )))
+            .await;
+    }
+    // Long turns can evict their user item before the summary-only completion arrives.
+    app.ensure_thread_channel(thread_id)
+        .store
+        .lock()
+        .await
+        .buffer
+        .clear();
+    Ok(ThreadBufferedEvent::Notification(Box::new(
+        ServerNotification::TurnCompleted(codex_app_server_protocol::TurnCompletedNotification {
+            thread_id: thread_id.to_string(),
+            turn: Turn {
+                id: turn_id.to_string(),
+                items: vec![title_agent_message(
+                    turn_id,
+                    "Finished task",
+                    Some(MessagePhase::FinalAnswer),
+                )],
+                items_view: Default::default(),
+                token_usage: None,
+                status,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                duration_ms: None,
+            },
+        }),
+    )))
 }
 
 #[tokio::test]
@@ -305,6 +753,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         recent_message_limit: configured.then_some(3),
         max_title_chars: configured.then_some(/*t*/ 12),
         instructions: configured.then(|| "Name the concrete authentication problem".to_string()),
+        ..Default::default()
     };
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
@@ -616,6 +1065,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         "prompt".to_string(),
         /*effort*/ None,
         THREAD_TITLE_MAX_CHARS,
+        Default::default(),
         Ok(temporary_thread_id.to_string()),
         cancellation.clone(),
     );
@@ -625,6 +1075,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         &mut tui,
         &mut app_server,
         AppEvent::GeneratedThreadTitle {
+            auto_rename: Default::default(),
             max_title_chars: THREAD_TITLE_MAX_CHARS,
             cancellation,
             thread_id,
@@ -962,6 +1413,7 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         "prompt".to_string(),
         /*effort*/ None,
         THREAD_TITLE_MAX_CHARS,
+        Default::default(),
         Err("startup failed".to_string()),
         CancellationToken::new(),
     );
@@ -973,6 +1425,7 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         "prompt".to_string(),
         /*effort*/ None,
         THREAD_TITLE_MAX_CHARS,
+        Default::default(),
         Ok("invalid-thread-id".to_string()),
         CancellationToken::new(),
     );
@@ -1009,6 +1462,7 @@ async fn thread_title_progress_clears_failed_requests_and_follows_thread_switche
         &mut tui,
         &mut app_server,
         AppEvent::GeneratedThreadTitle {
+            auto_rename: Default::default(),
             max_title_chars: THREAD_TITLE_MAX_CHARS,
             cancellation: CancellationToken::new(),
             thread_id,

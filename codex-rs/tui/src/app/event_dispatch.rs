@@ -2841,7 +2841,12 @@ impl App {
                 self.suggest_thread_name(app_server, thread_id, request_id)
                     .await;
             }
+            AppEvent::StopAutomaticThreadTitles { thread_id, stopped } => {
+                self.stop_automatic_thread_titles(thread_id);
+                let _ = stopped.send(());
+            }
             AppEvent::ThreadTitleStarted {
+                auto_rename,
                 max_title_chars,
                 cancellation,
                 thread_id,
@@ -2857,11 +2862,13 @@ impl App {
                     prompt,
                     effort,
                     max_title_chars,
+                    auto_rename,
                     result,
                     cancellation,
                 );
             }
             AppEvent::GeneratedThreadTitle {
+                auto_rename,
                 max_title_chars,
                 cancellation,
                 thread_id,
@@ -2882,19 +2889,8 @@ impl App {
                             && let Some(title) = super::thread_title::parse_thread_title(
                                 &response, max_title_chars,
                             )
-                            && let Ok(thread) = app_server
-                                .thread_read(thread_id, /*include_turns*/ false)
-                                .await
-                            && thread.name.is_none()
                         {
-                            match app_server.thread_set_name(thread_id, title.clone()).await {
-                                Ok(()) => self
-                                    .chat_widget
-                                    .on_thread_name_updated(thread_id, Some(title)),
-                                Err(error) => {
-                                    tracing::debug!(%error, "failed to apply generated thread title");
-                                }
-                            }
+                            self.save_automatic_thread_title(app_server, thread_id, title, auto_rename).await;
                         }
                     }
                     ThreadTitleDestination::RenameSuggestion { request_id } => {
