@@ -168,7 +168,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             &mut app_server,
             AppEvent::GeneratedThreadTitle {
                 auto_rename: crate::app_event::AutoRenameRequest {
-                    update_policy: codex_config::AutoRenameUpdatePolicy::UntilManual,
+                    auto_update: true,
                     ..Default::default()
                 },
                 max_title_chars: THREAD_TITLE_MAX_CHARS,
@@ -248,8 +248,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
     }
 
     let mut app = make_test_app().await;
-    app.local_settings.auto_rename.update_policy =
-        codex_config::AutoRenameUpdatePolicy::UntilManual;
+    app.local_settings.auto_rename.auto_update = true;
     app.local_settings.auto_rename.auto_update_interval_turns =
         std::num::NonZeroUsize::new(/*n*/ 2).expect("positive interval");
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
@@ -467,7 +466,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
     app.finish_thread_title_generation(thread_id, ThreadTitleDestination::Automatic);
     let request = crate::app_event::AutoRenameRequest {
         expected_name: Some("Initial title".to_string()),
-        update_policy: codex_config::AutoRenameUpdatePolicy::UntilManual,
+        auto_update: true,
     };
     app.save_automatic_thread_title(
         &mut app_server,
@@ -530,7 +529,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
     assert!(app.automatic_thread_title_prompt(&event).await.is_some());
     let request = crate::app_event::AutoRenameRequest {
         expected_name: Some("Updated title".to_string()),
-        update_policy: codex_config::AutoRenameUpdatePolicy::UntilManual,
+        auto_update: true,
     };
     // A matching generated title consumes the interval without another index record.
     let index_path = app.config.codex_home.join("session_index.jsonl");

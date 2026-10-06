@@ -58,7 +58,6 @@ pub use auth_policy::ManagedAuthPolicy;
 pub use auto_rename::AutoRenameConfig;
 pub use auto_rename::AutoRenameContext;
 pub use auto_rename::AutoRenameFirstTrigger;
-pub use auto_rename::AutoRenameUpdatePolicy;
 pub use browser_computer_use_requirements::AllowDenyRequirementToml;
 pub use browser_computer_use_requirements::BrowserUseAccessApprovalLifetimeToml;
 pub use browser_computer_use_requirements::BrowserUseOriginPolicyToml;
