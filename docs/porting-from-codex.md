@@ -75,9 +75,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `823ea830c0fd418b09ff02d36cad9a1fff66465b`.
-- Commit date: 2026-10-05.
-- Subject: Preserve trusted-tool context in Guardian Decisions requests (#51070).
+- Last incorporated upstream commit: `0b863c69f50335acd92164aab971cb58d298c2fe`.
+- Commit date: 2026-10-06.
+- Subject: Preserve URL destinations in wrapped hook details (#51473).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
