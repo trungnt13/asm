@@ -98,6 +98,10 @@ Leave other inherited workflows unchanged unless the task authorizes changes. Ch
 
 ### Operate a release
 
+Deliver the complete installable package before unrelated feature work. Reuse the existing release workflow, not a second pipeline. Keep installation separate; publication does not authorize installing binaries or restarting a shared server.
+
+Inspect failed CI jobs before release. Fix relevant code or packaging errors. For runner allocation or communication failures, inspect annotations and available logs, then rerun failed jobs without repeating successful jobs. Do not infer a code defect or change build settings from a runner failure alone. When the owner requires CI recovery first, verify the retry succeeds before dispatching the release.
+
 1. Require an explicit release request. Select the repository explicitly, for example with `gh ... -R trungnt13/asm`. Before pushing source to `origin/main`, verify the V8 prerequisite below. Release the intended commit from `origin/main`, not unpushed local work. Candidates build or reuse their own archives; do not wait for postmerge builds.
 2. Dispatch [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. The workflow owns version selection, candidate creation, builds, publication, verification, and remote `main` updates. Do not repeat these steps manually. Ordinary branch dispatch is build-only. A `main` push does not request publication.
 3. After interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Keep the original version and commit even if upstream advances. Report failures that need owner decisions. Do not invent versions or replace tags.
