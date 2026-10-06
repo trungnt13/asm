@@ -5,6 +5,7 @@ use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::*;
 use crate::app_event::AgentPickerThreadRefresh;
+use crate::status::format_tokens_compact;
 use crate::status_line_labels::compact_model_name;
 use crate::status_line_labels::compact_reasoning_label;
 use codex_app_server_protocol::RequestId;
@@ -72,6 +73,24 @@ impl App {
         }
         if fast {
             label.push_str("-fast");
+        }
+        // Canonical child paths identify V2 spawns even when resuming under different features.
+        let context_window = (!is_primary
+            && self
+                .agent_navigation
+                .get(&thread_id)
+                .is_some_and(|entry| entry.agent_path.is_some()))
+        .then(|| {
+            self.config
+                .subagent_model_context_windows
+                .get(&settings.model)
+                .copied()
+        })
+        .flatten()
+        .or(self.config.model_context_window);
+        if let Some(context_window) = context_window.filter(|window| *window > 0) {
+            label.push('-');
+            label.push_str(&format_tokens_compact(context_window).to_lowercase());
         }
         Some(label)
     }

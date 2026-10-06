@@ -17,6 +17,11 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
         .enable(Feature::FastMode)
         .expect("enable fast mode");
     app.config.service_tier = Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string());
+    app.config.model_context_window = Some(128_000);
+    app.config.subagent_model_context_windows.extend([
+        ("gpt-6-astra".to_string(), 272_000),
+        ("gpt-6.1-sol".to_string(), 272_000),
+    ]);
     app.config
         .subagent_service_tiers
         .entry("gpt-6.1-sol".to_string())
@@ -86,9 +91,9 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
             .map(|item| item.name.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "Main [default] ast6-xhi",
-            "/root/sol_fast sol61-hig-fast",
-            "/root/sol_standard sol61-max",
+            "Main [default] ast6-xhi-128k",
+            "/root/sol_fast sol61-hig-fast-272k",
+            "/root/sol_standard sol61-max-272k",
         ]
     );
     app.chat_widget.show_selection_view(params);
@@ -100,7 +105,7 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
     app.config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
     assert_eq!(
         app.agent_picker_model_label(standard_id, /*is_primary*/ false),
-        Some("sol61-max".to_string())
+        Some("sol61-max-272k".to_string())
     );
     app.agent_navigation.set_model_settings(
         standard_id,
@@ -109,7 +114,7 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
     );
     assert_eq!(
         app.agent_picker_model_label(standard_id, /*is_primary*/ false),
-        Some("sol61-low-fast".to_string())
+        Some("sol61-low-fast-272k".to_string())
     );
     app.agent_navigation.set_model_settings(
         standard_id,
@@ -118,6 +123,72 @@ async fn subagent_picker_shows_configured_model_effort_and_tier() {
     );
     assert_eq!(
         app.agent_picker_model_label(standard_id, /*is_primary*/ false),
+        Some("sol61-med-fast-272k".to_string())
+    );
+
+    // Local backend flags do not change the identity of an already spawned V2 child.
+    app.config
+        .features
+        .disable(Feature::MultiAgentV2)
+        .expect("disable local v2 flag");
+    assert_eq!(
+        app.agent_picker_model_label(fast_id, /*is_primary*/ false),
+        Some("sol61-hig-fast-272k".to_string())
+    );
+    // Missing paths cannot establish V2 identity, so matched maps must not apply.
+    let no_path_id = ThreadId::from_string("00000000-0000-0000-0000-000000000004").unwrap();
+    app.agent_navigation.upsert(
+        no_path_id, /*agent_nickname*/ None, /*agent_role*/ None,
+        /*is_closed*/ false,
+    );
+    app.agent_navigation.set_model_settings(
+        no_path_id,
+        Some("gpt-6.1-sol".to_string()),
+        /*reasoning_effort*/ None,
+    );
+    assert_eq!(
+        app.agent_picker_model_label(no_path_id, /*is_primary*/ false),
+        Some("sol61-med-fast-128k".to_string())
+    );
+    app.config.model_context_window = None;
+    assert_eq!(
+        app.agent_picker_model_label(no_path_id, /*is_primary*/ false),
         Some("sol61-med-fast".to_string())
+    );
+    for capacity in [0, -1] {
+        app.config.model_context_window = Some(capacity);
+        app.config
+            .subagent_model_context_windows
+            .insert("gpt-6.1-sol".to_string(), capacity);
+        assert_eq!(
+            app.agent_picker_model_label(fast_id, /*is_primary*/ false),
+            Some("sol61-hig-fast".to_string())
+        );
+        assert_eq!(
+            app.agent_picker_model_label(root_id, /*is_primary*/ true),
+            Some("ast6-xhi-fast".to_string())
+        );
+    }
+    app.config.model_context_window = Some(32_768);
+    app.agent_navigation.set_model_settings(
+        fast_id,
+        Some("custom-2".to_string()),
+        Some(ReasoningEffort::Low),
+    );
+    assert_eq!(
+        app.agent_picker_model_label(fast_id, /*is_primary*/ false),
+        Some("cus2-low-fast-32.8k".to_string())
+    );
+    app.config.model_context_window = None;
+    assert_eq!(
+        app.agent_picker_model_label(fast_id, /*is_primary*/ false),
+        Some("cus2-low-fast".to_string())
+    );
+    app.config
+        .subagent_model_context_windows
+        .insert("custom-2".to_string(), /*v*/ 272_000);
+    assert_eq!(
+        app.agent_picker_model_label(fast_id, /*is_primary*/ false),
+        Some("cus2-low-fast-272k".to_string())
     );
 }
