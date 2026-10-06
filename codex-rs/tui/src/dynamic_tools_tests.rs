@@ -479,6 +479,7 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
             arguments: json!({"threadId": target, "title": "Renamed task"}),
         },
         ThreadStartParams::default(),
+        Features::with_defaults(),
         status_receiver,
         Some(&event_tx),
     );
