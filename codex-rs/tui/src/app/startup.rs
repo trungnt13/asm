@@ -938,6 +938,7 @@ See the Codex keymap documentation for supported actions and examples."
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashMap::new(),
+            automatic_thread_titles: HashMap::new(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
             turn_agent_counts: Default::default(),

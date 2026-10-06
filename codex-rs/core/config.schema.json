@@ -408,6 +408,12 @@
     "AutoRenameConfig": {
       "additionalProperties": false,
       "properties": {
+        "auto_update_interval_turns": {
+          "default": 5,
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "context": {
           "allOf": [
             {
@@ -466,6 +472,14 @@
           "maximum": 32.0,
           "minimum": 1.0,
           "type": "integer"
+        },
+        "update_policy": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AutoRenameUpdatePolicy"
+            }
+          ],
+          "default": "once"
         }
       },
       "type": "object"
@@ -481,6 +495,13 @@
       "enum": [
         "first_user_message",
         "first_completed_turn"
+      ],
+      "type": "string"
+    },
+    "AutoRenameUpdatePolicy": {
+      "enum": [
+        "once",
+        "until_manual"
       ],
       "type": "string"
     },
@@ -7017,7 +7038,7 @@
           "$ref": "#/definitions/AutoRenameConfig"
         }
       ],
-      "description": "One-time automatic naming in the TUI; Desktop naming is unaffected."
+      "description": "Automatic naming in the TUI; Desktop naming is unaffected."
     },
     "auto_review": {
       "allOf": [
