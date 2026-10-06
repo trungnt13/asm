@@ -408,6 +408,11 @@
     "AutoRenameConfig": {
       "additionalProperties": false,
       "properties": {
+        "additional_naming_guidance": {
+          "default": null,
+          "description": "Additional naming guidance, limited to 512 UTF-8 bytes.",
+          "type": "string"
+        },
         "auto_update": {
           "default": false,
           "type": "boolean"
@@ -438,14 +443,9 @@
           ],
           "default": "first_user_message"
         },
-        "instructions": {
-          "default": null,
-          "description": "Additional naming guidance, limited to 512 UTF-8 bytes.",
-          "type": "string"
-        },
         "max_context_bytes": {
           "default": null,
-          "description": "Source-text budget from 128 to 8192 bytes, separate from additional instructions. Omission retains the original source-text budget.",
+          "description": "Source-text budget from 128 to 8192 bytes, separate from additional naming guidance. Omission retains the original source-text budget.",
           "format": "uint",
           "maximum": 8192.0,
           "minimum": 128.0,
@@ -455,6 +455,13 @@
           "default": null,
           "format": "uint",
           "maximum": 128.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "max_title_words": {
+          "default": null,
+          "description": "Request at most this many words without truncating generated titles. Omission retains the default soft word-count guidance.",
+          "format": "uint",
           "minimum": 1.0,
           "type": "integer"
         },
