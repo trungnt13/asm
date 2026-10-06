@@ -7,6 +7,7 @@
 use super::App;
 use super::thread_events::ThreadBufferedEvent;
 use crate::app_event::AppEvent;
+use crate::app_event::AutoRenameRequest;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
 use crate::temporary_structured_request::TemporaryStructuredThreadOptions;
@@ -29,6 +30,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(super) const THREAD_TITLE_MAX_CHARS: usize = 36;
 const THREAD_TITLE_MODEL: &str = "gpt-5.6-luna";
+const AUTO_RENAME_MODEL: &str = "gpt-6-luna";
 pub(super) const THREAD_TITLE_PROMPT_MAX_BYTES: usize = 960;
 pub(super) const THREAD_TITLE_RECENT_MESSAGES: usize = 8;
 
@@ -60,6 +62,7 @@ impl App {
 
     /// A saved manual name supersedes any pending title generation for that thread.
     pub(super) fn cancel_thread_title_generation(&mut self, thread_id: ThreadId) {
+        self.automatic_thread_titles.remove(&thread_id);
         self.pending_thread_titles.retain(|(id, _), cancellation| {
             if *id == thread_id {
                 cancellation.cancel();
@@ -78,6 +81,7 @@ impl App {
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
         prompt: String,
+        auto_rename: AutoRenameRequest,
     ) {
         let std::collections::hash_map::Entry::Vacant(entry) =
             self.pending_thread_titles.entry((thread_id, destination))
@@ -87,15 +91,19 @@ impl App {
         let cancellation = entry.insert(CancellationToken::new()).clone();
         self.sync_thread_title_progress();
         let request_handle = app_server.request_handle();
+        let preferred_model = match destination {
+            ThreadTitleDestination::Automatic => AUTO_RENAME_MODEL,
+            ThreadTitleDestination::RenameSuggestion { .. } => THREAD_TITLE_MODEL,
+        };
         let model = if self.chat_widget.config_ref().model_provider_id == "openai"
             && self.chat_widget.has_chatgpt_account()
             && self
                 .chat_widget
                 .model_catalog()
                 .try_list_models()
-                .is_ok_and(|models| models.iter().any(|model| model.model == THREAD_TITLE_MODEL))
+                .is_ok_and(|models| models.iter().any(|model| model.model == preferred_model))
         {
-            THREAD_TITLE_MODEL.to_string()
+            preferred_model.to_string()
         } else {
             self.chat_widget.current_model().to_string()
         };
@@ -109,7 +117,12 @@ impl App {
             .unwrap_or(model);
         let effort = automatic_settings
             .and_then(|settings| settings.reasoning_effort.clone())
-            .or_else(|| (model == THREAD_TITLE_MODEL).then_some(ReasoningEffort::Low));
+            .or_else(|| {
+                (model == THREAD_TITLE_MODEL
+                    || (destination == ThreadTitleDestination::Automatic
+                        && model == AUTO_RENAME_MODEL))
+                    .then_some(ReasoningEffort::Low)
+            });
         let explicit_model = automatic_settings.and_then(|settings| settings.model.clone());
         let config = self.chat_widget.config_ref();
         let options = TemporaryStructuredThreadOptions {
@@ -140,6 +153,7 @@ impl App {
             };
 
             event_sender.send(AppEvent::ThreadTitleStarted {
+                auto_rename,
                 max_title_chars,
                 cancellation,
                 thread_id,
@@ -161,6 +175,7 @@ impl App {
         prompt: String,
         effort: Option<ReasoningEffort>,
         max_title_chars: usize,
+        auto_rename: AutoRenameRequest,
         result: Result<String, String>,
         cancellation: CancellationToken,
     ) {
@@ -216,6 +231,7 @@ impl App {
             .map_err(|error| error.to_string());
 
             event_sender.send(AppEvent::GeneratedThreadTitle {
+                auto_rename,
                 max_title_chars,
                 cancellation,
                 thread_id,
@@ -280,6 +296,7 @@ impl App {
             thread_id,
             ThreadTitleDestination::RenameSuggestion { request_id },
             recent_conversation_thread_title_prompt(&conversation),
+            AutoRenameRequest::default(),
         );
     }
 }

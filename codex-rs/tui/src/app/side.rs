@@ -570,6 +570,7 @@ impl App {
     }
 
     pub(super) async fn discard_thread_local_state(&mut self, thread_id: ThreadId) {
+        self.stop_automatic_thread_titles(thread_id);
         self.pending_app_server_requests
             .cancel_thread_verification(&thread_id.to_string());
         let app_event_tx = self.app_event_tx.clone();

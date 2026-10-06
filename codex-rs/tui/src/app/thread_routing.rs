@@ -2095,7 +2095,8 @@ impl App {
                 app_server,
                 thread_id,
                 ThreadTitleDestination::Automatic,
-                prompt,
+                prompt.prompt,
+                prompt.request,
             );
         }
         if !had_active_modal
