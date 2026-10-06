@@ -114,7 +114,7 @@ These requirements govern release code, not a second manual release procedure.
 
 #### Version
 
-- Select the latest published, non-draft upstream `rust-v` prerelease by publication time. Increment only its numeric patch by one. Keep the suffix: `rust-v0.159.0-alpha.6` → tag `v0.159.1-alpha.6`. Never increment the previous fork version or suffix. If the derived remote tag exists or no upstream prerelease is available, stop. Ask the owner how to proceed.
+- Select the highest upstream `rust-v` prerelease tag by Semantic Versioning order. Compare numeric parts as numbers (`alpha.9` < `alpha.10`), not creation or publication time. An upstream release need not be published. Increment only its numeric patch by one. Keep the suffix: `rust-v0.159.0-alpha.6` → tag `v0.159.1-alpha.6`. Never increment the previous fork version or suffix. If the derived remote tag exists or no upstream prerelease tag is available, stop. Ask the owner how to proceed.
 - Create immutable candidate branch `agent/release-<run-id>`, not a version commit on `main`. Set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) and matching workspace versions in [`Cargo.lock`](../codex-rs/Cargo.lock). Do not change dependencies.
 - Tag, Cargo, and CLI `--version` must agree, except name prefixes. A tag rename cannot change binary contents. Never move candidates or existing tags during retries. Keep candidate branches for recovery. Retain pre-policy version bumps until the next successful release.
 
