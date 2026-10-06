@@ -198,6 +198,8 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
     ] {
         let projected = cells(
             ThreadItem::SubAgentActivity {
+                model: None,
+                reasoning_effort: None,
                 id: "activity-1".to_string(),
                 kind,
                 agent_thread_id: "01912345-1234-7123-8123-123456789abc".to_string(),
