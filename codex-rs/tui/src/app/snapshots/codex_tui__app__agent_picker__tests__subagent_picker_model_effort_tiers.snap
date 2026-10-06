@@ -6,8 +6,8 @@ expression: "render_bottom_popup(&app.chat_widget, 110)"
   Select an agent to watch. ⌥← previous, ⌥→ next.
 
 
-› 1. • Main [default] ast6-xhi (current)  00000000-0000-0000-0000-000000000001
-  2. • /root/sol_fast sol61-hig-fast      00000000-0000-0000-0000-000000000002
-  3. • /root/sol_standard sol61-max       00000000-0000-0000-0000-000000000003
+› 1. • Main [default] ast6-xhi-128k (current)  00000000-0000-0000-0000-000000000001
+  2. • /root/sol_fast sol61-hig-fast-272k      00000000-0000-0000-0000-000000000002
+  3. • /root/sol_standard sol61-max-272k       00000000-0000-0000-0000-000000000003
 
   enter select · esc back
