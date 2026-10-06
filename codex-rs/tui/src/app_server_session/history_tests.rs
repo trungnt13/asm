@@ -101,6 +101,7 @@ fn side_boundary_stops_initial_and_older_turn_pages_in_server_order() {
     use codex_app_server_protocol::TurnStatus;
     let turn = |id: &str| Turn {
         id: id.into(),
+        root_turn_id: None,
         items: Vec::new(),
         items_view: TurnItemsView::NotLoaded,
         token_usage: None,
@@ -166,6 +167,7 @@ async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_bounda
     };
     let mut turns = vec![Turn {
         id: "side-turn".into(),
+        root_turn_id: None,
         items: Vec::new(),
         items_view: TurnItemsView::NotLoaded,
         token_usage: None,

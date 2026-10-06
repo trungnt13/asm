@@ -2065,6 +2065,8 @@ async fn collab_receiver_notification_caches_thread_without_app_server_read() {
     ] {
         for (index, child) in children.iter().enumerate() {
             let item = ThreadItem::SubAgentActivity {
+                model: None,
+                reasoning_effort: None,
                 id: format!("activity-{kind:?}-{index}"),
                 kind,
                 agent_thread_id: child.to_string(),
@@ -2132,6 +2134,8 @@ async fn collab_receiver_notification_caches_thread_without_app_server_read() {
                 turn_id: turn_id.into(),
                 completed_at_ms: 0,
                 item: ThreadItem::SubAgentActivity {
+                    model: None,
+                    reasoning_effort: None,
                     id: "idle-message".into(),
                     kind: codex_app_server_protocol::SubAgentActivityKind::Interacted,
                     agent_thread_id: children[1].to_string(),
