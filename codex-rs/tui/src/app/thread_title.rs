@@ -25,6 +25,7 @@ use codex_protocol::openai_models::ReasoningEffort;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
+use std::num::NonZeroUsize;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -317,10 +318,26 @@ pub(super) fn thread_title_output_schema(max_title_chars: usize) -> Value {
     })
 }
 
-pub(super) fn thread_title_instructions(max_title_chars: usize) -> String {
+/// Distinguish default soft guidance from an explicit word-count request.
+pub(super) enum TitleWordLimit {
+    DefaultGuidance,
+    AtMost(NonZeroUsize),
+}
+
+pub(super) fn thread_title_instructions(
+    max_title_chars: usize,
+    word_limit: TitleWordLimit,
+) -> String {
+    let word_guidance = match word_limit {
+        TitleWordLimit::DefaultGuidance => "under five words where possible".to_string(),
+        TitleWordLimit::AtMost(maximum) => {
+            let unit = if maximum.get() == 1 { "word" } else { "words" };
+            format!("at most {maximum} {unit}")
+        }
+    };
     format!(
         "Generate a concise, single-line task title of at most \
-  {max_title_chars} characters and under five words where possible. \
+  {max_title_chars} characters and {word_guidance}. \
   Start with an imperative verb. Capitalize only the first word unless the \
   user's language, proper nouns, acronyms, or code terms require otherwise. \
   Preserve ticket references exactly. Write in the user's language. \
@@ -331,7 +348,8 @@ pub(super) fn thread_title_instructions(max_title_chars: usize) -> String {
 
 /// Build a bounded title request without truncating a Unicode character.
 pub(super) fn thread_title_prompt(user_message: &str) -> String {
-    let instructions = thread_title_instructions(THREAD_TITLE_MAX_CHARS);
+    let instructions =
+        thread_title_instructions(THREAD_TITLE_MAX_CHARS, TitleWordLimit::DefaultGuidance);
     let prefix = format!("{instructions}\n\nUser prompt:\n");
     let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
     let user_message = user_message
@@ -469,7 +487,8 @@ where
 
 /// Bound the entire suggestion prompt while preserving complete Unicode characters.
 pub(super) fn recent_conversation_thread_title_prompt(conversation: &str) -> String {
-    let instructions = thread_title_instructions(THREAD_TITLE_MAX_CHARS);
+    let instructions =
+        thread_title_instructions(THREAD_TITLE_MAX_CHARS, TitleWordLimit::DefaultGuidance);
     let prefix = format!(
         "{instructions}\n\
 Prioritize the current task and latest substantive user request.\n\n\

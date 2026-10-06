@@ -145,7 +145,8 @@ auto_update_interval_turns = 7
 max_context_bytes = 8192
 recent_message_limit = 8
 max_title_chars = 64
-instructions = "Name the concrete task"
+max_title_words = 3
+additional_naming_guidance = "Name the concrete task"
 "#,
     )
     .expect("automatic naming config");
@@ -163,11 +164,13 @@ instructions = "Name the concrete task"
             max_context_bytes: Some(8192),
             recent_message_limit: Some(8),
             max_title_chars: Some(64),
-            instructions: Some("Name the concrete task".to_string()),
+            max_title_words: std::num::NonZeroUsize::new(/*n*/ 3),
+            additional_naming_guidance: Some("Name the concrete task".to_string()),
         })
     );
     let defaults: ConfigToml = toml::from_str("[auto_rename]").expect("default naming config");
     let defaults = defaults.auto_rename.expect("naming section");
+    assert_eq!(defaults.max_title_words, None);
     assert!(!defaults.auto_update);
     assert_eq!(defaults.auto_update_interval_turns.get(), 5);
     for field in [
@@ -181,6 +184,10 @@ instructions = "Name the concrete task"
         "recent_message_limit = 33",
         "max_title_chars = 0",
         "max_title_chars = 129",
+        "max_title_words = 0",
+        "max_title_words = -1",
+        "max_title_words = 'three'",
+        "instructions = 'old key is not an alias'",
         "auto_update = 'true'",
         "auto_update_interval_turns = 0",
         "auto_update_interval_turns = -1",
@@ -192,7 +199,7 @@ instructions = "Name the concrete task"
     }
     assert!(
         toml::from_str::<ConfigToml>(&format!(
-            "[auto_rename]\ninstructions = '{}'",
+            "[auto_rename]\nadditional_naming_guidance = '{}'",
             "x".repeat(/*n*/ 513)
         ))
         .is_err()
