@@ -626,6 +626,15 @@ openai_base_url = "{redirected_base_url}"
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    assert_eq!(
+        reloaded_worker
+            .token_usage_info()
+            .await
+            .expect("reloaded worker usage")
+            .model_context_window,
+        Some(190_000),
+        "cold reload must resolve the saved child model against the current rules",
+    );
     tokio::time::timeout(Duration::from_secs(10), analytics_client.flush()).await?;
     let mut worker_initializations = Vec::new();
     for request in server.received_requests().await.unwrap_or_default() {
@@ -663,15 +672,6 @@ openai_base_url = "{redirected_base_url}"
             "initialization_mode": "resumed",
             "created_at": worker_created_at,
         })]
-    );
-    assert_eq!(
-        reloaded_worker
-            .token_usage_info()
-            .await
-            .expect("reloaded worker usage")
-            .model_context_window,
-        Some(190_000),
-        "cold reload must resolve the saved child model against the current rules",
     );
     assert!(followup_child_request.requests().iter().any(|request| {
         request.body_contains_text(FOLLOWUP_TASK)
