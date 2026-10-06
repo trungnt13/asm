@@ -65,6 +65,8 @@ pub(super) fn subagent(
 ) -> Arc<dyn HistoryCell> {
     Arc::new(
         crate::multi_agents::sub_agent_activity_history_cell(&ThreadItem::SubAgentActivity {
+            model: None,
+            reasoning_effort: None,
             id: id.to_owned(),
             kind,
             agent_thread_id: "01912345-1234-7123-8123-123456789abc".to_owned(),
