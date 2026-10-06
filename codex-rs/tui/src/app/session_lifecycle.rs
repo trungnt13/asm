@@ -1343,6 +1343,7 @@ impl App {
         target_session: SessionTarget,
     ) -> Result<AppRunControl> {
         if self.ignore_same_thread_resume(&target_session) {
+            self.stop_automatic_thread_titles(target_session.thread_id);
             self.agents_overview
                 .hidden_threads
                 .remove(&target_session.thread_id);
@@ -1416,6 +1417,7 @@ impl App {
             }
         };
         let resumed_thread_id = resumed.session.thread_id;
+        self.stop_automatic_thread_titles(resumed_thread_id);
         let retained_input = (self.chat_widget.is_external_writer_view()
             && self.chat_widget.thread_id() == Some(resumed_thread_id))
         .then(|| self.chat_widget.capture_thread_input_state())
