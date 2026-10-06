@@ -90,12 +90,14 @@ fn bounds_the_entire_title_prompt_for_dense_unicode() {
         let settings = codex_config::AutoRenameConfig {
             max_context_bytes: Some(8192),
             max_title_chars: Some(128),
-            instructions: Some("x".repeat(/*n*/ 512)),
+            max_title_words: std::num::NonZeroUsize::new(/*n*/ 1),
+            additional_naming_guidance: Some("x".repeat(/*n*/ 512)),
             ..Default::default()
         };
         let source = message.repeat(/*n*/ 10);
         let prompt = super::super::auto_rename::automatic_title_prompt(&settings, &source);
         assert!(prompt.len() <= 9500);
+        assert!(prompt.contains("at most 1 word."));
         assert!(prompt.is_char_boundary(prompt.len()));
     }
 }
@@ -751,7 +753,10 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         max_context_bytes: configured.then_some(/*t*/ 8192),
         recent_message_limit: configured.then_some(3),
         max_title_chars: configured.then_some(/*t*/ 12),
-        instructions: configured.then(|| "Name the concrete authentication problem".to_string()),
+        max_title_words: configured
+            .then(|| std::num::NonZeroUsize::new(/*n*/ 2).expect("positive word count")),
+        additional_naming_guidance: configured
+            .then(|| "Name the concrete authentication problem".to_string()),
         ..Default::default()
     };
     let mut tui = crate::tui::test_support::make_test_tui()?;
@@ -908,6 +913,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                         Some(result.as_ref().expect("hidden title thread").clone());
                     if configured {
                         app.local_settings.auto_rename.max_title_chars = Some(64);
+                        app.local_settings.auto_rename.max_title_words =
+                            std::num::NonZeroUsize::new(/*n*/ 1);
                     }
                 }
                 generated |= matches!(event.as_ref(), AppEvent::GeneratedThreadTitle { .. });
@@ -970,6 +977,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         let expected_name = if cancel {
             "Keep this title"
         } else if configured {
+            // Word-count guidance does not truncate the three-word generated title.
             "Fix login ti"
         } else {
             "Fix login timeout"
@@ -1019,6 +1027,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             12
         );
         let prompt = request.message_input_texts("user").join("\n");
+        assert!(prompt.contains("at most 2 words"));
+        assert!(!prompt.contains("under five words where possible"));
         assert!(prompt.contains("Name the concrete authentication problem"));
         assert_eq!(
             prompt.contains("Auth retries cause the timeout"),
