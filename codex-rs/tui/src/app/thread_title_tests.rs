@@ -616,6 +616,7 @@ async fn title_completion_event(
             thread_id: thread_id.to_string(),
             turn: Turn {
                 id: turn_id.to_string(),
+                root_turn_id: None,
                 items: vec![title_agent_message(
                     turn_id,
                     "Finished task",
@@ -842,6 +843,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                             thread_id: thread_id.to_string(),
                             turn: Turn {
                                 id: "existing-turn".to_string(),
+                                root_turn_id: None,
                                 items: vec![title_agent_message(
                                     "answer",
                                     "Auth retries cause the timeout",
