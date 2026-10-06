@@ -211,7 +211,8 @@ jobs:
           archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
           # This selects the pinned candidate's contract, never a validation fallback.
           if grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
-            resource_args=()
+            # macOS Bash 3.2 treats empty arrays as unset under nounset.
+            resource_args=(--force)
             if [[ "$TARGET" == *-linux-gnu ]]; then
               resource_args+=(--bwrap-bin "${release_dir}/bwrap")
             fi
@@ -220,7 +221,7 @@ jobs:
               --entrypoint-bin "${release_dir}/codex" \
               --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
               --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
-              --archive-output "$archive" "${resource_args[@]}" --force
+              --archive-output "$archive" "${resource_args[@]}"
           else
             mkdir -p "$(dirname "$archive")"
             tar -C "$release_dir" -czf "$archive" codex codex-code-mode-host
