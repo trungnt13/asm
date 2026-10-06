@@ -260,11 +260,11 @@ pub(crate) enum TranscriptExportDestination {
     File(PathBuf),
 }
 
-/// Capture naming ownership and update policy before background generation.
+/// Capture naming ownership and automatic-update intent before background generation.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AutoRenameRequest {
     pub(crate) expected_name: Option<String>,
-    pub(crate) update_policy: codex_config::AutoRenameUpdatePolicy,
+    pub(crate) auto_update: bool,
 }
 
 /// Deliver a generated title to its originating automatic rename or editable prompt.

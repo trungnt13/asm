@@ -140,7 +140,7 @@ model = "title-model"
 reasoning_effort = "low"
 first_trigger = "first_completed_turn"
 context = "recent_conversation"
-update_policy = "until_manual"
+auto_update = true
 auto_update_interval_turns = 7
 max_context_bytes = 8192
 recent_message_limit = 8
@@ -157,7 +157,7 @@ instructions = "Name the concrete task"
             reasoning_effort: Some(codex_protocol::openai_models::ReasoningEffort::Low),
             first_trigger: crate::AutoRenameFirstTrigger::FirstCompletedTurn,
             context: crate::AutoRenameContext::RecentConversation,
-            update_policy: crate::AutoRenameUpdatePolicy::UntilManual,
+            auto_update: true,
             auto_update_interval_turns: std::num::NonZeroUsize::new(/*n*/ 7)
                 .expect("positive interval"),
             max_context_bytes: Some(8192),
@@ -168,7 +168,7 @@ instructions = "Name the concrete task"
     );
     let defaults: ConfigToml = toml::from_str("[auto_rename]").expect("default naming config");
     let defaults = defaults.auto_rename.expect("naming section");
-    assert_eq!(defaults.update_policy, crate::AutoRenameUpdatePolicy::Once);
+    assert!(!defaults.auto_update);
     assert_eq!(defaults.auto_update_interval_turns.get(), 5);
     for field in [
         "model = ' '",
@@ -181,7 +181,7 @@ instructions = "Name the concrete task"
         "recent_message_limit = 33",
         "max_title_chars = 0",
         "max_title_chars = 129",
-        "update_policy = 'unknown'",
+        "auto_update = 'true'",
         "auto_update_interval_turns = 0",
         "auto_update_interval_turns = -1",
     ] {
