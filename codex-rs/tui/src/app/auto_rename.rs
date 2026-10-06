@@ -16,7 +16,6 @@ use codex_app_server_protocol::UserInput;
 use codex_config::AutoRenameConfig;
 use codex_config::AutoRenameContext;
 use codex_config::AutoRenameFirstTrigger;
-use codex_config::AutoRenameUpdatePolicy;
 use codex_protocol::ThreadId;
 use std::collections::HashSet;
 
@@ -56,7 +55,7 @@ impl App {
             return None;
         };
         let thread_id = self.active_thread_id?;
-        if settings.update_policy == AutoRenameUpdatePolicy::UntilManual
+        if settings.auto_update
             && let ServerNotification::ItemCompleted(item) = notification.as_ref()
             && (self.chat_widget.thread_name().is_none()
                 || self
@@ -102,7 +101,7 @@ impl App {
         {
             state.completed_turns.insert(turn.turn.id.clone());
         }
-        let recurring = settings.update_policy == AutoRenameUpdatePolicy::UntilManual
+        let recurring = settings.auto_update
             && self
                 .automatic_thread_titles
                 .get(&thread_id)
@@ -134,7 +133,7 @@ impl App {
                 .automatic_thread_titles
                 .get(&thread_id)
                 .and_then(|state| state.owned_title.clone()),
-            update_policy: settings.update_policy,
+            auto_update: settings.auto_update,
         };
         if !recurring
             && self
@@ -342,7 +341,7 @@ impl App {
             tracing::debug!(%error, "failed to apply generated thread title");
             return;
         }
-        if request.update_policy == AutoRenameUpdatePolicy::UntilManual {
+        if request.auto_update {
             let state = self.automatic_thread_titles.entry(thread_id).or_default();
             if state.owned_title.is_none() {
                 state.turns_since_attempt = 0;

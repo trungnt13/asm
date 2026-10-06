@@ -23,14 +23,6 @@ pub enum AutoRenameContext {
     RecentConversation,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AutoRenameUpdatePolicy {
-    #[default]
-    Once,
-    UntilManual,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct AutoRenameConfig {
@@ -40,7 +32,7 @@ pub struct AutoRenameConfig {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub first_trigger: AutoRenameFirstTrigger,
     pub context: AutoRenameContext,
-    pub update_policy: AutoRenameUpdatePolicy,
+    pub auto_update: bool,
     pub auto_update_interval_turns: NonZeroUsize,
     /// Source-text budget from 128 to 8192 bytes, separate from additional instructions.
     /// Omission retains the original source-text budget.
@@ -66,7 +58,7 @@ impl Default for AutoRenameConfig {
             reasoning_effort: None,
             first_trigger: AutoRenameFirstTrigger::default(),
             context: AutoRenameContext::default(),
-            update_policy: AutoRenameUpdatePolicy::default(),
+            auto_update: false,
             auto_update_interval_turns: NonZeroUsize::new(/*n*/ 5)
                 .expect("positive update interval"),
             max_context_bytes: None,
