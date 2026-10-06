@@ -212,6 +212,11 @@ impl App {
 
             return;
         }
+        if let ServerNotification::ThreadNameUpdated(name) = &notification
+            && let Ok(thread_id) = ThreadId::from_string(&name.thread_id)
+        {
+            self.observe_automatic_thread_name(thread_id, name.thread_name.as_deref());
+        }
         self.handle_agent_picker_visibility_notification(app_server_client, &notification);
 
         if let ServerNotification::ThreadStarted(started) = &notification
