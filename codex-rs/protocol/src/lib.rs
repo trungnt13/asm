@@ -1,6 +1,7 @@
 pub mod account;
 mod agent_path;
 pub mod auth;
+mod external_agent;
 mod response_item_id;
 mod response_usage;
 mod sanitized_git_url;
@@ -8,6 +9,7 @@ mod session_id;
 mod thread_id;
 mod tool_name;
 pub use agent_path::AgentPath;
+pub use external_agent::ExternalAgentDescriptor;
 pub use permission_profile_intersection::PermissionIntersectionError;
 pub use permission_profile_intersection::intersect_effective_permission_profiles;
 pub use response_item_id::ResponseItemId;
