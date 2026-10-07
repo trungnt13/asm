@@ -1,11 +1,10 @@
-//! Apply one configured title on user request without enabling automatic updates.
+//! Apply one configured title and restore eligibility for configured automatic refresh.
 
 use super::App;
 use super::auto_rename::automatic_title_prompt;
 use super::auto_rename::user_message_text;
 use super::thread_title::parse_thread_title;
 use super::thread_title::recent_conversation_messages;
-use crate::app_command::AppCommand;
 use crate::app_event::AutoRenameRequest;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
@@ -70,7 +69,6 @@ impl App {
             prompt,
             AutoRenameRequest {
                 expected_name: thread.name,
-                auto_update: false,
             },
         );
     }
@@ -113,7 +111,10 @@ impl App {
                 );
                 return;
             }
-            Ok(thread) if thread.name.as_ref() == Some(&title) => return,
+            Ok(thread) if thread.name.as_ref() == Some(&title) => {
+                self.persist_automatic_thread_title(thread_id, &title).await;
+                return;
+            }
             Ok(_) => {}
             Err(error) => {
                 self.chat_widget
@@ -121,16 +122,14 @@ impl App {
                 return;
             }
         }
-        // The shared command future also includes large user-turn paths.
-        if let Err(error) = Box::pin(self.try_submit_active_thread_op_via_app_server(
-            app_server,
-            thread_id,
-            &AppCommand::set_thread_name(title),
-        ))
-        .await
-        {
+        if let Err(error) = app_server.thread_set_name(thread_id, title.clone()).await {
             self.chat_widget
                 .add_error_message(format!("Could not rename the session: {error}"));
+            return;
         }
+        self.chat_widget
+            .expect_manual_thread_name(thread_id, title.clone());
+        self.cancel_thread_title_generation(thread_id);
+        self.persist_automatic_thread_title(thread_id, &title).await;
     }
 }
