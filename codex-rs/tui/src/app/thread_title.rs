@@ -93,7 +93,9 @@ impl App {
         self.sync_thread_title_progress();
         let request_handle = app_server.request_handle();
         let preferred_model = match destination {
-            ThreadTitleDestination::Automatic => AUTO_RENAME_MODEL,
+            ThreadTitleDestination::Automatic | ThreadTitleDestination::ExplicitAutoRename => {
+                AUTO_RENAME_MODEL
+            }
             ThreadTitleDestination::RenameSuggestion { .. } => THREAD_TITLE_MODEL,
         };
         let model = if self.chat_widget.config_ref().model_provider_id == "openai"
@@ -108,8 +110,11 @@ impl App {
         } else {
             self.chat_widget.current_model().to_string()
         };
-        let automatic_settings = (destination == ThreadTitleDestination::Automatic)
-            .then_some(&self.local_settings.auto_rename);
+        let automatic_settings = matches!(
+            destination,
+            ThreadTitleDestination::Automatic | ThreadTitleDestination::ExplicitAutoRename
+        )
+        .then_some(&self.local_settings.auto_rename);
         let max_title_chars = automatic_settings
             .and_then(|settings| settings.max_title_chars)
             .unwrap_or(THREAD_TITLE_MAX_CHARS);
@@ -120,8 +125,7 @@ impl App {
             .and_then(|settings| settings.reasoning_effort.clone())
             .or_else(|| {
                 (model == THREAD_TITLE_MODEL
-                    || (destination == ThreadTitleDestination::Automatic
-                        && model == AUTO_RENAME_MODEL))
+                    || (automatic_settings.is_some() && model == AUTO_RENAME_MODEL))
                     .then_some(ReasoningEffort::Low)
             });
         let explicit_model = automatic_settings.and_then(|settings| settings.model.clone());
@@ -180,6 +184,12 @@ impl App {
         result: Result<String, String>,
         cancellation: CancellationToken,
     ) {
+        if destination == ThreadTitleDestination::ExplicitAutoRename
+            && self.chat_widget.thread_id() != Some(thread_id)
+        {
+            cancellation.cancel();
+            self.finish_thread_title_generation(thread_id, destination);
+        }
         if cancellation.is_cancelled() {
             if let Ok(temporary_thread_id) = result {
                 let request_handle = app_server.request_handle();
@@ -193,6 +203,10 @@ impl App {
             Ok(thread_id) => thread_id,
             Err(error) => {
                 tracing::debug!(%error, "failed to start title-generation thread");
+                if destination == ThreadTitleDestination::ExplicitAutoRename {
+                    self.chat_widget
+                        .add_error_message(format!("Could not generate a session name: {error}"));
+                }
                 self.finish_thread_title_generation(thread_id, destination);
                 if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
                     self.chat_widget.apply_thread_name_suggestion(
@@ -204,6 +218,11 @@ impl App {
         };
 
         let Ok(temporary_thread_id) = ThreadId::from_string(&temporary_thread_id_text) else {
+            if destination == ThreadTitleDestination::ExplicitAutoRename {
+                self.chat_widget.add_error_message(
+                    "Could not generate a session name: invalid helper thread ID.".to_string(),
+                );
+            }
             self.finish_thread_title_generation(thread_id, destination);
             if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
                 self.chat_widget
