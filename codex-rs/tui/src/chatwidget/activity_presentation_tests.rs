@@ -74,6 +74,42 @@ async fn live_tool_summary_preserves_compact_raw_and_full_presentations() {
         chat.active_cell_transcript_hyperlink_lines(/*width*/ 72),
         full
     );
+    chat.local_settings.tui.collapse_tool_calls_max_lines =
+        std::num::NonZeroUsize::new(/*n*/ 2);
+    let long_command = ["bash", "-lc", "alpha; bravo; charlie; delta; echo; foxtrot; golf; hotel; india; juliet; kilo; lima; mike; november"]
+        .map(str::to_owned).to_vec();
+    let parsed = codex_shell_command::parse_command::parse_command(&long_command);
+    chat.transcript.active_cell = Some(Box::new(new_active_exec_command(
+        "multi-line".to_owned(),
+        long_command,
+        parsed,
+        CommandExecutionSource::Agent,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    )));
+    let wrapped = preview(&chat, /*expanded*/ false);
+    assert_eq!(wrapped.activity.len(), 2);
+    chat.local_settings.tui.collapse_tool_calls_max_lines = None;
+    assert_eq!(preview(&chat, /*expanded*/ false).activity.len(), 1);
+    chat.transcript.active_cell = None;
+    // Restore the completed call to compare its original raw output.
+    let mut call = new_active_exec_command(
+        "live".to_owned(),
+        vec!["glab".to_owned()],
+        Vec::new(),
+        CommandExecutionSource::Agent,
+        /*interaction_input*/ None,
+        /*animations_enabled*/ false,
+    );
+    assert!(call.complete_call(
+        "live",
+        CommandOutput::new(
+            /*exit_code*/ 0,
+            "hidden-first\n2\n3\n4\n5\n6\nlast\n".to_owned()
+        ),
+        std::time::Duration::ZERO
+    ));
+    chat.transcript.active_cell = Some(Box::new(call));
     chat.set_raw_output_mode(/*enabled*/ true);
     assert_eq!(preview(&chat, /*expanded*/ false).activity, raw);
 }
