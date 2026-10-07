@@ -47,7 +47,7 @@ pub(crate) use bookmark::TranscriptBookmark;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;
-pub(crate) use tool_groups::summary_line as tool_group_summary_line;
+pub(crate) use tool_groups::summary_lines as tool_group_summary_lines;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum EntryKey {

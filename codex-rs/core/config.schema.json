@@ -4753,6 +4753,13 @@
           "description": "Group consecutive tool calls into compact fullscreen transcript summaries. Defaults to `false` to preserve existing tool previews.",
           "type": "boolean"
         },
+        "collapse_tool_calls_max_lines": {
+          "default": null,
+          "description": "Maximum physical lines in a collapsed activity summary, including counts and names. Omit to use one line; values must be positive.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "copy_on_select": {
           "allOf": [
             {
