@@ -385,6 +385,19 @@ impl ChatWidget {
                     self.defer_input_until_settings_applied();
                 }
             }
+            SlashCommand::AutoRename => {
+                if !self.ensure_thread_rename_allowed() {
+                    return;
+                }
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx
+                        .send(AppEvent::AutoRenameThread { thread_id });
+                } else {
+                    self.add_error_message(
+                        "Session is still starting; try /autorename again in a moment.".to_string(),
+                    );
+                }
+            }
             SlashCommand::Rename => {
                 self.session_telemetry
                     .counter("codex.thread.rename", /*inc*/ 1, &[]);
@@ -1328,6 +1341,7 @@ impl ChatWidget {
             | SlashCommand::Diff
             | SlashCommand::App
             | SlashCommand::Rename
+            | SlashCommand::AutoRename
             | SlashCommand::Voice
             | SlashCommand::Recap
             | SlashCommand::TestApproval => QueueDrain::Continue,
