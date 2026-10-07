@@ -3369,6 +3369,7 @@ dependencies = [
  "codex-utils-path-uri",
  "futures",
  "pretty_assertions",
+ "serde",
  "serde_json",
  "tokio",
 ]
