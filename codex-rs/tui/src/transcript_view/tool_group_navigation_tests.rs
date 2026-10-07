@@ -25,7 +25,7 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
         ),
     ];
     let mut view = TranscriptView::default();
-    view.set_collapse_tool_calls(/*enabled*/ true);
+    view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     render(&mut view, &cells, /*width*/ 72, /*height*/ 20);
     let layout = view.current_layout(&cells, /*index*/ 1).unwrap();
     let offset = layout.text().find("git").unwrap();
@@ -77,7 +77,7 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
         subagent("contact-2", SubAgentActivityKind::Interacted, "/root/b"),
     ];
     let mut contact_view = TranscriptView::default();
-    contact_view.set_collapse_tool_calls(/*enabled*/ true);
+    contact_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     let collapsed = text(&render(
         &mut contact_view,
         &contacts,
@@ -129,6 +129,65 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
     assert!(latest.contains("Ran 3 tool calls (/root/older, /root/a, /root/b)"));
     assert!(latest.contains("Interacted with `/root/older`"));
 
+    let mut lifecycle = vec![
+        subagent(
+            "start",
+            SubAgentActivityKind::Started,
+            "/root/long_lifecycle_path",
+        ),
+        subagent(
+            "done",
+            SubAgentActivityKind::Completed,
+            "/root/long_lifecycle_path",
+        ),
+    ];
+    let mut lifecycle_view = TranscriptView::default();
+    lifecycle_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 2);
+    render(
+        &mut lifecycle_view,
+        &lifecycle,
+        /*width*/ 40,
+        /*height*/ 20,
+    );
+    lifecycle_view.handle_key(KeyCode::F(4).into(), &lifecycle);
+    lifecycle_view.handle_key(KeyCode::Enter.into(), &lifecycle);
+    let opened = text(&render(
+        &mut lifecycle_view,
+        &lifecycle,
+        /*width*/ 40,
+        /*height*/ 20,
+    ));
+    assert!(opened.contains("Started `/root/long_lifecycle_path`"));
+    assert!(opened.contains("Completed `/root/long_lifecycle_path`"));
+    assert!(!opened.contains("tool call"));
+    lifecycle_view.held_reading = Some(lifecycle_view.capture_snapshot(&lifecycle));
+    lifecycle.insert(
+        /*index*/ 0,
+        subagent("older-start", SubAgentActivityKind::Started, "/root/older"),
+    );
+    lifecycle_view.history_loaded(&lifecycle, 0..1);
+    let pinned = text(&render(
+        &mut lifecycle_view,
+        &lifecycle,
+        /*width*/ 40,
+        /*height*/ 20,
+    ));
+    assert_eq!(pinned.matches("1 agent started · 1 completed").count(), 1);
+    assert_eq!(
+        pinned
+            .matches("Started `/root/long_lifecycle_path`")
+            .count(),
+        1
+    );
+    lifecycle_view.jump_to_latest();
+    let latest = text(&render(
+        &mut lifecycle_view,
+        &lifecycle,
+        /*width*/ 40,
+        /*height*/ 20,
+    ));
+    assert!(latest.contains("2 agents started · 1 completed"));
+    assert!(!latest.contains("Running"));
     let mut waits = crate::multi_agents::AgentWaitHistory::default();
     let begin: Arc<dyn HistoryCell> = Arc::new(
         waits
@@ -148,7 +207,7 @@ fn group_header_mouse_coordinates_and_pagination_preserve_reading() {
     );
     let mut wait_cells = vec![end];
     let mut wait_view = TranscriptView::default();
-    wait_view.set_collapse_tool_calls(/*enabled*/ true);
+    wait_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     render(
         &mut wait_view,
         &wait_cells,
@@ -189,7 +248,7 @@ fn find_reveals_hidden_group_follower_without_changing_group_disclosure() {
     ];
     for manually_expanded in [false, true] {
         let mut view = TranscriptView::default();
-        view.set_collapse_tool_calls(/*enabled*/ true);
+        view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
         render(&mut view, &cells, /*width*/ 80, /*height*/ 24);
         if manually_expanded {
             view.handle_key(KeyCode::F(4).into(), &cells);

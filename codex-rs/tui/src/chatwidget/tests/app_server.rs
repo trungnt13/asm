@@ -1441,10 +1441,10 @@ async fn live_app_server_sub_agent_activity_renders_once() {
                 lines_to_single_string(&cells[0].display_lines(/*width*/ 80)),
                 format!("• {title} `/root/researcher`\n"),
             );
-            let interacted = kind == codex_app_server_protocol::SubAgentActivityKind::Interacted;
+            let grouped = kind != codex_app_server_protocol::SubAgentActivityKind::Interrupted;
             assert_eq!(
                 cells[0].activity_ids(),
-                if interacted {
+                if grouped {
                     vec!["subagent:activity-2".to_string()]
                 } else {
                     Vec::new()
@@ -1453,10 +1453,20 @@ async fn live_app_server_sub_agent_activity_renders_once() {
             assert_eq!(
                 cells[0].tool_call_summary().map(|summary| (
                     summary.count,
+                    summary.agent_starts,
+                    summary.agent_completions,
                     summary.running,
                     summary.names
                 )),
-                interacted.then(|| (1, false, vec!["/root/researcher".to_string()])),
+                grouped.then(|| (
+                    usize::from(
+                        kind == codex_app_server_protocol::SubAgentActivityKind::Interacted
+                    ),
+                    usize::from(kind == codex_app_server_protocol::SubAgentActivityKind::Started),
+                    usize::from(kind == codex_app_server_protocol::SubAgentActivityKind::Completed),
+                    false,
+                    vec!["/root/researcher".to_string()],
+                )),
             );
             assert_eq!(cells[0].activity_disclosure(/*width*/ 80), None);
         }
