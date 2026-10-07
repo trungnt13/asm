@@ -52,6 +52,29 @@ def api(path, *arguments, allow_missing=False):
         time.sleep(2 ** (attempt + 1))
 
 
+def semver_precedence(value):
+    match = re.fullmatch(
+        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+        r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+        r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
+        value,
+    )
+    if not match:
+        return None
+    identifiers = match[4].split(".") if match[4] else []
+    if any(
+        value.isdigit() and len(value) > 1 and value[0] == "0" for value in identifiers
+    ):
+        return None
+    return (
+        tuple(int(value) for value in match.groups()[:3]),
+        match[4] is None,
+        tuple(
+            (0, int(value)) if value.isdigit() else (1, value) for value in identifiers
+        ),
+    )
+
+
 def upstream_prereleases():
     for line in git(
         "ls-remote",
@@ -61,28 +84,11 @@ def upstream_prereleases():
         "rust-v*",
     ).splitlines():
         _, reference = line.split()
-        match = re.fullmatch(
-            r"refs/tags/rust-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-"
-            r"([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)"
-            r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
-            reference,
-        )
-        if not match:
-            continue
-        identifiers = match[4].split(".")
-        if any(
-            value.isdigit() and len(value) > 1 and value[0] == "0"
-            for value in identifiers
-        ):
-            continue
-        precedence = (
-            tuple(int(value) for value in match.groups()[:3]),
-            tuple(
-                (0, int(value)) if value.isdigit() else (1, value)
-                for value in identifiers
-            ),
-        )
-        yield precedence, reference.removeprefix("refs/tags/")
+        tag = reference.removeprefix("refs/tags/")
+        value = tag.removeprefix("rust-v")
+        precedence = semver_precedence(value)
+        if precedence is not None and not precedence[1]:
+            yield precedence, tag
 
 
 def version(revision):
@@ -163,17 +169,175 @@ def complete_candidate(tag, revision):
     if release and not release["draft"]:
         if not tag_sha:
             raise ValueError("Published release has no matching remote tag")
-        names = {asset["name"] for asset in release.get("assets", [])}
-        legacy = {
-            "codex-aarch64-apple-darwin.tar.gz",
-            "codex-x86_64-unknown-linux-gnu.tar.gz",
-            "SHA256SUMS", "install.sh",
-        }
-        staged = legacy | {
-            "SHA256SUMS-aarch64-apple-darwin", "SHA256SUMS-x86_64-unknown-linux-gnu",
-        }
-        return names in (legacy, staged)
+        return published_assets_complete(release)
     return False
+
+
+def published_assets_complete(release):
+    names = {asset["name"] for asset in release.get("assets", [])}
+    legacy = {
+        "codex-aarch64-apple-darwin.tar.gz",
+        "codex-x86_64-unknown-linux-gnu.tar.gz",
+        "SHA256SUMS",
+        "install.sh",
+    }
+    staged = legacy | {
+        "SHA256SUMS-aarch64-apple-darwin",
+        "SHA256SUMS-x86_64-unknown-linux-gnu",
+    }
+    return not release["draft"] and names in (legacy, staged)
+
+
+def completed_publication(run, candidate, tag, candidate_ref):
+    if run["status"] != "completed" or run["conclusion"] != "success":
+        return False
+    if run["path"] != ".github/workflows/fork-rust-release.yml":
+        return False
+    jobs = api(
+        f"repos/{REPOSITORY}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100"
+    )["jobs"]
+    required = {
+        "Verify published aarch64-apple-darwin binaries",
+        "Verify published x86_64-unknown-linux-gnu binaries",
+        "Advance main only after release verification",
+    }
+    succeeded = {job["name"] for job in jobs if job["conclusion"] == "success"}
+    if not required <= succeeded or not succeeded & {
+        "Complete and verify immutable release",
+        "Publish and verify immutable release",
+    }:
+        return False
+    if run["id"] == int(candidate_ref.rsplit("-", 1)[1]):
+        return run["event"] == "workflow_dispatch" and run["head_branch"] == "main"
+    sync_job = next(
+        job
+        for job in jobs
+        if job["name"] == "Advance main only after release verification"
+    )
+    logs = subprocess.check_output(
+        ["gh", "api", f"repos/{REPOSITORY}/actions/jobs/{sync_job['id']}/logs"],
+        text=True,
+    )
+    # Job environment ties both original and successful resume runs to the frozen candidate.
+    return all(
+        re.search(rf"\b{key}:\s+{re.escape(value)}(?:\s|$)", logs)
+        for key, value in {
+            "RELEASE_SHA": candidate,
+            "RELEASE_TAG": tag,
+            "CANDIDATE_REF": candidate_ref,
+        }.items()
+    )
+
+
+def next_release_version(upstream):
+    match = re.fullmatch(r"rust-v(\d+)\.(\d+)\.(\d+)(-.+)", upstream)
+    major, minor, patch, suffix = match.groups()
+    base = f"{major}.{minor}.{int(patch) + 1}{suffix}"
+    stem, plus, metadata = base.partition("+")
+    tags, candidates, releases = {}, {}, {}
+    for line in git(
+        "ls-remote", "origin", "refs/tags/v*", "refs/heads/agent/release-*"
+    ).splitlines():
+        sha, reference = line.split()
+        if reference.startswith("refs/heads/"):
+            candidates[reference] = sha
+        else:
+            tag = reference.removeprefix("refs/tags/").removesuffix("^{}")
+            if reference.endswith("^{}") or tag not in tags:
+                tags[tag] = sha
+    page = 1
+    while True:
+        batch = api(f"repos/{REPOSITORY}/releases?per_page=100&page={page}")
+        releases.update((release["tag_name"], release) for release in batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    occupied = set(tags) | set(releases)
+    versions = {
+        tag: semver_precedence(tag.removeprefix("v"))
+        for tag in occupied
+        if tag.startswith("v")
+    }
+    versions = {tag: order for tag, order in versions.items() if order is not None}
+    family = {
+        tag
+        for tag in occupied
+        if tag == f"v{base}"
+        or re.fullmatch(
+            rf"v{re.escape(stem)}\.[1-9][0-9]*{re.escape(plus + metadata)}", tag
+        )
+    }
+    # A failed initialization can leave a candidate before its tag or draft exists.
+    for reference, sha in candidates.items():
+        matching = {tag for tag in versions if tags.get(tag) == sha}
+        if not matching:
+            raise ValueError(
+                f"Unfinished candidate {reference}; resume its original run"
+            )
+        family.update(matching)
+    completed = set()
+    resume_runs = None
+    for tag in family:
+        release = releases.get(tag)
+        if not tags.get(tag) or not release or not published_assets_complete(release):
+            raise ValueError(f"Incomplete release {tag}; resume its original run")
+        references = [
+            reference for reference, sha in candidates.items() if sha == tags[tag]
+        ]
+        if not references:
+            raise ValueError(
+                f"Cannot prove completed candidate for {tag}; ask the owner"
+            )
+        for reference in references:
+            run_id = reference.rsplit("-", 1)[1]
+            run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
+            if completed_publication(run, tags[tag], tag, reference):
+                completed.add(tag)
+                break
+            if resume_runs is None:
+                resume_runs = []
+                page = 1
+                while True:
+                    batch = api(
+                        f"repos/{REPOSITORY}/actions/workflows/fork-rust-release.yml/runs?status=success&per_page=100&page={page}"
+                    )["workflow_runs"]
+                    resume_runs.extend(batch)
+                    if len(batch) < 100:
+                        break
+                    page += 1
+            if any(
+                completed_publication(resume, tags[tag], tag, reference)
+                for resume in resume_runs
+            ):
+                completed.add(tag)
+                break
+        if tag not in completed:
+            raise ValueError(
+                f"Release verification or main sync unfinished for {tag}; resume its original run"
+            )
+    if any(release["draft"] for tag, release in releases.items() if tag in versions):
+        raise ValueError("Unfinished draft release exists; resume its original run")
+    counter = max(
+        (
+            int(tag.removeprefix(f"v{stem}.").removesuffix(plus + metadata))
+            for tag in occupied
+            if tag != f"v{base}"
+            and re.fullmatch(
+                rf"v{re.escape(stem)}\.[1-9][0-9]*{re.escape(plus + metadata)}", tag
+            )
+        ),
+        default=0,
+    )
+    selected = (
+        f"{stem}.{counter + 1}{plus}{metadata}"
+        if f"v{base}" in occupied or counter
+        else base
+    )
+    if versions and semver_precedence(selected) <= max(versions.values()):
+        raise ValueError(
+            f"Proposed version {selected} does not exceed existing fork versions; ask the owner"
+        )
+    return selected
 
 
 def output(revision, tag="", candidate_ref="", complete=False, publish=False):
@@ -188,9 +352,9 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
             "complete": str(complete).lower(),
             "publish": str(publish).lower(),
             "staged": str(
-                publish and "SHA256SUMS-$vendor_target" in git_file(
-                    revision, "scripts/install/install.sh"
-                )
+                publish
+                and "SHA256SUMS-$vendor_target"
+                in git_file(revision, "scripts/install/install.sh")
             ).lower(),
         }.items():
             print(f"{key}={value}", file=stream)
@@ -212,9 +376,7 @@ def prepare():
         revision = git("rev-parse", f"{revision}^{{commit}}")
         if tag != f"v{version(revision)}":
             raise ValueError("Tag does not agree with Cargo version")
-        output(
-            revision, tag, complete=complete_candidate(tag, revision), publish=True
-        )
+        output(revision, tag, complete=complete_candidate(tag, revision), publish=True)
         return
     if reference != "refs/heads/main":
         raise ValueError("New releases must be explicitly dispatched on main")
@@ -239,19 +401,7 @@ def prepare():
         if not tags:
             raise ValueError("No upstream Rust prerelease tag found")
         upstream = max(tags, key=lambda tag: tag[0])[1]
-        match = re.fullmatch(r"rust-v(\d+)\.(\d+)\.(\d+)(-.+)", upstream)
-        if not match:
-            raise ValueError(f"Unsupported upstream prerelease tag: {upstream}")
-        major, minor, patch, suffix = match.groups()
-        new_version = f"{major}.{minor}.{int(patch) + 1}{suffix}"
-        tag = f"v{new_version}"
-        if remote_ref(f"refs/tags/{tag}") or api(
-            f"repos/{REPOSITORY}/releases/tags/{tag}",
-            allow_missing=True,
-        ):
-            raise ValueError(
-                f"Derived release already exists: {tag}; resume its original run"
-            )
+        new_version = next_release_version(upstream)
         git("checkout", "--detach", revision)
         for path, contents in rewritten_files(revision, new_version).items():
             Path(path).write_text(contents)
