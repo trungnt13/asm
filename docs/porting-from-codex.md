@@ -80,9 +80,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `d83bb540ec64bf6b009bca0283b0be91ea33f26a`.
+- Last incorporated upstream commit: `0e1520605f67969b58e53762be4d675c036a981d`.
 - Commit date: 2026-10-07.
-- Subject: Move Windows sandbox tests into a dedicated integration binary (#51678).
+- Subject: Fix a discovery race in the external auth refresh test (#51710).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
