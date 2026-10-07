@@ -239,6 +239,7 @@ mod new_session;
 mod turn_tips;
 pub(crate) use new_session::has_launch_setting;
 mod auto_rename;
+mod auto_rename_persistence;
 mod autorename_command;
 mod clipboard;
 mod footer_selection;
