@@ -49,7 +49,12 @@ impl App {
         event: &ThreadBufferedEvent,
     ) -> Option<AutomaticTitlePrompt> {
         let settings = &self.local_settings.auto_rename;
-        if !settings.enabled {
+        if !settings.enabled
+            || self.active_thread_id.is_some_and(|thread_id| {
+                self.pending_thread_titles
+                    .contains_key(&(thread_id, ThreadTitleDestination::ExplicitAutoRename))
+            })
+        {
             return None;
         }
         let ThreadBufferedEvent::Notification(notification) = event else {
@@ -278,13 +283,16 @@ impl App {
 
     pub(super) fn stop_automatic_thread_titles(&mut self, thread_id: ThreadId) {
         self.automatic_thread_titles.remove(&thread_id);
-        if let Some(cancellation) = self
-            .pending_thread_titles
-            .remove(&(thread_id, ThreadTitleDestination::Automatic))
-        {
-            cancellation.cancel();
-            self.sync_thread_title_progress();
+        for destination in [
+            ThreadTitleDestination::Automatic,
+            ThreadTitleDestination::ExplicitAutoRename,
+        ] {
+            if let Some(cancellation) = self.pending_thread_titles.remove(&(thread_id, destination))
+            {
+                cancellation.cancel();
+            }
         }
+        self.sync_thread_title_progress();
     }
 
     pub(super) fn observe_automatic_thread_name(
@@ -292,6 +300,14 @@ impl App {
         thread_id: ThreadId,
         name: Option<&str>,
     ) {
+        if self
+            .pending_thread_titles
+            .contains_key(&(thread_id, ThreadTitleDestination::ExplicitAutoRename))
+            && self.chat_widget.thread_id() == Some(thread_id)
+            && self.chat_widget.thread_name().as_deref() != name
+        {
+            self.cancel_thread_title_generation(thread_id);
+        }
         let expected = self
             .automatic_thread_titles
             .get(&thread_id)
@@ -403,7 +419,7 @@ pub(super) fn automatic_title_prompt(settings: &AutoRenameConfig, source: &str) 
     format!("{prefix}{}", &source[..end])
 }
 
-fn user_message_text(item: &ThreadItem) -> Option<String> {
+pub(super) fn user_message_text(item: &ThreadItem) -> Option<String> {
     let ThreadItem::UserMessage { content, .. } = item else {
         return None;
     };

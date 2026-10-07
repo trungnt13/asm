@@ -2835,6 +2835,9 @@ impl App {
                     }
                 }
             }
+            AppEvent::AutoRenameThread { thread_id } => {
+                Box::pin(self.autorename_thread(app_server, thread_id)).await;
+            }
             AppEvent::ToggleAgentsOverviewPin { thread_id, pinned } => {
                 self.toggle_agents_overview_pin(app_server, thread_id, pinned);
             }
@@ -2847,6 +2850,7 @@ impl App {
                 self.complete_agents_overview_pin(
                     app_server, request_id, thread_id, pinned, result,
                 );
+
             }
             AppEvent::SuggestThreadName {
                 thread_id,
@@ -2906,6 +2910,9 @@ impl App {
                         {
                             self.save_automatic_thread_title(app_server, thread_id, title, auto_rename).await;
                         }
+                    }
+                    ThreadTitleDestination::ExplicitAutoRename => {
+                        Box::pin(self.apply_autorename_result(app_server, thread_id, result, max_title_chars, auto_rename)).await;
                     }
                     ThreadTitleDestination::RenameSuggestion { request_id } => {
                         let suggestion = result
