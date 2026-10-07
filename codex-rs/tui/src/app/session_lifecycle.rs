@@ -724,6 +724,8 @@ impl App {
         self.schedule_recap_check(thread_id, now);
 
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
+        self.restore_automatic_thread_title(thread_id, self.chat_widget.thread_name().as_deref())
+            .await;
         if is_replay_only
             && self
                 .thread_event_channels
@@ -1343,7 +1345,20 @@ impl App {
         target_session: SessionTarget,
     ) -> Result<AppRunControl> {
         if self.ignore_same_thread_resume(&target_session) {
+            let previous = self
+                .automatic_thread_titles
+                .remove(&target_session.thread_id);
             self.stop_automatic_thread_titles(target_session.thread_id);
+            let name = self.chat_widget.thread_name();
+            self.restore_automatic_thread_title(target_session.thread_id, name.as_deref())
+                .await;
+            if let Some(previous) = previous
+                && let Some(restored) = self
+                    .automatic_thread_titles
+                    .get_mut(&target_session.thread_id)
+            {
+                restored.completed_turns.extend(previous.completed_turns);
+            }
             self.agents_overview
                 .hidden_threads
                 .remove(&target_session.thread_id);

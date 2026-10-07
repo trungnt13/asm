@@ -95,6 +95,19 @@ impl App {
         } else {
             None
         };
+        let name = if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            channel
+                .store
+                .lock()
+                .await
+                .session
+                .as_ref()
+                .and_then(|session| session.thread_name.clone())
+        } else {
+            None
+        };
+        self.restore_automatic_thread_title(thread_id, name.as_deref())
+            .await;
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = receiver;
         self.refresh_pending_thread_approvals().await;
@@ -949,9 +962,10 @@ impl App {
             }
             AppCommand::SetThreadName { name } => {
                 let name = name.to_string();
+                self.cancel_thread_title_generation(thread_id);
+                self.forget_automatic_thread_title(thread_id)?;
                 app_server.thread_set_name(thread_id, name.clone()).await?;
                 self.chat_widget.expect_manual_thread_name(thread_id, name);
-                self.cancel_thread_title_generation(thread_id);
                 Ok(true)
             }
             AppCommand::Review { target } => {
