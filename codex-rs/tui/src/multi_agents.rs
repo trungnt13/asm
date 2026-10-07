@@ -329,7 +329,7 @@ impl HistoryCell for SubAgentActivityHistoryCell {
     }
 
     fn activity_ids(&self) -> Vec<String> {
-        if self.kind == SubAgentActivityKind::Interacted {
+        if self.kind != SubAgentActivityKind::Interrupted {
             vec![format!("subagent:{}", self.id)]
         } else {
             Vec::new()
@@ -337,13 +337,18 @@ impl HistoryCell for SubAgentActivityHistoryCell {
     }
 
     fn tool_call_summary(&self) -> Option<ToolCallSummary> {
-        // Each interaction is emitted once after a successful send_message or followup_task.
-        (self.kind == SubAgentActivityKind::Interacted).then(|| ToolCallSummary {
-            count: 1,
-            count_key: None,
-            running: false,
+        // Lifecycle notifications describe successful agent outcomes, not extra tool calls.
+        let mut summary = ToolCallSummary {
             names: vec![self.agent_path.clone()],
-        })
+            ..Default::default()
+        };
+        match self.kind {
+            SubAgentActivityKind::Started => summary.agent_starts = 1,
+            SubAgentActivityKind::Interacted => summary.count = 1,
+            SubAgentActivityKind::Completed => summary.agent_completions = 1,
+            SubAgentActivityKind::Interrupted => return None,
+        }
+        Some(summary)
     }
 
     fn activity_disclosure(&self, _width: u16) -> Option<crate::history_cell::ActivityDisclosure> {

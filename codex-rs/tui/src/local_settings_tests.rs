@@ -137,6 +137,7 @@ auto_recap = false
 fullscreen_transcript = true
 mouse_scroll_speed = 0.5
 collapse_tool_calls = true
+collapse_tool_calls_max_lines = 3
 copy_on_select = "never"
 copy_on_select_clear_selection = true
 right_click_paste = "off"
@@ -180,6 +181,16 @@ fast_default_opt_out = true
             .await?;
         assert_eq!(config.startup_warnings, Vec::<String>::new());
         assert_eq!(config.tui_mouse_scroll_speed, Some(1.5));
+        assert_eq!(
+            config
+                .tui_collapse_tool_calls_max_lines
+                .map(std::num::NonZeroUsize::get),
+            if config_text.is_empty() {
+                None
+            } else {
+                Some(3)
+            }
+        );
         let bootstrap = crate::legacy_core::config::load_config_toml_with_layer_stack(
             home.path(),
             /*cwd*/ None,
@@ -213,6 +224,14 @@ fast_default_opt_out = true
                 .map(|usage| usage.alias.as_str())
                 .collect::<Vec<_>>(),
             vec!["features.transcript_v2"],
+        );
+    }
+    for value in ["0", "-1", "1.5"] {
+        assert!(
+            toml::from_str::<codex_config::types::Tui>(&format!(
+                "collapse_tool_calls_max_lines = {value}"
+            ))
+            .is_err()
         );
     }
     Ok(())
