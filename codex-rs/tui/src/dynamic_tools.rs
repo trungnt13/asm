@@ -746,7 +746,7 @@ async fn execute_inner(
                 tokio::time::timeout(Duration::from_secs(/*secs*/ 30), receiver)
                     .await
                     .map_err(|_| "TUI did not acknowledge manual title update".to_string())?
-                    .map_err(|_| "TUI closed before manual title update".to_string())?;
+                    .map_err(|_| "TUI closed before manual title update".to_string())??;
             }
             let title = arguments.title;
             let _: ThreadSetNameResponse =
