@@ -14,6 +14,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct CollapsedToolGroups {
     enabled: bool,
+    max_lines: usize,
     summaries: RefCell<HashMap<EntryKey, CachedToolSummary>>,
     layouts: HashMap<(usize, usize, usize), Arc<TextLayout>>,
 }
@@ -48,9 +49,10 @@ impl CollapsedToolGroups {
 }
 
 impl TranscriptView {
-    pub(crate) fn set_collapse_tool_calls(&mut self, enabled: bool) {
-        if self.collapsed_tools.enabled != enabled {
+    pub(crate) fn set_collapse_tool_calls(&mut self, enabled: bool, max_lines: usize) {
+        if self.collapsed_tools.enabled != enabled || self.collapsed_tools.max_lines != max_lines {
             self.collapsed_tools.enabled = enabled;
+            self.collapsed_tools.max_lines = max_lines;
             self.collapsed_tools.invalidate_layouts();
             self.cache.clear();
             self.live_key = None;
@@ -153,17 +155,14 @@ impl TranscriptView {
         if expanded {
             self.disclosure.expanded.extend(ids);
         }
-        let mut summary = ToolCallSummary {
-            count: 0,
-            count_key: None,
-            names: Vec::new(),
-            running: false,
-        };
+        let mut summary = ToolCallSummary::default();
         let mut counted = HashSet::new();
         for cell in members {
             if let Some(member) = self.collapsed_tools.summary(cell) {
                 if member.count_key.is_none_or(|key| counted.insert(key)) {
                     summary.count += member.count;
+                    summary.agent_starts += member.agent_starts;
+                    summary.agent_completions += member.agent_completions;
                 }
                 summary.running |= member.running;
                 for name in member.names {
@@ -173,7 +172,7 @@ impl TranscriptView {
                 }
             }
         }
-        let mut lines = vec![summary_line(&summary, width, expanded)];
+        let mut lines = summary_lines(&summary, width, expanded, self.collapsed_tools.max_lines);
         if expanded {
             for cell in members {
                 lines.extend(cell.compact_hyperlink_lines(width));
@@ -193,7 +192,12 @@ impl TranscriptView {
     }
 }
 
-pub(crate) fn summary_line(summary: &ToolCallSummary, width: u16, expanded: bool) -> HyperlinkLine {
+pub(crate) fn summary_lines(
+    summary: &ToolCallSummary,
+    width: u16,
+    expanded: bool,
+    max_lines: usize,
+) -> Vec<HyperlinkLine> {
     let marker = if expanded { "▾" } else { "▸" };
     let verb = if summary.running { "Running" } else { "Ran" };
     let noun = if summary.count == 1 {
@@ -201,7 +205,23 @@ pub(crate) fn summary_line(summary: &ToolCallSummary, width: u16, expanded: bool
     } else {
         "tool calls"
     };
-    let header = format!("{marker} {verb} {} {noun}", summary.count);
+    let mut counts = Vec::new();
+    if summary.count > 0 {
+        counts.push(format!("{verb} {} {noun}", summary.count));
+    }
+    if summary.agent_starts > 0 {
+        let agents = if summary.agent_starts == 1 {
+            "agent"
+        } else {
+            "agents"
+        };
+        counts.push(format!("{} {agents} started", summary.agent_starts));
+    }
+    if summary.agent_completions > 0 {
+        counts.push(format!("{} completed", summary.agent_completions));
+    }
+    let header = format!("{marker} {}", counts.join(" · "));
+    let max_lines = max_lines.max(/*other*/ 1);
     let mut visible = summary.names.len();
     let text = loop {
         let mut names = summary.names[..visible].join(", ");
@@ -217,12 +237,37 @@ pub(crate) fn summary_line(summary: &ToolCallSummary, width: u16, expanded: bool
         } else {
             format!("{header} ({names})")
         };
-        if Line::from(text.clone()).width() <= usize::from(width) || visible == 0 {
+        let line = Line::from(text.clone());
+        let fits = if max_lines == 1 {
+            line.width() <= usize::from(width)
+        } else {
+            let rows = crate::wrapping::word_wrap_line(&line, width.max(/*other*/ 1) as usize);
+            rows.len() <= max_lines
+                && rows.iter().all(|row| {
+                    crate::line_truncation::line_width(row) <= usize::from(width.max(/*other*/ 1))
+                })
+        };
+        if fits || visible == 0 {
             break text;
         }
         visible -= 1;
     };
-    truncate_line_with_ellipsis_if_overflow(Line::from(text).dim(), usize::from(width)).into()
+    if max_lines == 1 {
+        return vec![
+            truncate_line_with_ellipsis_if_overflow(Line::from(text).dim(), usize::from(width))
+                .into(),
+        ];
+    }
+    let mut lines =
+        crate::wrapping::word_wrap_lines([Line::from(text).dim()], width.max(/*other*/ 1) as usize);
+    if lines.len() > max_lines {
+        lines.truncate(max_lines);
+        let last = lines.last_mut().expect("positive summary line budget");
+        // Even the counts can exceed a very narrow budget; mark the clipped header.
+        last.spans.push("…".into());
+        *last = truncate_line_with_ellipsis_if_overflow(last.clone(), usize::from(width));
+    }
+    lines.into_iter().map(HyperlinkLine::from).collect()
 }
 
 #[cfg(test)]

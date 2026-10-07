@@ -117,6 +117,8 @@ impl HistoryCell for AgentWaitHistoryCell {
             WaitGroupState::Running | WaitGroupState::Completed => Some(ToolCallSummary {
                 count: 1,
                 count_key: Some(self.count_key.clone()),
+                agent_starts: 0,
+                agent_completions: 0,
                 running: matches!(state, WaitGroupState::Running),
                 names: vec!["wait_agent".to_string()],
             }),
