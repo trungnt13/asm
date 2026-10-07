@@ -625,6 +625,7 @@ async fn thread_search_occurrences_reads_paginated_projection() -> Result<()> {
     );
     store
         .create_thread(CreateThreadParams {
+            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
@@ -1725,6 +1726,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
     );
     store
         .create_thread(CreateThreadParams {
+            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
@@ -2556,6 +2558,7 @@ async fn seed_pathless_store_thread(
 ) -> Result<()> {
     store
         .create_thread(CreateThreadParams {
+            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),

@@ -3316,6 +3316,9 @@ pub struct SessionMeta {
     pub subagent_history_start_ordinal: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_agent_version: Option<MultiAgentVersion>,
+    /// Authoritative runtime identity for an externally executed child thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_agent: Option<crate::ExternalAgentDescriptor>,
     /// Initial context-window identity for consumers that tail rollout JSONL before compaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<SessionContextWindow>,
@@ -3352,6 +3355,7 @@ impl Default for SessionMeta {
             history_base: None,
             subagent_history_start_ordinal: None,
             multi_agent_version: None,
+            external_agent: None,
             context_window: None,
         }
     }
