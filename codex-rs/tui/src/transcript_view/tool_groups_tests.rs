@@ -97,7 +97,7 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
         ),
     ];
     let mut view = TranscriptView::default();
-    view.set_collapse_tool_calls(/*enabled*/ true);
+    view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     let collapsed = text(&render(
         &mut view, &cells, /*width*/ 72, /*height*/ 28,
     ));
@@ -155,7 +155,7 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
         subagent("contact-3", SubAgentActivityKind::Interacted, "/root/b"),
     ];
     let mut mixed_view = TranscriptView::default();
-    mixed_view.set_collapse_tool_calls(/*enabled*/ true);
+    mixed_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     let mixed_collapsed = text(&render(
         &mut mixed_view,
         &mixed_cells,
@@ -218,6 +218,59 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
     ));
     assert!(!mixed_recollapsed.contains("Interacted with"));
     assert!(mixed_recollapsed.contains("▸ Ran 6 tool calls (/root/a, glab, curl, /root/b)"));
+    let lifecycle_cells = vec![
+        subagent("start-a", SubAgentActivityKind::Started, "/root/a"),
+        completed(
+            "command-a",
+            "git status; rg needle",
+            "command output",
+            /*exit_code*/ 0,
+        ),
+        subagent("start-b", SubAgentActivityKind::Started, "/root/b"),
+        subagent("done-a", SubAgentActivityKind::Completed, "/root/a"),
+    ];
+    let mut lifecycle_view = TranscriptView::default();
+    lifecycle_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 2);
+    let lifecycle_collapsed = text(&render(
+        &mut lifecycle_view,
+        &lifecycle_cells,
+        /*width*/ 80,
+        /*height*/ 20,
+    ));
+    assert!(
+        lifecycle_collapsed
+            .contains("Ran 1 tool call · 2 agents started · 1 completed (/root/a, git, rg,")
+    );
+    assert!(lifecycle_collapsed.contains("/root/b)"));
+    assert!(!lifecycle_collapsed.contains("Running"));
+    lifecycle_view.handle_key(KeyCode::F(4).into(), &lifecycle_cells);
+    lifecycle_view.handle_key(KeyCode::Enter.into(), &lifecycle_cells);
+    let lifecycle_expanded = text(&render(
+        &mut lifecycle_view,
+        &lifecycle_cells,
+        /*width*/ 80,
+        /*height*/ 20,
+    ));
+    for cell in &lifecycle_cells {
+        for line in cell.compact_hyperlink_lines(/*width*/ 80) {
+            assert!(lifecycle_expanded.contains(line.line.to_string().trim()));
+        }
+    }
+    let pure_cells = vec![
+        Arc::clone(&lifecycle_cells[0]),
+        Arc::clone(&lifecycle_cells[3]),
+    ];
+    let mut pure = TranscriptView::default();
+    pure.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
+    let pure_rendered = text(&render(
+        &mut pure,
+        &pure_cells,
+        /*width*/ 80,
+        /*height*/ 10,
+    ));
+    assert!(pure_rendered.contains("▸ 1 agent started · 1 completed (/root/a)"));
+    assert!(!pure_rendered.contains("tool call"));
+    assert!(!pure_rendered.contains("Running"));
     let mut waits = AgentWaitHistory::default();
     let mut wait_cells = vec![
         completed(
@@ -236,7 +289,7 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
         ),
     ];
     let mut wait_view = TranscriptView::default();
-    wait_view.set_collapse_tool_calls(/*enabled*/ true);
+    wait_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     let wait_running = text(&render(
         &mut wait_view,
         &wait_cells,
@@ -293,7 +346,7 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
     ));
     assert!(wait_appended.contains("Ran 3 tool calls (git, wait_agent)"));
     assert_eq!(wait_appended.matches("No agents completed yet").count(), 2);
-    wait_view.set_collapse_tool_calls(/*enabled*/ false);
+    wait_view.set_collapse_tool_calls(/*enabled*/ false, /*max_lines*/ 1);
     let disabled = text(&render(
         &mut wait_view,
         &wait_cells,
@@ -316,7 +369,7 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
             .unwrap(),
     )];
     let mut pending_view = TranscriptView::default();
-    pending_view.set_collapse_tool_calls(/*enabled*/ true);
+    pending_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     assert!(
         text(&render(
             &mut pending_view,
@@ -336,7 +389,7 @@ fn grouped_tools_expand_original_previews_and_refresh_after_append() {
     assert!(stopped.contains("Waiting for agents"));
     assert!(!stopped.contains("Running"));
     insta::assert_snapshot!(format!(
-        "collapsed\n{collapsed}\n\nexpanded\n{expanded}\n\nappended\n{appended}\n\ncollapsed after append\n{recollapsed}\n\nmixed collapsed\n{mixed_collapsed}\n\nmixed expanded\n{mixed_expanded}\n\nmixed appended\n{mixed_appended}\n\nmixed recollapsed\n{mixed_recollapsed}\n\nwait running\n{wait_running}\n\nwait collapsed\n{wait_collapsed}\n\nwait expanded\n{wait_expanded}\n\nwait appended\n{wait_appended}\n\nwait stopped\n{stopped}"
+        "collapsed\n{collapsed}\n\nexpanded\n{expanded}\n\nappended\n{appended}\n\ncollapsed after append\n{recollapsed}\n\nmixed collapsed\n{mixed_collapsed}\n\nmixed expanded\n{mixed_expanded}\n\nmixed appended\n{mixed_appended}\n\nmixed recollapsed\n{mixed_recollapsed}\n\nlifecycle collapsed\n{lifecycle_collapsed}\n\nlifecycle expanded\n{lifecycle_expanded}\n\npure lifecycle\n{pure_rendered}\n\nwait running\n{wait_running}\n\nwait collapsed\n{wait_collapsed}\n\nwait expanded\n{wait_expanded}\n\nwait appended\n{wait_appended}\n\nwait stopped\n{stopped}"
     ));
 }
 
@@ -370,8 +423,12 @@ fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
                 .unwrap(),
         ));
     }
+    cells.extend([
+        subagent("start", SubAgentActivityKind::Started, "/root/worker"),
+        subagent("done", SubAgentActivityKind::Completed, "/root/worker"),
+    ]);
     let mut original_cells = cells.clone();
-    for index in [1, 3, 4] {
+    for index in [1, 3, 4, 5, 6] {
         original_cells[index] = Arc::new(crate::history_cell::PlainHistoryCell::new(
             cells[index].display_lines(/*width*/ 72),
         ));
@@ -390,7 +447,7 @@ fn option_leaves_disabled_raw_and_detailed_views_unchanged() {
             /*height*/ 24,
         );
         let mut configured = TranscriptView::default();
-        configured.set_collapse_tool_calls(enabled);
+        configured.set_collapse_tool_calls(enabled, /*max_lines*/ 1);
         configured.set_presentation(detailed, mode);
         assert_eq!(
             render(
@@ -448,14 +505,15 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
         ),
     ];
     let mut view = TranscriptView::default();
-    view.set_collapse_tool_calls(/*enabled*/ true);
+    view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     let rendered = text(&render(
         &mut view, &cells, /*width*/ 72, /*height*/ 28,
     ));
     assert!(rendered.contains("Assistant message between tools"));
     assert!(rendered.contains("failure diagnostic"));
-    assert!(rendered.contains("Started `/root/started`"));
-    assert!(rendered.contains("Completed `/root/completed`"));
+    assert!(rendered.contains("Ran 1 tool call · 1 agent started · 1 completed"));
+    assert!(!rendered.contains("Started `/root/started`"));
+    assert!(!rendered.contains("Completed `/root/completed`"));
     assert!(rendered.contains("Interrupted `/root/interrupted`"));
     assert!(!rendered.contains("Interacted with"));
     assert!(!rendered.contains("hidden first"));
@@ -474,7 +532,7 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
         })
         .collect::<Vec<_>>();
     let mut narrow = TranscriptView::default();
-    narrow.set_collapse_tool_calls(/*enabled*/ true);
+    narrow.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
     let narrow_rendered = text(&render(
         &mut narrow,
         &narrow_cells,
@@ -483,6 +541,93 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
     ));
     assert!(narrow_rendered.contains("more"));
     assert!(!narrow_rendered.contains("hidden"));
+    let summary = ToolCallSummary {
+        count: 6,
+        names: names
+            .iter()
+            .map(|name| (*name).to_owned())
+            .chain(["測試😀".to_owned()])
+            .collect(),
+        ..Default::default()
+    };
+    for max_lines in [1, 2, 3] {
+        let lines = summary_lines(
+            &summary, /*width*/ 32, /*expanded*/ false, max_lines,
+        );
+        assert_eq!(lines.len(), max_lines);
+        assert!(lines.iter().all(|line| line.line.width() <= 32));
+        let joined = lines
+            .iter()
+            .map(|line| line.line.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if max_lines < 3 {
+            assert!(joined.contains("+"), "{joined}");
+            assert!(joined.contains("more"), "{joined}");
+        } else {
+            assert!(joined.contains("測試😀"), "{joined}");
+            assert!(!joined.contains("more"), "{joined}");
+        }
+        assert!(TextLayout::new(lines, /*width*/ 32).row_count() <= max_lines);
+    }
+    for width in [1, 2] {
+        let oversized = ToolCallSummary {
+            count: 1,
+            names: vec!["界ﾞ".to_owned(), "👨‍👩‍👧‍👦".to_owned()],
+            ..Default::default()
+        };
+        let lines = summary_lines(
+            &oversized, width, /*expanded*/ false, /*max_lines*/ 40,
+        );
+        assert!(
+            lines
+                .iter()
+                .all(|line| crate::line_truncation::line_width(&line.line) <= usize::from(width))
+        );
+        let joined = lines
+            .iter()
+            .map(|line| line.line.to_string())
+            .collect::<String>();
+        assert!(joined.contains("+2"), "{joined}");
+        assert!(!joined.contains("界ﾞ"));
+        assert!(!joined.contains("👨‍👩‍👧‍👦"));
+        assert!(TextLayout::new(lines, width).row_count() <= 40);
+    }
+    let unicode = ToolCallSummary {
+        count: 1,
+        names: vec!["界ﾞ".to_owned(), "👨‍👩‍👧‍👦".to_owned()],
+        ..Default::default()
+    };
+    let lines = summary_lines(
+        &unicode, /*width*/ 22, /*expanded*/ true, /*max_lines*/ 2,
+    );
+    let joined = lines
+        .iter()
+        .map(|line| line.line.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(joined.contains("界ﾞ"));
+    assert!(joined.contains("👨‍👩‍👧‍👦"));
+    assert!(TextLayout::new(lines, /*width*/ 22).row_count() <= 2);
+    narrow.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 2);
+    let two_lines = text(&render(
+        &mut narrow,
+        &narrow_cells,
+        /*width*/ 32,
+        /*height*/ 8,
+    ));
+    assert!(two_lines.contains("charlie"));
+    assert!(!narrow_rendered.contains("charlie"));
+    narrow.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
+    assert_eq!(
+        text(&render(
+            &mut narrow,
+            &narrow_cells,
+            /*width*/ 32,
+            /*height*/ 8
+        )),
+        narrow_rendered
+    );
     let mut waits = AgentWaitHistory::default();
     let begin: Arc<dyn HistoryCell> = Arc::new(
         waits
@@ -539,7 +684,7 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
                 .unwrap(),
         );
         let mut failure_view = TranscriptView::default();
-        failure_view.set_collapse_tool_calls(/*enabled*/ true);
+        failure_view.set_collapse_tool_calls(/*enabled*/ true, /*max_lines*/ 1);
         let mut visible_cells = vec![Arc::clone(&begin)];
         render(
             &mut failure_view,
@@ -589,6 +734,6 @@ fn failures_and_messages_break_groups_and_narrow_headers_remain_bounded() {
         }
     }
     insta::assert_snapshot!(format!(
-        "barriers\n{rendered}\n\nnarrow\n{narrow_rendered}\n\nsplit wait\n{split}"
+        "barriers\n{rendered}\n\nnarrow\n{narrow_rendered}\n\nnarrow two lines\n{two_lines}\n\nsplit wait\n{split}"
     ));
 }

@@ -1,6 +1,6 @@
 ---
 source: tui/src/transcript_view/tool_groups_tests.rs
-expression: "format!(\"barriers\\n{rendered}\\n\\nnarrow\\n{narrow_rendered}\\n\\nsplit wait\\n{split}\")"
+expression: "format!(\"barriers\\n{rendered}\\n\\nnarrow\\n{narrow_rendered}\\n\\nnarrow two lines\\n{two_lines}\\n\\nsplit wait\\n{split}\")"
 ---
 barriers
 ▸ Ran 3 tool calls (glab, curl, /root/a)
@@ -10,11 +10,7 @@ Assistant message between tools
 • Failed (exit 1) false
   └ failure diagnostic
 
-▸ Ran 1 tool call (/root/b)
-
-• Started `/root/started`
-
-• Completed `/root/completed`
+▸ Ran 1 tool call · 1 agent started · 1 completed (/root/b, +2 more)
 
 • Interrupted `/root/interrupted`
 
@@ -32,9 +28,23 @@ Assistant message between tools
 
 
 
+
+
+
+
 narrow
 ▸ Ran 6 tool calls (+6 more)
 
+
+
+
+
+
+
+
+narrow two lines
+▸ Ran 6 tool calls (alpha,
+bravo, charlie, delta, +2 more)
 
 
 

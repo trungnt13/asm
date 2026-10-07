@@ -216,10 +216,10 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
                 .collect::<Vec<_>>(),
             vec![format!("• {title} `/root/reviewer`")],
         );
-        let interacted = kind == SubAgentActivityKind::Interacted;
+        let grouped = kind != SubAgentActivityKind::Interrupted;
         assert_eq!(
             projected[0].activity_ids(),
-            if interacted {
+            if grouped {
                 vec!["subagent:activity-1".to_string()]
             } else {
                 Vec::new()
@@ -228,10 +228,18 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
         assert_eq!(
             projected[0].tool_call_summary().map(|summary| (
                 summary.count,
+                summary.agent_starts,
+                summary.agent_completions,
                 summary.running,
                 summary.names
             )),
-            interacted.then(|| (1, false, vec!["/root/reviewer".to_string()])),
+            grouped.then(|| (
+                usize::from(kind == SubAgentActivityKind::Interacted),
+                usize::from(kind == SubAgentActivityKind::Started),
+                usize::from(kind == SubAgentActivityKind::Completed),
+                false,
+                vec!["/root/reviewer".to_string()],
+            )),
         );
         assert_eq!(projected[0].activity_disclosure(/*width*/ 80), None);
     }
