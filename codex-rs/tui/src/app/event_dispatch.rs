@@ -2820,10 +2820,14 @@ impl App {
                 }
             }
             AppEvent::RenameAgentsOverviewThread { thread_id, name } => {
-                match app_server.thread_set_name(thread_id, name.clone()).await {
+                self.cancel_thread_title_generation(thread_id);
+                let result = match self.forget_automatic_thread_title(thread_id) {
+                    Ok(()) => app_server.thread_set_name(thread_id, name.clone()).await,
+                    Err(error) => Err(error.into()),
+                };
+                match result {
                     Ok(()) => {
                         self.chat_widget.expect_manual_thread_name(thread_id, name);
-                        self.cancel_thread_title_generation(thread_id);
                     }
                     Err(error) => {
                         if let Ok(mut state) = self.agents_overview.view_state.lock() {
@@ -2860,7 +2864,9 @@ impl App {
             }
             AppEvent::StopAutomaticThreadTitles { thread_id, stopped } => {
                 self.stop_automatic_thread_titles(thread_id);
-                let _ = stopped.send(());
+                let result = self.forget_automatic_thread_title(thread_id).map_err(|error| error.to_string());
+                if let Err(error) = &result { self.chat_widget.add_error_message(error.clone()); }
+                let _ = stopped.send(result);
             }
             AppEvent::ThreadTitleStarted {
                 auto_rename,
