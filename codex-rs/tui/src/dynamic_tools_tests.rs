@@ -490,7 +490,7 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
         };
         assert_eq!(thread_id.to_string(), target);
         stopped
-            .send(())
+            .send(Ok(()))
             .expect("title request waiting for acknowledgement");
     };
     let (renamed, ()) = tokio::join!(same_name, stop);
@@ -498,6 +498,44 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
         response_json(renamed),
         json!({"threadId": target, "title": "Renamed task"})
     );
+
+    let (_status_sender, status_receiver) = broadcast::channel(/*capacity*/ 8);
+    let blocked = execute(
+        server.request_handle(),
+        DynamicToolCallParams {
+            thread_id: source.clone(),
+            turn_id: "persisted-turn".to_string(),
+            call_id: "rename-blocked".to_string(),
+            namespace: Some(NAMESPACE.to_string()),
+            tool: "set_thread_title".to_string(),
+            arguments: json!({"threadId": target, "title": "Must not save"}),
+        },
+        ThreadStartParams::default(),
+        Features::with_defaults(),
+        status_receiver,
+        Some(&event_tx),
+    );
+    let reject = async {
+        let AppEvent::StopAutomaticThreadTitles { stopped, .. } = event_rx.recv().await.unwrap()
+        else {
+            panic!("manual title intent expected");
+        };
+        stopped
+            .send(Err("Could not save manual-name protection".to_string()))
+            .unwrap();
+    };
+    let (blocked, ()) = tokio::join!(blocked, reject);
+    assert!(!blocked.success);
+    assert_eq!(
+        blocked.content_items,
+        vec![DynamicToolCallOutputContentItem::InputText {
+            text: "Could not save manual-name protection".to_string(),
+        }]
+    );
+    let current = response_json(
+        call_tool(&server, &source, "read_thread", json!({"threadId": target})).await,
+    );
+    assert_eq!(current["thread"]["title"], "Renamed task");
 
     let forked = response_json(
         call_tool(&server, &source, "fork_thread", json!({"threadId": target})).await,
