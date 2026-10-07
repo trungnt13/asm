@@ -1,7 +1,13 @@
 ---
 source: tui/src/chatwidget/tests/slash_commands.rs
-expression: popup
+expression: "format!(\"{autorename_popup}\\n\\n{popup}\")"
 ---
+› /autorename  generate and apply a name using auto_rename settings
+
+› /autorename
+
+  sol56 def·/tmp/project
+
   Rename thread
   Generating a title suggestion…
 
