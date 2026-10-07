@@ -2917,7 +2917,6 @@ impl App {
                 self.complete_agents_overview_pin(
                     app_server, request_id, thread_id, pinned, result,
                 );
-
             }
             AppEvent::SuggestThreadName {
                 thread_id,
