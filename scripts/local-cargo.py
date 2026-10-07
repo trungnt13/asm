@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # Local recipes share a small profile while explicit selections and CI stay unchanged.
+import hashlib
 import json
 import os
 import subprocess
@@ -83,6 +84,18 @@ def main() -> int:
             Path(source_checkout.stdout.strip()) / "scripts/local-rustc-workspace.sh"
         )
     command = args[offset] if len(args) > offset else ""
+    if (
+        command == "clippy"
+        and "CARGO_TARGET_DIR" not in os.environ
+        and not any(
+            arg == "--target-dir" or arg.startswith("--target-dir=")
+            for arg in cargo_args
+        )
+    ):
+        # Clippy replaces the workspace wrapper, so it needs a private cache.
+        checkout_path = source_checkout.stdout.strip() or str(source)
+        namespace = hashlib.sha256(checkout_path.encode()).hexdigest()
+        env["CARGO_TARGET_DIR"] = str(root / "codex-rs/target/clippy" / namespace)
     if command not in {"build", "check", "clippy", "nextest"}:
         with ownership:
             return subprocess.call(["cargo", *args], env=env)
