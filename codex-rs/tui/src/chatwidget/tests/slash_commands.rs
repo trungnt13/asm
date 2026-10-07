@@ -1306,10 +1306,20 @@ async fn slash_rename_requests_and_prefills_an_editable_title_suggestion() {
     chat.thread_id = Some(thread_id);
     chat.thread_name = Some("Current project title".to_string());
 
+    chat.apply_external_edit("/autorename".to_string());
+    let autorename_popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert!(autorename_popup.contains("/autorename"));
+    chat.apply_external_edit(String::new());
+    chat.dispatch_command(SlashCommand::AutoRename);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::AutoRenameThread { thread_id: requested }) if requested == thread_id);
+
     chat.dispatch_command(SlashCommand::Rename);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("slash_rename_suggestion_loading", popup);
+    assert_chatwidget_snapshot!(
+        "slash_rename_suggestion_loading",
+        format!("{autorename_popup}\n\n{popup}")
+    );
 
     let request_id = match rx.try_recv() {
         Ok(AppEvent::SuggestThreadName {
