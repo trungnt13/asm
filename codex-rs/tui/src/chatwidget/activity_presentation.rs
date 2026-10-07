@@ -44,9 +44,15 @@ impl ChatWidget {
             .and_then(HistoryCell::tool_call_summary);
         let activity = active.map_or_else(Vec::new, |cell| {
             if let Some(summary) = &summary {
-                let mut lines = vec![crate::transcript_view::tool_group_summary_line(
-                    summary, width, expanded,
-                )];
+                let mut lines = crate::transcript_view::tool_group_summary_lines(
+                    summary,
+                    width,
+                    expanded,
+                    self.local_settings
+                        .tui
+                        .collapse_tool_calls_max_lines
+                        .map_or(/*default*/ 1, std::num::NonZeroUsize::get),
+                );
                 if expanded {
                     lines.extend(cell.compact_hyperlink_lines(width));
                 }

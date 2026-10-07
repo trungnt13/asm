@@ -78,6 +78,7 @@ impl LocalSettings {
                 fullscreen_transcript: config.tui_fullscreen_transcript,
                 mouse_scroll_speed: config.tui_mouse_scroll_speed,
                 collapse_tool_calls: config.tui_collapse_tool_calls,
+                collapse_tool_calls_max_lines: config.tui_collapse_tool_calls_max_lines,
                 copy_on_select: config.tui_copy_on_select,
                 right_click_paste: config.tui_right_click_paste,
                 alternate_screen: config.tui_alternate_screen,
