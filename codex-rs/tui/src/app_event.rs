@@ -260,18 +260,20 @@ pub(crate) enum TranscriptExportDestination {
     File(PathBuf),
 }
 
-/// Capture naming ownership and automatic-update intent before background generation.
+/// Capture the expected saved name and background-update intent before title generation.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AutoRenameRequest {
     pub(crate) expected_name: Option<String>,
     pub(crate) auto_update: bool,
 }
 
-/// Deliver a generated title to its originating automatic rename or editable prompt.
+/// Route a title to background naming, an explicit command, or an editable suggestion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ThreadTitleDestination {
     /// Apply a title only while the initiating client's naming ownership is unchanged.
     Automatic,
+    /// Apply one configured title after an explicit user command.
+    ExplicitAutoRename,
     /// Prefill only the still-active rename prompt with the matching request ID.
     RenameSuggestion { request_id: Uuid },
 }
@@ -367,6 +369,10 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         request_id: Uuid,
     },
+    /// Generate and save one configured title for the displayed thread.
+    AutoRenameThread {
+        thread_id: ThreadId,
+    },
     StopAutomaticThreadTitles {
         thread_id: ThreadId,
         stopped: tokio::sync::oneshot::Sender<()>,
@@ -382,7 +388,7 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
         result: Result<String, String>,
     },
-    /// Route a hidden title request to its automatic rename or editable prompt.
+    /// Route a hidden title result to its captured naming destination.
     GeneratedThreadTitle {
         auto_rename: AutoRenameRequest,
         max_title_chars: usize,
