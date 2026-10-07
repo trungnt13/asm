@@ -305,7 +305,11 @@ def main():
     sha = os.environ["RELEASE_SHA"]
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("invalid GITHUB_REPOSITORY")
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?", tag):
+    if not re.fullmatch(
+        r"v[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?"
+        r"(?:\+[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)?",
+        tag,
+    ):
         raise ValueError("invalid RELEASE_TAG")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("RELEASE_SHA must be a full commit SHA")
