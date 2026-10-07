@@ -20,12 +20,12 @@ use codex_config::AutoRenameFirstTrigger;
 use codex_protocol::ThreadId;
 use std::collections::HashSet;
 
-/// Retain live user context before ownership is granted by a successful title save.
+/// Retain live context and the expected title for eligible automatic refresh.
 #[derive(Default)]
 pub(super) struct AutoRenameState {
-    owned_title: Option<String>,
+    pub(super) owned_title: Option<String>,
     turns_since_attempt: usize,
-    completed_turns: HashSet<String>,
+    pub(super) completed_turns: HashSet<String>,
     latest_user_message: Option<AutoRenameUserMessage>,
 }
 
@@ -139,7 +139,6 @@ impl App {
                 .automatic_thread_titles
                 .get(&thread_id)
                 .and_then(|state| state.owned_title.clone()),
-            auto_update: settings.auto_update,
         };
         if !recurring
             && self
@@ -270,15 +269,26 @@ impl App {
         if source.trim().is_empty() {
             return None;
         }
+        let prompt = automatic_title_prompt(settings, &source);
+        drop(store);
         if recurring {
+            if !self.automatic_title_record_matches(thread_id, request.expected_name.as_deref()) {
+                self.stop_automatic_thread_titles(thread_id);
+                return None;
+            }
             self.automatic_thread_titles
                 .get_mut(&thread_id)?
                 .turns_since_attempt = 0;
         }
-        Some(AutomaticTitlePrompt {
-            prompt: automatic_title_prompt(settings, &source),
-            request,
-        })
+        Some(AutomaticTitlePrompt { prompt, request })
+    }
+
+    pub(super) fn track_automatic_thread_title(&mut self, thread_id: ThreadId, title: String) {
+        let state = self.automatic_thread_titles.entry(thread_id).or_default();
+        if state.owned_title.is_none() {
+            state.turns_since_attempt = 0;
+        }
+        state.owned_title = Some(title);
     }
 
     pub(super) fn stop_automatic_thread_titles(&mut self, thread_id: ThreadId) {
@@ -333,12 +343,14 @@ impl App {
         request: AutoRenameRequest,
     ) {
         if request.expected_name.is_some()
-            && self
-                .automatic_thread_titles
-                .get(&thread_id)
-                .and_then(|state| state.owned_title.as_ref())
-                != request.expected_name.as_ref()
+            && (!self.automatic_title_record_matches(thread_id, request.expected_name.as_deref())
+                || self
+                    .automatic_thread_titles
+                    .get(&thread_id)
+                    .and_then(|state| state.owned_title.as_ref())
+                    != request.expected_name.as_ref())
         {
+            self.stop_automatic_thread_titles(thread_id);
             return;
         }
         let Ok(thread) = app_server
@@ -352,19 +364,14 @@ impl App {
             return;
         }
         if thread.name.as_ref() == Some(&title) {
+            self.persist_automatic_thread_title(thread_id, &title).await;
             return;
         }
         if let Err(error) = app_server.thread_set_name(thread_id, title.clone()).await {
             tracing::debug!(%error, "failed to apply generated thread title");
             return;
         }
-        if request.auto_update {
-            let state = self.automatic_thread_titles.entry(thread_id).or_default();
-            if state.owned_title.is_none() {
-                state.turns_since_attempt = 0;
-            }
-            state.owned_title = Some(title.clone());
-        }
+        self.persist_automatic_thread_title(thread_id, &title).await;
         self.chat_widget
             .on_thread_name_updated(thread_id, Some(title));
     }

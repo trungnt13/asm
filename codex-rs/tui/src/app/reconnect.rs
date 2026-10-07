@@ -466,6 +466,8 @@ impl App {
                 }
                 return Err(err);
             }
+            self.restore_automatic_thread_title(id, self.chat_widget.thread_name().as_deref())
+                .await;
             self.config = self.chat_widget.config_ref().clone();
             self.refresh_pending_thread_approvals().await;
             if self.thread_unavailable(id) && !self.chat_widget.is_external_writer_view() {
