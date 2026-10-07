@@ -254,11 +254,10 @@ pub(crate) enum TranscriptExportDestination {
     File(PathBuf),
 }
 
-/// Capture the expected saved name and background-update intent before title generation.
+/// Capture the saved name that a generated title may replace.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AutoRenameRequest {
     pub(crate) expected_name: Option<String>,
-    pub(crate) auto_update: bool,
 }
 
 /// Route a title to background naming, an explicit command, or an editable suggestion.
@@ -369,7 +368,7 @@ pub(crate) enum AppEvent {
     },
     StopAutomaticThreadTitles {
         thread_id: ThreadId,
-        stopped: tokio::sync::oneshot::Sender<()>,
+        stopped: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     /// Register a hidden title-generation thread started in the background.
     ThreadTitleStarted {
