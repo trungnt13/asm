@@ -1,6 +1,6 @@
 ---
 source: tui/src/transcript_view/tool_groups_tests.rs
-expression: "format!(\"collapsed\\n{collapsed}\\n\\nexpanded\\n{expanded}\\n\\nappended\\n{appended}\\n\\ncollapsed after append\\n{recollapsed}\\n\\nmixed collapsed\\n{mixed_collapsed}\\n\\nmixed expanded\\n{mixed_expanded}\\n\\nmixed appended\\n{mixed_appended}\\n\\nmixed recollapsed\\n{mixed_recollapsed}\\n\\nwait running\\n{wait_running}\\n\\nwait collapsed\\n{wait_collapsed}\\n\\nwait expanded\\n{wait_expanded}\\n\\nwait appended\\n{wait_appended}\\n\\nwait stopped\\n{stopped}\")"
+expression: "format!(\"collapsed\\n{collapsed}\\n\\nexpanded\\n{expanded}\\n\\nappended\\n{appended}\\n\\ncollapsed after append\\n{recollapsed}\\n\\nmixed collapsed\\n{mixed_collapsed}\\n\\nmixed expanded\\n{mixed_expanded}\\n\\nmixed appended\\n{mixed_appended}\\n\\nmixed recollapsed\\n{mixed_recollapsed}\\n\\nlifecycle collapsed\\n{lifecycle_collapsed}\\n\\nlifecycle expanded\\n{lifecycle_expanded}\\n\\npure lifecycle\\n{pure_rendered}\\n\\nwait running\\n{wait_running}\\n\\nwait collapsed\\n{wait_collapsed}\\n\\nwait expanded\\n{wait_expanded}\\n\\nwait appended\\n{wait_appended}\\n\\nwait stopped\\n{stopped}\")"
 ---
 collapsed
 ▸ Ran 3 tool calls (glab, curl)
@@ -200,6 +200,62 @@ mixed recollapsed
 
 
 
+
+
+
+
+
+
+
+
+
+
+lifecycle collapsed
+▸ Ran 1 tool call · 2 agents started · 1 completed (/root/a, git, rg, /root/b)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+lifecycle expanded
+▾ Ran 1 tool call · 2 agents started · 1 completed (/root/a, git, rg, /root/b)
+• Started `/root/a`
+• Ran git status; rg needle
+  └ command output
+• Started `/root/b`
+• Completed `/root/a`
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+pure lifecycle
+▸ 1 agent started · 1 completed (/root/a)
 
 
 

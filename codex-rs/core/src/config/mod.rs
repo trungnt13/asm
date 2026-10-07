@@ -824,6 +824,9 @@ pub struct Config {
     /// Group consecutive tools in the fullscreen transcript.
     pub tui_collapse_tool_calls: bool,
 
+    /// Optional positive row budget for collapsed fullscreen activity summaries.
+    pub tui_collapse_tool_calls_max_lines: Option<std::num::NonZeroUsize>,
+
     /// Override the terminal-specific default for copying transcript mouse selections.
     pub tui_copy_on_select: codex_config::types::CopyOnSelect,
 
@@ -4623,6 +4626,10 @@ impl Config {
                 .map(|t| t.raw_output_mode)
                 .unwrap_or(false),
             tui_collapse_tool_calls: cfg.tui.as_ref().is_some_and(|tui| tui.collapse_tool_calls),
+            tui_collapse_tool_calls_max_lines: cfg
+                .tui
+                .as_ref()
+                .and_then(|tui| tui.collapse_tool_calls_max_lines),
             tui_fullscreen_transcript: cfg
                 .tui
                 .as_ref()
