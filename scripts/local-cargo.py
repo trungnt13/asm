@@ -68,6 +68,20 @@ def main() -> int:
             fcntl.flock(checkout_lock, fcntl.LOCK_SH)
             break
     env = {**os.environ, "CARGO_TARGET_DIR": target_dir()}
+    source_checkout = subprocess.run(
+        ["git", "-C", str(source), "rev-parse", "--show-toplevel"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if (
+        source_checkout.returncode == 0
+        and "RUSTC_WORKSPACE_WRAPPER" not in env
+        and "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER" not in env
+    ):
+        env["RUSTC_WORKSPACE_WRAPPER"] = str(
+            Path(source_checkout.stdout.strip()) / "scripts/local-rustc-workspace.sh"
+        )
     command = args[offset] if len(args) > offset else ""
     if command not in {"build", "check", "clippy", "nextest"}:
         with ownership:
@@ -118,6 +132,7 @@ def main() -> int:
                 "CARGO_ENCODED_RUSTFLAGS",
                 "RUSTC_WRAPPER",
                 "RUSTC_WORKSPACE_WRAPPER",
+                "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
                 "RUSTY_V8_ARCHIVE",
                 "RUSTY_V8_SRC_BINDING_PATH",
                 "AWS_LC_SYS_NO_JITTER_ENTROPY",
