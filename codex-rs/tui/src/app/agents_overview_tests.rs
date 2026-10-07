@@ -505,6 +505,7 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
         request_id,
         Ok(AgentsOverviewThreadRefresh {
             last_messages: HashMap::new(),
+            pinned_thread_ids: None,
             threads: [refreshed_child_id, stale_child_id]
                 .into_iter()
                 .map(|id| {
