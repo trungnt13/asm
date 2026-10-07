@@ -259,14 +259,33 @@ def next_release_version(upstream):
         if tag.startswith("v")
     }
     versions = {tag: order for tag, order in versions.items() if order is not None}
+    counter_pattern = re.compile(
+        rf"v{re.escape(stem)}\.([1-9][0-9]*){re.escape(plus + metadata)}"
+    )
     family = {
-        tag
-        for tag in occupied
-        if tag == f"v{base}"
-        or re.fullmatch(
-            rf"v{re.escape(stem)}\.[1-9][0-9]*{re.escape(plus + metadata)}", tag
-        )
+        tag for tag in occupied if tag == f"v{base}" or counter_pattern.fullmatch(tag)
     }
+    counter = max(
+        (
+            int(match[1])
+            for tag in occupied
+            if (match := counter_pattern.fullmatch(tag))
+        ),
+        default=0,
+    )
+    selected = (
+        f"{stem}.{counter + 1}{plus}{metadata}"
+        if f"v{base}" in occupied or counter
+        else base
+    )
+    if versions and semver_precedence(selected) <= max(versions.values()):
+        raise ValueError(
+            f"Proposed version {selected} does not exceed existing fork versions; ask the owner"
+        )
+    proof_tags = family | {
+        tag for tag, order in versions.items() if order == max(versions.values())
+    }
+    existing_candidates = set(family)
     # A failed initialization can leave a candidate before its tag or draft exists.
     for reference, sha in candidates.items():
         matching = {tag for tag in versions if tags.get(tag) == sha}
@@ -274,13 +293,16 @@ def next_release_version(upstream):
             raise ValueError(
                 f"Unfinished candidate {reference}; resume its original run"
             )
-        family.update(matching)
+        existing_candidates.update(matching)
     completed = set()
     resume_runs = None
-    for tag in family:
+    for tag in existing_candidates | proof_tags:
         release = releases.get(tag)
         if not tags.get(tag) or not release or not published_assets_complete(release):
             raise ValueError(f"Incomplete release {tag}; resume its original run")
+        # Superseded complete releases need not depend on retained Actions logs forever.
+        if tag not in proof_tags:
+            continue
         references = [
             reference for reference, sha in candidates.items() if sha == tags[tag]
         ]
@@ -317,26 +339,6 @@ def next_release_version(upstream):
             )
     if any(release["draft"] for tag, release in releases.items() if tag in versions):
         raise ValueError("Unfinished draft release exists; resume its original run")
-    counter = max(
-        (
-            int(tag.removeprefix(f"v{stem}.").removesuffix(plus + metadata))
-            for tag in occupied
-            if tag != f"v{base}"
-            and re.fullmatch(
-                rf"v{re.escape(stem)}\.[1-9][0-9]*{re.escape(plus + metadata)}", tag
-            )
-        ),
-        default=0,
-    )
-    selected = (
-        f"{stem}.{counter + 1}{plus}{metadata}"
-        if f"v{base}" in occupied or counter
-        else base
-    )
-    if versions and semver_precedence(selected) <= max(versions.values()):
-        raise ValueError(
-            f"Proposed version {selected} does not exceed existing fork versions; ask the owner"
-        )
     return selected
 
 
