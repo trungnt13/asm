@@ -462,6 +462,7 @@ impl ExternalAgentSessionImporter {
             prompt_cache_key: None,
             thread_id,
             extra_config: None,
+            external_agent: None,
             forked_from_id: None,
             parent_thread_id: None,
             source: source.clone(),
