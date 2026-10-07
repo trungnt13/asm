@@ -29,6 +29,8 @@ pub enum SlashCommand {
     Hooks,
     Review,
     Rename,
+    #[strum(serialize = "autorename")]
+    AutoRename,
     New,
     Archive,
     Delete,
@@ -102,6 +104,7 @@ impl SlashCommand {
             SlashCommand::Recap => "summarize the current conversation now",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Rename => "rename the current thread",
+            SlashCommand::AutoRename => "generate and apply a name using auto_rename settings",
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Archive => "archive this session",
             SlashCommand::Delete => "permanently delete this session",
@@ -282,6 +285,7 @@ impl SlashCommand {
             | SlashCommand::CopyId
             | SlashCommand::Raw
             | SlashCommand::Rename
+            | SlashCommand::AutoRename
             | SlashCommand::Mention
             | SlashCommand::Skills
             | SlashCommand::Hooks
