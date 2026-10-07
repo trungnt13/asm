@@ -30,7 +30,7 @@ setup_remote_env() {
   if [[ -n "${CI:-}" ]]; then
     profile_dir="debug"
   fi
-  codex_binary_path="${CARGO_TARGET_DIR:-target}/${profile_dir}/codex"
+  codex_binary_path="$(python3 "${REPO_ROOT}/scripts/local-cargo.py" --print-target-dir)/${profile_dir}/codex"
   if [[ "${codex_binary_path}" != /* ]]; then
     codex_binary_path="${REPO_ROOT}/codex-rs/${codex_binary_path}"
   fi

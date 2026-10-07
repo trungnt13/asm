@@ -8,13 +8,15 @@ set windows-shell := ["python", "-c", 'import os, runpy; runpy.run_path(os.envir
 rust_min_stack := "8388608" # 8 MiB
 python := if os_family() == "windows" { "python" } else { "python3" }
 local_profile_dir := if env("CI", "") == "" { "dev-small" } else { "debug" }
-cargo_target_dir := env("CARGO_TARGET_DIR", "target")
 
 # Display help
 help:
     just -l
 
 # `codex`
+build-dev *args:
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" build -p codex-cli -p codex-code-mode-host --bin codex --bin codex-code-mode-host {args}
+
 alias c := codex
 codex *args:
     {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run --bin codex -- {args}
@@ -46,7 +48,7 @@ assemble-codex-package *args:
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
     {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" build -p codex-cli
-    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-app-server-test-client -- --codex-bin "{{ cargo_target_dir }}/{{ local_profile_dir }}/codex" {args}
+    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-app-server-test-client -- --codex-bin "$({{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" --print-target-dir)/{{ local_profile_dir }}/codex" {args}
 
 # Format the justfile, Rust, Bazel/Starlark, Python SDK code, and Python scripts.
 fmt:
