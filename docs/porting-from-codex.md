@@ -15,23 +15,26 @@ This guide overrides conflicting repository instructions, including [AGENTS.md](
 - Refresh Git status, branches, and worktrees before edits, including after resume.
 - For syncs and pushes, inspect remotes and fork history. For overlap or unexplained changes, inspect relevant repo sessions. Recover context from Git and sessions, not owner memory or a task diary.
 - For concurrent tasks, create a named `codex/` branch and separate worktree before edits. Coordinate shared files. Assign one agent to staging and commits per checkout. Integrate one task at a time into local `main`.
+- Prefer a reusable task checkout: `python3 scripts/dev-worktree.py acquire codex/<task>`. Keep its path through builds and validation. Slots have an exclusive owner/branch lease; use `--slot <name>` for parallel tasks. Release with `python3 scripts/dev-worktree.py release codex/<task>` only after clean local `main` integration. Keep the detached checkout for reuse. Never clear another owner's lease or discard work; inspect and coordinate abandoned leases.
 - Preserve existing work. If it blocks progress, use another worktree. Get permission before committing or stashing unrelated work. Keep authorized stashes until restoration is verified. Never overwrite other work to clean a checkout.
 
 ### Build the binary first
 
 For runtime or UI edits, inspect all affected paths, including streaming and completed output. Make the smallest coherent change.
 
-Before Cargo runs in a new worktree, ensure sufficient disk space. Select a compatible existing cache with `CARGO_TARGET_DIR`, not an empty worktree-local cache. Keep the native target, toolchain, profile, flags, and cache stable. Cache reuse can still require recompilation. Reuse matching verified fork [V8 artifacts](#v8-dependency-release); keep `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH` overrides stable with that cache.
+Before Cargo runs, ensure sufficient disk space. Local `just` Cargo recipes default to the main checkout's `codex-rs/target`; explicit `CARGO_TARGET_DIR` and Cargo target-directory options retain their meaning. Keep native host mode, toolchain, profile, selected features, flags, checkout, and cache stable. Do not add `--target` merely to name the native host. Fresh checkout timestamps, source/version changes, and changed inputs can still force rebuilds. Reuse matching verified fork [V8 artifacts](#v8-dependency-release); explicitly export the same verified absolute `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH` paths. Do not infer artifact validity from an old Cargo fingerprint.
 
 From `codex-rs`, build both binaries from the same source, native target, and `dev-small` profile:
 
 ```bash
-cargo build -p codex-cli -p codex-code-mode-host --bin codex --bin codex-code-mode-host --profile dev-small
+just build-dev
 ```
 
-Prioritize this pair over other Cargo jobs. Serialize jobs that share a target directory. Keep executable siblings in `${CARGO_TARGET_DIR:-target}/dev-small`; verify which checkout produced them. During builds, inspect independent code and review affected tests or snapshots. Test executables are not these binaries.
+Prioritize this pair over other Cargo jobs. Serialize jobs that share a target directory. Keep executable siblings in the resolved target directory's `dev-small`; verify which checkout produced them. During builds, inspect independent code and review affected tests or snapshots. Test executables are not these binaries.
 
-For ordinary local runtime or UI checks, run `"${CARGO_TARGET_DIR:-target}/dev-small/codex" --no-daemon` from `codex-rs`. This uses the current embedded backend without changing or stopping a shared daemon; the sibling `codex-code-mode-host` supports code mode. Test daemon or remote behavior separately when it matters: `codex agents` and `--remote` cannot use `--no-daemon`.
+The local Cargo wrapper locks build/check/Clippy/nextest commands per effective cache and saves input details plus Cargo fingerprint reasons under the main checkout's `.agents/dev-build-cache/<date>/`. An explicit `CARGO_LOG` retains its filter. Inspect logs before blaming cache loss. Active wrapper commands also prevent reusable-checkout release or switching. `cargo run` keeps interactive I/O without holding the cache lock for a live app. CI and Windows behavior stay unchanged. Direct Cargo bypasses these protections and must finish before checkout release.
+
+For ordinary local runtime or UI checks, run `"$(python3 ../scripts/local-cargo.py --print-target-dir)/dev-small/codex" --no-daemon` from `codex-rs`. This uses the current embedded backend without changing or stopping a shared daemon; the sibling `codex-code-mode-host` supports code mode. Test daemon or remote behavior separately when it matters: `codex agents` and `--remote` cannot use `--no-daemon`.
 
 Before handoff, verify both executables exist, CLI `--version`, and `--help` for each. A help check does not prove model requests or tools work. When safe, hand off both before automated checks finish. Report their verified absolute paths, build time, a manual check, and pending checks. Rebuild both after runtime edits. Never present old binaries as current. Get permission before replacing installed `codex`.
 
