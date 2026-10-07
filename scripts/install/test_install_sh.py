@@ -13,8 +13,8 @@ import unittest
 
 
 INSTALL_SCRIPT = Path(__file__).with_name("install.sh")
-VERSION = "0.159.1-alpha.9"
-NEXT_VERSION = "0.159.1-alpha.10"
+VERSION = "0.162.1-alpha.18.1.1"
+NEXT_VERSION = "0.162.1-alpha.18.1.2"
 
 
 def write_release(
