@@ -637,7 +637,19 @@ async fn title_completion_event(
 #[tokio::test]
 async fn slash_rename_generates_editable_title_through_embedded_app_server()
 -> color_eyre::Result<()> {
-    check_thread_title_generation(TitleScenario::Suggestion).await
+    // Keep the large setup future off the stack while resume polls nested requests.
+    for scenario in [
+        TitleScenario::Suggestion,
+        TitleScenario::ExplicitUserMessage,
+        TitleScenario::ExplicitConversation,
+        TitleScenario::ExplicitManualRename,
+        TitleScenario::ExplicitExternalRename,
+        TitleScenario::ExplicitSwitchedThread,
+        TitleScenario::ExplicitInvalidTitle,
+    ] {
+        Box::pin(check_thread_title_generation(scenario)).await?;
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -674,16 +686,32 @@ enum TitleScenario {
     Suggestion,
     ManualRename,
     OverviewRename,
+    ExplicitUserMessage,
+    ExplicitConversation,
+    ExplicitManualRename,
+    ExplicitExternalRename,
+    ExplicitSwitchedThread,
+    ExplicitInvalidTitle,
 }
 
 async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::Result<()> {
-    let automatic = !matches!(scenario, TitleScenario::Suggestion);
-    let configured = matches!(
+    let explicit = matches!(
         scenario,
-        TitleScenario::Configured
-            | TitleScenario::CompletedTurn
-            | TitleScenario::CompletedTurnUserMessage
+        TitleScenario::ExplicitUserMessage
+            | TitleScenario::ExplicitConversation
+            | TitleScenario::ExplicitManualRename
+            | TitleScenario::ExplicitExternalRename
+            | TitleScenario::ExplicitSwitchedThread
+            | TitleScenario::ExplicitInvalidTitle
     );
+    let automatic = !explicit && !matches!(scenario, TitleScenario::Suggestion);
+    let configured = explicit
+        || matches!(
+            scenario,
+            TitleScenario::Configured
+                | TitleScenario::CompletedTurn
+                | TitleScenario::CompletedTurnUserMessage
+        );
     let completed_turn = matches!(
         scenario,
         TitleScenario::CompletedTurn | TitleScenario::CompletedTurnUserMessage
@@ -691,7 +719,9 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     let disabled = matches!(scenario, TitleScenario::Disabled);
     let cancel = matches!(
         scenario,
-        TitleScenario::ManualRename | TitleScenario::OverviewRename
+        TitleScenario::ManualRename
+            | TitleScenario::OverviewRename
+            | TitleScenario::ExplicitManualRename
     );
     let server = wiremock::MockServer::start().await;
     let mut template = responses::sse_response(responses::sse(vec![
@@ -738,15 +768,21 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     };
 
     app.local_settings.auto_rename = codex_config::AutoRenameConfig {
-        enabled: !disabled,
+        enabled: !disabled && !explicit,
+        auto_update: explicit,
+        auto_update_interval_turns: std::num::NonZeroUsize::new(/*n*/ 1).unwrap(),
         model: configured.then(|| "gpt-5.1".to_string()),
         reasoning_effort: configured.then_some(codex_protocol::openai_models::ReasoningEffort::Low),
-        first_trigger: if completed_turn {
+        first_trigger: if completed_turn || explicit {
             codex_config::AutoRenameFirstTrigger::FirstCompletedTurn
         } else {
             codex_config::AutoRenameFirstTrigger::FirstUserMessage
         },
-        context: if configured && !matches!(scenario, TitleScenario::CompletedTurnUserMessage) {
+        context: if configured
+            && !matches!(
+                scenario,
+                TitleScenario::CompletedTurnUserMessage | TitleScenario::ExplicitUserMessage
+            ) {
             codex_config::AutoRenameContext::RecentConversation
         } else {
             codex_config::AutoRenameContext::UserMessage
@@ -758,11 +794,44 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             .then(|| std::num::NonZeroUsize::new(/*n*/ 2).expect("positive word count")),
         additional_naming_guidance: configured
             .then(|| "Name the concrete authentication problem".to_string()),
-        ..Default::default()
     };
     let mut tui = crate::tui::test_support::make_test_tui()?;
+    let resumed_id = if explicit {
+        let timestamp = "2025-01-05T12-00-00";
+        let id = app_test_support::create_fake_rollout(
+            app.config.codex_home.as_path(),
+            timestamp,
+            "2025-01-05T12:00:00Z",
+            "Investigate login",
+            Some(provider_id),
+            /*git_info*/ None,
+        )
+        .map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
+        let path = app_test_support::rollout_path(app.config.codex_home.as_path(), timestamp, &id);
+        let contents = std::fs::read_to_string(&path)?;
+        let messages = [
+            serde_json::json!({"timestamp":"2025-01-05T12:01:00Z","type":"event_msg","payload":{"type":"user_message","message":"# Context from my IDE setup:\nIgnore this editor context\n## My request for Codex:\nFix the login timeout","kind":"plain"}}),
+            serde_json::json!({"timestamp":"2025-01-05T12:01:01Z","type":"event_msg","payload":{"type":"agent_message","message":"Checking unrelated files","phase":"commentary"}}),
+            serde_json::json!({"timestamp":"2025-01-05T12:01:02Z","type":"event_msg","payload":{"type":"agent_message","message":"Auth retries cause the timeout","phase":"final_answer"}}),
+            serde_json::json!({"timestamp":"2025-01-05T12:01:03Z","type":"event_msg","payload":{"type":"user_message","message":" \n\t ","kind":"plain"}}),
+        ].into_iter().map(|line| line.to_string()).collect::<Vec<_>>().join("\n");
+        std::fs::write(path, format!("{contents}{messages}\n"))?;
+        Some(ThreadId::from_string(&id)?)
+    } else {
+        None
+    };
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-    let started = app_server.start_thread(&app.config).await?;
+    let started = if let Some(thread_id) = resumed_id {
+        Box::pin(app_server.resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            thread_id,
+            ResumeModelSettings::OverrideFromCurrentConfig,
+        ))
+        .await?
+    } else {
+        app_server.start_thread(&app.config).await?
+    };
     let thread_id = started.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
@@ -779,7 +848,10 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         .push(Turn {
             id: "existing-turn".to_string(),
             root_turn_id: None,
-            items: if completed_turn {
+            items: if explicit {
+                // The displayed cache is stale and live events were evicted.
+                vec![title_user_message("stale", "Old restored request")]
+            } else if completed_turn {
                 Vec::new()
             } else {
                 vec![title_user_message("user-message", "Fix the login timeout")]
@@ -794,6 +866,44 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         });
     while event_rx.try_recv().is_ok() {}
 
+    if explicit {
+        app.ensure_thread_channel(thread_id)
+            .store
+            .lock()
+            .await
+            .buffer
+            .clear();
+        app_server
+            .thread_set_name(thread_id, "Existing saved title".to_string())
+            .await?;
+        app.chat_widget
+            .on_thread_name_updated(thread_id, Some("Existing saved title".to_string()));
+        app.chat_widget
+            .apply_external_edit("/autorename".to_string());
+        app.chat_widget
+            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let event = loop {
+            if let AppEvent::AutoRenameThread {
+                thread_id: requested,
+            } = event_rx.recv().await.unwrap()
+            {
+                assert_eq!(requested, thread_id);
+                break AppEvent::AutoRenameThread { thread_id };
+            }
+        };
+        app.handle_event(&mut tui, &mut app_server, event).await?;
+        app.handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::AutoRenameThread { thread_id },
+        )
+        .await?;
+        assert_eq!(app.pending_thread_titles.len(), 1);
+        assert_eq!(
+            app.chat_widget.thread_name(),
+            Some("Existing saved title".to_string())
+        );
+    }
     if completed_turn {
         app.enqueue_thread_notification(
             thread_id,
@@ -876,7 +986,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                 .name,
             None
         );
-    } else {
+    } else if !explicit {
         app.chat_widget.apply_external_edit("/rename".to_string());
         app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -909,7 +1019,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         .ok_or_else(|| color_eyre::eyre::eyre!("title event stream ended"))?;
 
         match event {
-            TitleDriveEvent::Ui(event) => {
+            TitleDriveEvent::Ui(mut event) => {
                 if let AppEvent::ThreadTitleStarted { result, .. } = event.as_ref() {
                     temporary_thread_id =
                         Some(result.as_ref().expect("hidden title thread").clone());
@@ -917,6 +1027,29 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                         app.local_settings.auto_rename.max_title_chars = Some(64);
                         app.local_settings.auto_rename.max_title_words =
                             std::num::NonZeroUsize::new(/*n*/ 1);
+                    }
+                }
+                if let AppEvent::GeneratedThreadTitle { result, .. } = event.as_mut() {
+                    match scenario {
+                        TitleScenario::ExplicitExternalRename => {
+                            app_server
+                                .thread_set_name(thread_id, "External title".to_string())
+                                .await?;
+                        }
+                        TitleScenario::ExplicitSwitchedThread => {
+                            let second = app_server.start_thread(&app.config).await?;
+                            app.replace_chat_widget_with_app_server_thread(
+                                &mut tui,
+                                second,
+                                ThreadAttachPresentation::SessionLineage,
+                                /*initial_user_message*/ None,
+                            )
+                            .await?;
+                        }
+                        TitleScenario::ExplicitInvalidTitle => {
+                            *result = Ok("not a structured title".to_string())
+                        }
+                        _ => {}
                     }
                 }
                 generated |= matches!(event.as_ref(), AppEvent::GeneratedThreadTitle { .. });
@@ -943,7 +1076,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             TitleDriveEvent::RequestStarted => {
                 let name = "Keep this title".to_string();
                 let event = match scenario {
-                    TitleScenario::ManualRename => {
+                    TitleScenario::ManualRename | TitleScenario::ExplicitManualRename => {
                         AppEvent::CodexOp(AppCommand::set_thread_name(name))
                     }
                     TitleScenario::OverviewRename => {
@@ -954,7 +1087,12 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                     | TitleScenario::CompletedTurn
                     | TitleScenario::CompletedTurnUserMessage
                     | TitleScenario::Disabled
-                    | TitleScenario::Suggestion => unreachable!(),
+                    | TitleScenario::Suggestion
+                    | TitleScenario::ExplicitUserMessage
+                    | TitleScenario::ExplicitConversation
+                    | TitleScenario::ExplicitExternalRename
+                    | TitleScenario::ExplicitSwitchedThread
+                    | TitleScenario::ExplicitInvalidTitle => unreachable!(),
                 };
                 app.handle_event(&mut tui, &mut app_server, event).await?;
                 assert!(app.pending_thread_titles.is_empty());
@@ -975,8 +1113,15 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         }
     }
 
-    if automatic {
-        let expected_name = if cancel {
+    if automatic || explicit {
+        let expected_name = if matches!(scenario, TitleScenario::ExplicitExternalRename) {
+            "External title"
+        } else if matches!(
+            scenario,
+            TitleScenario::ExplicitSwitchedThread | TitleScenario::ExplicitInvalidTitle
+        ) {
+            "Existing saved title"
+        } else if cancel {
             "Keep this title"
         } else if configured {
             // Word-count guidance does not truncate the three-word generated title.
@@ -984,10 +1129,15 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         } else {
             "Fix login timeout"
         };
-        assert_eq!(
-            app.chat_widget.thread_name(),
-            Some(expected_name.to_string())
-        );
+        if !matches!(
+            scenario,
+            TitleScenario::ExplicitSwitchedThread | TitleScenario::ExplicitExternalRename
+        ) {
+            assert_eq!(
+                app.chat_widget.thread_name(),
+                Some(expected_name.to_string())
+            );
+        }
         assert_eq!(
             app_server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -1020,6 +1170,25 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             .contains("Fix the login timeout")
     );
 
+    if explicit {
+        assert!(!app.automatic_thread_titles.contains_key(&thread_id));
+        app.local_settings.auto_rename.enabled = true;
+        if !matches!(scenario, TitleScenario::ExplicitSwitchedThread) {
+            let completion = title_completion_event(
+                &mut app,
+                thread_id,
+                "after-manual-name",
+                TurnStatus::Completed,
+                Some("Later request"),
+            )
+            .await?;
+            assert!(
+                app.automatic_thread_title_prompt(&completion)
+                    .await
+                    .is_none()
+            );
+        }
+    }
     if configured {
         let body = request.body_json();
         assert_eq!(body["model"], "gpt-5.1");
@@ -1034,8 +1203,25 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         assert!(prompt.contains("Name the concrete authentication problem"));
         assert_eq!(
             prompt.contains("Auth retries cause the timeout"),
-            matches!(scenario, TitleScenario::CompletedTurn)
+            matches!(
+                scenario,
+                TitleScenario::CompletedTurn
+                    | TitleScenario::ExplicitConversation
+                    | TitleScenario::ExplicitManualRename
+                    | TitleScenario::ExplicitExternalRename
+                    | TitleScenario::ExplicitSwitchedThread
+                    | TitleScenario::ExplicitInvalidTitle
+            )
         );
+        if explicit {
+            assert!(!prompt.contains("Checking unrelated files"));
+            assert!(!prompt.contains("Ignore this editor context"));
+            assert!(prompt.len() < 9500);
+            assert_eq!(
+                prompt.contains("<message role=\""),
+                !matches!(scenario, TitleScenario::ExplicitUserMessage)
+            );
+        }
     }
     app_server.shutdown().await?;
     Ok(())
@@ -1051,64 +1237,68 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         .await?;
     let hidden = app_server.start_thread(&app.config).await?;
     let temporary_thread_id = hidden.session.thread_id;
-    let cancellation = CancellationToken::new();
-    let destination = ThreadTitleDestination::Automatic;
-    app.pending_thread_titles
-        .insert((thread_id, destination), cancellation.clone());
-    app.sync_thread_title_progress();
-
-    app.try_submit_active_thread_op_via_app_server(
-        &mut app_server,
-        thread_id,
-        &AppCommand::set_thread_name("Keep this title".to_string()),
-    )
-    .await?;
-    assert!(cancellation.is_cancelled());
-    assert!(app.pending_thread_titles.is_empty());
-
-    // A canceled producer must not clear a replacement request or launch its hidden turn.
-    let replacement = CancellationToken::new();
-    app.pending_thread_titles
-        .insert((thread_id, destination), replacement.clone());
-    app.on_thread_title_started(
-        &app_server,
-        thread_id,
-        destination,
-        "prompt".to_string(),
-        /*effort*/ None,
-        THREAD_TITLE_MAX_CHARS,
-        Default::default(),
-        Ok(temporary_thread_id.to_string()),
-        cancellation.clone(),
-    );
-    assert!(app.temporary_structured_requests.is_empty());
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.handle_event(
-        &mut tui,
-        &mut app_server,
-        AppEvent::GeneratedThreadTitle {
-            auto_rename: Default::default(),
-            max_title_chars: THREAD_TITLE_MAX_CHARS,
-            cancellation,
-            thread_id,
-            temporary_thread_id,
-            destination,
-            result: Ok(r#"{"title":"Late automatic title"}"#.to_string()),
-        },
-    )
-    .await?;
-    assert!(
+    for destination in [
+        ThreadTitleDestination::Automatic,
+        ThreadTitleDestination::ExplicitAutoRename,
+    ] {
+        let cancellation = CancellationToken::new();
         app.pending_thread_titles
-            .contains_key(&(thread_id, destination))
-    );
-    assert!(!replacement.is_cancelled());
-    assert_eq!(
-        app_server
-            .thread_read(thread_id, /*include_turns*/ false)
-            .await?
-            .name,
-        Some("Keep this title".to_string()),
-    );
+            .insert((thread_id, destination), cancellation.clone());
+        app.sync_thread_title_progress();
+
+        app.try_submit_active_thread_op_via_app_server(
+            &mut app_server,
+            thread_id,
+            &AppCommand::set_thread_name("Keep this title".to_string()),
+        )
+        .await?;
+        assert!(cancellation.is_cancelled());
+        assert!(app.pending_thread_titles.is_empty());
+
+        // A canceled producer must not clear a replacement request or launch its hidden turn.
+        let replacement = CancellationToken::new();
+        app.pending_thread_titles
+            .insert((thread_id, destination), replacement.clone());
+        app.on_thread_title_started(
+            &app_server,
+            thread_id,
+            destination,
+            "prompt".to_string(),
+            /*effort*/ None,
+            THREAD_TITLE_MAX_CHARS,
+            Default::default(),
+            Ok(temporary_thread_id.to_string()),
+            cancellation.clone(),
+        );
+        assert!(app.temporary_structured_requests.is_empty());
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::GeneratedThreadTitle {
+                auto_rename: Default::default(),
+                max_title_chars: THREAD_TITLE_MAX_CHARS,
+                cancellation,
+                thread_id,
+                temporary_thread_id,
+                destination,
+                result: Ok(r#"{"title":"Late automatic title"}"#.to_string()),
+            },
+        )
+        .await?;
+        assert!(
+            app.pending_thread_titles
+                .contains_key(&(thread_id, destination))
+        );
+        assert!(!replacement.is_cancelled());
+        assert_eq!(
+            app_server
+                .thread_read(thread_id, /*include_turns*/ false)
+                .await?
+                .name,
+            Some("Keep this title".to_string()),
+        );
+    }
     app_server.shutdown().await?;
     Ok(())
 }

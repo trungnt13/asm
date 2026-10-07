@@ -52,8 +52,10 @@ async fn slash_rename_is_rejected_for_side_threads() {
         "Side conversations are ephemeral and cannot be renamed.".to_string(),
     );
 
-    chat.dispatch_command(SlashCommand::Rename);
-    assert_side_rename_rejected(&mut rx, &mut op_rx);
+    for command in [SlashCommand::Rename, SlashCommand::AutoRename] {
+        chat.dispatch_command(command);
+        assert_side_rename_rejected(&mut rx, &mut op_rx);
+    }
 }
 
 #[tokio::test]
