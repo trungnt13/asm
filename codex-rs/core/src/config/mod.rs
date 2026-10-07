@@ -992,6 +992,11 @@ pub struct Config {
     /// User-defined role declarations keyed by role name.
     pub agent_roles: BTreeMap<String, AgentRoleConfig>,
 
+    /// Immutable executor identity for a managed external V2 child.
+    pub external_agent: Option<codex_protocol::ExternalAgentDescriptor>,
+    /// Whether the owning parent is creating or reopening the external conversation.
+    pub external_agent_launch_mode: codex_extension_api::ExternalAgentLaunchMode,
+
     /// Maximum token budget allowed for a goal and default budget for new goals.
     pub max_goal_token_budget: Option<i64>,
 
@@ -4493,6 +4498,8 @@ impl Config {
             agent_default_subagent_reasoning_effort,
             agent_max_depth,
             agent_roles,
+            external_agent: None,
+            external_agent_launch_mode: Default::default(),
             max_goal_token_budget: cfg
                 .goals
                 .as_ref()
