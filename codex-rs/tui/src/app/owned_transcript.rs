@@ -49,7 +49,13 @@ impl App {
             .local_settings
             .copy_on_select(&codex_terminal_detection::terminal_info());
         view.set_keymap_bindings(&self.keymap);
-        view.set_collapse_tool_calls(self.local_settings.tui.collapse_tool_calls);
+        view.set_collapse_tool_calls(
+            self.local_settings.tui.collapse_tool_calls,
+            self.local_settings
+                .tui
+                .collapse_tool_calls_max_lines
+                .map_or(/*default*/ 1, std::num::NonZeroUsize::get),
+        );
         view.set_presentation(view.is_detailed(), chat_widget.history_render_mode());
         let active_key = chat_widget.active_cell_transcript_key();
         let detailed = view.is_detailed();
