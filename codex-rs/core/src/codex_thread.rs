@@ -91,6 +91,8 @@ pub struct ThreadConfigSnapshot {
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,
+    /// Persisted execution identity for an external child runtime.
+    pub external_agent: Option<codex_protocol::ExternalAgentDescriptor>,
     pub model_provider_id: String,
     pub service_tier: Option<String>,
     pub approval_policy: AskForApproval,
