@@ -17,21 +17,20 @@ use codex_extension_api::ExternalAgentLaunch;
 use codex_extension_api::ExternalAgentRuntime;
 use codex_extension_api::ExternalObservation;
 use codex_extension_api::TurnStartPhase;
+use codex_protocol::AgentPath;
 use codex_protocol::ResponseItemId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::PersistContext;
 use tokio_util::sync::CancellationToken;
 
-use crate::agent::api::AgentInput;
-use crate::agent::api::AgentTarget;
-use crate::agent::api::SendRequest;
-use crate::agent::child_config::build_agent_resume_config;
-use crate::agent::types::AgentMessage;
-use crate::agent::types::MessageDeliveryMode;
+use crate::TurnStartOptions;
+use crate::agent_communication::AgentCommunicationContext;
+use crate::agent_communication::AgentCommunicationKind;
 use crate::hook_runtime::inspect_pending_input;
 use crate::hook_runtime::record_additional_contexts;
 use crate::hook_runtime::record_pending_input;
@@ -215,21 +214,34 @@ async fn run_turn(
                 validate_fragment(&message)?;
                 // Consent and permission requests must reach the orchestrator even
                 // when the user is not viewing this child's transcript.
-                if let Some(parent) = turn.session_source.parent_thread_id() {
-                    let resume_config = build_agent_resume_config(&turn).map_err(invalid)?;
-                    if let Err(error) = session
+                if let (Some(parent), Some(child_path)) = (
+                    turn.session_source.parent_thread_id(),
+                    turn.session_source.get_agent_path(),
+                ) && let Some(parent_path) = child_path
+                    .as_str()
+                    .rsplit_once('/')
+                    .and_then(|(parent, _)| AgentPath::try_from(parent).ok())
+                {
+                    let control = session
                         .services
-                        .agent_control
-                        .send(SendRequest {
-                            caller: session.thread_id,
-                            target: AgentTarget::Id(parent),
-                            resume_config,
-                            input: AgentInput::Message {
-                                message: AgentMessage::Plaintext(message.clone()),
-                                mode: MessageDeliveryMode::QueueOnly,
-                            },
-                            start_options: Default::default(),
-                        })
+                        .local_agent_runtime
+                        .control(session.services.agent_control.identity());
+                    if let Err(error) = control
+                        .send_inter_agent_communication(
+                            parent,
+                            InterAgentCommunication::new(
+                                child_path,
+                                parent_path,
+                                Vec::new(),
+                                message.clone(),
+                                /*trigger_turn*/ false,
+                            ),
+                            AgentCommunicationContext::new(
+                                AgentCommunicationKind::Message,
+                                session.thread_id,
+                            ),
+                            TurnStartOptions::default(),
+                        )
                         .await
                     {
                         tracing::warn!(%error, "external runtime notice could not reach its parent");
