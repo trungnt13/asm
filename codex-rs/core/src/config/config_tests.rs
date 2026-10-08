@@ -8717,7 +8717,6 @@ async fn load_config_rejects_missing_agent_role_config_file() -> std::io::Result
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
-                    execution_backend: None,
                     description: Some("Research role".to_string()),
                     config_file: Some(missing_path.abs()),
                     nickname_candidates: None,
@@ -8863,7 +8862,6 @@ async fn agent_role_file_metadata_overrides_config_toml_metadata() -> std::io::R
         &role_config_path,
         r#"
 description = "Role metadata from file"
-execution_backend = "  claude-code  "
 nickname_candidates = ["Hypatia"]
 developer_instructions = "Research carefully"
 model = "gpt-5.2"
@@ -8874,7 +8872,6 @@ model = "gpt-5.2"
         codex_home.path().join(CONFIG_TOML_FILE),
         r#"[agents.researcher]
 description = "Research role from config"
-execution_backend = "config-backend"
 config_file = "./agents/researcher.toml"
 nickname_candidates = ["Noether"]
 "#,
@@ -8892,8 +8889,6 @@ nickname_candidates = ["Noether"]
         .expect("researcher role should load");
     assert_eq!(role.description.as_deref(), Some("Role metadata from file"));
     assert_eq!(role.config_file.as_ref(), Some(&role_config_path));
-    assert_eq!(role.execution_backend.as_deref(), Some("claude-code"));
-    assert_eq!(config.external_agent, None);
     assert_eq!(
         role.nickname_candidates
             .as_ref()
@@ -9737,7 +9732,6 @@ async fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Res
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
-                    execution_backend: None,
                     description: Some("Research role".to_string()),
                     config_file: None,
                     nickname_candidates: Some(vec![
@@ -9784,7 +9778,6 @@ async fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
-                    execution_backend: None,
                     description: Some("Research role".to_string()),
                     config_file: None,
                     nickname_candidates: Some(Vec::new()),
@@ -9825,7 +9818,6 @@ async fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
-                    execution_backend: None,
                     description: Some("Research role".to_string()),
                     config_file: None,
                     nickname_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
@@ -9866,7 +9858,6 @@ async fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io:
             roles: BTreeMap::from([(
                 "researcher".to_string(),
                 AgentRoleToml {
-                    execution_backend: None,
                     description: Some("Research role".to_string()),
                     config_file: None,
                     nickname_candidates: Some(vec!["Agent <One>".to_string()]),

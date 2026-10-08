@@ -2089,7 +2089,6 @@ dependencies = [
  "codex-aws-auth",
  "codex-backend-client",
  "codex-chatgpt",
- "codex-claude-runtime-extension",
  "codex-cloud-config",
  "codex-code-mode",
  "codex-config",
@@ -2502,18 +2501,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "codex-claude-runtime-extension"
-version = "0.162.1-alpha.18.1"
-dependencies = [
- "codex-extension-api",
- "futures",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -3375,7 +3362,6 @@ dependencies = [
  "codex-utils-path-uri",
  "futures",
  "pretty_assertions",
- "serde",
  "serde_json",
  "tokio",
 ]

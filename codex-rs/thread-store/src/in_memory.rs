@@ -180,7 +180,6 @@ mod tests {
                     dynamic_tools: Vec::new(),
                     selected_capability_roots: Vec::new(),
                     multi_agent_version: None,
-                    external_agent: None,
                     history_mode: ThreadHistoryMode::Legacy,
                     history_base: None,
                     subagent_history_start_ordinal: None,
@@ -458,7 +457,6 @@ mod tests {
             dynamic_tools: Vec::new(),
             selected_capability_roots: Vec::new(),
             multi_agent_version: None,
-            external_agent: None,
             history_mode,
             history_base: None,
             subagent_history_start_ordinal: None,
@@ -614,7 +612,6 @@ impl InMemoryThreadStore {
             history_base: params.history_base,
             subagent_history_start_ordinal: params.subagent_history_start_ordinal,
             multi_agent_version: params.multi_agent_version,
-            external_agent: params.external_agent.clone(),
             context_window: Some(SessionContextWindow::new(params.initial_window_id.clone())),
             ..SessionMeta::default()
         };

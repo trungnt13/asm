@@ -40,7 +40,6 @@ use crate::tools::handlers::multi_agents::WaitAgentHandler;
 use crate::tools::handlers::multi_agents_common::DEFAULT_WAIT_TIMEOUT_MS;
 use crate::tools::handlers::multi_agents_common::MAX_WAIT_TIMEOUT_MS;
 use crate::tools::handlers::multi_agents_common::MIN_WAIT_TIMEOUT_MS;
-use crate::tools::handlers::multi_agents_spec::ExternalMessageSupport;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
@@ -1382,7 +1381,6 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
     if collab_tools_enabled(turn_context, context.model_info) {
         if multi_agent_v2_enabled(turn_context) {
             let model_messages = ResolvedModelMessages::from_model(context.model_info);
-            let external_messages = ExternalMessageSupport::from_config(&turn_context.config);
             let spawn_agent_description =
                 model_messages.multi_agent_tool_description_override("spawn_agent");
             let exposure = if turn_context.config.multi_agent_v2.non_code_mode_only {
@@ -1399,7 +1397,6 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 multi_agent_v2_handler(
                     SpawnAgentHandlerV2::new(
                         SpawnAgentToolOptions {
-                            external_messages,
                             available_models: turn_context.available_models.clone(),
                             multi_agent_version: turn_context.multi_agent_version,
                             include_model_catalog_in_spawn_agent_list: turn_context
@@ -1428,36 +1425,26 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     // Spawn composes the selected description with inheritance and usage guidance.
                     /*description_override*/
                     None,
-                    (external_messages == ExternalMessageSupport::Disabled)
-                        .then(|| model_messages.multi_agent_tool_parameters_override("spawn_agent"))
-                        .flatten(),
+                    model_messages.multi_agent_tool_parameters_override("spawn_agent"),
                 ),
                 exposure,
             );
             if !turn_context.config.multi_agent_v2.disable_direct_message {
                 registry.register_trusted_with_exposure(
                     multi_agent_v2_handler(
-                        SendMessageHandlerV2::new(external_messages),
+                        SendMessageHandlerV2,
                         tool_namespace,
                         model_messages.multi_agent_tool_description_override("send_message"),
-                        (external_messages == ExternalMessageSupport::Disabled)
-                            .then(|| {
-                                model_messages.multi_agent_tool_parameters_override("send_message")
-                            })
-                            .flatten(),
+                        model_messages.multi_agent_tool_parameters_override("send_message"),
                     ),
                     exposure,
                 );
                 registry.register_trusted_with_exposure(
                     multi_agent_v2_handler(
-                        FollowupTaskHandlerV2::new(external_messages),
+                        FollowupTaskHandlerV2,
                         tool_namespace,
                         model_messages.multi_agent_tool_description_override("followup_task"),
-                        (external_messages == ExternalMessageSupport::Disabled)
-                            .then(|| {
-                                model_messages.multi_agent_tool_parameters_override("followup_task")
-                            })
-                            .flatten(),
+                        model_messages.multi_agent_tool_parameters_override("followup_task"),
                     ),
                     exposure,
                 );
@@ -1501,7 +1488,6 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
             };
             registry.add_with_exposure(
                 SpawnAgentHandler::new(SpawnAgentToolOptions {
-                    external_messages: Default::default(),
                     available_models: turn_context.available_models.clone(),
                     multi_agent_version: turn_context.multi_agent_version,
                     include_model_catalog_in_spawn_agent_list: turn_context

@@ -1,7 +1,4 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
-
-use crate::ExternalAgentBackend;
 
 use crate::ApprovalReviewContributor;
 use crate::ConfigContributor;
@@ -31,7 +28,6 @@ impl<C: Sync> Default for ExtensionRegistryBuilder<C> {
             registry: ExtensionRegistry {
                 event_sink: Arc::new(NoopExtensionEventSink),
                 turn_start_admission: None,
-                external_agent_backends: BTreeMap::new(),
                 thread_lifecycle_contributors: Vec::new(),
                 turn_lifecycle_contributors: Vec::new(),
                 config_contributors: Vec::new(),
@@ -148,19 +144,6 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
         self.registry.turn_item_contributors.push(contributor);
     }
 
-    /// Registers a trusted backend, rejecting ambiguous duplicate identities.
-    pub fn register_external_agent_backend(
-        &mut self,
-        id: String,
-        backend: Arc<dyn ExternalAgentBackend>,
-    ) -> Result<(), String> {
-        if self.registry.external_agent_backends.contains_key(&id) {
-            return Err(format!("external agent backend already registered: {id}"));
-        }
-        self.registry.external_agent_backends.insert(id, backend);
-        Ok(())
-    }
-
     /// Finishes construction and returns the immutable registry.
     pub fn build(self) -> ExtensionRegistry<C> {
         self.registry
@@ -170,7 +153,6 @@ impl<C: Sync> ExtensionRegistryBuilder<C> {
 /// Immutable typed registry produced after extensions are installed.
 pub struct ExtensionRegistry<C: Sync> {
     event_sink: Arc<dyn ExtensionEventSink>,
-    external_agent_backends: BTreeMap<String, Arc<dyn ExternalAgentBackend>>,
     turn_start_admission: Option<Arc<dyn TurnStartAdmission>>,
     thread_lifecycle_contributors: Vec<Arc<dyn ThreadLifecycleContributor<C>>>,
     turn_lifecycle_contributors: Vec<Arc<dyn TurnLifecycleContributor>>,
@@ -193,7 +175,6 @@ impl<C: Sync> ExtensionRegistry<C> {
         ExtensionRegistryBuilder {
             registry: Self {
                 event_sink: self.event_sink.clone(),
-                external_agent_backends: self.external_agent_backends.clone(),
                 turn_start_admission: self.turn_start_admission.clone(),
                 thread_lifecycle_contributors: self.thread_lifecycle_contributors.clone(),
                 turn_lifecycle_contributors: self.turn_lifecycle_contributors.clone(),
@@ -210,11 +191,6 @@ impl<C: Sync> ExtensionRegistry<C> {
                 approval_review_contributors: self.approval_review_contributors.clone(),
             },
         }
-    }
-
-    /// Returns the explicitly registered executor; missing backends never fall back.
-    pub fn external_agent_backend(&self, id: &str) -> Option<Arc<dyn ExternalAgentBackend>> {
-        self.external_agent_backends.get(id).cloned()
     }
 
     /// Acquires the host's turn-start permit, or an empty permit for ungated hosts.

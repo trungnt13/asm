@@ -459,79 +459,46 @@ impl LocalAgentControl {
                     CodexErr::InvalidRequest(format!("permission_profile is invalid: {err}"))
                 })?;
         }
-        let stored_external =
-            initial_history
-                .get_rollout_items()
-                .iter()
-                .find_map(|item| match item {
-                    codex_history::RolloutItem::SessionMeta(line) => {
-                        line.meta.external_agent.clone()
-                    }
-                    _ => None,
-                });
-        if let Some(external) = stored_external {
-            if crate::agent::external::configured_backend(
-                &config,
-                session_source.get_agent_role().as_deref(),
-            )
-            .map_err(CodexErr::InvalidRequest)?
-            .as_deref()
-                != Some(external.backend_id.as_str())
-            {
-                return Err(CodexErr::InvalidRequest(
-                    "recorded external backend differs from configured role".to_owned(),
-                ));
-            }
-            config.model = Some(external.model.clone());
-            config.external_agent = Some(external);
-            config.external_agent_launch_mode =
-                codex_extension_api::ExternalAgentLaunchMode::Resume;
-            config.model_reasoning_effort = None;
-            config.service_tier = None;
-            crate::agent::external::validate_config(&config).map_err(CodexErr::InvalidRequest)?;
-        } else {
-            config.service_tier = self.root_service_tier();
-            if let Some(model) = stored_model {
-                config.model = Some(model);
-            }
-            if config.model_provider_id != stored_model_provider {
-                config.model_provider = config
-                    .model_providers
-                    .get(&stored_model_provider)
-                    .cloned()
-                    .ok_or_else(|| {
-                        CodexErr::InvalidRequest(format!(
-                            "Model provider `{stored_model_provider}` not found"
-                        ))
-                    })?;
-                config.model_provider_id = stored_model_provider;
-            }
-            if !config.subagent_service_tiers.is_empty() {
-                let model = config.model.as_deref().ok_or_else(|| {
-                    CodexErr::InvalidRequest(
-                        "could not resolve the reloaded child model for service tier selection"
-                            .to_string(),
-                    )
+        config.service_tier = self.root_service_tier();
+        if let Some(model) = stored_model {
+            config.model = Some(model);
+        }
+        if config.model_provider_id != stored_model_provider {
+            config.model_provider = config
+                .model_providers
+                .get(&stored_model_provider)
+                .cloned()
+                .ok_or_else(|| {
+                    CodexErr::InvalidRequest(format!(
+                        "Model provider `{stored_model_provider}` not found"
+                    ))
                 })?;
-                let model_info = state
-                    .models_manager
-                    .get_model_info(model, &config.to_models_manager_config())
-                    .await;
-                let reasoning_effort = config
-                    .model_reasoning_effort
-                    .as_ref()
-                    .or(model_info.default_reasoning_level.as_ref());
-                if matching_subagent_service_tier(&config, &model_info.slug, reasoning_effort)
-                    .is_some()
-                {
-                    config.service_tier = select_subagent_service_tier(
-                        &config,
-                        &model_info,
-                        reasoning_effort,
-                        self.root_service_tier(),
-                    )
-                    .map_err(CodexErr::InvalidRequest)?;
-                }
+            config.model_provider_id = stored_model_provider;
+        }
+        if !config.subagent_service_tiers.is_empty() {
+            let model = config.model.as_deref().ok_or_else(|| {
+                CodexErr::InvalidRequest(
+                    "could not resolve the reloaded child model for service tier selection"
+                        .to_string(),
+                )
+            })?;
+            let model_info = state
+                .models_manager
+                .get_model_info(model, &config.to_models_manager_config())
+                .await;
+            let reasoning_effort = config
+                .model_reasoning_effort
+                .as_ref()
+                .or(model_info.default_reasoning_level.as_ref());
+            if matching_subagent_service_tier(&config, &model_info.slug, reasoning_effort).is_some()
+            {
+                config.service_tier = select_subagent_service_tier(
+                    &config,
+                    &model_info,
+                    reasoning_effort,
+                    self.root_service_tier(),
+                )
+                .map_err(CodexErr::InvalidRequest)?;
             }
         }
         let parent_thread_id = owner_thread_id

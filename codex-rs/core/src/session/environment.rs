@@ -164,34 +164,6 @@ impl Session {
         current: &SessionConfiguration,
         updates: &SessionSettingsUpdate,
     ) -> ConstraintResult<SessionConfiguration> {
-        let settings = &updates.step_settings;
-        if current.original_config_do_not_use.external_agent.is_some()
-            && (settings.model.is_some()
-                || settings.effort.is_some()
-                || settings.collaboration_mode.is_some()
-                || settings.reasoning_summary.is_some()
-                || settings.service_tier.is_some()
-                || settings.personality.is_some()
-                || settings.approval_policy.is_some()
-                || settings.approvals_reviewer.is_some()
-                || updates.service_tier_for_turn.is_some()
-                || updates.environments.is_some()
-                || updates.runtime_workspace_roots.is_some()
-                || updates.profile_workspace_roots.is_some()
-                || updates.sandbox_policy.is_some()
-                || updates.permission_profile.is_some()
-                || updates.active_permission_profile.is_some()
-                || updates.windows_sandbox_level.is_some())
-        {
-            return Err(ConstraintError::InvalidValue {
-                field_name: "external executor settings",
-                candidate: "native model or execution authority settings".to_string(),
-                allowed:
-                    "fixed external runtime configuration; recreate the child to change authority"
-                        .to_string(),
-                requirement_source: codex_config::RequirementSource::Unknown,
-            });
-        }
         let current_environments = &current.environments;
         if let Some(environments) = &updates.environments {
             ensure_configs_stay_owner_provided(current_environments, &environments.environments)?;
@@ -325,28 +297,6 @@ impl Session {
         // waiting for this environment's configuration.
         if inherited && matches!(environments, (None, None)) {
             return Ok(());
-        }
-        let configurations = [environments.0.as_deref(), environments.1.as_deref()];
-        if state
-            .session_configuration
-            .original_config_do_not_use
-            .external_agent
-            .is_some()
-            && configurations
-                .iter()
-                .flatten()
-                .any(|environment| !matches!(environment.config, EnvironmentConfigState::Pending))
-        {
-            // Initial readiness may resolve once. Identical owner retries are
-            // harmless, but a running external worker cannot adopt new authority.
-            if configurations.iter().flatten().all(|environment| {
-                matches!((&environment.config, &result), (EnvironmentConfigState::Ready(current), Ok(next)) if current == next)
-            }) {
-                return Ok(());
-            }
-            return Err(CodexErr::InvalidRequest(
-                "external environment configuration is fixed; stop and recreate the child to change authority".to_string(),
-            ));
         }
         if let Ok(config) = &result {
             validate_environment_config(selection, config)?;
