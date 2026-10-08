@@ -1,0 +1,14 @@
+load("//:defs.bzl", "codex_rust_crate")
+
+codex_rust_crate(
+    name = "claude-runtime",
+    compile_data = [
+        "activity.py",
+        "bridge.py",
+        "channel.py",
+        "instructions.py",
+        "lifecycle.py",
+        "observations.py",
+    ],
+    crate_name = "codex_claude_runtime_extension",
+)
