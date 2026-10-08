@@ -80,9 +80,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `b38942ce7ce73a5cee7981f1f1b6f1a3d2c5a5c0`.
-- Commit date: 2026-10-07.
-- Subject: Preserve diagnostic reasons for MCP user verification failures (#51808).
+- Last incorporated upstream commit: `2fdf047c9631c9ed01a31b62efb7891718a931a8`.
+- Commit date: 2026-10-08.
+- Subject: Fix idle cleanup for disconnected multi-agent v2 children (#52081).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
