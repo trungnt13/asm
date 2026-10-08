@@ -199,32 +199,6 @@ impl AgentControl for LocalAgentControl {
         })
     }
 
-    fn external_agent_descriptor(
-        &self,
-        agent: ThreadId,
-    ) -> BoxFuture<'_, Result<Option<codex_protocol::ExternalAgentDescriptor>>> {
-        Box::pin(async move {
-            self.runtime.ensure_agent_known(agent)?;
-            let state = self.runtime.upgrade()?;
-            if let Ok(thread) = state.get_thread(agent).await {
-                return Ok(thread.config_snapshot().await.external_agent);
-            }
-            let stored = state
-                .read_stored_thread(codex_thread_store::ReadThreadParams {
-                    thread_id: agent,
-                    include_archived: true,
-                    include_history: true,
-                })
-                .await?;
-            Ok(stored.history.and_then(|history| {
-                history.items.into_iter().find_map(|item| match item {
-                    codex_history::RolloutItem::SessionMeta(line) => line.meta.external_agent,
-                    _ => None,
-                })
-            }))
-        })
-    }
-
     fn interrupt(
         &self,
         caller: ThreadId,

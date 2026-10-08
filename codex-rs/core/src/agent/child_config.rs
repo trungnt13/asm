@@ -62,35 +62,6 @@ pub(crate) async fn prepare_agent_spawn_config(
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
     }
-    if let Some(backend) = crate::agent::external::configured_backend(&config, options.role_name)? {
-        if options.version != SpawnConfigVersion::V2 || options.full_history_fork {
-            return Err("external roles require multi-agent V2 with fork_turns=none".to_owned());
-        }
-        if options.model.is_some() || options.reasoning_effort.is_some() {
-            return Err(
-                "external roles select their own model; omit model and reasoning_effort".to_owned(),
-            );
-        }
-        if session
-            .services
-            .extensions
-            .external_agent_backend(&backend)
-            .is_none()
-        {
-            return Err(format!(
-                "external agent backend is not installed: {backend}"
-            ));
-        }
-        // External model identity must come from its role, never from the parent sampler.
-        config.model = None;
-        apply_spawn_agent_role(session, &mut config, options.role_name).await?;
-        apply_spawn_agent_runtime_overrides(&mut config, turn)?;
-        crate::agent::external::select_new(&mut config, backend)?;
-        return Ok(PreparedSpawnConfig {
-            config,
-            role_name: options.role_name.map(str::to_owned),
-        });
-    }
     apply_requested_spawn_agent_model_overrides(
         session,
         step_context,
@@ -170,8 +141,6 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
         config.model_context_window = None;
         config.model_auto_compact_token_limit = None;
     }
-    config.external_agent = None;
-    config.external_agent_launch_mode = Default::default();
     // Preserve activation for history forks without freezing the parent's model-owned prompts.
     // Fresh child startup restores configured preferences from the retained snapshot.
     config.token_budget = turn.configured_token_budget.clone();
