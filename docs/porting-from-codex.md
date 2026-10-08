@@ -303,6 +303,7 @@ Expansion restores original previews in order. Keep failures and approval reques
 ### Compact status line
 
 - Join segments with `·`, without spaces. Use `CtxN%` for used context, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode.
+- Show context-window capacity as only the compact token count, without the `window` suffix, including in `/statusline` previews.
 - Lowercase model labels. Remove `gpt-`. Keep at most the first three letters. Append all version digits without separators: `GPT-6-Astra` → `ast6`, `GPT-6.1-Sol` → `sol61`, `Terra 5.6` → `ter56`. Apply this limit to custom aliases. Names without digits have no version suffix.
 - Keep the first three reasoning-label letters, including model-with-reasoning items: `medium` → `med`, `high` → `hig`, `xhigh` → `xhi`.
 - Apply labels to the footer, `/statusline` preview, and `/subagents` model info. Preserve model IDs, other picker labels, and terminal titles. Remove the space before the agent role only in the footer: `Main[default]`. Preserve paths, roles, colors, order, and single-row truncation.
