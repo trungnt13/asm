@@ -181,7 +181,6 @@ impl ResolvedStepSettings {
 /// instructions are not mistaken for explicit overrides.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModelInfoOverrides {
-    pub(crate) external_model: Option<String>,
     pub(crate) context_window: Option<i64>,
     // Keep model-specific child limits separate from the inherited scalar fallback.
     pub(crate) subagent_context_windows: HashMap<String, i64>,
@@ -193,7 +192,6 @@ pub(crate) struct ModelInfoOverrides {
 impl From<ModelsManagerConfig> for ModelInfoOverrides {
     fn from(config: ModelsManagerConfig) -> Self {
         Self {
-            external_model: None,
             context_window: config.model_context_window,
             subagent_context_windows: HashMap::new(),
             auto_compact_token_limit: config.model_auto_compact_token_limit,
@@ -210,10 +208,6 @@ impl ModelInfoOverrides {
         multi_agent_version: Option<MultiAgentVersion>,
     ) -> Self {
         let mut overrides = Self::from(config.to_models_manager_config());
-        overrides.external_model = config
-            .external_agent
-            .as_ref()
-            .map(|external| external.model.clone());
         if multi_agent_version == Some(MultiAgentVersion::V2)
             && matches!(
                 source,
@@ -223,22 +217,6 @@ impl ModelInfoOverrides {
             overrides.subagent_context_windows = config.subagent_model_context_windows.clone();
         }
         overrides
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn resolve_model(
-        &self,
-        models_manager: &dyn ModelsManager,
-        model: &str,
-        personality: Option<Personality>,
-    ) -> ModelInfo {
-        if let Some(model) = &self.external_model {
-            crate::agent::external::model_info(model)
-        } else {
-            models_manager
-                .get_model_info(model, &self.models_manager_config(model, personality))
-                .await
-        }
     }
 
     pub(crate) fn models_manager_config(
@@ -295,12 +273,10 @@ impl StepSettings {
         models_manager: &dyn ModelsManager,
         overrides: &ModelInfoOverrides,
     ) -> ModelInfo {
-        overrides
-            .resolve_model(
-                models_manager,
-                self.collaboration_mode.model(),
-                self.personality,
-            )
+        let config =
+            overrides.models_manager_config(self.collaboration_mode.model(), self.personality);
+        models_manager
+            .get_model_info(self.collaboration_mode.model(), &config)
             .await
     }
 

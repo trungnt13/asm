@@ -23,60 +23,8 @@ const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
     "Model override for the new agent. Omit unless an explicit override is needed.";
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ExternalMessageSupport {
-    #[default]
-    Disabled,
-    Enabled,
-}
-
-impl ExternalMessageSupport {
-    pub(crate) fn from_config(config: &crate::config::Config) -> Self {
-        if config
-            .agent_roles
-            .values()
-            .any(|role| role.execution_backend.is_some())
-        {
-            Self::Enabled
-        } else {
-            Self::Disabled
-        }
-    }
-}
-
-pub(crate) fn with_external_message(
-    mut spec: ToolSpec,
-    support: ExternalMessageSupport,
-) -> ToolSpec {
-    if support == ExternalMessageSupport::Enabled
-        && let ToolSpec::Function(tool) = &mut spec
-        && let Some(properties) = &mut tool.parameters.properties
-    {
-        properties.insert(
-            "external_message".to_string(),
-            JsonSchema::string(Some(
-                "Plaintext message for a configured external-runtime agent only. Use exactly one of message or external_message; native agents require message.".to_string(),
-            )),
-        );
-        if let Some(required) = &mut tool.parameters.required {
-            required.retain(|name| name != "message");
-        }
-        tool.parameters.one_of = Some(
-            ["message", "external_message"]
-                .into_iter()
-                .map(|name| JsonSchema {
-                    required: Some(vec![name.to_string()]),
-                    ..Default::default()
-                })
-                .collect(),
-        );
-    }
-    spec
-}
-
 #[derive(Debug, Clone)]
 pub struct SpawnAgentToolOptions {
-    pub external_messages: ExternalMessageSupport,
     pub available_models: Vec<ModelPreset>,
     pub agent_type_description: String,
     pub expose_agent_type: bool,
@@ -91,7 +39,6 @@ pub struct SpawnAgentToolOptions {
 impl Default for SpawnAgentToolOptions {
     fn default() -> Self {
         Self {
-            external_messages: ExternalMessageSupport::Disabled,
             available_models: Vec::new(),
             agent_type_description: String::new(),
             expose_agent_type: true,
@@ -196,33 +143,29 @@ pub fn create_spawn_agent_tool_v2(
         )),
     );
 
-    with_external_message(
-        ToolSpec::Function(ResponsesApiTool {
-            name: "spawn_agent".to_string(),
-            description: spawn_agent_tool_description_v2(
-                available_models_description.as_deref(),
-                options.include_model_catalog_in_spawn_agent_list
-                    && options.model_catalog_in_context,
-                options
-                    .expose_spawn_agent_model_overrides
-                    .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
-                inherited_model_guidance,
-                options.usage_hint_text,
-                description_override,
-            ),
-            strict: false,
-            defer_loading: None,
-            parameters: JsonSchema::object(
-                properties,
-                Some(vec!["task_name".to_string(), "message".to_string()]),
-                Some(false.into()),
-            ),
-            output_schema: Some(
-                spawn_agent_output_schema_v2(options.hide_agent_type_model_reasoning).into(),
-            ),
-        }),
-        options.external_messages,
-    )
+    ToolSpec::Function(ResponsesApiTool {
+        name: "spawn_agent".to_string(),
+        description: spawn_agent_tool_description_v2(
+            available_models_description.as_deref(),
+            options.include_model_catalog_in_spawn_agent_list && options.model_catalog_in_context,
+            options
+                .expose_spawn_agent_model_overrides
+                .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
+            inherited_model_guidance,
+            options.usage_hint_text,
+            description_override,
+        ),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::object(
+            properties,
+            Some(vec!["task_name".to_string(), "message".to_string()]),
+            Some(false.into()),
+        ),
+        output_schema: Some(
+            spawn_agent_output_schema_v2(options.hide_agent_type_model_reasoning).into(),
+        ),
+    })
 }
 
 pub fn create_send_input_tool_v1() -> ToolSpec {

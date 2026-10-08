@@ -15,8 +15,6 @@ pub struct AgentRoleConfig {
     pub config_file: Option<PathBuf>,
     /// Candidate nicknames for agents spawned with this role.
     pub nickname_candidates: Option<Vec<String>>,
-    /// Execution backend identifier carried by role metadata.
-    pub execution_backend: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, Default, PartialEq)]
@@ -25,7 +23,6 @@ struct RawAgentRoleFileToml {
     name: Option<String>,
     description: Option<String>,
     nickname_candidates: Option<Vec<String>>,
-    execution_backend: Option<String>,
     #[serde(flatten)]
     config: ConfigToml,
 }
@@ -35,7 +32,6 @@ pub struct ResolvedAgentRoleFile {
     pub role_name: String,
     pub description: Option<String>,
     pub nickname_candidates: Option<Vec<String>>,
-    pub execution_backend: Option<String>,
     pub config: TomlValue,
 }
 
@@ -99,14 +95,6 @@ pub fn parse_agent_role_file_contents(
         parsed.nickname_candidates.as_deref(),
     )?;
 
-    let execution_backend = normalize_agent_role_execution_backend(
-        &format!(
-            "agent role file {}.execution_backend",
-            role_file_label.display()
-        ),
-        parsed.execution_backend.as_deref(),
-    )?;
-
     let mut config = role_file_toml;
     let Some(config_table) = config.as_table_mut() else {
         return Err(std::io::Error::new(
@@ -120,13 +108,11 @@ pub fn parse_agent_role_file_contents(
     config_table.remove("name");
     config_table.remove("description");
     config_table.remove("nickname_candidates");
-    config_table.remove("execution_backend");
 
     Ok(ResolvedAgentRoleFile {
         role_name,
         description,
         nickname_candidates,
-        execution_backend,
         config,
     })
 }
@@ -141,20 +127,6 @@ pub(crate) fn normalize_agent_role_description(
             format!("{field_label} cannot be blank"),
         )),
         Some(description) => Ok(Some(description.to_string())),
-        None => Ok(None),
-    }
-}
-
-pub(crate) fn normalize_agent_role_execution_backend(
-    field_label: &str,
-    execution_backend: Option<&str>,
-) -> std::io::Result<Option<String>> {
-    match execution_backend.map(str::trim) {
-        Some("") => Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("{field_label} cannot be blank"),
-        )),
-        Some(execution_backend) => Ok(Some(execution_backend.to_string())),
         None => Ok(None),
     }
 }

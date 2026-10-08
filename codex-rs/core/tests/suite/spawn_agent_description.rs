@@ -532,7 +532,6 @@ async fn configured_agent_roles_control_spawn_agent_type(
                 config.agent_roles.insert(
                     "researcher".to_string(),
                     AgentRoleConfig {
-                        execution_backend: None,
                         description: Some("Research role".to_string()),
                         config_file: None,
                         nickname_candidates: None,

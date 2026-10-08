@@ -50,7 +50,6 @@ pub(super) async fn create_thread(
                 .collect()
         }))
         .with_multi_agent_version(params.multi_agent_version)
-        .with_external_agent(params.external_agent)
         .with_history_mode(params.history_mode)
         .with_history_base(params.history_base)
         .with_forked_from_ordinal_exclusive(

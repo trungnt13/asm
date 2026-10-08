@@ -823,10 +823,6 @@ pub struct AgentsToml {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AgentRoleToml {
-    /// Execution backend identifier carried by role metadata.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_backend: Option<String>,
-
     /// Human-facing role documentation used in spawn tool guidance.
     /// Required unless supplied by the referenced agent role file.
     pub description: Option<String>,

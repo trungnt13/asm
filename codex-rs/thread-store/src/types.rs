@@ -106,9 +106,6 @@ pub struct CreateThreadParams {
     pub selected_capability_roots: Vec<SelectedCapabilityRoot>,
     /// Multi-agent runtime selected when the thread was created.
     pub multi_agent_version: Option<MultiAgentVersion>,
-    /// Runtime identity persisted with an externally executed child thread.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_agent: Option<codex_protocol::ExternalAgentDescriptor>,
     /// Persisted thread history contract selected when the thread was created.
     pub history_mode: ThreadHistoryMode,
     /// Exclusive prefix of another paginated rollout inherited by this thread.
