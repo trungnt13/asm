@@ -299,6 +299,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     }
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    crate::tasks::external::shutdown(sess).await;
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();
     if let Some(shell_snapshot_prewarm) = shell_snapshot_prewarm {
         shell_snapshot_prewarm.abort();
@@ -486,6 +487,42 @@ pub(super) async fn submission_loop(
             op = ?sub.op,
             "Submission"
         );
+        if sess.get_config().await.external_agent.is_some()
+            && matches!(
+                &sub.op,
+                Op::Compact
+                    | Op::Review { .. }
+                    | Op::RealtimeConversationStart(_)
+                    | Op::RealtimeConversationAttach { .. }
+                    | Op::RealtimeConversationDetach { .. }
+                    | Op::RealtimeConversationAudio(_)
+                    | Op::RealtimeConversationText(_)
+                    | Op::RealtimeConversationSpeech(_)
+                    | Op::RealtimeConversationClose
+                    | Op::RealtimeConversationListVoices
+            )
+        {
+            let message = format!(
+                "{} is unavailable for external-runtime children",
+                sub.op.kind()
+            );
+            if let Op::RealtimeConversationAttach { reply, .. }
+            | Op::RealtimeConversationDetach { reply, .. } = sub.op
+            {
+                let _ = reply.send(Err(CodexErr::InvalidRequest(message)));
+            } else {
+                sess.send_event_raw(Event {
+                    id: sub.id,
+                    msg: EventMsg::Error(ErrorEvent {
+                        misalignment: None,
+                        message,
+                        codex_error_info: Some(CodexErrorInfo::BadRequest),
+                    }),
+                })
+                .await;
+            }
+            continue;
+        }
         let dispatch_span = submission_dispatch_span(&sub);
         let should_exit = async {
             match sub.op {

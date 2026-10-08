@@ -231,6 +231,19 @@ impl Session {
         turn_id: &str,
         update: TurnSettingsUpdate,
     ) -> TurnSettingsUpdateOutcome {
+        if self.get_config().await.external_agent.is_some()
+            && (update.model.is_some()
+                || update.effort.is_some()
+                || update.summary.is_some()
+                || update.service_tier.is_some()
+                || update.approvals_reviewer.is_some()
+                || update.environments.is_some())
+        {
+            return TurnSettingsUpdateOutcome::Rejected {
+                reason: "native model and execution authority settings are fixed for external-runtime children"
+                    .to_string(),
+            };
+        }
         let updates_model_settings = update.model.is_some()
             || update.effort.is_some()
             || update.summary.is_some()

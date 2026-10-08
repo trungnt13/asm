@@ -64,7 +64,9 @@ pub(crate) fn tool_log_payload<'a>(
     payload: &'a ToolPayload,
     source: &ToolCallSource,
 ) -> Cow<'a, str> {
-    if matches!(source, ToolCallSource::DirectPlaintextMessage) {
+    if matches!(source, ToolCallSource::DirectPlaintextMessage)
+        || matches!(payload, ToolPayload::Function { arguments } if serde_json::from_str::<serde_json::Value>(arguments).ok().is_some_and(|args| args.get("external_message").is_some()))
+    {
         return Cow::Borrowed("[plaintext arguments]");
     }
     payload.log_payload()
