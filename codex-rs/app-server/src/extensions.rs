@@ -65,15 +65,6 @@ pub(crate) fn thread_extensions(
         turn_start_admission,
     } = dependencies;
     let mut builder = ExtensionRegistryBuilder::<Config>::with_event_sink(Arc::clone(&event_sink));
-    assert!(
-        builder
-            .register_external_agent_backend(
-                "claude_code".to_owned(),
-                Arc::new(codex_claude_runtime_extension::ClaudeCodeBackend::default()),
-            )
-            .is_ok(),
-        "unique built-in external executor identity"
-    );
     if let Some(admission) = turn_start_admission {
         builder.turn_start_admission(admission);
     }
