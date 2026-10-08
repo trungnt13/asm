@@ -4925,7 +4925,6 @@ async fn open_thread_persistence(session: &mut Session) -> PathBuf {
     let live_thread = LiveThread::create(
         Arc::clone(&session.services.thread_store),
         CreateThreadParams {
-            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -5828,7 +5827,6 @@ enabled = false
     child_config.agent_roles.insert(
         "custom".to_string(),
         crate::config::AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path.to_path_buf()),
             nickname_candidates: None,
@@ -8654,7 +8652,6 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
-            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -8776,7 +8773,6 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
-            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -11715,7 +11711,6 @@ async fn attach_in_memory_thread_store(
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
-            external_agent: None,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
