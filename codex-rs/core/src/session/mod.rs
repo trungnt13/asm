@@ -601,6 +601,19 @@ impl Session {
             git_enrichment_policy,
             windows_sandbox_proxy_settings_mode,
         } = args;
+        let mut config = config;
+        crate::agent::external::restore(&mut config, &conversation_history, &session_source)
+            .map_err(CodexErr::InvalidRequest)?;
+        if let Some(external) = &config.external_agent
+            && extensions
+                .external_agent_backend(&external.backend_id)
+                .is_none()
+        {
+            return Err(CodexErr::InvalidRequest(format!(
+                "external agent backend is not installed: {}",
+                external.backend_id
+            )));
+        }
         let (tx_sub, rx_sub) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = async_channel::unbounded();
 
@@ -687,14 +700,18 @@ impl Session {
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = models_manager
-            .get_default_model(
-                &config.model,
-                allow_provider_model_fallback,
-                refresh_strategy,
-                config.http_client_factory(),
-            )
-            .await;
+        let model = if let Some(external) = &config.external_agent {
+            external.model.clone()
+        } else {
+            models_manager
+                .get_default_model(
+                    &config.model,
+                    allow_provider_model_fallback,
+                    refresh_strategy,
+                    config.http_client_factory(),
+                )
+                .await
+        };
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
@@ -734,7 +751,8 @@ impl Session {
                 .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
             config.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
-        if allow_provider_model_fallback
+        if config.external_agent.is_none()
+            && allow_provider_model_fallback
             && let Some(requested_model) = config.model.as_ref()
             && model != *requested_model
         {
@@ -749,6 +767,11 @@ impl Session {
         let multi_agent_version = config.multi_agent_version_override().or_else(|| {
             resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
         });
+        if config.external_agent.is_some() && multi_agent_version != Some(MultiAgentVersion::V2) {
+            return Err(CodexErr::InvalidRequest(
+                "external executors require multi-agent V2".to_owned(),
+            ));
+        }
         let model_info_overrides =
             ModelInfoOverrides::for_session(&config, &session_source, multi_agent_version);
 
@@ -756,18 +779,15 @@ impl Session {
         // 1. config.base_instructions override
         // 2. conversation history => session_meta.base_instructions
         // 3. rendered instructions_template for current model
-        let model_info = models_manager
-            .get_model_info(
-                model.as_str(),
-                &model_info_overrides.models_manager_config(&model, config.personality),
-            )
+        let model_info = model_info_overrides
+            .resolve_model(models_manager.as_ref(), &model, config.personality)
             .await;
         let auth = auth_manager.auth_cached();
         // Forked subagents keep their parent's activation with the copied history.
         // Fresh children restore configured preferences before applying startup defaults.
         let inherits_token_budget = matches!(&conversation_history, InitialHistory::Forked(_))
             && config.token_budget_startup_config.is_some();
-        if !inherits_token_budget {
+        if config.external_agent.is_none() && !inherits_token_budget {
             Arc::make_mut(&mut config)
                 .prepare_token_budget_for_startup()
                 .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;

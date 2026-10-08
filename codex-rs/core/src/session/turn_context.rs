@@ -782,11 +782,8 @@ impl TurnContext {
             &self.session_source,
             Some(self.multi_agent_version),
         );
-        let model_info = models_manager
-            .get_model_info(
-                model.as_str(),
-                &overrides.models_manager_config(&model, config.personality),
-            )
+        let model_info = overrides
+            .resolve_model(models_manager.as_ref(), &model, config.personality)
             .await;
         let supported_reasoning_levels = model_info
             .supported_reasoning_levels
