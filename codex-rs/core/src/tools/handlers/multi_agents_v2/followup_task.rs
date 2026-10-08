@@ -3,10 +3,15 @@ use super::message_tool::FollowupTaskArgs;
 use super::message_tool::handle_message_string_tool;
 use super::*;
 use crate::agent::types::MessageDeliveryMode;
+use crate::tools::handlers::multi_agents_spec::ExternalMessageSupport;
 use crate::tools::handlers::multi_agents_spec::create_followup_task_tool;
+use crate::tools::handlers::multi_agents_spec::with_external_message;
 use codex_tools::ToolSpec;
 
-pub(crate) struct Handler;
+#[derive(Default)]
+pub(crate) struct Handler {
+    external_messages: ExternalMessageSupport,
+}
 
 impl ToolExecutor<ToolInvocation> for Handler {
     fn tool_name(&self) -> ToolName {
@@ -14,7 +19,7 @@ impl ToolExecutor<ToolInvocation> for Handler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_followup_task_tool()
+        with_external_message(create_followup_task_tool(), self.external_messages)
     }
 
     fn handle<'a>(&'a self, invocation: ToolInvocation) -> codex_tools::ToolExecutorFuture<'a>
@@ -31,6 +36,10 @@ impl ToolExecutor<ToolInvocation> for Handler {
 }
 
 impl Handler {
+    pub(crate) fn new(external_messages: ExternalMessageSupport) -> Self {
+        Self { external_messages }
+    }
+
     async fn handle_call(
         &self,
         invocation: ToolInvocation,
@@ -43,6 +52,7 @@ impl Handler {
             MessageDeliveryMode::TriggerTurn,
             args.target,
             args.message,
+            args.external_message,
             analytics,
         )
         .await
