@@ -164,6 +164,26 @@ impl Session {
         current: &SessionConfiguration,
         updates: &SessionSettingsUpdate,
     ) -> ConstraintResult<SessionConfiguration> {
+        let settings = &updates.step_settings;
+        if current.original_config_do_not_use.external_agent.is_some()
+            && (settings.model.is_some()
+                || settings.effort.is_some()
+                || settings.collaboration_mode.is_some()
+                || settings.reasoning_summary.is_some()
+                || settings.service_tier.is_some()
+                || settings.personality.is_some()
+                || updates.service_tier_for_turn.is_some()
+                || updates.environments.is_some())
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "external executor settings",
+                candidate: "native model or environment settings".to_string(),
+                allowed:
+                    "fixed external runtime configuration; recreate the child to change authority"
+                        .to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         let current_environments = &current.environments;
         if let Some(environments) = &updates.environments {
             ensure_configs_stay_owner_provided(current_environments, &environments.environments)?;
