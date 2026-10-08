@@ -1,4 +1,3 @@
-use codex_protocol::ExternalAgentDescriptor;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::models::BaseInstructions;
@@ -39,8 +38,7 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     .expect("initialize state database");
     let store = LocalThreadStore::new(config, Some(state_db.clone()));
     let thread_id = ThreadId::new();
-    let prompt_cache_key =
-        create_paginated_thread(&store, thread_id, /*external_agent*/ None).await;
+    let prompt_cache_key = create_paginated_thread(&store, thread_id).await;
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
@@ -216,13 +214,7 @@ async fn revert_preserves_resolved_multi_agent_version_in_session_metadata() {
         MultiAgentVersion::Disabled,
     ] {
         let thread_id = ThreadId::new();
-        let external_agent = (version == MultiAgentVersion::V2).then(|| ExternalAgentDescriptor {
-            version: 1,
-            backend_id: "claude-code".to_string(),
-            runtime_session_id: ThreadId::new(),
-            model: "claude-sonnet-4-6".to_string(),
-        });
-        create_paginated_thread(&store, thread_id, external_agent.clone()).await;
+        create_paginated_thread(&store, thread_id).await;
         store
             .append_items(AppendThreadItemsParams {
                 thread_id,
@@ -274,7 +266,6 @@ async fn revert_preserves_resolved_multi_agent_version_in_session_metadata() {
                 .await
                 .expect("read replacement metadata");
             assert_eq!(meta.meta.multi_agent_version, Some(version));
-            assert_eq!(meta.meta.external_agent, external_agent);
         }
     }
 }
@@ -291,11 +282,7 @@ async fn rollout_paths_for_thread(
         .collect()
 }
 
-async fn create_paginated_thread(
-    store: &LocalThreadStore,
-    thread_id: ThreadId,
-    external_agent: Option<ExternalAgentDescriptor>,
-) -> SessionId {
+async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) -> SessionId {
     let prompt_cache_key = ThreadId::new().into();
     store
         .create_thread(CreateThreadParams {
@@ -314,7 +301,6 @@ async fn create_paginated_thread(
             dynamic_tools: Vec::new(),
             selected_capability_roots: Vec::new(),
             multi_agent_version: None,
-            external_agent,
             history_mode: ThreadHistoryMode::Paginated,
             history_base: None,
             subagent_history_start_ordinal: None,
