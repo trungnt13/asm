@@ -302,6 +302,7 @@ impl App {
                     }))
                     .filter(|item| seen.insert(item.id().to_string())),
                 /*settings*/ None,
+                /*previous_title*/ None,
             )
         };
 
@@ -385,6 +386,7 @@ pub(super) fn thread_title_prompt(user_message: &str) -> String {
 pub(super) fn recent_conversation_messages<'a, I>(
     items: I,
     settings: Option<&AutoRenameConfig>,
+    previous_title: Option<&str>,
 ) -> Option<String>
 where
     I: IntoIterator<Item = &'a ThreadItem>,
@@ -457,7 +459,7 @@ where
             THREAD_TITLE_PROMPT_MAX_BYTES
                 .saturating_sub(recent_conversation_thread_title_prompt("").len())
         },
-        super::auto_rename::automatic_context_bytes,
+        |settings| super::auto_rename::automatic_context_bytes(settings, previous_title),
     );
     let markup_size = |messages: &[(&str, String)]| {
         "<conversation>\n".len()
