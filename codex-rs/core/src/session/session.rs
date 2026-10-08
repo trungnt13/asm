@@ -276,7 +276,6 @@ impl SessionConfiguration {
             .map(|config| config.permission_profile.clone())
             .unwrap_or_else(|| self.permission_profile_state.snapshot());
         ThreadConfigSnapshot {
-            external_agent: self.original_config_do_not_use.external_agent.clone(),
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -1047,7 +1046,6 @@ impl Session {
                             prompt_cache_key,
                             thread_id,
                             extra_config: config.extra_config.clone(),
-                            external_agent: config.external_agent.clone(),
                             forked_from_id,
                             parent_thread_id,
                             source: session_source,
@@ -1798,7 +1796,6 @@ impl Session {
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )
-                .with_native_execution_for(&config)
                 .with_executed_tool_calls(executed_tool_calls.clone())
                 .with_restored_history(matches!(
                     &initial_history,
@@ -1947,9 +1944,8 @@ impl Session {
                 &inherited_environments,
                 &session_configuration.environments,
             );
-            if config.external_agent.is_none() {
-                sess.schedule_startup_prewarm(super::startup_prewarm::PrewarmInput::Base).await;
-            }
+            sess.schedule_startup_prewarm(super::startup_prewarm::PrewarmInput::Base)
+                .await;
             let session_start_source = match &initial_history {
                 InitialHistory::Forked(_) if forked_from_id.is_some() => {
                     codex_hooks::SessionStartSource::Fork
