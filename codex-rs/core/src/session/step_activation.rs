@@ -220,16 +220,59 @@ impl Session {
     /// of task kind. Publication does not propagate to child sessions or require
     /// the task to sample; consumers using initial settings remain unchanged.
     ///
-    /// Callers must serialize updates through completion, including model
-    /// resolution, so each sparse patch sees the preceding publication.
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "the final managed-policy check and active settings publication must remain atomic"
-    )]
+    /// Updates share the persistent-settings permit through publication.
+    #[tracing::instrument(skip_all)]
     pub(super) async fn apply_turn_settings(
         &self,
         turn_id: &str,
         update: TurnSettingsUpdate,
+    ) -> TurnSettingsUpdateOutcome {
+        let _guard = super::thread_settings::acquire_persistence_lock(self).await;
+        let manual_reasoning = update.model.is_some() || update.effort.is_some();
+        let outcome = self
+            .apply_turn_settings_locked(turn_id, update, /*expected_task_done*/ None)
+            .await;
+        if manual_reasoning && outcome == TurnSettingsUpdateOutcome::Applied {
+            self.pause_adaptive_reasoning();
+        }
+        outcome
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn apply_adaptive_turn_settings(
+        &self,
+        turn: &TurnContext,
+        expected: &Arc<ResolvedStepSettings>,
+        expected_task_done: &Arc<tokio::sync::Notify>,
+        effort: codex_protocol::openai_models::ReasoningEffort,
+    ) -> TurnSettingsUpdateOutcome {
+        let _guard = super::thread_settings::acquire_persistence_lock(self).await;
+        if self.adaptive_reasoning_paused()
+            || !Arc::ptr_eq(&turn.next_step_settings.load_full(), expected)
+        {
+            return TurnSettingsUpdateOutcome::TargetUnavailable;
+        }
+        self.apply_turn_settings_locked(
+            &turn.sub_id,
+            TurnSettingsUpdate {
+                effort: Some(Some(effort)),
+                ..Default::default()
+            },
+            Some(expected_task_done),
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the final managed-policy check and active settings publication must remain atomic"
+    )]
+    #[tracing::instrument(skip_all)]
+    async fn apply_turn_settings_locked(
+        &self,
+        turn_id: &str,
+        update: TurnSettingsUpdate,
+        expected_task_done: Option<&Arc<tokio::sync::Notify>>,
     ) -> TurnSettingsUpdateOutcome {
         let updates_model_settings = update.model.is_some()
             || update.effort.is_some()
@@ -250,14 +293,17 @@ impl Session {
             let active = self.active_turn.lock().await;
             active.as_ref().and_then(|active| {
                 active.task.as_ref().and_then(|task| {
-                    (task.turn_context.sub_id == turn_id && !task.cancellation_token.is_cancelled())
-                        .then(|| {
-                            (
-                                Arc::clone(&task.turn_context),
-                                Arc::clone(&task.done),
-                                task.turn_context.next_step_settings.load_full(),
-                            )
-                        })
+                    (task.turn_context.sub_id == turn_id
+                        && !task.cancellation_token.is_cancelled()
+                        && expected_task_done
+                            .is_none_or(|expected| Arc::ptr_eq(&task.done, expected)))
+                    .then(|| {
+                        (
+                            Arc::clone(&task.turn_context),
+                            Arc::clone(&task.done),
+                            task.turn_context.next_step_settings.load_full(),
+                        )
+                    })
                 })
             })
         };

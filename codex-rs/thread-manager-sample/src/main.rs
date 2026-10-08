@@ -355,6 +355,7 @@ async fn new_config(
         main_execve_wrapper_exe: None,
         zsh_path: None,
         model_reasoning_effort: None,
+        adaptive_reasoning: Default::default(),
         plan_mode_reasoning_effort: None,
         model_reasoning_summary: None,
         model_catalog: None,

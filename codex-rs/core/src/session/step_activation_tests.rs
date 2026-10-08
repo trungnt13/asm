@@ -165,6 +165,34 @@ async fn instruction_refresh_serializes_reads_and_releases_on_cancellation() {
 #[tokio::test]
 async fn next_step_waits_for_environment_publication_before_capturing() {
     let ActivationFixture { session, turn, .. } = activation_fixture(activation_models()).await;
+    let original = turn.next_step_settings.load_full();
+    let done = {
+        let active = session.active_turn.lock().await;
+        Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
+    };
+    for (target_done, expected) in [
+        (
+            Arc::new(Notify::new()),
+            TurnSettingsUpdateOutcome::TargetUnavailable,
+        ),
+        (Arc::clone(&done), TurnSettingsUpdateOutcome::Applied),
+        (
+            Arc::clone(&done),
+            TurnSettingsUpdateOutcome::TargetUnavailable,
+        ),
+    ] {
+        assert_eq!(
+            session
+                .apply_adaptive_turn_settings(&turn, &original, &target_done, ReasoningEffort::High)
+                .await,
+            expected,
+        );
+    }
+    assert_eq!(
+        turn.next_step_settings.load().reasoning_effort(),
+        Some(&ReasoningEffort::High)
+    );
+    assert!(!session.adaptive_reasoning_paused());
     let next_cwd = turn.config.cwd.join("next-step-environment");
     std::fs::create_dir_all(&next_cwd).expect("create next workspace");
     let next_cwd = codex_utils_path_uri::PathUri::from_abs_path(&next_cwd);
@@ -710,6 +738,17 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         let active = session.active_turn.lock().await;
         Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
     };
+    assert!(session.adaptive_reasoning_paused());
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(&turn, &after.settings, &done, ReasoningEffort::Low)
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    assert!(Arc::ptr_eq(
+        &turn.next_step_settings.load_full(),
+        &after.settings
+    ));
     let completed = done.notified();
     finish.notify_one();
     timeout(Duration::from_secs(/*secs*/ 10), completed)
@@ -834,6 +873,21 @@ async fn delayed_activation_does_not_retarget_a_task(change: TaskChangeDuringLoo
         &expected_inputs,
     ));
     assert_eq!(desired_step_settings(&session).await, desired);
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(
+                &expected_turn,
+                &expected_inputs,
+                &done,
+                ReasoningEffort::High
+            )
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    assert!(Arc::ptr_eq(
+        &expected_turn.next_step_settings.load_full(),
+        &expected_inputs
+    ));
     session.abort_all_tasks(TurnAbortReason::Replaced).await;
 }
 
