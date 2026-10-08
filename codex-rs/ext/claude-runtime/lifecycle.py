@@ -112,6 +112,14 @@ class Worker:
         return writable
 
     def guard_owned_tree(self):
+        # Subreaping adopts exited daemonization helpers as well as live workers.
+        while True:
+            try:
+                child, _ = os.waitpid(-1, os.WNOHANG)
+                if child == 0:
+                    break
+            except ChildProcessError:
+                break
         snapshot = descendants()
         parents = {}
         protected = []
@@ -120,10 +128,11 @@ class Worker:
                 fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
                 if fields[19] != birth:
                     continue
+                if fields[0] == "Z":
+                    continue
                 parents[pid] = int(fields[1])
-                if fields[0] == "Z" or (
-                    pid == getattr(self, "pid", None)
-                    and birth == getattr(self, "pane_birth", None)
+                if pid == getattr(self, "pid", None) and birth == getattr(
+                    self, "pane_birth", None
                 ):
                     continue
                 executable = Path(f"/proc/{pid}/exe").stat()
@@ -227,7 +236,18 @@ class Worker:
                         raise RuntimeError(
                             "Claude session moved outside its owned terminal; handoff is unsupported"
                         )
-                if getattr(self, "worker_alive", False) and self.writable_clients():
+                snapshot = descendants()
+                server_alive = snapshot.get(
+                    getattr(self, "server_pid", None)
+                ) == getattr(self, "server_birth", "")
+                writable = False
+                if server_alive:
+                    try:
+                        writable = self.writable_clients()
+                    except (OSError, subprocess.SubprocessError):
+                        if descendants().get(self.server_pid) == self.server_birth:
+                            raise
+                if writable:
                     raise RuntimeError(
                         "Writable human attachment prevents safe cancellation ownership proof"
                     )
@@ -364,6 +384,7 @@ class Worker:
             + self.instruction_revision
             + ". Apply the complete instructions. "
             + "Then call asm_bridge ack with the channel message_id. Ack confirms receipt, not understanding or task success. "
+            + "Use foreground tools only; background tasks and scheduled work are unsupported. "
             + "The bridge provides no permission approvals.",
             "--resume" if mode == "resume" else "--session-id",
             self.session,
@@ -371,6 +392,8 @@ class Worker:
         environment = os.environ.copy()
         environment.update(
             {
+                "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+                "CLAUDE_CODE_DISABLE_CRON": "1",
                 "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
                 "OTEL_LOGS_EXPORTER": "otlp",
                 "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
@@ -416,6 +439,8 @@ class Worker:
         ):
             raise RuntimeError("tmux server executable identity cannot be established")
         self.pane_birth = snapshot[self.pid]
+        self.server_pid, self.server_birth = server_pid, snapshot[server_pid]
+        self.waiting_for = None
         self.owned_identities = {
             self.pid: self.pane_birth,
             server_pid: snapshot[server_pid],

@@ -4,10 +4,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use codex_extension_api::ExternalAgentEvent;
+use codex_extension_api::ExternalAgentLaunchError;
 use codex_extension_api::ExternalObservation;
 use serde_json::Value;
 use serde_json::json;
 use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
@@ -22,7 +24,7 @@ use uuid::Uuid;
 
 use crate::events::Observations;
 
-type Replies = Arc<Mutex<HashMap<String, oneshot::Sender<Result<(), String>>>>>;
+type Replies = Arc<Mutex<HashMap<String, oneshot::Sender<Result<Value, String>>>>>;
 pub(super) type Exit = watch::Receiver<Option<Result<ExitStatus, String>>>;
 
 struct Write {
@@ -34,6 +36,7 @@ pub(super) struct Commands {
     writes: mpsc::Sender<Write>,
     close: Arc<Notify>,
     replies: Replies,
+    stderr: Arc<Mutex<Vec<u8>>>,
 }
 
 impl Drop for Commands {
@@ -49,12 +52,29 @@ impl Commands {
     ) -> Result<(Arc<Self>, Exit), String> {
         let stdin = child.stdin.take().ok_or("Missing bridge stdin")?;
         let stdout = child.stdout.take().ok_or("Missing bridge stdout")?;
+        let mut stderr = child.stderr.take().ok_or("Missing bridge stderr")?;
+        let diagnostics = Arc::new(Mutex::new(Vec::new()));
+        let stderr_tail = Arc::clone(&diagnostics);
+        tokio::spawn(async move {
+            let mut buffer = [0; 4096];
+            loop {
+                let count = match stderr.read(&mut buffer).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => count,
+                };
+                let mut tail = stderr_tail.lock().await;
+                tail.extend_from_slice(&buffer[..count]);
+                let excess = tail.len().saturating_sub(/*rhs*/ 8192);
+                tail.drain(..excess);
+            }
+        });
         let (writes, receiver) = mpsc::channel(/*buffer*/ 16);
         let close = Arc::new(Notify::new());
         let commands = Arc::new(Self {
             writes,
             close: Arc::clone(&close),
             replies: Arc::new(Mutex::new(HashMap::new())),
+            stderr: diagnostics,
         });
         tokio::spawn(write_commands(stdin, receiver, close));
         tokio::spawn(read_observations(
@@ -75,7 +95,63 @@ impl Commands {
     }
 
     #[tracing::instrument(skip_all)]
+    pub(super) async fn diagnostics(&self) -> String {
+        let tail = self.stderr.lock().await;
+        let text: String = String::from_utf8_lossy(&tail)
+            .chars()
+            .filter(|character| !character.is_control() || *character == '\n')
+            .collect();
+        if text.is_empty() {
+            String::new()
+        } else {
+            format!("; bridge stderr: {text}")
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn launch(&self, payload: Value) -> Result<(), ExternalAgentLaunchError> {
+        let reply = self
+            .request_reply("launch", payload)
+            .await
+            .map_err(ExternalAgentLaunchError::Unsettled)?;
+        if reply.get("ok").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        let error = reply
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Bridge launch failed")
+            .to_owned();
+        Err(
+            if reply.get("settled").and_then(Value::as_bool) == Some(true) {
+                ExternalAgentLaunchError::Rejected(error)
+            } else {
+                ExternalAgentLaunchError::Unsettled(error)
+            },
+        )
+    }
+
+    #[tracing::instrument(skip_all)]
     pub(super) async fn request(&self, op: &str, payload: Value) -> Result<(), String> {
+        let result = self.request_reply(op, payload).await.and_then(|reply| {
+            if reply.get("ok").and_then(Value::as_bool) == Some(true) {
+                Ok(())
+            } else {
+                Err(reply
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Bridge command failed")
+                    .to_owned())
+            }
+        });
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => Err(format!("{error}{}", self.diagnostics().await)),
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn request_reply(&self, op: &str, payload: Value) -> Result<Value, String> {
         let id = Uuid::new_v4().to_string();
         let mut bytes = serde_json::to_vec(&json!({"id": id, "op": op, "payload": payload}))
             .map_err(|error| error.to_string())?;
@@ -171,16 +247,7 @@ async fn read_observations(
         };
         if let Some(id) = value.get("reply_to").and_then(Value::as_str) {
             if let Some(reply) = replies.lock().await.remove(id) {
-                let result = if value.get("ok").and_then(Value::as_bool) == Some(true) {
-                    Ok(())
-                } else {
-                    Err(value
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Bridge command failed")
-                        .to_owned())
-                };
-                let _ = reply.send(result);
+                let _ = reply.send(Ok(value));
             }
         } else if let Ok(event) = serde_json::from_value::<ExternalAgentEvent>(value) {
             closed |= matches!(event.kind, ExternalObservation::Closed);
@@ -231,3 +298,7 @@ pub(super) async fn wait_for_exit(mut exit: Exit) -> Result<ExitStatus, String> 
     .await
     .map_err(|_| "Claude bridge exit not confirmed; settlement unknown".to_owned())?
 }
+
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;
