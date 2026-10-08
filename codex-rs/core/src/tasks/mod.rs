@@ -1,4 +1,5 @@
 mod compact;
+pub(crate) mod external;
 mod lifecycle;
 mod regular;
 mod review;
