@@ -1744,42 +1744,83 @@ async fn root_switch_preserves_vim_line_yank() -> Result<()> {
 
 #[tokio::test]
 async fn root_switch_loads_local_preferences_from_disk() -> Result<()> {
-    // Keep the large setup and root-switch futures off the test thread's stack.
-    let mut app = Box::pin(make_test_app()).await;
-    trust_fixture_folders(&mut app);
-    let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
-        app.chat_widget.config_ref(),
-    ))
-    .await?;
-    let previous = Box::pin(app_server.start_thread(&app.config)).await?;
-    app.enqueue_primary_thread_session(previous.session, previous.turns)
+    for (parallel, running_parent) in [(false, false), (true, false), (true, true)] {
+        // Keep the large setup and root-switch futures off the test thread's stack.
+        let mut app = Box::pin(make_test_app()).await;
+        trust_fixture_folders(&mut app);
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
+            app.chat_widget.config_ref(),
+        ))
         .await?;
-    let target_thread_id = ThreadId::from_string(
-        &app_test_support::create_fake_rollout(
-            app.config.codex_home.as_path(),
-            "2025-01-05T12-00-00",
-            "2025-01-05T12:00:00Z",
-            "Target task",
-            Some(&app.config.model_provider_id),
-            /*git_info*/ None,
-        )
-        .expect("materialize target rollout"),
-    )?;
-    std::fs::write(
-        app.local_settings.user_config_path.as_path(),
-        "[tui]\ntheme = \"dracula\"\nresume_cwd = \"session\"\n[history]\npersistence = \"none\"\n",
-    )?;
-    let config = Box::pin(app.rebuild_config_for_cwd(app.config.cwd.to_path_buf())).await?;
-    let expected = crate::local_settings::LocalSettings::from(&config);
-    let mut tui = crate::tui::test_support::make_test_tui()?;
+        let previous = Box::pin(app_server.start_thread(&app.config)).await?;
+        let previous_root_id = previous.session.thread_id;
+        app.enqueue_primary_thread_session(previous.session, previous.turns)
+            .await?;
+        let target_thread_id = ThreadId::from_string(
+            &app_test_support::create_fake_rollout(
+                app.config.codex_home.as_path(),
+                "2025-01-05T12-00-00",
+                "2025-01-05T12:00:00Z",
+                "Target task",
+                Some(&app.config.model_provider_id),
+                /*git_info*/ None,
+            )
+            .expect("materialize target rollout"),
+        )?;
+        if parallel {
+            let target = Box::pin(app_server.resume_thread(
+                &app.local_settings,
+                app.config.clone(),
+                target_thread_id,
+                crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+            ))
+            .await?;
+            app.side_threads.insert(
+                target_thread_id,
+                super::super::side::SideThreadState::parallel(previous_root_id),
+            );
+            app.ensure_thread_channel(target_thread_id)
+                .store
+                .lock()
+                .await
+                .set_session(target.session, target.turns);
+        }
+        if running_parent {
+            // Exercise background retention without starting a model turn.
+            app.ensure_thread_channel(previous_root_id)
+                .store
+                .lock()
+                .await
+                .active_turn_id = Some("parent-turn".to_string());
+        }
+        std::fs::write(
+            app.local_settings.user_config_path.as_path(),
+            "[tui]\ntheme = \"dracula\"\nresume_cwd = \"session\"\n[history]\npersistence = \"none\"\n",
+        )?;
+        let config = Box::pin(app.rebuild_config_for_cwd(app.config.cwd.to_path_buf())).await?;
+        let expected = crate::local_settings::LocalSettings::from(&config);
+        let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id))
-        .await?;
+        Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id))
+            .await?;
 
-    assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
-    assert_eq!(app.local_settings, expected);
-    assert_eq!(app.chat_widget.local_settings, expected);
-    app_server.shutdown().await?;
+        assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
+        assert_eq!(app.local_settings, expected);
+        assert_eq!(app.chat_widget.local_settings, expected);
+        assert!(app.side_threads.is_empty());
+        assert!(!app.chat_widget.parallel_conversation_active());
+        let response: ThreadUnsubscribeResponse = app_server
+            .request_handle()
+            .request_typed(ClientRequest::ThreadUnsubscribe {
+                request_id: RequestId::String("verify-selected-subscription".to_string()),
+                params: ThreadUnsubscribeParams {
+                    thread_id: target_thread_id.to_string(),
+                },
+            })
+            .await?;
+        assert_eq!(response.status, ThreadUnsubscribeStatus::Unsubscribed);
+        app_server.shutdown().await?;
+    }
     Ok(())
 }
 
