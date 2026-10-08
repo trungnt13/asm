@@ -18,7 +18,8 @@ use crate::tools::context::FunctionToolOutput;
 /// Input for the MultiAgentV2 `send_message` tool.
 pub(crate) struct SendMessageArgs {
     pub(crate) target: String,
-    pub(crate) message: String,
+    pub(crate) message: Option<String>,
+    pub(crate) external_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,7 +27,8 @@ pub(crate) struct SendMessageArgs {
 /// Input for the MultiAgentV2 `followup_task` tool.
 pub(crate) struct FollowupTaskArgs {
     pub(crate) target: String,
-    pub(crate) message: String,
+    pub(crate) message: Option<String>,
+    pub(crate) external_message: Option<String>,
 }
 
 pub(super) fn message_content(message: String) -> Result<String, FunctionCallError> {
@@ -38,15 +40,48 @@ pub(super) fn message_content(message: String) -> Result<String, FunctionCallErr
     Ok(message)
 }
 
+pub(super) fn message_from_arguments(
+    message: Option<String>,
+    external_message: Option<String>,
+    external_backend: Option<&str>,
+    source: &crate::tools::context::ToolCallSource,
+) -> Result<crate::agent::types::AgentMessage, FunctionCallError> {
+    match (message, external_message, external_backend) {
+        (None, Some(message), Some(_)) => {
+            let message = message_content(message)?;
+            // A byte cap bounds even adversarial text below the context-item token ceiling.
+            if message.len() > 8192 {
+                return Err(FunctionCallError::RespondToModel(
+                    "external_message must not exceed 8192 bytes".to_string(),
+                ));
+            }
+            Ok(crate::agent::types::AgentMessage::Plaintext(message))
+        }
+        (Some(message), None, None) => {
+            Ok(agent_message_from_tool(message_content(message)?, source))
+        }
+        (None, Some(_), None) => Err(FunctionCallError::RespondToModel(
+            "external_message requires a configured external-runtime agent".to_string(),
+        )),
+        (Some(_), None, Some(_)) => Err(FunctionCallError::RespondToModel(
+            "External-runtime agents require external_message, not encrypted message".to_string(),
+        )),
+        (Some(_), Some(_), _) | (None, None, _) => Err(FunctionCallError::RespondToModel(
+            "Provide exactly one of message or external_message".to_string(),
+        )),
+    }
+}
+
 /// Handles the shared MultiAgentV2 message flow for both `send_message` and `followup_task`.
 pub(super) async fn handle_message_string_tool(
     invocation: ToolInvocation,
     mode: MessageDeliveryMode,
     target: String,
-    message: String,
+    message: Option<String>,
+    external_message: Option<String>,
     analytics: &mut ToolCallAnalytics,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
-    let message = message_content(message)?;
+    let message = message.map(message_content).transpose()?;
     let ToolInvocation {
         session,
         turn,
@@ -55,6 +90,24 @@ pub(super) async fn handle_message_string_tool(
         ..
     } = invocation;
     let receiver_thread_id = resolve_agent_target(&session, &turn, &target).await?;
+    let external_descriptor = if external_message.is_some() {
+        session
+            .services
+            .agent_control
+            .external_agent_descriptor(receiver_thread_id)
+            .await
+            .map_err(|err| collab_v2_agent_error(receiver_thread_id, err))?
+    } else {
+        None
+    };
+    let message = message_from_arguments(
+        message,
+        external_message,
+        external_descriptor
+            .as_ref()
+            .map(|descriptor| descriptor.backend_id.as_str()),
+        &source,
+    )?;
     analytics.set_receiver(receiver_thread_id);
     let resume_config =
         build_agent_resume_config(&turn).map_err(FunctionCallError::RespondToModel)?;
@@ -65,10 +118,7 @@ pub(super) async fn handle_message_string_tool(
             caller: session.thread_id,
             target: AgentTarget::Id(receiver_thread_id),
             resume_config,
-            input: AgentInput::Message {
-                message: agent_message_from_tool(message, &source),
-                mode,
-            },
+            input: AgentInput::Message { message, mode },
             start_options: TurnStartOptions {
                 parent_turn_id: (mode == MessageDeliveryMode::TriggerTurn)
                     .then(|| turn.sub_id.clone()),
