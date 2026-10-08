@@ -81,19 +81,6 @@ pub trait AgentControl: Send + Sync {
     /// authority. Success makes the child available for attachment through its thread manager.
     fn ensure_child_loaded(&self, parent: ThreadId, child: ThreadId) -> BoxFuture<'_, Result<()>>;
 
-    /// Reads immutable executor identity without starting a recipient turn.
-    fn external_agent_descriptor(
-        &self,
-        agent: ThreadId,
-    ) -> BoxFuture<'_, Result<Option<codex_protocol::ExternalAgentDescriptor>>> {
-        let _ = agent;
-        Box::pin(async {
-            Err(codex_protocol::error::CodexErr::InvalidRequest(
-                "external executor inspection is unsupported by this agent controller".to_owned(),
-            ))
-        })
-    }
-
     /// Stop current work and return the pre-interrupt snapshot. V2 rejects root/self
     /// targets and tolerates known unloaded agents; other modes retain direct-ID interruption.
     fn interrupt(
