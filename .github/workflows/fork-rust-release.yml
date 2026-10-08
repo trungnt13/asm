@@ -193,7 +193,7 @@ jobs:
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
           # A resumed immutable candidate retains its original package contract.
-          if [[ "$TARGET" == *-linux-gnu ]] && grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+          if [[ "$TARGET" == *-linux-gnu ]] && grep -Fq 'codex-package.json' "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py"; then
             cargo build --locked --release --target "$TARGET" --bin bwrap
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
             export CODEX_BWRAP_SHA256
@@ -211,14 +211,17 @@ jobs:
           release_dir="target/${TARGET}/release"
           archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
           # This selects the pinned candidate's contract, never a validation fallback.
-          if grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+          if grep -Fq 'codex-package.json' "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py"; then
             # macOS Bash 3.2 treats empty arrays as unset under nounset.
             resource_args=(--force)
+            if grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+              resource_args+=(--no-zsh)
+            fi
             if [[ "$TARGET" == *-linux-gnu ]]; then
               resource_args+=(--bwrap-bin "${release_dir}/bwrap")
             fi
             CODEX_REPO_ROOT="$GITHUB_WORKSPACE" python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" \
-              --target "$TARGET" --cargo-profile release --no-zsh \
+              --target "$TARGET" --cargo-profile release \
               --entrypoint-bin "${release_dir}/codex" \
               --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
               --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
