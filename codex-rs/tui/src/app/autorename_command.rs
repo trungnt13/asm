@@ -51,7 +51,7 @@ impl App {
                 .filter_map(user_message_text)
                 .find(|text| !text.trim().is_empty()),
             AutoRenameContext::RecentConversation => {
-                recent_conversation_messages(items, Some(settings))
+                recent_conversation_messages(items, Some(settings), /*previous_title*/ None)
             }
         };
         let Some(source) = source else {
@@ -59,7 +59,7 @@ impl App {
                 .add_error_message("There is no conversation text to name.".to_string());
             return;
         };
-        let prompt = automatic_title_prompt(settings, &source);
+        let prompt = automatic_title_prompt(settings, &source, /*previous_title*/ None);
         // An explicit naming request supersedes background ownership and other suggestions.
         self.cancel_thread_title_generation(thread_id);
         self.generate_thread_title(
