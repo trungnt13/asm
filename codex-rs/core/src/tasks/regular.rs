@@ -44,6 +44,9 @@ impl SessionTask for RegularTask {
         input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
+        if ctx.config.external_agent.is_some() {
+            return super::external::run(sess, ctx, input, cancellation_token).await;
+        }
         let run_turn_span = trace_span!("run_turn");
         // Regular turns emit `TurnStarted` inline so first-turn lifecycle does
         // not wait on startup prewarm resolution.
@@ -121,6 +124,12 @@ impl SessionTask for RegularTask {
                 return Ok(last_agent_message);
             }
             next_input = Vec::new();
+        }
+    }
+
+    async fn abort(&self, session: Arc<Session>, ctx: Arc<TurnContext>) {
+        if ctx.config.external_agent.is_some() {
+            let _ = super::external::interrupt(session.as_ref(), ctx.as_ref()).await;
         }
     }
 }
