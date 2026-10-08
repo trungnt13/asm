@@ -998,10 +998,20 @@ async fn selected_user_config_file_layers_over_base_user_config() {
         r#"
 model = "gpt-main"
 approval_policy = "on-request"
+[adaptive_reasoning]
+min_effort = "minimal"
+max_effort = "max"
 "#,
     )
     .expect("write default user config");
-    std::fs::write(&selected_config, r#"model = "gpt-work""#).expect("write selected user config");
+    std::fs::write(
+        &selected_config,
+        r#"model = "gpt-work"
+[adaptive_reasoning]
+max_effort = "high"
+"#,
+    )
+    .expect("write selected user config");
 
     let mut overrides = LoaderOverrides::with_managed_config_path_for_tests(managed_path);
     overrides.user_config_path =
@@ -1055,6 +1065,18 @@ approval_policy = "on-request"
             .get("approval_policy")
             .and_then(TomlValue::as_str),
         Some("on-request")
+    );
+    let effective: codex_config::config_toml::ConfigToml = layers
+        .effective_config()
+        .try_into()
+        .expect("merged profile config should deserialize");
+    assert_eq!(
+        effective.adaptive_reasoning,
+        Some(codex_config::AdaptiveReasoningConfig {
+            min_effort: codex_protocol::openai_models::ReasoningEffort::Minimal,
+            max_effort: codex_protocol::openai_models::ReasoningEffort::High,
+            ..Default::default()
+        })
     );
 }
 

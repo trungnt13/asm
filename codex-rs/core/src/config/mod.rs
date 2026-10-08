@@ -1061,6 +1061,7 @@ pub struct Config {
     /// Value to use for `reasoning.effort` when making a request using the
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
+    pub adaptive_reasoning: codex_config::AdaptiveReasoningConfig,
     /// Optional Plan-mode-specific reasoning effort override used by the TUI.
     ///
     /// When unset, Plan mode uses the built-in Plan preset default (currently
@@ -3530,6 +3531,19 @@ impl Config {
             feature_requirements,
             &mut startup_warnings,
         )?;
+        let adaptive_reasoning = cfg.adaptive_reasoning.clone().unwrap_or_default();
+        adaptive_reasoning
+            .validate()
+            .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
+        if adaptive_reasoning.enabled
+            && (!features.enabled(Feature::ReasoningEffortOverride)
+                || !features.enabled(Feature::StepModelSwitching))
+        {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "adaptive_reasoning.enabled requires features.reasoning_effort_override and features.step_model_switching",
+            ));
+        }
         let mcp_enterprise_managed_auth = McpEnterpriseManagedAuthConfig::resolve(
             &config_layer_stack,
             cfg.mcp_enterprise_managed_auth.as_ref(),
@@ -4632,6 +4646,7 @@ impl Config {
                 .and_then(|auto_review| auto_review.circuit_break_action)
                 .unwrap_or_default(),
             model_reasoning_effort: cfg.model_reasoning_effort,
+            adaptive_reasoning,
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_catalog,
