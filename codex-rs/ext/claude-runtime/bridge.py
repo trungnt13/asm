@@ -14,11 +14,12 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-LIMIT = 256 * 1024
 from activity import Activity
 from instructions import Instructions
 from lifecycle import Worker, become_subreaper
-from observations import Observations, TEXT_LIMIT, clipped
+from observations import Observations, clipped
+
+LIMIT = 256 * 1024
 
 
 def exchange(config, path, payload):
@@ -52,7 +53,7 @@ class Bridge(Worker, Observations, Activity, Instructions):
         self.idle_since = None
         self.idle_without_stop_since = None
         self.activity_unavailable_since = None
-        self.background_wait = False
+        self.waiting_for = None
         self.unresolved_tools = {}
         self.running = True
         self.last_poll = 0
@@ -248,7 +249,6 @@ class Bridge(Worker, Observations, Activity, Instructions):
             self.unresolved_tools.clear()
             self.idle_without_stop_since = None
             self.activity_unavailable_since = None
-            self.background_wait = False
             self.task_deadlines.clear()
             self.pending_prompts.clear()
             while not self.outbound.empty():
@@ -409,6 +409,7 @@ def main():
                     "reply_to": envelope["id"],
                     "ok": False,
                     "error": "Claude subscription worker refuses provider/API/token environment overrides",
+                    "settled": True,
                 }
             ),
             flush=True,
@@ -416,10 +417,14 @@ def main():
         return
     bridge = Bridge.__new__(Bridge)
     startup_error = None
+    launched = False
+    settled = True
+    cleanup_errors = []
     try:
         become_subreaper()
         bridge.__init__(envelope)
         print(json.dumps({"reply_to": envelope["id"], "ok": True}), flush=True)
+        launched = True
         bridge.run()
     except (
         ValueError,
@@ -431,28 +436,48 @@ def main():
     ) as error:
         startup_error = str(error)
     finally:
-        if hasattr(bridge, "owns_record"):
-            bridge.settle_worker()
-        else:
-            from lifecycle import descendants
+        try:
+            if getattr(bridge, "owns_record", False):
+                bridge.settle_worker()
+            else:
+                from lifecycle import descendants
 
-            if descendants():
-                raise RuntimeError(
-                    "Startup child ownership unavailable; refusing cleanup signals"
-                )
-        if hasattr(bridge, "http"):
-            bridge.http.shutdown()
-        if hasattr(bridge, "database"):
-            bridge.database.close()
-        if hasattr(bridge, "lease"):
-            bridge.lease.close()
-    if startup_error is not None:
-        print(
-            json.dumps(
-                {"reply_to": envelope["id"], "ok": False, "error": startup_error}
-            ),
-            flush=True,
-        )
+                if descendants():
+                    raise RuntimeError(
+                        "Startup child ownership unavailable; refusing cleanup signals"
+                    )
+        except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as error:
+            settled = False
+            cleanup_errors.append("Execution cleanup failed: " + str(error))
+        for name in ("http", "database", "lease"):
+            resource = getattr(bridge, name, None)
+            if resource is not None:
+                try:
+                    if name == "http":
+                        resource.shutdown()
+                    else:
+                        resource.close()
+                except (OSError, sqlite3.Error, RuntimeError) as error:
+                    cleanup_errors.append(name + " close failed: " + str(error))
+    errors = ([startup_error] if startup_error is not None else []) + cleanup_errors
+    if errors:
+        error = clipped("; ".join(errors))
+        if launched:
+            print(error, file=sys.stderr, flush=True)
+        else:
+            print(
+                json.dumps(
+                    {
+                        "reply_to": envelope["id"],
+                        "ok": False,
+                        "error": error,
+                        "settled": settled,
+                    }
+                ),
+                flush=True,
+            )
+    if not settled:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
