@@ -235,10 +235,12 @@ impl Session {
             && (update.model.is_some()
                 || update.effort.is_some()
                 || update.summary.is_some()
-                || update.service_tier.is_some())
+                || update.service_tier.is_some()
+                || update.approvals_reviewer.is_some()
+                || update.environments.is_some())
         {
             return TurnSettingsUpdateOutcome::Rejected {
-                reason: "native model settings are unavailable for external-runtime children"
+                reason: "native model and execution authority settings are fixed for external-runtime children"
                     .to_string(),
             };
         }
