@@ -1,6 +1,7 @@
 """Delivery and response-boundary checks for the owned Claude incarnation."""
 
 import json
+import shlex
 import subprocess
 import time
 
@@ -30,7 +31,6 @@ class Activity:
                 )
                 self.idle_without_stop_since = None
                 self.activity_unavailable_since = None
-                self.background_wait = False
                 self.task_deadlines[identifier] = time.monotonic() + 300
                 self.outbound.put_nowait(message)
                 self.database.execute(
@@ -59,7 +59,6 @@ class Activity:
         self.unresolved_tools.clear()
         self.idle_without_stop_since = None
         self.activity_unavailable_since = None
-        self.background_wait = False
         while not self.outbound.empty():
             self.outbound.get_nowait()
         self.emit("failed", reason, turn=turn)
@@ -134,6 +133,22 @@ class Activity:
             "busy",
             "waiting",
         )
+        waiting_for = (
+            clipped(worker.get("waitingFor") or "input needed")
+            if known_activity and worker["status"] == "waiting"
+            else None
+        )
+        if waiting_for and waiting_for != self.waiting_for:
+            self.emit(
+                "notice",
+                "Claude needs human input: "
+                + waiting_for
+                + ". Attach and decide in Claude, then detach: "
+                + shlex.join(
+                    [self.tmux, "-L", self.server_name, "attach", "-t", "worker"]
+                ),
+            )
+        self.waiting_for = waiting_for
         if self.active and self.prompt and not known_activity:
             if self.activity_unavailable_since is None:
                 self.activity_unavailable_since = now
@@ -146,13 +161,7 @@ class Activity:
         else:
             self.activity_unavailable_since = None
         idle = known_activity and worker.get("status") == "idle"
-        if (
-            self.active
-            and self.prompt
-            and idle
-            and not self.stop
-            and not self.background_wait
-        ):
+        if self.active and self.prompt and idle and not self.stop:
             if self.idle_without_stop_since is None:
                 self.idle_without_stop_since = now
             elif now - self.idle_without_stop_since >= 30:

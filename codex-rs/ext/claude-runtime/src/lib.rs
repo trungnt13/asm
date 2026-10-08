@@ -10,6 +10,9 @@ use std::sync::Arc;
 
 use codex_extension_api::ExternalAgentBackend;
 use codex_extension_api::ExternalAgentLaunch;
+use codex_extension_api::ExternalAgentLaunchError;
+use codex_extension_api::ExternalAgentLaunchError::Rejected;
+use codex_extension_api::ExternalAgentLaunchError::Unsettled;
 use codex_extension_api::ExternalAgentRuntime;
 use futures::future::BoxFuture;
 use serde_json::json;
@@ -56,7 +59,7 @@ impl ExternalAgentBackend for ClaudeCodeBackend {
     fn open(
         &self,
         launch: ExternalAgentLaunch,
-    ) -> BoxFuture<'_, Result<Arc<dyn ExternalAgentRuntime>, String>> {
+    ) -> BoxFuture<'_, Result<Arc<dyn ExternalAgentRuntime>, ExternalAgentLaunchError>> {
         Box::pin(self.open_worker(launch))
     }
 }
@@ -66,20 +69,22 @@ impl ClaudeCodeBackend {
     async fn open_worker(
         &self,
         launch: ExternalAgentLaunch,
-    ) -> Result<Arc<dyn ExternalAgentRuntime>, String> {
+    ) -> Result<Arc<dyn ExternalAgentRuntime>, ExternalAgentLaunchError> {
         if !cfg!(target_os = "linux") {
-            return Err("Claude workers require Linux child-subreaper cancellation support".into());
+            return Err(Rejected(
+                "Claude workers require Linux child-subreaper cancellation support".into(),
+            ));
         }
         if FORBIDDEN_PROVIDER_ENV
             .iter()
             .any(|key| std::env::var_os(key).is_some() || launch.env.contains_key(*key))
         {
-            return Err("Claude subscription worker refuses ambient or selected provider/API credential overrides".into());
+            return Err(Rejected("Claude subscription worker refuses ambient or selected provider/API credential overrides".into()));
         }
         let selected_path = launch
             .env
             .get("PATH")
-            .ok_or("Claude worker requires an explicit selected PATH")?;
+            .ok_or_else(|| Rejected("Claude worker requires an explicit selected PATH".into()))?;
         let resolve = |program: &PathBuf| -> Result<PathBuf, String> {
             let candidates = if program.is_absolute() {
                 vec![program.clone()]
@@ -119,19 +124,19 @@ impl ClaudeCodeBackend {
                     )
                 })
         };
-        let python = resolve(&self.python)?;
-        let claude = resolve(&self.claude)?;
-        let tmux = resolve(&self.tmux)?;
+        let python = resolve(&self.python).map_err(Rejected)?;
+        let claude = resolve(&self.claude).map_err(Rejected)?;
+        let tmux = resolve(&self.tmux).map_err(Rejected)?;
         let assets = launch.state_dir.join(format!("bridge-{}", Uuid::new_v4()));
         tokio::fs::create_dir_all(&assets)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| Rejected(error.to_string()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             tokio::fs::set_permissions(&assets, std::fs::Permissions::from_mode(/*mode*/ 0o700))
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| Rejected(error.to_string()))?;
         }
         for (name, source) in [
             ("bridge.py", include_str!("../bridge.py")),
@@ -143,7 +148,7 @@ impl ClaudeCodeBackend {
         ] {
             tokio::fs::write(assets.join(name), source)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| Rejected(error.to_string()))?;
         }
         let child = Command::new(&python)
             .env_clear()
@@ -153,11 +158,12 @@ impl ClaudeCodeBackend {
             .arg(assets.join("bridge.py"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| Rejected(error.to_string()))?;
         let observations = Arc::new(Observations::default());
-        let (commands, exit) = Commands::start(child, Arc::clone(&observations))?;
+        let (commands, exit) =
+            Commands::start(child, Arc::clone(&observations)).map_err(Unsettled)?;
         let runtime = Arc::new(ClaudeRuntime {
             commands,
             exit,
@@ -167,17 +173,20 @@ impl ClaudeCodeBackend {
         });
         if let Err(error) = runtime
             .commands
-            .request(
-                "launch",
-                json!({"launch": launch, "claude": claude, "tmux": tmux}),
-            )
+            .launch(json!({"launch": launch, "claude": claude, "tmux": tmux}))
             .await
         {
             runtime.commands.close();
-            match wait_for_exit(runtime.exit.clone()).await {
-                Ok(status) if status.success() => return Err(error),
-                result => return Err(format!("{error}; bridge cleanup not confirmed: {result:?}")),
-            }
+            let exit = wait_for_exit(runtime.exit.clone()).await;
+            let diagnostics = runtime.commands.diagnostics().await;
+            return Err(match (error, exit) {
+                (Rejected(error), Ok(status)) if status.success() => {
+                    Rejected(format!("{error}{diagnostics}"))
+                }
+                (Rejected(error) | Unsettled(error), exit) => Unsettled(format!(
+                    "{error}; bridge cleanup not confirmed: {exit:?}{diagnostics}"
+                )),
+            });
         }
         Ok(runtime)
     }
