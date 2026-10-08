@@ -47,7 +47,7 @@ impl ThreadLifecycleContributor<Config> for GuardianExtension {
         input: ThreadStartInput<'a, Config>,
     ) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            if input.config.external_agent.is_some() || input.session_source.is_internal() {
+            if input.session_source.is_internal() {
                 return;
             }
             input
@@ -162,8 +162,7 @@ impl ThreadLifecycleContributor<Config> for GuardianExtension {
         input: ThreadReadyInput<'a, Config>,
     ) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            if input.config.external_agent.is_some()
-                || input.session_source.is_internal()
+            if input.session_source.is_internal()
                 || !matches!(
                     input.config.permissions.approval_policy.value(),
                     AskForApproval::OnRequest | AskForApproval::Granular(_)
