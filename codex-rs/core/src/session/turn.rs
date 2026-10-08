@@ -255,6 +255,14 @@ pub(crate) async fn run_turn(
     required_servers.sort_unstable();
     required_servers.dedup();
 
+    sess.adapt_reasoning(
+        &turn_context,
+        &input,
+        codex_config::AdaptiveReasoningTrigger::TurnStart,
+        &cancellation_token,
+    )
+    .await;
+
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = match sess
         .capture_step_context_with_required_mcp_servers(
@@ -456,6 +464,16 @@ pub(crate) async fn run_turn(
             &window_id,
         )
         .await;
+
+        if next_step_context.is_none() || !pending_input.is_empty() {
+            sess.adapt_reasoning(
+                &turn_context,
+                &pending_input,
+                codex_config::AdaptiveReasoningTrigger::ToolResult,
+                &cancellation_token,
+            )
+            .await;
+        }
 
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match next_step_context.take() {
