@@ -696,6 +696,14 @@ impl App {
                     }
                 }
             };
+            // Keep the destination's new subscription and work when leaving parallel mode.
+            if self
+                .side_threads
+                .get(&root_thread_id)
+                .is_some_and(|state| state.kind == CompanionKind::Parallel)
+            {
+                self.side_threads.remove(&root_thread_id);
+            }
             if !previous_running_thread_ids.is_empty() {
                 for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
                     let discarded = match startup_draft.as_deref_mut() {
