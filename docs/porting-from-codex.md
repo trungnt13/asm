@@ -113,6 +113,16 @@ Inspect failed CI jobs before release. Fix relevant code or packaging errors. Fo
 4. A platform is available as soon as its checked archive and platform checksum manifest are published. The whole release is complete only when `release`, both `verify_native` jobs, and `sync_main` succeeded for that candidate. Legacy `v*` tag pushes and dispatches can publish. Require publication and both native checks. Skip `sync_main` for legacy releases. Inspect that run's recorded checks and current release metadata. Do not repeat successful checks on unchanged artifacts. A green build-only run, pushed tag, or version label does not prove publication.
 5. Fetch the result. Fast-forward local `main` only when safe. Preserve local edits and concurrent commits. Report the released commit, upstream baseline, checks, and remote/local integration status, including blocked updates.
 
+### Release notes
+
+- Publish notes on GitHub for each new release. Include the same notes in the final report.
+- Compare the release commit with the previous completed release. Include only changes present in the new package.
+- Use separate `ASM` and `Codex` headings. State `No changes` for an empty section.
+- Use ASD-STE100 style: short, direct sentences, active voice, and one term per concept.
+- Use one flat list item per feature or fix: `**Name:** What changed. User effect or required action.` Keep each item on one source line.
+- State relevant defaults, limits, and experimental status. Link supporting commits or files on the same line.
+- State the version, platform readiness, and validation results outside the feature lists. Do not claim unverified effects.
+
 ### Workflow requirements
 
 These requirements govern release code, not a second manual release procedure.
