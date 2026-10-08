@@ -129,6 +129,7 @@ pub use external_agent::ExternalAgentEvent;
 pub use external_agent::ExternalAgentInput;
 pub use external_agent::ExternalAgentInputKind;
 pub use external_agent::ExternalAgentLaunch;
+pub use external_agent::ExternalAgentLaunchError;
 pub use external_agent::ExternalAgentLaunchMode;
 pub use external_agent::ExternalAgentRuntime;
 pub use external_agent::ExternalObservation;
