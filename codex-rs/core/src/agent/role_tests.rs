@@ -94,7 +94,6 @@ async fn apply_role_returns_unavailable_for_missing_user_role_file() {
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(PathBuf::from("/path/does/not/exist.toml")),
             nickname_candidates: None,
@@ -118,7 +117,6 @@ async fn apply_role_rejects_symlinked_role_file() {
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -139,7 +137,6 @@ async fn apply_role_returns_unavailable_for_invalid_user_role_toml() {
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -155,11 +152,7 @@ async fn apply_role_returns_unavailable_for_invalid_user_role_toml() {
 
 #[tokio::test]
 async fn apply_role_ignores_agent_metadata_fields_in_user_role_file() {
-    let (home, mut config) = test_config_with_cli_overrides(vec![(
-        "sandbox_mode".to_string(),
-        TomlValue::String("danger-full-access".to_string()),
-    )])
-    .await;
+    let (home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
     let role_path = write_role_config(
         &home,
         "metadata-role.toml",
@@ -167,37 +160,14 @@ async fn apply_role_ignores_agent_metadata_fields_in_user_role_file() {
 name = "archivist"
 description = "Role metadata"
 nickname_candidates = ["Hypatia"]
-execution_backend = "claude-code"
 developer_instructions = "Stay focused"
 model = "role-model"
 "#,
     )
     .await;
-    let parsed = codex_agent_roles::parse_agent_role_file_contents(
-        &fs::read_to_string(&role_path).expect("read role file"),
-        &role_path,
-        home.path(),
-        Some("custom"),
-    )
-    .expect("parse role metadata");
-    assert_eq!(parsed.execution_backend.as_deref(), Some("claude-code"));
-    assert_eq!(
-        parsed.config,
-        TomlValue::Table(toml::Table::from_iter([
-            (
-                "developer_instructions".to_string(),
-                TomlValue::String("Stay focused".to_string()),
-            ),
-            (
-                "model".to_string(),
-                TomlValue::String("role-model".to_string())
-            ),
-        ]))
-    );
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -209,33 +179,6 @@ model = "role-model"
         .expect("custom role should apply");
 
     assert_eq!(config.model.as_deref(), Some("role-model"));
-    assert_eq!(config.external_agent, None);
-
-    // Native parents capture startup preferences even when budgets are disabled.
-    config
-        .prepare_token_budget_for_startup()
-        .expect("capture disabled budget preferences");
-    assert!(config.token_budget_startup_config.is_some());
-    crate::agent::external::select_new(&mut config, "claude-code".to_string())
-        .expect("disabled budget snapshot must not block external selection");
-
-    config
-        .features
-        .enable(Feature::TokenBudget)
-        .expect("enable budget");
-    assert_eq!(
-        crate::agent::external::validate_config(&config),
-        Err("external agents do not support shared token budgets".to_string()),
-    );
-    config
-        .features
-        .disable(Feature::TokenBudget)
-        .expect("disable budget");
-    config.token_budget = Some(crate::config::TokenBudgetConfig::default());
-    assert_eq!(
-        crate::agent::external::validate_config(&config),
-        Err("external agents do not support shared token budgets".to_string()),
-    );
 }
 
 #[tokio::test]
@@ -255,7 +198,6 @@ async fn apply_role_preserves_unspecified_keys() {
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -357,7 +299,6 @@ async fn apply_role_refreshes_model_instructions_only_when_personality_opt_out_c
         config.agent_roles.insert(
             "custom".to_string(),
             AgentRoleConfig {
-                execution_backend: None,
                 description: None,
                 config_file: Some(role_path),
                 nickname_candidates: None,
@@ -399,7 +340,6 @@ service_tier = "priority"
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -430,7 +370,6 @@ async fn apply_role_preserves_existing_service_tier_without_override() {
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -474,7 +413,6 @@ writable_roots = ["./sandbox-root"]
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -538,7 +476,6 @@ command = "attacker-command"
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -658,7 +595,6 @@ async fn apply_role_takes_precedence_over_existing_session_flags_for_same_key() 
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -702,7 +638,6 @@ enabled = false
     config.agent_roles.insert(
         "custom".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: None,
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -747,7 +682,6 @@ fn spawn_tool_spec_build_deduplicates_user_defined_built_in_roles() {
         (
             "explorer".to_string(),
             AgentRoleConfig {
-                execution_backend: None,
                 description: Some("user override".to_string()),
                 config_file: None,
                 nickname_candidates: None,
@@ -769,7 +703,6 @@ fn spawn_tool_spec_lists_user_defined_roles_before_built_ins() {
     let user_defined_roles = BTreeMap::from([(
         "aaa".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: Some("first".to_string()),
             config_file: None,
             nickname_candidates: None,
@@ -797,7 +730,6 @@ fn spawn_tool_spec_marks_role_locked_model_and_reasoning_effort() {
     let user_defined_roles = BTreeMap::from([(
         "researcher".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: Some("Research carefully.".to_string()),
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -823,7 +755,6 @@ fn spawn_tool_spec_marks_role_locked_reasoning_effort_only() {
     let user_defined_roles = BTreeMap::from([(
         "reviewer".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: Some("Review carefully.".to_string()),
             config_file: Some(role_path),
             nickname_candidates: None,
@@ -849,7 +780,6 @@ fn spawn_tool_spec_omits_role_service_tier() {
     let user_defined_roles = BTreeMap::from([(
         "tiered".to_string(),
         AgentRoleConfig {
-            execution_backend: None,
             description: Some("Stay fast.".to_string()),
             config_file: Some(role_path),
             nickname_candidates: None,

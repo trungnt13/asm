@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use chrono::SecondsFormat;
-use codex_protocol::ExternalAgentDescriptor;
 use codex_protocol::RolloutId;
 use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
@@ -117,7 +116,6 @@ pub enum RolloutRecorderParams {
         selected_capability_roots: Vec<SelectedCapabilityRoot>,
         runtime_workspace_roots: Option<Vec<PathBuf>>,
         multi_agent_version: Option<MultiAgentVersion>,
-        external_agent: Option<ExternalAgentDescriptor>,
         history_mode: ThreadHistoryMode,
         history_base: Option<HistoryPosition>,
         subagent_history_start_ordinal: Option<u64>,
@@ -225,7 +223,6 @@ impl RolloutRecorderParams {
             selected_capability_roots: Vec::new(),
             runtime_workspace_roots: None,
             multi_agent_version: None,
-            external_agent: None,
             history_mode: Default::default(),
             history_base: None,
             subagent_history_start_ordinal: None,
@@ -317,17 +314,6 @@ impl RolloutRecorderParams {
         } = &mut self
         {
             *version = multi_agent_version;
-        }
-        self
-    }
-
-    pub fn with_external_agent(mut self, external_agent: Option<ExternalAgentDescriptor>) -> Self {
-        if let Self::Create {
-            external_agent: descriptor,
-            ..
-        } = &mut self
-        {
-            *descriptor = external_agent;
         }
         self
     }
@@ -955,7 +941,6 @@ impl RolloutRecorder {
                 selected_capability_roots,
                 runtime_workspace_roots,
                 multi_agent_version,
-                external_agent,
                 history_mode,
                 history_base,
                 subagent_history_start_ordinal,
@@ -1007,7 +992,6 @@ impl RolloutRecorder {
                     history_base,
                     subagent_history_start_ordinal,
                     multi_agent_version,
-                    external_agent,
                     context_window: initial_window_id.map(SessionContextWindow::new),
                 };
 

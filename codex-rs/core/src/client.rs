@@ -201,7 +201,6 @@ fn session_telemetry_for_request(
 #[derive(Debug)]
 struct ModelClientState {
     thread_id: ThreadId,
-    native_execution_disabled: std::sync::atomic::AtomicBool,
     provider: SharedModelProvider,
     workspace_routing: WorkspaceRoutingContext,
     auth_env_telemetry: AuthEnvTelemetry,
@@ -574,7 +573,6 @@ impl ModelClient {
         Self {
             state: Arc::new(ModelClientState {
                 thread_id,
-                native_execution_disabled: std::sync::atomic::AtomicBool::new(false),
                 provider: model_provider,
                 workspace_routing,
                 auth_env_telemetry,
@@ -605,16 +603,6 @@ impl ModelClient {
             api_key_cyber_access_programs:
                 cyber_access_program::ApiKeyCyberAccessPrograms::UnsupportedProvider,
         }
-    }
-
-    /// Prevents provider requests for external-runtime threads, including helpers.
-    pub(crate) fn with_native_execution_for(self, config: &crate::config::Config) -> Self {
-        if config.external_agent.is_some() {
-            self.state
-                .native_execution_disabled
-                .store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        self
     }
 
     pub(crate) fn with_executed_tool_calls(mut self, recorder: ExecutedToolCalls) -> Self {
@@ -1111,15 +1099,6 @@ impl ModelClient {
     /// This centralizes setup used by both prewarm and normal request paths so they stay in
     /// lockstep when auth/provider resolution changes.
     async fn current_client_setup(&self, routing: ClientRouting) -> Result<CurrentClientSetup> {
-        if self
-            .state
-            .native_execution_disabled
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Err(CodexErr::InvalidRequest(
-                "native inference is unavailable for external-runtime children".to_owned(),
-            ));
-        }
         // Capture before resolving credentials so an account switch during setup cannot label
         // an old connection with the new owner's revision.
         let auth_owner_generation = self.auth_owner_generation();
