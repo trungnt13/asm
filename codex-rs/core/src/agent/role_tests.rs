@@ -155,7 +155,11 @@ async fn apply_role_returns_unavailable_for_invalid_user_role_toml() {
 
 #[tokio::test]
 async fn apply_role_ignores_agent_metadata_fields_in_user_role_file() {
-    let (home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
+    let (home, mut config) = test_config_with_cli_overrides(vec![(
+        "sandbox_mode".to_string(),
+        TomlValue::String("danger-full-access".to_string()),
+    )])
+    .await;
     let role_path = write_role_config(
         &home,
         "metadata-role.toml",
@@ -206,6 +210,32 @@ model = "role-model"
 
     assert_eq!(config.model.as_deref(), Some("role-model"));
     assert_eq!(config.external_agent, None);
+
+    // Native parents capture startup preferences even when budgets are disabled.
+    config
+        .prepare_token_budget_for_startup()
+        .expect("capture disabled budget preferences");
+    assert!(config.token_budget_startup_config.is_some());
+    crate::agent::external::select_new(&mut config, "claude-code".to_string())
+        .expect("disabled budget snapshot must not block external selection");
+
+    config
+        .features
+        .enable(Feature::TokenBudget)
+        .expect("enable budget");
+    assert_eq!(
+        crate::agent::external::validate_config(&config),
+        Err("external agents do not support shared token budgets".to_string()),
+    );
+    config
+        .features
+        .disable(Feature::TokenBudget)
+        .expect("disable budget");
+    config.token_budget = Some(crate::config::TokenBudgetConfig::default());
+    assert_eq!(
+        crate::agent::external::validate_config(&config),
+        Err("external agents do not support shared token budgets".to_string()),
+    );
 }
 
 #[tokio::test]
