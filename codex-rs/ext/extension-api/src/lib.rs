@@ -1,6 +1,5 @@
 mod capabilities;
 mod contributors;
-mod external_agent;
 mod registry;
 mod session_isolation;
 mod state;
@@ -123,13 +122,3 @@ pub use model_request::ModelResponseError;
 pub use model_request::ModelResponseInterceptor;
 pub use model_request::ModelResponseStream;
 pub use model_request::ResponseEvent;
-
-pub use external_agent::ExternalAgentBackend;
-pub use external_agent::ExternalAgentEvent;
-pub use external_agent::ExternalAgentInput;
-pub use external_agent::ExternalAgentInputKind;
-pub use external_agent::ExternalAgentLaunch;
-pub use external_agent::ExternalAgentLaunchError;
-pub use external_agent::ExternalAgentLaunchMode;
-pub use external_agent::ExternalAgentRuntime;
-pub use external_agent::ExternalObservation;
