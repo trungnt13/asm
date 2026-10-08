@@ -109,7 +109,7 @@ jobs:
             resource_args+=(--bwrap-bin "${release_dir}/bwrap")
           fi
           CODEX_REPO_ROOT="$GITHUB_WORKSPACE" python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" \
-            --target "$TARGET" --cargo-profile release --no-zsh \
+            --target "$TARGET" --cargo-profile release \
             --entrypoint-bin "${release_dir}/codex" \
             --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
             --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
