@@ -15,6 +15,7 @@ use crate::tools::handlers::multi_agents::collab_tool_call_status;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::create_spawn_agent_tool_v2;
 use crate::tools::handlers::multi_agents_v2::message_tool::message_content;
+use crate::tools::handlers::multi_agents_v2::message_tool::message_from_arguments;
 use crate::turn_timing::now_unix_timestamp_ms;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::ThreadId;
@@ -122,7 +123,7 @@ async fn handle_spawn_agent(
     let arguments = function_arguments(payload)?;
     let args: SpawnAgentArgs = parse_arguments(&arguments)?;
     let fork_mode = args.fork_mode()?;
-    let message = message_content(args.message)?;
+    let message = args.message.map(message_content).transpose()?;
     let role_name = args
         .agent_type
         .as_deref()
@@ -145,6 +146,15 @@ async fn handle_spawn_agent(
     .await
     .map_err(FunctionCallError::RespondToModel)?;
     let config = prepared.config;
+    let message = message_from_arguments(
+        message,
+        args.external_message,
+        config
+            .external_agent
+            .as_ref()
+            .map(|descriptor| descriptor.backend_id.as_str()),
+        &source,
+    )?;
     let is_full_history_fork = matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory));
     let spawn_source = thread_spawn_source(
         session.thread_id,
@@ -189,7 +199,7 @@ async fn handle_spawn_agent(
             caller: session.thread_id,
             config,
             input: AgentInput::Message {
-                message: agent_message_from_tool(message, &source),
+                message,
                 mode: MessageDeliveryMode::TriggerTurn,
             },
             source: spawn_source,
@@ -267,7 +277,8 @@ impl CoreToolRuntime for Handler {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SpawnAgentArgs {
-    message: String,
+    message: Option<String>,
+    external_message: Option<String>,
     task_name: String,
     agent_type: Option<String>,
     model: Option<String>,
