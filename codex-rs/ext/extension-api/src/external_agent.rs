@@ -18,7 +18,14 @@ pub trait ExternalAgentBackend: Send + Sync {
     fn open(
         &self,
         launch: ExternalAgentLaunch,
-    ) -> BoxFuture<'_, Result<Arc<dyn ExternalAgentRuntime>, String>>;
+    ) -> BoxFuture<'_, Result<Arc<dyn ExternalAgentRuntime>, ExternalAgentLaunchError>>;
+}
+
+/// A rejected launch leaves no owned execution; an unsettled launch may still run.
+#[derive(Debug)]
+pub enum ExternalAgentLaunchError {
+    Rejected(String),
+    Unsettled(String),
 }
 
 /// Controls an owned runtime and receives passive observations.
