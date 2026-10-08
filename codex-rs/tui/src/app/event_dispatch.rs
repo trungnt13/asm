@@ -977,6 +977,14 @@ impl App {
                         && self.chat_widget.submit_op(AppCommand::interrupt())
                     {
                         self.chat_widget.pause_active_goal_for_interrupt();
+                    } else if self
+                        .side_threads
+                        .get(&thread_id)
+                        .is_some_and(|state| state.kind == CompanionKind::Parallel)
+                    {
+                        if let Err(error) = self.interrupt_side_thread(app_server, thread_id).await {
+                            self.chat_widget.add_error_message(error);
+                        }
                     } else if self.side_threads.contains_key(&thread_id)
                         && let Err(error) = self
                             .try_submit_active_thread_op_via_app_server(
