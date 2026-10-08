@@ -2011,10 +2011,7 @@ async fn token_usage_update_refreshes_status_line_with_runtime_context_window() 
         token_usage_notification(ThreadId::new(), "turn-1", Some(950_000)),
     )));
 
-    assert_eq!(
-        app.chat_widget.status_line_text(),
-        Some("950K window".into())
-    );
+    assert_eq!(app.chat_widget.status_line_text(), Some("950K".into()));
 }
 
 #[tokio::test]
