@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use codex_extension_api::ExternalAgentLaunch;
+use codex_extension_api::ExternalAgentLaunchError;
 use codex_extension_api::ExternalAgentLaunchMode;
 use codex_extension_api::ExternalAgentRuntime;
 use codex_protocol::error::CodexErr;
@@ -35,7 +36,8 @@ enum RuntimeState {
     Stopped,
     Opening {
         _task: JoinHandle<()>,
-        receiver: oneshot::Receiver<Result<Arc<dyn ExternalAgentRuntime>, String>>,
+        receiver:
+            oneshot::Receiver<Result<Arc<dyn ExternalAgentRuntime>, ExternalAgentLaunchError>>,
         acknowledgement: Option<oneshot::Sender<()>>,
         launch: ExternalAgentLaunch,
         backend_id: String,
@@ -94,16 +96,18 @@ pub(super) async fn open(
             let runtime = match backend.open(request).await {
                 Ok(runtime) => runtime,
                 Err(error) => {
-                    guard.record_shutdown_failure("open_runtime", "external_launch_failed");
+                    if matches!(&error, ExternalAgentLaunchError::Unsettled(_)) {
+                        guard.record_shutdown_failure("open_runtime", "external_launch_failed");
+                    }
                     let _ = sender.send(Err(error));
                     guard.complete();
                     return;
                 }
             };
             let abandoned = if tree.shutdown.is_cancelled() {
-                let _ = sender.send(Err(
-                    "external launch finished after tree shutdown".to_string()
-                ));
+                let _ = sender.send(Err(ExternalAgentLaunchError::Unsettled(
+                    "external launch finished after tree shutdown".to_string(),
+                )));
                 true
             } else if sender.send(Ok(Arc::clone(&runtime))).is_err() {
                 true
@@ -134,7 +138,9 @@ pub(super) async fn open(
         _ = cancellation.cancelled() => return Err(CodexErr::TurnAborted),
         result = resolve_open(&mut state) => {
             if let Err(error) = result {
-                record_failure(session);
+                if !matches!(*state, RuntimeState::Empty | RuntimeState::Stopped) {
+                    record_failure(session);
+                }
                 return Err(invalid(error));
             }
         }
@@ -203,7 +209,14 @@ async fn resolve_open(state: &mut RuntimeState) -> Result<(), String> {
             }
             Ok(())
         }
-        Ok(Err(error)) => {
+        Ok(Err(ExternalAgentLaunchError::Rejected(error))) => {
+            *state = match launch.mode {
+                ExternalAgentLaunchMode::New => RuntimeState::Empty,
+                ExternalAgentLaunchMode::Resume => RuntimeState::Stopped,
+            };
+            Err(error)
+        }
+        Ok(Err(ExternalAgentLaunchError::Unsettled(error))) => {
             *state = RuntimeState::Unknown;
             Err(error)
         }
@@ -223,13 +236,14 @@ pub(crate) async fn interrupt(session: &Session, turn: &TurnContext) -> Result<(
     else {
         return Ok(());
     };
-    let state = slot.0.lock().await;
-    let runtime = match &*state {
-        RuntimeState::Open(opened) => Some(Arc::clone(&opened.runtime)),
-        RuntimeState::Empty | RuntimeState::Stopped => return Ok(()),
-        RuntimeState::Opening { .. } | RuntimeState::Unknown => None,
+    let runtime = {
+        let state = slot.0.lock().await;
+        match &*state {
+            RuntimeState::Open(opened) => Some(Arc::clone(&opened.runtime)),
+            RuntimeState::Empty | RuntimeState::Stopped => return Ok(()),
+            RuntimeState::Opening { .. } | RuntimeState::Unknown => None,
+        }
     };
-    drop(state);
     if let Some(runtime) = runtime
         && matches!(
             tokio::time::timeout(STOP_TIMEOUT, runtime.interrupt(&turn.sub_id)).await,
@@ -276,7 +290,9 @@ pub(crate) async fn shutdown(session: &Session) {
         return;
     }
     if resolve_open(&mut state).await.is_err() {
-        record_failure(session);
+        if !matches!(*state, RuntimeState::Empty | RuntimeState::Stopped) {
+            record_failure(session);
+        }
         return;
     }
     if let RuntimeState::Open(opened) = &mut *state

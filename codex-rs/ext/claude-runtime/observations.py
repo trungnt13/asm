@@ -27,6 +27,18 @@ class Observations:
             "mcp__asm_bridge__ack",
             "mcp__asm_bridge__read_instructions",
         )
+        if name == "PreToolUse" and (
+            payload.get("tool_name") == "CronCreate"
+            or payload.get("tool_name") in ("Bash", "Agent")
+            and payload.get("tool_input", {}).get("run_in_background")
+        ):
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "ASM supports foreground work only; background tasks and scheduling are disabled",
+                }
+            }
         if payload.get("tool_name") == "mcp__asm_bridge__read_instructions":
             self.observe_instruction_read(payload)
         if (
@@ -53,7 +65,7 @@ class Observations:
             and self.active
             and (self.writable_clients() or self.prompt and prompt != self.prompt)
         ):
-            self.abort_reason = "An unowned Claude prompt arrived during ASM work; completion invalidated"
+            self.abort_reason = "Unsupported Claude continuation arrived during ASM work; outcome unknown"
             self.stop = None
             return {
                 "decision": "block",
@@ -67,7 +79,6 @@ class Observations:
             "PostToolUseFailure",
         ):
             self.idle_without_stop_since = None
-            self.background_wait = False
         if name == "MessageDisplay" and correlated:
             self.stop, self.idle_since = None, None
             identifier = payload["message_id"]
@@ -159,12 +170,11 @@ class Observations:
                 )
         elif name == "Stop" and correlated:
             self.idle_without_stop_since = None
-            self.background_wait = bool(
-                payload.get("background_tasks") or payload.get("session_crons")
-            )
             if "background_tasks" not in payload or "session_crons" not in payload:
                 self.abort_reason = "Claude Stop lacks required activity snapshot; unsupported completion capability"
-            elif not payload["background_tasks"] and not payload["session_crons"]:
+            elif payload["background_tasks"] or payload["session_crons"]:
+                self.abort_reason = "Claude background tasks or scheduled work are unsupported; outcome unknown"
+            else:
                 self.stop, self.idle_since = payload, None
         elif name == "StopFailure" and correlated:
             self.abort_reason = clipped(
