@@ -67,7 +67,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
-            StatusSurfacePreviewItem::ContextWindowSize => "0 window",
+            StatusSurfacePreviewItem::ContextWindowSize => "0",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
             StatusSurfacePreviewItem::TotalInputTokens => "0 in",
             StatusSurfacePreviewItem::CacheHitRate => "Cch89.6%",
