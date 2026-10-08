@@ -80,7 +80,9 @@ pub(crate) fn validate_config(config: &Config) -> Result<(), String> {
     }
     if config.rollout_budget.is_some()
         || config.token_budget.is_some()
-        || config.token_budget_startup_config.is_some()
+        || config
+            .features
+            .enabled(codex_features::Feature::TokenBudget)
     {
         return Err("external agents do not support shared token budgets".to_owned());
     }
