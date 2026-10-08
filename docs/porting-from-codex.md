@@ -80,9 +80,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `2fdf047c9631c9ed01a31b62efb7891718a931a8`.
+- Last incorporated upstream commit: `c9e0fffbbc05c36478686444f6ab1edbadfe2768`.
 - Commit date: 2026-10-08.
-- Subject: Fix idle cleanup for disconnected multi-agent v2 children (#52081).
+- Subject: Enable parallel execution for read-only tools (#52245).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
@@ -151,6 +151,7 @@ Ubuntu 22.04 / glibc 2.35 is the Linux minimum. Keep Linux builds and native smo
 - Use optimized `--release`, never `dev-small`. Set `CARGO_PROFILE_RELEASE_STRIP=debuginfo`. Retain function symbols and optimization settings. Fix pipeline timeouts without weakening the profile. Upstream tests do not justify more symbol or dependency removal.
 - Keep workflow shell commands compatible with macOS Bash 3.2, including array expansion under `set -u`.
 - Build `codex` and `codex-code-mode-host` from one commit, target, and profile. Each `codex-<target>.tar.gz` must contain a complete canonical CLI package: `bin/codex`, `bin/codex-code-mode-host`, `codex-package.json`, `codex-path/rg`, and, on Linux, `codex-resources/bwrap`. Use the existing package layout and pinned ripgrep manifest; build Bubblewrap from the same source and release profile, and embed its final SHA-256 in the CLI before packaging. Include only required package resources, with regular executable files and matching version/target metadata. Shared-server startup must recognize and validate this package without relying on host helpers. The completed release has six assets: both archives, `SHA256SUMS-<target>` for each target, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Do not publish source trees or diagnostics. Each platform manifest covers its archive and the pinned installer.
+- Detect a candidate's complete package contract from its pinned smoke check's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only when that pinned CLI accepts it; old candidates retain their original contract.
 - Pin builds, packaging, installer bytes, payload checks, and archive reuse to the immutable candidate commit SHA. Pin orchestration scripts to the dispatch SHA; preserve those bytes before checking out the candidate. Never fetch newer controls mid-run. For legacy releases, use the exact tagged commit SHA. Verify the release tag resolves to that commit. Candidate packaging can precede tag creation.
 - Before upload, run [native package smoke checks](../.github/scripts/smoke-codex-archive.py). CLI `--version` must match Cargo. Both main binaries' `--help` commands must succeed with usage. Validate manifest fields and required resources, and run bundled ripgrep and Bubblewrap smoke commands. Do not require code-mode helper `--version`. Record binary and archive sizes.
 - For GNU Linux, verify source-built ELF executables use the x86_64 GNU loader and no glibc symbols newer than 2.35. Pinned ripgrep may be statically linked; check its architecture and run it on the minimum OS too. Run version/help checks in a clean Ubuntu 22.04 container with only declared runtime libraries. The build runner alone does not prove compatibility.

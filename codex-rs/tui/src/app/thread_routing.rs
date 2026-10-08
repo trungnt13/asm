@@ -848,7 +848,7 @@ impl App {
                             .side_threads
                             .get(&thread_id)
                             .is_none_or(|side| side.kind == CompanionKind::Parallel);
-                    let eligible_account = self.chat_widget.daybreak_turn_eligible(enabled);
+                    let eligible_account = self.chat_widget.daybreak_account_eligible();
                     let cyber_access_program = match crate::daybreak::program_for_turn(
                         &self.chat_widget.model_catalog().models,
                         model,
