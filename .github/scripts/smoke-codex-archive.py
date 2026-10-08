@@ -65,7 +65,7 @@ with tarfile.open(archive_path, "r:gz") as archive:
                 with archive.extractfile(member) as source, path.open("wb") as output:
                     shutil.copyfileobj(source, output)
                 os.chmod(path, member.mode & 0o777)
-        validate_package_dir(package, PACKAGE_VARIANTS["codex"], spec, include_zsh=False)
+        validate_package_dir(package, PACKAGE_VARIANTS["codex"], spec)
         metadata_fields = json.loads(
             (package / "codex-package.json").read_text(), object_pairs_hook=list
         )
