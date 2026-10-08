@@ -59,10 +59,13 @@ pub(super) async fn run(
         cancellation.clone(),
     )
     .await;
-    if result.is_err() && !cancellation.is_cancelled() {
-        interrupt(&session, &turn).await?;
+    match result {
+        Err(error) if !cancellation.is_cancelled() => match interrupt(&session, &turn).await {
+            Ok(()) => Err(error),
+            Err(cleanup) => Err(CodexErr::Fatal(format!("{error}; {cleanup}"))),
+        },
+        result => result,
     }
-    result
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
