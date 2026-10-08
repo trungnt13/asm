@@ -820,6 +820,17 @@ impl Session {
             });
         }
 
+        if active_task.turn_context.config.external_agent.is_some()
+            && !active_turn
+                .turn_state
+                .lock()
+                .await
+                .accepts_mailbox_delivery_for_current_turn()
+        {
+            // Terminal publication has atomically closed this external turn's input.
+            return Err(NotSubmittedReason::NoActiveTurn);
+        }
+
         match active_task.kind {
             crate::state::TaskKind::Regular => {}
             crate::state::TaskKind::Review => {

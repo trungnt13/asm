@@ -319,6 +319,37 @@ impl InputQueue {
         turn_state.pending_input.items.clear();
     }
 
+    /// Seals external answer publication against both mailbox delivery and user steering.
+    /// The active-turn lock shares the acceptance boundary with both input paths.
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "seal external input atomically with the active reservation, matching mailbox acceptance"
+    )]
+    pub(crate) async fn close_external_turn_input(
+        &self,
+        active_turn: &Mutex<Option<ActiveTurn>>,
+        sub_id: &str,
+    ) -> bool {
+        let active = active_turn.lock().await;
+        let Some(turn) = active.as_ref().filter(|turn| {
+            turn.task.as_ref().is_some_and(|task| {
+                task.turn_context.sub_id == sub_id && !task.cancellation_token.is_cancelled()
+            })
+        }) else {
+            return false;
+        };
+        let mut state = turn.turn_state.lock().await;
+        if state.pending_input.items.iter().any(|input| {
+            !matches!(input,
+                TurnInput::InterAgentCommunication(mail) if !mail.trigger_turn
+            )
+        }) {
+            return false;
+        }
+        state.set_mailbox_delivery_phase(MailboxDeliveryPhase::NextTurn);
+        true
+    }
+
     pub(crate) async fn defer_mailbox_delivery_to_next_turn(
         &self,
         active_turn: &Mutex<Option<ActiveTurn>>,
