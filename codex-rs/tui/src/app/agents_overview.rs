@@ -708,6 +708,33 @@ impl App {
                     }
                 }
             };
+            // Keep the destination's new subscription and work when leaving parallel mode.
+            if self
+                .side_threads
+                .get(&root_thread_id)
+                .is_some_and(|state| state.kind == CompanionKind::Parallel)
+            {
+                self.side_threads.remove(&root_thread_id);
+            }
+            if !previous_running_thread_ids.is_empty() {
+                for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
+                    let discarded = match startup_draft.as_deref_mut() {
+                        Some(draft) => {
+                            draft
+                                .run_until(
+                                    tui,
+                                    self.discard_side_thread(app_server, side_thread_id),
+                                )
+                                .await?
+                        }
+                        None => self.discard_side_thread(app_server, side_thread_id).await,
+                    };
+                    if !discarded {
+                        let _ = app_server.thread_unsubscribe(root_thread_id).await;
+                        return Ok(AppRunControl::Continue);
+                    }
+                }
+            }
             for (thread_id, requests) in previous_pending_requests {
                 self.agents_overview
                     .dispatched_requests
