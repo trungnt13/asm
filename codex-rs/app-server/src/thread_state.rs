@@ -103,6 +103,8 @@ pub(crate) struct TurnSummary {
 
 #[derive(Default)]
 pub(crate) struct ThreadState {
+    /// Inherited project assignment for pathless forks, which have no stored metadata row.
+    pub(crate) ephemeral_project_id: Option<String>,
     goal_resume_lock: Arc<Mutex<()>>,
     pub(crate) pending_interrupts: PendingInterruptQueue,
     pub(crate) turn_summary: TurnSummary,
