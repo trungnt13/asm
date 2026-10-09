@@ -48,7 +48,7 @@ async fn autodetect_environment_id_with_origins(
     origins: &[SanitizedGitUrl],
 ) -> anyhow::Result<AutodetectSelection> {
     // 1) Try repo-specific environments based on local git origins (GitHub only, like VSCode)
-    crate::append_error_log(format!("env: git origins: {origins:?}"));
+    tracing::debug!("env: git origins: {origins:?}");
     let mut by_repo_envs: Vec<CodeEnvironment> = Vec::new();
     for origin in origins {
         if let Some((owner, repo)) = parse_owner_repo(origin.as_str()) {
@@ -63,18 +63,16 @@ async fn autodetect_environment_id_with_origins(
                     base_url, "github", owner, repo
                 )
             };
-            crate::append_error_log(format!("env: GET {url}"));
+            tracing::debug!("env: GET {url}");
             match get_json::<Vec<CodeEnvironment>>(http, &url, headers).await {
                 Ok(mut list) => {
-                    crate::append_error_log(format!(
+                    tracing::debug!(
                         "env: by-repo returned {} env(s) for {owner}/{repo}",
                         list.len(),
-                    ));
+                    );
                     by_repo_envs.append(&mut list);
                 }
-                Err(e) => crate::append_error_log(format!(
-                    "env: by-repo fetch failed for {owner}/{repo}: {e}"
-                )),
+                Err(e) => tracing::debug!("env: by-repo fetch failed for {owner}/{repo}: {e}"),
             }
         }
     }
@@ -91,19 +89,21 @@ async fn autodetect_environment_id_with_origins(
     } else {
         format!("{base_url}/api/codex/environments")
     };
-    crate::append_error_log(format!("env: GET {list_url}"));
+    tracing::debug!("env: GET {list_url}");
     // Fetch and log the full environments JSON for debugging
     let response = http.get(&list_url, headers).await?;
     let status = response.status;
     let ct = response.content_type;
     let body = response.body;
-    crate::append_error_log(format!("env: status={status} content-type={ct}"));
-    match serde_json::from_str::<serde_json::Value>(&body) {
-        Ok(v) => {
-            let pretty = serde_json::to_string_pretty(&v).unwrap_or(body.clone());
-            crate::append_error_log(format!("env: /environments JSON (pretty):\n{pretty}"));
+    tracing::debug!("env: status={status} content-type={ct}");
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        match serde_json::from_str::<serde_json::Value>(&body) {
+            Ok(v) => {
+                let pretty = serde_json::to_string_pretty(&v).unwrap_or(body.clone());
+                tracing::debug!("env: /environments JSON (pretty):\n{pretty}");
+            }
+            Err(_) => tracing::debug!("env: /environments (raw):\n{body}"),
         }
-        Err(_) => crate::append_error_log(format!("env: /environments (raw):\n{body}")),
     }
     if !status.is_success() {
         anyhow::bail!("GET {list_url} failed: {status}; content-type={ct}; body={body}");
@@ -133,16 +133,16 @@ fn pick_environment_row(
             .iter()
             .find(|e| e.label.as_deref().unwrap_or("").to_lowercase() == lc)
         {
-            crate::append_error_log(format!("env: matched by label: {label} -> {}", e.id));
+            tracing::debug!("env: matched by label: {label} -> {}", e.id);
             return Some(e.clone());
         }
     }
     if envs.len() == 1 {
-        crate::append_error_log("env: single environment available; selecting it");
+        tracing::debug!("env: single environment available; selecting it");
         return Some(envs[0].clone());
     }
     if let Some(e) = envs.iter().find(|e| e.is_pinned.unwrap_or(false)) {
-        crate::append_error_log(format!("env: selecting pinned environment: {}", e.id));
+        tracing::debug!("env: selecting pinned environment: {}", e.id);
         return Some(e.clone());
     }
     // Highest task_count as heuristic
@@ -151,7 +151,7 @@ fn pick_environment_row(
         .max_by_key(|e| e.task_count.unwrap_or(0))
         .or_else(|| envs.first())
     {
-        crate::append_error_log(format!("env: selecting by task_count/first: {}", e.id));
+        tracing::debug!("env: selecting by task_count/first: {}", e.id);
         return Some(e.clone());
     }
     None
@@ -166,7 +166,7 @@ async fn get_json<T: serde::de::DeserializeOwned>(
     let status = response.status;
     let ct = response.content_type;
     let body = response.body;
-    crate::append_error_log(format!("env: status={status} content-type={ct}"));
+    tracing::debug!("env: status={status} content-type={ct}");
     if !status.is_success() {
         anyhow::bail!("GET {url} failed: {status}; content-type={ct}; body={body}");
     }
@@ -281,7 +281,7 @@ fn parse_owner_repo(url: &str) -> Option<(String, String)> {
         let mut parts = rest.splitn(2, '/');
         let owner = parts.next()?.to_string();
         let repo = parts.next()?.to_string();
-        crate::append_error_log(format!("env: parsed SSH GitHub origin => {owner}/{repo}"));
+        tracing::debug!("env: parsed SSH GitHub origin => {owner}/{repo}");
         return Some((owner, repo));
     }
     // HTTPS or git protocol
@@ -297,7 +297,7 @@ fn parse_owner_repo(url: &str) -> Option<(String, String)> {
             let mut parts = rest.splitn(2, '/');
             let owner = parts.next()?.to_string();
             let repo = parts.next()?.to_string();
-            crate::append_error_log(format!("env: parsed HTTP GitHub origin => {owner}/{repo}"));
+            tracing::debug!("env: parsed HTTP GitHub origin => {owner}/{repo}");
             return Some((owner, repo));
         }
     }
