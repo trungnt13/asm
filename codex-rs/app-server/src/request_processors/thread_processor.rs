@@ -5081,13 +5081,76 @@ impl ThreadRequestProcessor {
                 "`experimentalPredictionMode` requires a thread id without a path or turn cutoff",
             ));
         }
-        let source_thread = self
-            .read_stored_thread_for_resume(
+        let temporary_source = if path.is_none() && !ephemeral && !experimental_prediction_mode {
+            let id = ThreadId::from_string(&thread_id)
+                .map_err(|err| invalid_request(format!("invalid session id: {err}")))?;
+            if let Ok(parent) = self.thread_manager.get_thread(id).await {
+                parent
+                    .ephemeral_fork_history()
+                    .await
+                    .map_err(|err| invalid_request(err.to_string()))?
+                    .map(|items| (id, parent, items))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let temporary_source_history = temporary_source.is_some();
+        let mut source_thread = if let Some((source_id, parent, items)) = temporary_source {
+            let snapshot = parent.config_snapshot().await;
+            let source_state = self.thread_state_manager.thread_state(source_id).await;
+            let project_id = source_state.lock().await.ephemeral_project_id.clone();
+            let now = chrono::Utc::now();
+            StoredThread {
+                originator: Some(snapshot.originator),
+                thread_id: source_id,
+                extra_config: None,
+                rollout_path: None,
+                forked_from_id: snapshot.forked_from_thread_id,
+                parent_thread_id: None,
+                preview: preview_from_rollout_items(&items),
+                name: None,
+                model_provider: snapshot.model_provider_id,
+                model: Some(snapshot.model),
+                reasoning_effort: snapshot.reasoning_effort,
+                created_at: now,
+                updated_at: now,
+                recency_at: now,
+                archived_at: None,
+                section: None,
+                section_position: None,
+                section_entered_at: None,
+                project_id,
+                daybreak_enabled: None,
+                cwd: snapshot.environments.legacy_fallback_cwd.to_path_buf(),
+                cli_version: String::new(),
+                source: snapshot.session_source,
+                // The in-memory replay is a copied history, not a stored paginated reference.
+                history_mode: ThreadHistoryMode::Legacy,
+                thread_source: snapshot.thread_source,
+                agent_nickname: None,
+                agent_role: None,
+                agent_path: None,
+                git_info: None,
+                approval_mode: snapshot.approval_policy,
+                permission_profile: snapshot.permission_profile,
+                token_usage: None,
+                first_user_message: None,
+                history: Some(codex_thread_store::StoredThreadHistory {
+                    thread_id: source_id,
+                    items,
+                    revision: None,
+                }),
+            }
+        } else {
+            self.read_stored_thread_for_resume(
                 &thread_id,
                 path.as_ref(),
                 /*include_history*/ false,
             )
-            .await?;
+            .await?
+        };
         let inherited_fork = if experimental_prediction_mode {
             // Keep inherited state and its preparation off the fork handler's stack.
             let (mut options, settings) = Box::pin(async {
@@ -5175,6 +5238,14 @@ impl ThreadRequestProcessor {
         };
         let source_history_items = if let Some(prepared_fork) = prepared_fork.as_ref() {
             Arc::clone(&prepared_fork.model_context)
+        } else if temporary_source_history {
+            Arc::new(
+                source_thread
+                    .history
+                    .take()
+                    .expect("temporary replay history")
+                    .items,
+            )
         } else {
             let mut source_thread = self
                 .read_stored_thread_for_resume(
@@ -5472,6 +5543,7 @@ impl ThreadRequestProcessor {
                 .map_err(|err| core_thread_write_error("inherit source thread name", err))?;
         }
         let inherited_goal = if defer_goal_continuation
+            && !temporary_source_history
             && session_configured.rollout_path.is_some()
             && goals_enabled
         {
@@ -5579,6 +5651,8 @@ impl ThreadRequestProcessor {
         apply_live_thread_settings(&mut thread, &config_snapshot);
         if thread.path.is_none() {
             thread.project_id = inherited_project_id.clone();
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            thread_state.lock().await.ephemeral_project_id = inherited_project_id;
         }
 
         self.thread_watch_manager

@@ -96,6 +96,8 @@ pub(crate) struct Session {
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
     pub(super) fork_persistence: ForkPersistence,
     pub(super) history_initialization: HistoryInitialization,
+    /// Raw replay history retained only for temporary root forks, for explicit saving.
+    pub(crate) ephemeral_rollout_items: Option<Mutex<Vec<RolloutItem>>>,
     pub(super) forked_from_ordinal_exclusive: Option<u64>,
     pub(super) next_internal_sub_id: AtomicU64,
 }
@@ -1850,6 +1852,10 @@ impl Session {
                 git_enrichment_policy,
                 fork_persistence,
                 history_initialization,
+                ephemeral_rollout_items: (config.ephemeral
+                    && !session_configuration.session_source.is_non_root_agent()
+                    && matches!(&initial_history, InitialHistory::Forked(_)))
+                .then(|| Mutex::new(Vec::new())),
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
             });
