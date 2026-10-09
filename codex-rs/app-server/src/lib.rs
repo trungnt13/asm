@@ -741,6 +741,7 @@ pub async fn run_main_with_transport_options(
     let feedback_metadata_layer = feedback.metadata_layer();
     let log_db = state_db
         .clone()
+        .filter(|_| config.diagnostic_log_capture)
         .map(|state_db| log_db::start(state_db, log_write_warning.clone()));
     let log_db_layer = log_db
         .clone()
