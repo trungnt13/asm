@@ -337,6 +337,39 @@ async fn load_config_rejects_invalid_background_terminal_timeout_bounds() -> any
 
 #[tokio::test]
 async fn test_toml_parsing() {
+    for (model, effort, expected_model, expected_effort) in [
+        (
+            "gpt-6-astra",
+            "medium",
+            Some("gpt-6-astra"),
+            Some(ReasoningEffort::Medium),
+        ),
+        ("", "", None, None),
+        (
+            "gpt-6-astra",
+            "adaptive",
+            Some("gpt-6-astra"),
+            Some(ReasoningEffort::Custom("adaptive".to_string())),
+        ),
+    ] {
+        let config_toml: ConfigToml = toml::from_str(&format!(
+            "chat_model = {model:?}\nchat_reasoning = {effort:?}"
+        ))
+        .expect("chat settings should deserialize");
+        let config = Config::load_from_base_config_with_overrides(
+            config_toml,
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").abs(),
+        )
+        .await
+        .expect("chat settings should load");
+        assert_eq!(
+            (config.chat_model.as_deref(), config.chat_reasoning),
+            (expected_model, expected_effort)
+        );
+    }
+    assert!(toml::from_str::<ConfigToml>("chat_reasoning = 123").is_err());
+
     let history_with_persistence = r#"
 [history]
 persistence = "save-all"
