@@ -297,6 +297,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
+    sess.stop_adaptive_reasoning().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();

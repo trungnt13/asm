@@ -172,6 +172,14 @@ pub(crate) async fn run_turn(
     if crate::guardian::is_basic_session_source(&turn_context.session_source) {
         crate::guardian::check_pending_guardian_input(&sess, &turn_context).await?;
     }
+    sess.adapt_reasoning(
+        &turn_context,
+        &input,
+        codex_config::AdaptiveReasoningTrigger::TurnStart,
+        &cancellation_token,
+    )
+    .await;
+
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 
@@ -262,6 +270,7 @@ pub(crate) async fn run_turn(
         &cancellation_token,
     )
     .await;
+    sess.apply_ready_adaptive_reasoning(&turn_context).await;
 
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = match sess
@@ -443,6 +452,16 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
+        if !pending_input.is_empty() {
+            sess.adapt_reasoning(
+                &turn_context,
+                &pending_input,
+                codex_config::AdaptiveReasoningTrigger::ToolResult,
+                &cancellation_token,
+            )
+            .await;
+        }
+
         if run_hooks_and_record_inputs(
             &sess,
             &turn_context,
@@ -474,6 +493,8 @@ pub(crate) async fn run_turn(
             )
             .await;
         }
+
+        sess.apply_ready_adaptive_reasoning(&turn_context).await;
 
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match next_step_context.take() {
@@ -575,6 +596,13 @@ pub(crate) async fn run_turn(
                         .await;
                 }
                 can_drain_pending_input = true;
+                sess.adapt_reasoning(
+                    &turn_context,
+                    &[],
+                    codex_config::AdaptiveReasoningTrigger::ToolResult,
+                    &cancellation_token,
+                )
+                .await;
                 // Process async hooks only after sampling and its tools have finished.
                 drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ false).await;
                 let (has_pending_input, token_status) = async {

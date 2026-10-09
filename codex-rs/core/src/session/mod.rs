@@ -253,6 +253,8 @@ mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
 mod adaptive_reasoning;
+mod adaptive_reasoning_evidence;
+mod adaptive_reasoning_task;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -3698,6 +3700,17 @@ impl Session {
                             message_order.unwrap_or_else(|| state.history.reserve_input_order())
                         });
                 }
+            }
+            if items.iter().any(|envelope| {
+                matches!(&envelope.item,
+                ResponseItem::Message { role, .. } if role == "assistant")
+                    || matches!(
+                        &envelope.item,
+                        ResponseItem::FunctionCallOutput { .. }
+                            | ResponseItem::CustomToolCallOutput { .. }
+                    )
+            }) {
+                self.invalidate_adaptive_reasoning();
             }
             state
                 .history

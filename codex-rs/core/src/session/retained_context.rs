@@ -133,6 +133,7 @@ impl Session {
             .unwrap_or_else(|_| unreachable!("communication boundary remains open"));
         let (order, pending) = {
             let mut state = self.state.lock().await;
+            self.invalidate_adaptive_reasoning();
             let order = state.history.reserve_input_order();
             (order, self.pending_code_mode_message_recordings())
         };

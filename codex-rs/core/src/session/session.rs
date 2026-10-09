@@ -1863,6 +1863,7 @@ impl Session {
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
             });
+            sess.start_adaptive_reasoning_warmup(&config, &session_configuration);
             if let Some(startup) = &startup {
                 startup.set_session(Arc::clone(&sess));
             }
