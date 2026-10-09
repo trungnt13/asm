@@ -53,3 +53,6 @@ pub use session::ToolInvocationFuture;
 
 pub const PUBLIC_TOOL_NAME: &str = "exec";
 pub const WAIT_TOOL_NAME: &str = "wait";
+
+/// Explicit process-level opt-in for code-mode host diagnostic logging.
+pub const DIAGNOSTIC_LOG_CAPTURE_ENV: &str = "CODEX_DIAGNOSTIC_LOG_CAPTURE";

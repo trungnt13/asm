@@ -20,9 +20,13 @@ pub(crate) enum ShutdownBehavior {
 pub(crate) fn init(
     config: Option<&codex_core::config::Config>,
 ) -> (impl Send + Sync, codex_exec_server::ExecServerTelemetry) {
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_filter(stderr_env_filter());
+    let fmt_layer = config
+        .filter(|config| config.diagnostic_log_capture)
+        .map(|_| {
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(stderr_env_filter())
+        });
     let otel = match config {
         Some(config) => codex_core::otel_init::build_provider(
             config,

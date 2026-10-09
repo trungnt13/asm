@@ -49,14 +49,12 @@ const LOGIN_SUCCESS_MESSAGE: &str = "Successfully logged in";
 const DEFAULT_LOGIN_LOG_FILTER: &str =
     "codex_cli=info,codex_core=info,codex_login=info,codex_otel::auth_storage=warn";
 
-/// Installs a small file-backed tracing layer for direct `codex login` flows.
-///
-/// This deliberately duplicates a narrow slice of the TUI logging setup instead of reusing it
-/// wholesale. The TUI stack includes session-oriented layers that are valuable for interactive
-/// runs but unnecessary for a one-shot login command. Keeping the direct CLI path local lets this
-/// command produce a durable `codex-login.log` artifact without coupling it to the TUI's broader
-/// telemetry and feedback initialization.
+/// Captures direct login diagnostics only when explicitly enabled.
 fn init_login_file_logging(config: &Config) -> Option<WorkerGuard> {
+    if !config.diagnostic_log_capture {
+        return None;
+    }
+
     let log_dir = match codex_core::config::log_dir(config) {
         Ok(log_dir) => log_dir,
         Err(err) => {
