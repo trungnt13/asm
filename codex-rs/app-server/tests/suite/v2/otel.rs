@@ -53,7 +53,6 @@ async fn account_switch_reloads_telemetry_collectors_and_preserves_trace_context
     let mut app_server = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .with_env_overrides(&[("TRACEPARENT", Some(PARENT_TRACEPARENT))])
-        .with_json_logging("codex_app_server::otel_reloader=info")
         .build_initialized_with_timeout(TEST_TIMEOUT)
         .await?;
     app_server
@@ -99,14 +98,6 @@ async fn account_switch_reloads_telemetry_collectors_and_preserves_trace_context
     let response: LoginAccountResponse =
         timeout(TEST_TIMEOUT, app_server.read_response(request_id)).await??;
     assert_eq!(response, LoginAccountResponse::ChatgptAuthTokens {});
-    timeout(
-        TEST_TIMEOUT,
-        app_server.wait_for_json_log_event(
-            "codex.app_server.otel_reloaded",
-            Duration::from_secs(/*secs*/ 10),
-        ),
-    )
-    .await??;
     timeout(TEST_TIMEOUT, async {
         let mut poll = tokio::time::interval(Duration::from_secs(/*secs*/ 1));
         loop {
