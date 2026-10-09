@@ -88,6 +88,8 @@ Verify the upstream URL before fetching. Use the requested sync method. Otherwis
 
 A full sync includes the selected upstream `main` commit and all ancestors. Capture the old baseline and target before sync. Report that fixed range. Focus on fork differences and affected upstream changes. Apply the integration and validation rules above.
 
+After each upstream rebase, give a short, high-level list of the main upstream changes in that range. Group related changes, not individual commits. Use one plain sentence per idea to explain the change and its user effect, with a source link. Keep rebase status and validation separate.
+
 After successful full sync, advance the marker; cherry-picks do not advance it. Verify hash, date, and subject with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`. Confirm the marker is an ancestor of the fork branch.
 
 ## Platforms and CI
