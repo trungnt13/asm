@@ -154,7 +154,10 @@ impl Drop for CallerCancellation {
 }
 
 impl Connection {
-    pub(super) async fn spawn(host_program: &Path) -> Result<Self, ConnectionError> {
+    pub(super) async fn spawn(
+        host_program: &Path,
+        diagnostic_log_capture: bool,
+    ) -> Result<Self, ConnectionError> {
         let mut command = Command::new(host_program);
         #[cfg(unix)]
         command.process_group(0);
@@ -166,6 +169,14 @@ impl Connection {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
         scrub_non_inheritable_env_vars(command.as_std_mut());
+        command.env(
+            codex_code_mode_protocol::DIAGNOSTIC_LOG_CAPTURE_ENV,
+            if diagnostic_log_capture {
+                "true"
+            } else {
+                "false"
+            },
+        );
         let mut child = command.spawn().map_err(|error| ConnectionError::Spawn {
             host_program: host_program.to_path_buf(),
             error,

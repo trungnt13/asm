@@ -34,6 +34,7 @@ use tower::service_fn;
 
 pub(crate) struct ProcessOwnedGrpcCodeModeSessionProvider {
     host_program: PathBuf,
+    diagnostic_log_capture: bool,
     provider: OnceLock<GrpcCodeModeSessionProvider>,
 }
 
@@ -41,8 +42,13 @@ impl ProcessOwnedGrpcCodeModeSessionProvider {
     pub(crate) fn with_host_program(host_program: PathBuf) -> Self {
         Self {
             host_program,
+            diagnostic_log_capture: false,
             provider: OnceLock::new(),
         }
+    }
+    pub(crate) fn with_diagnostic_log_capture(mut self, diagnostic_log_capture: bool) -> Self {
+        self.diagnostic_log_capture = diagnostic_log_capture;
+        self
     }
 }
 
@@ -64,6 +70,7 @@ impl CodeModeSessionProvider for ProcessOwnedGrpcCodeModeSessionProvider {
             self.availability()?;
             let provider = self.provider.get_or_init(|| {
                 let host_program = self.host_program.clone();
+                let diagnostic_log_capture = self.diagnostic_log_capture;
                 // The URI is an HTTP/2 authority only; the connector exclusively uses pipes.
                 // A live but unresponsive child can leave both pipes open. Let HTTP/2
                 // detect that and drop the I/O, which reaps the child on reconnect.
@@ -73,7 +80,7 @@ impl CodeModeSessionProvider for ProcessOwnedGrpcCodeModeSessionProvider {
                     .keep_alive_while_idle(/*enabled*/ true)
                     .connect_with_connector_lazy(service_fn(move |_| {
                         let host_program = host_program.clone();
-                        async move { HostConnection::spawn(&host_program).map(TokioIo::new) }
+                        async move { HostConnection::spawn(&host_program, diagnostic_log_capture).map(TokioIo::new) }
                     }));
                 GrpcCodeModeSessionProvider::with_channel(channel)
             });
@@ -88,7 +95,7 @@ struct HostConnection {
 }
 
 impl HostConnection {
-    fn spawn(host_program: &Path) -> io::Result<Self> {
+    fn spawn(host_program: &Path, diagnostic_log_capture: bool) -> io::Result<Self> {
         let mut command = Command::from(background_command(host_program));
         #[cfg(unix)]
         command.process_group(/*pgroup*/ 0);
@@ -99,6 +106,10 @@ impl HostConnection {
             .stderr(Stdio::piped())
             .kill_on_drop(/*kill_on_drop*/ true);
         scrub_non_inheritable_env_vars(command.as_std_mut());
+        command.env(
+            codex_code_mode_protocol::DIAGNOSTIC_LOG_CAPTURE_ENV,
+            if diagnostic_log_capture { "1" } else { "0" },
+        );
         let mut child = command.spawn()?;
         let stdin = child
             .stdin
