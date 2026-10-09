@@ -126,7 +126,11 @@ async fn slash_side_is_rejected_for_side_threads() {
 
 #[tokio::test]
 async fn side_aliases_are_rejected_during_review_mode() {
-    for (command, name) in [(SlashCommand::Side, "side"), (SlashCommand::Btw, "btw")] {
+    for (command, name) in [
+        (SlashCommand::Side, "side"),
+        (SlashCommand::Btw, "btw"),
+        (SlashCommand::Chat, "chat"),
+    ] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.review.is_review_mode = true;
 
@@ -204,7 +208,7 @@ async fn submit_user_message_as_plain_user_turn_does_not_run_shell_commands() {
 
 #[tokio::test]
 async fn side_aliases_without_args_start_empty_side_conversations() {
-    for input in ["/side", "/btw"] {
+    for input in ["/side", "/btw", "/chat"] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let parent_thread_id = ThreadId::new();
         chat.thread_id = Some(parent_thread_id);
@@ -219,8 +223,10 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
             rx.try_recv(),
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
+                mode,
                 user_message: None,
             }) if emitted_parent_thread_id == parent_thread_id
+                && mode == if input.starts_with("/chat") { crate::app_event::SideConversationMode::Chat } else { crate::app_event::SideConversationMode::Side }
         );
         assert!(
             op_rx.try_recv().is_err(),
@@ -232,7 +238,11 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
 
 #[tokio::test]
 async fn side_aliases_request_forked_questions_while_task_running() {
-    for input in ["/side explore the codebase", "/btw explore the codebase"] {
+    for input in [
+        "/side explore the codebase",
+        "/btw explore the codebase",
+        "/chat explore the codebase",
+    ] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let parent_thread_id = ThreadId::new();
         chat.thread_id = Some(parent_thread_id);
@@ -250,8 +260,10 @@ async fn side_aliases_request_forked_questions_while_task_running() {
             rx.try_recv(),
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
+                mode,
                 user_message: Some(user_message),
             }) if emitted_parent_thread_id == parent_thread_id
+                && mode == if input.starts_with("/chat") { crate::app_event::SideConversationMode::Chat } else { crate::app_event::SideConversationMode::Side }
                 && user_message
                     == UserMessage {
                         text: "explore the codebase".to_string(),
@@ -351,7 +363,16 @@ async fn side_context_label_shows_hidden_side_snapshot() {
             style.add_modifier,
         )),
     );
-    assert_chatwidget_snapshot!("side_context_label_shows_hidden_side", terminal.backend());
+    let side = normalized_backend_snapshot(terminal.backend());
+    chat.set_side_conversation_context_label(Some("ctrl+/ for chat".to_string()));
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw hidden chat conversation footer");
+    let chat = normalized_backend_snapshot(terminal.backend());
+    assert_chatwidget_snapshot!(
+        "side_context_label_shows_hidden_side",
+        format!("Side:\n{side}\n\nChat:\n{chat}")
+    );
 }
 
 #[tokio::test]
@@ -363,7 +384,7 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         SlashCommand::New,
         SlashCommand::Clear,
         SlashCommand::Resume,
-        SlashCommand::Fork,
+        SlashCommand::Chat,
         SlashCommand::Worktree,
         SlashCommand::Compact,
         SlashCommand::Delete,
@@ -389,6 +410,62 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         assert!(op_rx.try_recv().is_err(), "{command:?}");
         assert!(!chat.bottom_pane.has_active_view(), "{command:?}");
     }
+
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    for command in [SlashCommand::SendLast, SlashCommand::Sync] {
+        chat.dispatch_command(command);
+        let errors = drain_insert_history(&mut rx);
+        assert!(lines_to_single_string(&errors[0]).contains("only available in Side/Chat"));
+    }
+    chat.set_side_conversation_active(/*active*/ true);
+    assert_eq!(chat.last_side_reply_markdown(), None);
+    chat.transcript.last_agent_markdown = Some("displayed reply".to_string());
+    chat.transcript.last_agent_source = Some("original reply".to_string());
+    assert_eq!(chat.last_side_reply_markdown(), Some("original reply"));
+
+    chat.dispatch_command(SlashCommand::Fork);
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::SideConversationAction {
+            action: crate::app_event::SideConversationAction::Fork { name: None },
+        })
+    );
+    chat.dispatch_command_with_args(SlashCommand::Fork, "saved chat".to_string(), Vec::new());
+    assert_matches!(rx.try_recv(), Ok(AppEvent::SideConversationAction {
+        action: crate::app_event::SideConversationAction::Fork { name: Some(name) },
+    }) if name == "saved chat");
+    chat.dispatch_command(SlashCommand::Sync);
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::SideConversationAction {
+            action: crate::app_event::SideConversationAction::Sync,
+        })
+    );
+    chat.dispatch_command_with_args(SlashCommand::Sync, "unexpected".to_string(), Vec::new());
+    let errors = drain_insert_history(&mut rx);
+    assert!(lines_to_single_string(&errors[0]).contains("Usage: /sync"));
+    assert!(rx.try_recv().is_err());
+
+    chat.on_task_started();
+    for command in [SlashCommand::Fork, SlashCommand::Sync] {
+        chat.dispatch_command(command);
+        let errors = drain_insert_history(&mut rx);
+        assert!(
+            lines_to_single_string(&errors[0]).contains("disabled while a task is in progress")
+        );
+        assert!(rx.try_recv().is_err());
+    }
+    chat.dispatch_command_with_args(
+        SlashCommand::SendLast,
+        "use this result".to_string(),
+        Vec::new(),
+    );
+    assert_matches!(rx.try_recv(), Ok(AppEvent::SideConversationAction {
+        action: crate::app_event::SideConversationAction::SendLast { text },
+    }) if text == "use this result");
+    assert!(op_rx.try_recv().is_err());
+    assert!(!chat.bottom_pane.has_active_view());
 }
 
 #[tokio::test]

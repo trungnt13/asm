@@ -277,6 +277,7 @@ async fn misalignment_policy_blocks_queued_turns_and_goal_resumption() -> Result
         },
         AppEvent::StartSide {
             parent_thread_id: thread_id,
+            mode: crate::app_event::SideConversationMode::Side,
             user_message: Some("Do not fork this stopped thread".into()),
         },
         AppEvent::StartParallel {
