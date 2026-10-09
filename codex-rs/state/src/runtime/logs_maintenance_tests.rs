@@ -105,7 +105,7 @@ async fn periodic_cleanup_prunes_without_new_log_writes_or_restart() {
     for timestamp in [now - 11 * DAY, now] {
         sqlx::query("INSERT INTO logs (ts, ts_nanos, level, target) VALUES (?, 0, 'INFO', 'test')")
             .bind(timestamp)
-            .execute(runtime.logs_pool.as_ref())
+            .execute(runtime.logs_pool.as_deref().expect("log capture enabled"))
             .await
             .unwrap();
     }
@@ -113,7 +113,7 @@ async fn periodic_cleanup_prunes_without_new_log_writes_or_restart() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let timestamps: Vec<i64> = sqlx::query_scalar("SELECT ts FROM logs ORDER BY ts")
-                .fetch_all(runtime.logs_pool.as_ref())
+                .fetch_all(runtime.logs_pool.as_deref().expect("log capture enabled"))
                 .await
                 .unwrap();
             if timestamps == vec![now] {
@@ -150,7 +150,7 @@ async fn startup_cleanup_runs_without_waiting_for_the_period() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM logs")
-                .fetch_one(runtime.logs_pool.as_ref())
+                .fetch_one(runtime.logs_pool.as_deref().expect("log capture enabled"))
                 .await
                 .unwrap();
             if count == 0 {
