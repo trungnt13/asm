@@ -27,12 +27,16 @@ where
         .and_then(OtelProvider::logger_export_layer)
         .map(Layer::boxed);
     let (logger_layer, logger_handle) = reload::Layer::new(logger_export_layer);
+    let logger_filter_handle = logger_handle.clone();
 
     let mut layers: Vec<Box<dyn Layer<S> + Send + Sync + 'static>> = vec![
         logger_layer
-            .with_filter(tracing_subscriber::filter::filter_fn(
-                OtelProvider::log_export_filter,
-            ))
+            .with_filter(tracing_subscriber::filter::filter_fn(move |metadata| {
+                OtelProvider::log_export_filter(metadata)
+                    && logger_filter_handle
+                        .with_current(Option::is_some)
+                        .unwrap_or(false)
+            }))
             .boxed(),
     ];
     if provider.is_some_and(|provider| provider.tracer.is_some()) {
