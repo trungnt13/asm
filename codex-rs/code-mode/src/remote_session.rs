@@ -48,6 +48,15 @@ impl ProcessOwnedCodeModeSessionProvider {
         }
     }
 
+    /// Selects capture before the provider starts its lazy host process.
+    pub fn with_diagnostic_log_capture(self, diagnostic_log_capture: bool) -> Self {
+        let mut host = OwnedCodeModeHost::new(self.host.host_program.clone());
+        host.diagnostic_log_capture = diagnostic_log_capture;
+        Self {
+            host: Arc::new(host),
+        }
+    }
+
     fn process_host(&self) -> Arc<OwnedCodeModeHost> {
         Arc::clone(&self.host)
     }
@@ -113,6 +122,7 @@ async fn create_host_session(
 
 struct OwnedCodeModeHost {
     host_program: PathBuf,
+    diagnostic_log_capture: bool,
     connection: StdMutex<Option<Arc<Connection>>>,
     connect_permit: Semaphore,
     connection_generation: AtomicU64,
@@ -124,6 +134,7 @@ impl OwnedCodeModeHost {
     fn new(host_program: PathBuf) -> Self {
         Self {
             host_program,
+            diagnostic_log_capture: false,
             connection: StdMutex::new(None),
             connect_permit: Semaphore::new(/*permits*/ 1),
             connection_generation: AtomicU64::new(0),
@@ -155,7 +166,7 @@ impl OwnedCodeModeHost {
         {
             return Err(ConnectionError::Other(error.clone()));
         }
-        let connection = Connection::spawn(&self.host_program).await;
+        let connection = Connection::spawn(&self.host_program, self.diagnostic_log_capture).await;
         let new_connection = match connection {
             Ok(connection) => connection,
             Err(error) => {
