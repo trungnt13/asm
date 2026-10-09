@@ -2360,7 +2360,12 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
 ) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    let config = MockResponsesConfig::new(&server.uri());
+    let config = match history_mode {
+        ThreadHistoryMode::Legacy => config,
+        ThreadHistoryMode::Paginated => config.enable_feature(Feature::Sqlite),
+    };
+    config.write(codex_home.path())?;
 
     let preview = "Saved user message";
     let create_rollout = match history_mode {
@@ -2580,6 +2585,7 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         .await??,
     )?;
     assert!(!saved.thread.ephemeral);
+    assert_eq!(saved.thread.history_mode, history_mode);
     assert_eq!(
         saved.thread.forked_from_id.as_deref(),
         Some(fork_thread_id.as_str())
@@ -2632,6 +2638,7 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         .await??,
     )?;
     assert!(!resumed.thread.ephemeral);
+    assert_eq!(resumed.thread.history_mode, history_mode);
     mcp.start_turn_and_wait_for_completion(TurnStartParams {
         thread_id: saved.thread.id,
         input: vec![UserInput::Text {
