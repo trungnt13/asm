@@ -55,7 +55,7 @@ fn active_dashboard_preserves_live_colors_controls_and_width() {
     assert!(actual.starts_with(" voice "));
     assert!(actual.lines().nth(1).unwrap().starts_with("   mic "));
     insta::assert_snapshot!(actual, @"
-    voice ● listening     ⌃x mute     /voice stop
+    voice ● listening     f9 mute     /voice stop
       mic ▆▅▄▃▂▁  ASM ▁▃▄▅▆█
     ");
     assert_eq!(buffer[(7, 0)].fg, Color::Red);
