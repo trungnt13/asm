@@ -138,6 +138,7 @@ use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::approvals::GuardianAssessmentEvent;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::PermissionProfile;
@@ -1206,6 +1207,22 @@ impl AppServerSession {
             }
         }
         session_config
+    }
+
+    pub(crate) fn require_fast_service_tier(&self, config: &Config) -> Result<()> {
+        let fast = ServiceTier::Fast.request_value();
+        let supported = config.model.as_deref().is_some_and(|model| {
+            self.available_models.iter().any(|preset| {
+                preset.model == model
+                    && service_tier_resolution::model_supports_service_tier(preset, fast)
+            })
+        });
+        if !supported || !config.features.service_tier_enabled(fast) {
+            color_eyre::eyre::bail!(
+                "/chat requires a model with Fast enabled; no conversation was created."
+            );
+        }
+        Ok(())
     }
 
     async fn fork_parent_title_from_app_server(
@@ -3690,6 +3707,7 @@ mod tests {
             preset.default_service_tier = None;
             app_server.available_models = vec![preset];
 
+            assert!(app_server.require_fast_service_tier(&config).is_err());
             let started = app_server.start_thread(&config).await?;
 
             assert_eq!(
@@ -3735,6 +3753,10 @@ mod tests {
         }];
         preset.default_service_tier = Some(ServiceTier::Fast.request_value().to_string());
         app_server.available_models = vec![preset];
+        app_server.require_fast_service_tier(&config)?;
+        config.features.disable(Feature::FastMode)?;
+        assert!(app_server.require_fast_service_tier(&config).is_err());
+        config.features.enable(Feature::FastMode)?;
 
         let resumed = app_server
             .resume_thread(
