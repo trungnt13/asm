@@ -390,6 +390,11 @@ pub(super) async fn start_app_server_for_session_command(
     let mut state_db = super::init_state_db_for_app_server_target(&config, &app_server_target)
         .await
         .wrap_err("failed to initialize state database")?;
+    let feedback = if config.diagnostic_log_capture {
+        codex_feedback::CodexFeedback::new()
+    } else {
+        codex_feedback::CodexFeedback::disabled()
+    };
     let app_server = super::start_app_server(
         &mut app_server_target,
         arg0_paths,
@@ -398,7 +403,7 @@ pub(super) async fn start_app_server_for_session_command(
         loader_overrides,
         strict_config,
         cloud_config_bundle,
-        codex_feedback::CodexFeedback::new(),
+        feedback,
         /*log_db*/ None,
         &mut state_db,
         environment_manager,
