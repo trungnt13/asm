@@ -237,6 +237,16 @@ Optional `macos_concurrency_experiment` compares cold builds of one commit on `m
 
 ## Intentional behavior differences
 
+### Minimal diagnostics
+
+ASM defaults to `diagnostic_log_capture = false`. This process-startup setting controls Rust stderr/file logging, persistent diagnostic logs, the feedback ring, continuously collected feedback tags, and the optional TUI replay and rollout-trace recorders. `RUST_LOG`, `log_dir`, and recorder environment variables do not enable those sinks while capture is disabled. Opt in with `diagnostic_log_capture = true` and restart the affected process; then the existing log filters apply. Propagate the policy to the code-mode helper without allowing an inherited helper environment setting to override it. Standalone helpers without a user config require their explicit diagnostic opt-in.
+
+When disabled, do not allocate feedback capture, install its tracing layers, open or migrate the diagnostic database, or start log insertion, pruning, and reclamation workers. Keep historical diagnostic files unchanged during ordinary startup. Explicit historical inspection and feedback export may read existing logs without enabling capture. Thread deletion must still remove its historical diagnostic records through existing-only on-demand access; missing files must not be created. Preserve feedback submission and actual upload errors without inventing captured evidence.
+
+Keep direct user-facing errors and warnings, exit status, structured protocol events, saved conversation/tool history, subagent relationships, memory, and operational state independent. Detached-daemon startup/fatal stderr and Windows sandbox security-audit logs remain separate failure-reporting channels; do not suppress them or weaken security checks. Leave product-event analytics and account usage accounting unchanged.
+
+The built-in Statsig metrics exporter is inactive in ASM, including optimized releases and account-change reloads. Retain its config spelling for compatibility and default `otel.metrics_exporter` to `none`. Preserve explicitly configured OTLP collectors. Local `runtime_metrics` remains opt-in and uses a manual reader without a reporting timer or network exporter when no exporter is configured. Do not perform the unsolicited session-storage size telemetry scan. Upstream tests do not validate these fork-specific disabled paths; use focused existing checks rather than broad upstream retesting.
+
 ### TUI automatic session names
 
 `[auto_rename]` controls automatic naming in the TUI only. It does not change Desktop naming, the conversation model, stored history, or `/rename` suggestions. Defaults remain enabled, first user message, user-message context, one-time naming, 36 title characters, and a 960-byte initial prompt. Automatic naming prefers `gpt-6-luna` at low effort only with OpenAI, a ChatGPT account, and an available catalog entry; otherwise use the conversation model. Manual `/rename` suggestions retain their upstream model selection.
