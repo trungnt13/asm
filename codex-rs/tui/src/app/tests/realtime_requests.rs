@@ -111,6 +111,7 @@ async fn check_remote_voice_start(
             /*failed_thread_name*/ None,
             crate::app_server_session::ThreadParamsMode::Remote,
             RealtimeRequestBehavior::AcceptStart,
+            super::session_lifecycle_requests::TurnStartBehavior::Forward,
             codex_config::LoaderOverrides::default(),
         )
         .await?;
@@ -1919,6 +1920,7 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                 /*failed_thread_name*/ None,
                 crate::app_server_session::ThreadParamsMode::Remote,
                 RealtimeRequestBehavior::Forward,
+                super::session_lifecycle_requests::TurnStartBehavior::Forward,
                 codex_config::LoaderOverrides::default(),
             )
             .await?;
