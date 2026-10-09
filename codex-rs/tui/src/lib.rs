@@ -639,7 +639,11 @@ pub(crate) async fn start_app_server_for_picker(
         loader_overrides,
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
-        codex_feedback::CodexFeedback::new(),
+        if config.diagnostic_log_capture {
+            codex_feedback::CodexFeedback::new()
+        } else {
+            codex_feedback::CodexFeedback::disabled()
+        },
         /*log_db*/ None,
         &mut state_db,
         environment_manager,

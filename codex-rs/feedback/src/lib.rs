@@ -139,6 +139,9 @@ impl<'a> FeedbackRequestSnapshot<'a> {
 }
 
 pub fn emit_feedback_request_tags(tags: &FeedbackRequestTags<'_>) {
+    if !tracing::enabled!(target: FEEDBACK_TAGS_TARGET, Level::INFO) {
+        return;
+    }
     let snapshot = FeedbackRequestSnapshot::from_tags(tags);
     tracing::info!(
         target: FEEDBACK_TAGS_TARGET,
@@ -163,6 +166,9 @@ pub fn emit_feedback_request_tags_with_auth_env(
     tags: &FeedbackRequestTags<'_>,
     auth_env: &AuthEnvTelemetry,
 ) {
+    if !tracing::enabled!(target: FEEDBACK_TAGS_TARGET, Level::INFO) {
+        return;
+    }
     let snapshot = FeedbackRequestSnapshot::from_tags(tags);
     tracing::info!(
         target: FEEDBACK_TAGS_TARGET,
@@ -198,13 +204,16 @@ pub fn emit_feedback_request_tags_with_auth_env(
 
 #[derive(Clone)]
 pub struct CodexFeedback {
-    inner: Arc<FeedbackInner>,
+    inner: Option<Arc<FeedbackInner>>,
 }
 
 impl LogWriteFailureReporter for CodexFeedback {
     fn report_failure(&self, diagnostic: &str) {
         // Bypass tracing so this diagnostic cannot return to the SQLite writer.
-        self.inner
+        let Some(inner) = &self.inner else {
+            return;
+        };
+        inner
             .ring
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -223,9 +232,14 @@ impl CodexFeedback {
         Self::with_capacity(DEFAULT_MAX_BYTES)
     }
 
+    /// Keeps feedback uploads available without retaining diagnostic logs or tags.
+    pub fn disabled() -> Self {
+        Self { inner: None }
+    }
+
     pub(crate) fn with_capacity(max_bytes: usize) -> Self {
         Self {
-            inner: Arc::new(FeedbackInner::new(max_bytes)),
+            inner: Some(Arc::new(FeedbackInner::new(max_bytes))),
         }
     }
 
@@ -240,58 +254,64 @@ impl CodexFeedback {
     ///
     /// This is intended for initialization code so call sites don't have to duplicate the exact
     /// `fmt::layer()` configuration and filter logic.
-    pub fn logger_layer<S>(&self) -> impl Layer<S> + Send + Sync + 'static
+    /// Returns `None` when capture is disabled.
+    pub fn logger_layer<S>(&self) -> Option<impl Layer<S> + Send + Sync + 'static>
     where
         S: tracing::Subscriber + for<'a> LookupSpan<'a>,
     {
-        tracing_subscriber::fmt::layer()
-            .with_writer(self.make_writer())
-            .with_timer(tracing_subscriber::fmt::time::SystemTime)
-            .with_ansi(false)
-            .with_target(false)
-            // Capture diagnostics independently of `RUST_LOG` without filling the feedback ring
-            // with high-volume request and response payloads.
-            .with_filter(
-                Targets::new()
-                    .with_default(Level::TRACE)
-                    // Opted-in content belongs to the configured OTLP destination, not feedback.
-                    .with_target("codex_otel.log_only", LevelFilter::OFF)
-                    .with_target("codex_http_client::transport", LevelFilter::DEBUG)
-                    .with_target("codex_api::sse", LevelFilter::DEBUG)
-                    // `tracing-log` checks legacy log records against their original
-                    // target before re-emitting them as `log`; tungstenite TRACE
-                    // includes full websocket frames and authenticated handshakes.
-                    .with_target("tungstenite", LevelFilter::DEBUG)
-                    .with_target("codex_api::responses_websocket_timing", LevelFilter::OFF)
-                    .with_target("codex_core::post_sampling_token_estimate", LevelFilter::OFF),
-            )
+        self.inner.as_ref().map(|_| {
+            tracing_subscriber::fmt::layer()
+                .with_writer(self.make_writer())
+                .with_timer(tracing_subscriber::fmt::time::SystemTime)
+                .with_ansi(false)
+                .with_target(false)
+                // Capture diagnostics independently of `RUST_LOG` without filling the feedback ring
+                // with high-volume request and response payloads.
+                .with_filter(
+                    Targets::new()
+                        .with_default(Level::TRACE)
+                        // Opted-in content belongs to the configured OTLP destination, not feedback.
+                        .with_target("codex_otel.log_only", LevelFilter::OFF)
+                        .with_target("codex_http_client::transport", LevelFilter::DEBUG)
+                        .with_target("codex_api::sse", LevelFilter::DEBUG)
+                        // `tracing-log` checks legacy log records against their original
+                        // target before re-emitting them as `log`; tungstenite TRACE
+                        // includes full websocket frames and authenticated handshakes.
+                        .with_target("tungstenite", LevelFilter::DEBUG)
+                        .with_target("codex_api::responses_websocket_timing", LevelFilter::OFF)
+                        .with_target("codex_core::post_sampling_token_estimate", LevelFilter::OFF),
+                )
+        })
     }
 
     /// Returns a [`tracing_subscriber`] layer that collects structured metadata for feedback.
     ///
     /// Events with `target: "feedback_tags"` are treated as key/value tags to attach to feedback
     /// uploads later.
-    pub fn metadata_layer<S>(&self) -> impl Layer<S> + Send + Sync + 'static
+    /// Returns `None` when capture is disabled.
+    pub fn metadata_layer<S>(&self) -> Option<impl Layer<S> + Send + Sync + 'static>
     where
         S: tracing::Subscriber + for<'a> LookupSpan<'a>,
     {
-        FeedbackMetadataLayer {
-            inner: self.inner.clone(),
-        }
-        .with_filter(Targets::new().with_target(FEEDBACK_TAGS_TARGET, Level::TRACE))
+        self.inner.as_ref().map(|inner| {
+            FeedbackMetadataLayer {
+                inner: Arc::clone(inner),
+            }
+            .with_filter(Targets::new().with_target(FEEDBACK_TAGS_TARGET, Level::TRACE))
+        })
     }
 
     pub fn snapshot(&self, session_id: Option<ThreadId>) -> FeedbackSnapshot {
-        let bytes = {
-            #[allow(clippy::expect_used)]
-            let guard = self.inner.ring.lock().expect("mutex poisoned");
-            guard.snapshot_bytes()
-        };
-        let tags = {
-            #[allow(clippy::expect_used)]
-            let guard = self.inner.tags.lock().expect("mutex poisoned");
-            guard.clone()
-        };
+        let (bytes, tags) = self.inner.as_ref().map_or_else(
+            || (Vec::new(), BTreeMap::new()),
+            |inner| {
+                #[allow(clippy::expect_used)]
+                let bytes = inner.ring.lock().expect("mutex poisoned").snapshot_bytes();
+                #[allow(clippy::expect_used)]
+                let tags = inner.tags.lock().expect("mutex poisoned").clone();
+                (bytes, tags)
+            },
+        );
         FeedbackSnapshot {
             bytes,
             tags,
@@ -319,7 +339,7 @@ impl FeedbackInner {
 
 #[derive(Clone)]
 pub struct FeedbackMakeWriter {
-    inner: Arc<FeedbackInner>,
+    inner: Option<Arc<FeedbackInner>>,
 }
 
 impl<'a> MakeWriter<'a> for FeedbackMakeWriter {
@@ -333,13 +353,15 @@ impl<'a> MakeWriter<'a> for FeedbackMakeWriter {
 }
 
 pub struct FeedbackWriter {
-    inner: Arc<FeedbackInner>,
+    inner: Option<Arc<FeedbackInner>>,
 }
 
 impl Write for FeedbackWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut guard = self.inner.ring.lock().map_err(|_| io::ErrorKind::Other)?;
-        guard.push_bytes(buf);
+        if let Some(inner) = &self.inner {
+            let mut guard = inner.ring.lock().map_err(|_| io::ErrorKind::Other)?;
+            guard.push_bytes(buf);
+        }
         Ok(buf.len())
     }
 
@@ -523,12 +545,13 @@ pub struct FeedbackUploadOptions<'a> {
 impl FeedbackSnapshot {
     /// Refreshes log bytes while preserving the captured metadata and thread identity.
     pub fn refresh_logs(&mut self, feedback: &CodexFeedback) {
-        self.bytes = feedback
-            .inner
-            .ring
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .snapshot_bytes();
+        self.bytes = feedback.inner.as_ref().map_or_else(Vec::new, |inner| {
+            inner
+                .ring
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .snapshot_bytes()
+        });
     }
 
     fn feedback_event(
@@ -1048,6 +1071,29 @@ mod tests {
         let snap = fb.snapshot(/*session_id*/ None);
         // Capacity 8: after writing 10 bytes, we should keep the last 8.
         pretty_assertions::assert_eq!(std::str::from_utf8(&snap.bytes).unwrap(), "cdefghij");
+
+        let disabled = CodexFeedback::disabled();
+        assert!(disabled.inner.is_none());
+        assert!(
+            disabled
+                .logger_layer::<tracing_subscriber::Registry>()
+                .is_none()
+        );
+        assert!(
+            disabled
+                .metadata_layer::<tracing_subscriber::Registry>()
+                .is_none()
+        );
+        disabled
+            .make_writer()
+            .make_writer()
+            .write_all(b"discarded")
+            .unwrap();
+        disabled.report_failure("discarded failure");
+        let mut snapshot = disabled.snapshot(/*session_id*/ None);
+        snapshot.refresh_logs(&disabled);
+        assert!(snapshot.bytes.is_empty());
+        assert!(snapshot.tags.is_empty());
     }
 
     #[test]
@@ -1163,7 +1209,7 @@ mod tests {
             content_type: None,
             buffer: b"later diagnostic".to_vec(),
         };
-        upload_test_feedback(&CodexFeedback::new(), &dsn, vec![attachment])
+        upload_test_feedback(&CodexFeedback::disabled(), &dsn, vec![attachment])
             .await
             .expect("all three envelopes should finish across twelve seconds of network waits");
     }
