@@ -493,6 +493,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::Resume
                 | SlashCommand::App
                 | SlashCommand::Side
+                | SlashCommand::Chat
                 | SlashCommand::Btw
                 | SlashCommand::Parallel
                 | SlashCommand::Agents

@@ -69,6 +69,19 @@ use codex_realtime_webrtc::StartedRealtimeWebrtcSession;
 
 use crate::history_cell::HistoryCell;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SideConversationMode {
+    Side,
+    Chat,
+}
+
+#[derive(Debug)]
+pub(crate) enum SideConversationAction {
+    Sync,
+    SendLast { text: String },
+    Fork { name: Option<String> },
+}
+
 /// Global voice controls always apply to the one call's owner.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum VoiceControl {
@@ -431,7 +444,12 @@ pub(crate) enum AppEvent {
     /// Fork the current thread into a transient side conversation.
     StartSide {
         parent_thread_id: ThreadId,
+        mode: SideConversationMode,
         user_message: Option<UserMessage>,
+    },
+
+    SideConversationAction {
+        action: SideConversationAction,
     },
 
     /// Fork the current thread into a saved parallel conversation.
