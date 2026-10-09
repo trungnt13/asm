@@ -1002,7 +1002,6 @@ approval_policy = "on-request"
 min_effort = "minimal"
 max_effort = "max"
 rubric_instructions = "Base selection policy."
-additional_instructions = "Keep this suffix."
 "#,
     )
     .expect("write default user config");
@@ -1079,7 +1078,6 @@ rubric_instructions = "Selected profile policy."
             min_effort: codex_protocol::openai_models::ReasoningEffort::Minimal,
             max_effort: codex_protocol::openai_models::ReasoningEffort::High,
             rubric_instructions: Some("Selected profile policy.".to_string()),
-            additional_instructions: "Keep this suffix.".to_string(),
             ..Default::default()
         })
     );

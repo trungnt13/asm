@@ -9,10 +9,6 @@
     "AdaptiveReasoningConfig": {
       "additionalProperties": false,
       "properties": {
-        "additional_instructions": {
-          "default": "",
-          "type": "string"
-        },
         "decision_model": {
           "default": "gpt-6-luna",
           "type": "string"
