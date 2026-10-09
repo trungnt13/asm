@@ -48,6 +48,10 @@ pub enum SlashCommand {
     Agents,
     Side,
     Btw,
+    Chat,
+    #[strum(serialize = "sendlast")]
+    SendLast,
+    Sync,
     Parallel,
     Copy,
     #[strum(serialize = "copyid")]
@@ -151,6 +155,9 @@ impl SlashCommand {
             SlashCommand::Side | SlashCommand::Btw => {
                 "start a side conversation in an ephemeral fork"
             }
+            SlashCommand::Chat => "start a temporary Fast chat",
+            SlashCommand::SendLast => "send the last side reply to main with optional instructions",
+            SlashCommand::Sync => "replace side history with the latest main context",
             SlashCommand::Parallel => "start a saved parallel conversation",
             SlashCommand::Permissions => "choose what ASM is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
@@ -197,6 +204,9 @@ impl SlashCommand {
                 | SlashCommand::Pets
                 | SlashCommand::Side
                 | SlashCommand::Btw
+                | SlashCommand::Chat
+                | SlashCommand::SendLast
+                | SlashCommand::Sync
                 | SlashCommand::Parallel
                 | SlashCommand::Resume
         )
@@ -206,7 +216,10 @@ impl SlashCommand {
     pub fn available_in_side_conversation(self) -> bool {
         matches!(
             self,
-            SlashCommand::Copy
+            SlashCommand::Fork
+                | SlashCommand::SendLast
+                | SlashCommand::Sync
+                | SlashCommand::Copy
                 | SlashCommand::CopyId
                 | SlashCommand::Agents
                 | SlashCommand::Export
@@ -256,6 +269,7 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Delete
             | SlashCommand::Fork
+            | SlashCommand::Sync
             | SlashCommand::Worktree
             | SlashCommand::Init
             | SlashCommand::Compact
@@ -312,6 +326,8 @@ impl SlashCommand {
             | SlashCommand::Exit
             | SlashCommand::Side
             | SlashCommand::Btw
+            | SlashCommand::Chat
+            | SlashCommand::SendLast
             | SlashCommand::Parallel => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,

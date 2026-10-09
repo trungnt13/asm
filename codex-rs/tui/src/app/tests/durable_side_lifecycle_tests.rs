@@ -34,6 +34,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         parent_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -51,6 +52,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         first_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -86,6 +88,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             &mut server,
             thread_id,
             CompanionKind::Side,
+            crate::app_event::SideConversationMode::Side,
             Some("Keep this inline side question".into()),
         ))
         .await?;
@@ -127,6 +130,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         parent_id,
         CompanionKind::Side,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -142,6 +146,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         temporary_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -171,6 +176,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             &mut server,
             parent_id,
             CompanionKind::Parallel,
+            crate::app_event::SideConversationMode::Side,
             /*user_message*/ None,
         ))
         .await?;
