@@ -1460,6 +1460,25 @@ async fn runtime_config_defaults_model_availability_nux() {
         cfg.model_availability_nux,
         ModelAvailabilityNuxConfig::default()
     );
+    assert!(!cfg.diagnostic_log_capture);
+    assert_eq!(cfg.otel.metrics_exporter, OtelExporterKind::None);
+    assert_eq!(
+        cfg.sqlite_config().diagnostic_log_capture(),
+        codex_state::DiagnosticLogCapture::Disabled
+    );
+
+    let cfg = Config::load_from_base_config_with_overrides(
+        toml::from_str("diagnostic_log_capture = true").expect("capture config"),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load capture config");
+    assert!(cfg.diagnostic_log_capture);
+    assert_eq!(
+        cfg.sqlite_config().diagnostic_log_capture(),
+        codex_state::DiagnosticLogCapture::Enabled
+    );
 }
 
 #[test]

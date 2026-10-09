@@ -809,6 +809,9 @@
         "chatgpt_base_url": {
           "type": "string"
         },
+        "diagnostic_log_capture": {
+          "type": "boolean"
+        },
         "experimental_compact_prompt_file": {
           "$ref": "#/definitions/AbsolutePathBuf"
         },
@@ -7128,6 +7131,10 @@
       "description": "Developer instructions inserted as a `developer` role message.",
       "type": "string"
     },
+    "diagnostic_log_capture": {
+      "description": "Opt in to process-local Rust logs and feedback diagnostics at startup. Defaults to false; saved conversation history is independent.",
+      "type": "boolean"
+    },
     "disable_paste_burst": {
       "description": "Legacy fallback for `tui.disable_paste_burst`. Prefer the setting under `[tui]`.",
       "type": "boolean"
@@ -7845,7 +7852,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Directory where Codex writes log files. Setting this value explicitly also enables the TUI text log in this directory. Defaults to `$CODEX_HOME/log`."
+      "description": "Directory where Codex writes log files. Setting this value explicitly also enables the TUI text log when diagnostic capture is enabled. Defaults to `$CODEX_HOME/log`."
     },
     "marketplaces": {
       "additionalProperties": {
