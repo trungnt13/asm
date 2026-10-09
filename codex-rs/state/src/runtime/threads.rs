@@ -1170,11 +1170,30 @@ ON CONFLICT(id) DO UPDATE SET
             .iter()
             .map(ThreadId::to_string)
             .collect::<Vec<_>>();
-        for (thread_id, thread_id_string) in thread_ids.iter().zip(&thread_id_strings) {
-            sqlx::query("DELETE FROM logs WHERE thread_id = ?")
-                .bind(thread_id_string)
-                .execute(self.logs_pool.as_ref())
-                .await?;
+        // Explicit deletion must purge historical diagnostics even when capture is disabled.
+        let historical_logs = if self.logs_pool.is_none() {
+            self.sqlite.open_existing_logs_pool().await?
+        } else {
+            None
+        };
+        let logs_pool = self.logs_pool.as_deref().or(historical_logs.as_ref());
+        let purge_result = async {
+            if let Some(logs_pool) = logs_pool {
+                for thread_id in &thread_id_strings {
+                    sqlx::query("DELETE FROM logs WHERE thread_id = ?")
+                        .bind(thread_id)
+                        .execute(logs_pool)
+                        .await?;
+                }
+            }
+            Ok::<(), sqlx::Error>(())
+        }
+        .await;
+        if let Some(pool) = historical_logs {
+            pool.close().await;
+        }
+        purge_result?;
+        for thread_id in thread_ids {
             self.thread_queue.delete_thread_queue(*thread_id).await?;
             self.delete_versioned_thread_memory(*thread_id).await?;
             self.thread_goals.delete_thread_goal(*thread_id).await?;
@@ -2055,6 +2074,37 @@ mod tests {
 
         assert_eq!(runtime.delete_thread(missing_thread_id).await?, 0);
         assert_thread_cleanup_state(&runtime, missing_thread_id).await?;
+        runtime
+            .upsert_thread(&test_thread_metadata(
+                &codex_home,
+                thread_id,
+                codex_home.clone(),
+            ))
+            .await?;
+        seed_thread_cleanup_state(&runtime, thread_id, child_thread_id).await?;
+        runtime.close().await;
+        let disabled_sqlite = crate::SqliteConfig::from_sqlite_home(codex_home.as_path().abs());
+        let disabled = StateRuntime::init(disabled_sqlite, "test-provider".to_string()).await?;
+        assert!(disabled.logs_pool.is_none());
+        assert_eq!(disabled.delete_thread(thread_id).await?, 1);
+        assert!(disabled.get_thread(thread_id).await?.is_none());
+        assert!(
+            disabled
+                .query_logs(&LogQuery {
+                    thread_ids: vec![thread_id.to_string()],
+                    ..Default::default()
+                })
+                .await?
+                .is_empty()
+        );
+        assert!(
+            disabled
+                .thread_goals()
+                .get_thread_goal(thread_id)
+                .await?
+                .is_none()
+        );
+        disabled.close().await;
         Ok(())
     }
 
@@ -2077,7 +2127,12 @@ mod tests {
             .await?;
         seed_thread_cleanup_state(&runtime, thread_id, child_thread_id).await?;
 
-        runtime.logs_pool.close().await;
+        runtime
+            .logs_pool
+            .as_deref()
+            .expect("log capture enabled")
+            .close()
+            .await;
         runtime
             .delete_thread(thread_id)
             .await
@@ -2114,7 +2169,7 @@ mod tests {
             .await?;
         sqlx::query("INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id) VALUES (1, 0, 'INFO', 'test', 'feedback log', ?)")
             .bind(thread_id.to_string())
-            .execute(runtime.logs_pool.as_ref())
+            .execute(runtime.logs_pool.as_deref().expect("log capture enabled"))
             .await?;
         Ok(())
     }
