@@ -230,7 +230,9 @@ impl Session {
         let _guard = super::thread_settings::acquire_persistence_lock(self).await;
         let manual_reasoning = update.model.is_some() || update.effort.is_some();
         let outcome = self
-            .apply_turn_settings_locked(turn_id, update, /*expected_task_done*/ None)
+            .apply_turn_settings_locked(
+                turn_id, update, /*expected_task_done*/ None, /*adaptive_guard*/ None,
+            )
             .await;
         if manual_reasoning && outcome == TurnSettingsUpdateOutcome::Applied {
             self.pause_adaptive_reasoning();
@@ -244,23 +246,33 @@ impl Session {
         turn: &TurnContext,
         expected: &Arc<ResolvedStepSettings>,
         expected_task_done: &Arc<tokio::sync::Notify>,
+        guard: &super::adaptive_reasoning_task::AdaptiveDecisionGuard,
         effort: codex_protocol::openai_models::ReasoningEffort,
     ) -> TurnSettingsUpdateOutcome {
-        let _guard = super::thread_settings::acquire_persistence_lock(self).await;
+        let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
+            return TurnSettingsUpdateOutcome::TargetUnavailable;
+        };
         if self.adaptive_reasoning_paused()
+            || guard.freshness.is_cancelled()
+            || tokio::time::Instant::now() >= guard.deadline
             || !Arc::ptr_eq(&turn.next_step_settings.load_full(), expected)
         {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         }
-        self.apply_turn_settings_locked(
-            &turn.sub_id,
-            TurnSettingsUpdate {
-                effort: Some(Some(effort)),
-                ..Default::default()
-            },
-            Some(expected_task_done),
+        tokio::time::timeout_at(
+            guard.deadline,
+            self.apply_turn_settings_locked(
+                &turn.sub_id,
+                TurnSettingsUpdate {
+                    effort: Some(Some(effort)),
+                    ..Default::default()
+                },
+                Some(expected_task_done),
+                Some(guard),
+            ),
         )
         .await
+        .unwrap_or(TurnSettingsUpdateOutcome::TargetUnavailable)
     }
 
     #[expect(
@@ -273,6 +285,7 @@ impl Session {
         turn_id: &str,
         update: TurnSettingsUpdate,
         expected_task_done: Option<&Arc<tokio::sync::Notify>>,
+        adaptive_guard: Option<&super::adaptive_reasoning_task::AdaptiveDecisionGuard>,
     ) -> TurnSettingsUpdateOutcome {
         let updates_model_settings = update.model.is_some()
             || update.effort.is_some()
@@ -377,6 +390,13 @@ impl Session {
         // safety checks together with applying the update under state and active_turn; no model
         // lookup or other preparation runs under these locks.
         let state = self.state.lock().await;
+        if adaptive_guard.is_some_and(|guard| {
+            state.shutting_down
+                || guard.freshness.is_cancelled()
+                || tokio::time::Instant::now() >= guard.deadline
+        }) {
+            return TurnSettingsUpdateOutcome::TargetUnavailable;
+        }
         // Environment configuration can arrive before its executor connects. If this update
         // omits environments, use what the running turn's manager knows now.
         let current_environments = self.services.turn_environments.selections();
