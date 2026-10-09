@@ -80,9 +80,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4`.
+- Last incorporated upstream commit: `9a59289fbea0e7e829c06aecfdd627651854da0f`.
 - Commit date: 2026-10-09.
-- Subject: Avoid an extra blank quote line when pasting text with a trailing newline (#52418).
+- Subject: Fix races in remote environment and session replacement tests (#52591).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
