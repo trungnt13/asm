@@ -3025,6 +3025,7 @@ async fn parallel_seeds_navigation_before_thread_started() -> Result<()> {
         &mut app_server,
         parent_thread_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -5107,7 +5108,10 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
     let original_approval_policy = app.config.permissions.approval_policy.value();
     let original_sandbox_policy = app.config.legacy_sandbox_policy();
 
-    let fork_config = app.side_fork_config(CompanionKind::Side);
+    let fork_config = app.side_fork_config(
+        CompanionKind::Side,
+        crate::app_event::SideConversationMode::Side,
+    );
 
     assert!(fork_config.ephemeral);
     assert_eq!(
@@ -5169,7 +5173,10 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
     app.chat_widget
         .set_approvals_reviewer(ApprovalsReviewer::AutoReview);
 
-    let fork_config = app.side_fork_config(CompanionKind::Side);
+    let fork_config = app.side_fork_config(
+        CompanionKind::Side,
+        crate::app_event::SideConversationMode::Side,
+    );
 
     assert_eq!(
         (
@@ -5187,6 +5194,38 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
             AskForApproval::OnRequest.to_core(),
             &parent_permission_profile,
             ApprovalsReviewer::AutoReview,
+        )
+    );
+    app.config.chat_model = Some("chat-selected-model".to_string());
+    app.config.chat_reasoning = Some(ReasoningEffortConfig::Medium);
+    let chat = app.side_fork_config(
+        CompanionKind::Side,
+        crate::app_event::SideConversationMode::Chat,
+    );
+    assert_eq!(
+        (
+            chat.model.as_deref(),
+            chat.model_reasoning_effort,
+            chat.service_tier.as_deref()
+        ),
+        (
+            Some("chat-selected-model"),
+            Some(ReasoningEffortConfig::Medium),
+            Some(ServiceTier::Fast.request_value())
+        )
+    );
+    assert_eq!(app.chat_widget.current_model(), "parent-thread-model");
+    app.config.chat_model = None;
+    app.config.chat_reasoning = None;
+    let chat = app.side_fork_config(
+        CompanionKind::Side,
+        crate::app_event::SideConversationMode::Chat,
+    );
+    assert_eq!(
+        (chat.model.as_deref(), chat.model_reasoning_effort),
+        (
+            Some("parent-thread-model"),
+            Some(ReasoningEffortConfig::High)
         )
     );
 }
