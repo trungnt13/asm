@@ -192,10 +192,17 @@ impl OtelProvider {
     }
 
     pub fn try_new(settings: &OtelSettings) -> Result<Option<Self>, Box<dyn Error>> {
-        let log_enabled = !matches!(settings.exporter, OtelExporter::None);
-        let trace_enabled = !matches!(settings.trace_exporter, OtelExporter::None);
+        let log_enabled = !matches!(
+            crate::config::resolve_exporter(&settings.exporter),
+            OtelExporter::None
+        );
+        let trace_enabled = !matches!(
+            crate::config::resolve_exporter(&settings.trace_exporter),
+            OtelExporter::None
+        );
         let metric_exporter = crate::config::resolve_exporter(&settings.metrics_exporter);
-        let metrics_enabled = !matches!(metric_exporter, OtelExporter::None);
+        let metrics_enabled =
+            settings.runtime_metrics || !matches!(metric_exporter, OtelExporter::None);
 
         if !log_enabled && !trace_enabled && !metrics_enabled {
             // Tracestate propagation is process-global; clear it when these
@@ -215,14 +222,14 @@ impl OtelProvider {
         }
         crate::trace_context::validate_tracestate_entries(&settings.tracestate)?;
 
-        let metrics = if matches!(metric_exporter, OtelExporter::None) {
+        let metrics = if !metrics_enabled {
             None
         } else {
             let mut config = MetricsConfig::otlp(
                 settings.environment.clone(),
                 settings.service_name.clone(),
                 settings.service_version.clone(),
-                settings.metrics_exporter.clone(),
+                metric_exporter,
             )
             .with_http_client_factory(settings.http_client_factory.clone());
             if settings.runtime_metrics {
@@ -275,7 +282,12 @@ impl OtelProvider {
         }
         if let Some(metrics) = provider.metrics.as_mut() {
             *metrics = crate::metrics::install_global(metrics.clone());
-            if matches!(settings.metrics_exporter, OtelExporter::Statsig) {
+            if matches!(settings.metrics_exporter, OtelExporter::Statsig)
+                && !matches!(
+                    crate::config::resolve_exporter(&settings.metrics_exporter),
+                    OtelExporter::None
+                )
+            {
                 crate::metrics::install_global_statsig_settings(StatsigMetricsSettings {
                     environment: settings.environment.clone(),
                 });
@@ -728,6 +740,21 @@ mod tests {
 
     #[test]
     fn cached_global_metrics_follow_reinstalled_provider() -> Result<(), Box<dyn Error>> {
+        let mut settings = test_otel_settings();
+        settings.runtime_metrics = true;
+        let local = OtelProvider::try_new(&settings)?.expect("local runtime metrics provider");
+        let metrics = local.metrics().expect("local metrics reader");
+        metrics.counter("codex.local_only", /*inc*/ 1, &[])?;
+        let snapshot = metrics.snapshot()?;
+        let names: Vec<_> = snapshot
+            .scope_metrics()
+            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .map(opentelemetry_sdk::metrics::data::Metric::name)
+            .collect();
+        assert_eq!(names, vec!["codex.local_only"]);
+        assert!(crate::metrics::global_statsig_settings().is_none());
+        local.shutdown();
+
         let initial =
             crate::metrics::install_global(MetricsClient::new(MetricsConfig::in_memory(
                 "test",

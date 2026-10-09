@@ -545,12 +545,7 @@ async fn metrics_exporters_respect_analytics_preferences() -> Result<()> {
             config.analytics_enabled = analytics_enabled;
             for default_analytics_enabled in [false, true] {
                 let expected_metrics = match config.otel.metrics_exporter {
-                    OtelExporterKind::None => false,
-                    // The built-in exporter is disabled in debug builds even with consent.
-                    OtelExporterKind::Statsig => {
-                        !cfg!(debug_assertions)
-                            && analytics_enabled.unwrap_or(default_analytics_enabled)
-                    }
+                    OtelExporterKind::None | OtelExporterKind::Statsig => false,
                     OtelExporterKind::OtlpHttp { .. } | OtelExporterKind::OtlpGrpc { .. } => true,
                 };
                 let provider = codex_core::otel_init::build_provider(

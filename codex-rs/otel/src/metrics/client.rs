@@ -363,21 +363,34 @@ impl MetricsClient {
                 build_provider(resource, exporter, export_interval, runtime_reader.clone())
             }
             MetricsExporter::Otlp(exporter) => {
-                let temporality = otlp_metrics_temporality(
-                    &exporter,
-                    std::env::var("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
-                        .ok()
-                        .as_deref(),
-                );
-                let exporter = crate::network_policy::PolicyExporter {
-                    exporter: build_otlp_metric_exporter(
-                        exporter,
-                        temporality,
-                        &http_client_factory,
-                    )?,
-                    policy: http_client_factory.network_policy().clone(),
-                };
-                build_provider(resource, exporter, export_interval, runtime_reader.clone())
+                if matches!(
+                    crate::config::resolve_exporter(&exporter),
+                    OtelExporter::None
+                ) {
+                    let mut builder = SdkMeterProvider::builder().with_resource(resource);
+                    if let Some(reader) = &runtime_reader {
+                        builder = builder.with_reader(SharedManualReader::new(Arc::clone(reader)));
+                    }
+                    let provider = builder.build();
+                    let meter = provider.meter(METER_NAME);
+                    (provider, meter)
+                } else {
+                    let temporality = otlp_metrics_temporality(
+                        &exporter,
+                        std::env::var("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE")
+                            .ok()
+                            .as_deref(),
+                    );
+                    let exporter = crate::network_policy::PolicyExporter {
+                        exporter: build_otlp_metric_exporter(
+                            exporter,
+                            temporality,
+                            &http_client_factory,
+                        )?,
+                        policy: http_client_factory.network_policy().clone(),
+                    };
+                    build_provider(resource, exporter, export_interval, runtime_reader.clone())
+                }
             }
         };
 
