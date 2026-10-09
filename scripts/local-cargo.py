@@ -4,12 +4,16 @@
 import hashlib
 import json
 import os
+import shutil
+import stat
 import subprocess
 import sys
 import time
 from contextlib import ExitStack
 from datetime import date
 from pathlib import Path
+
+STALE_ARTIFACT_DAYS = 3
 
 
 def common_root() -> Path:
@@ -29,6 +33,121 @@ def common_root() -> Path:
 
 def target_dir() -> str:
     return os.environ.get("CARGO_TARGET_DIR") or str(common_root() / "codex-rs/target")
+
+
+def cache_use_blocker(cache: Path) -> str | None:
+    # Process visibility is required, not inferred from artifact timestamps.
+    if sys.platform != "linux":
+        return "complete process inspection is unavailable on this host"
+    try:
+        for process in Path("/proc").iterdir():
+            if not process.name.isdigit() or int(process.name) == os.getpid():
+                continue
+            try:
+                name = (process / "comm").read_text().strip()
+                if name in {"cargo", "rustc", "rust-analyzer"}:
+                    return f"Rust build or editor process {process.name} is active"
+                paths = [os.readlink(process / "cwd")]
+                for descriptor in (process / "fd").iterdir():
+                    try:
+                        paths.append(os.readlink(descriptor))
+                    except FileNotFoundError:
+                        continue  # Descriptors can close during inspection.
+                for mapping in (process / "maps").read_text().splitlines():
+                    fields = mapping.split(maxsplit=5)
+                    if len(fields) == 6:
+                        paths.append(fields[5])
+            except FileNotFoundError:
+                if not process.exists():
+                    continue  # The process exited during inspection.
+                return f"cannot inspect process {process.name} completely"
+            if any(
+                path.startswith("/")
+                and Path(path.removesuffix(" (deleted)")).is_relative_to(cache)
+                for path in paths
+            ):
+                return f"process {process.name} uses the cache"
+    except OSError:
+        return "process inspection failed or access was denied"
+    return None
+
+
+def remove_stale_artifacts(cache: Path) -> tuple[int, str]:
+    import fcntl
+
+    blocker = cache_use_blocker(cache)
+    if blocker:
+        return 0, blocker
+    if sys.version_info < (3, 11) or not shutil.rmtree.avoids_symlink_attacks:
+        return 0, "descriptor-relative, symlink-safe removal is unavailable"
+    stale_before = time.time() - STALE_ARTIFACT_DAYS * 86400
+    removed = 0
+    skipped = []
+    # Directory descriptors keep traversal anchored when paths change.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    try:
+        with ExitStack() as root:
+            cache_fd = os.open(cache, flags)
+            root.callback(os.close, cache_fd)
+            for profile in os.listdir(cache_fd):
+                try:
+                    with ExitStack() as handles:
+                        profile_fd = os.open(profile, flags, dir_fd=cache_fd)
+                        handles.callback(os.close, profile_fd)
+                        lock_fd = os.open(
+                            ".cargo-lock", os.O_RDWR | os.O_NOFOLLOW, dir_fd=profile_fd
+                        )
+                        handles.callback(os.close, lock_fd)
+                        if not stat.S_ISREG(os.fstat(lock_fd).st_mode):
+                            skipped.append("non-regular Cargo lock")
+                            continue
+                        # Cargo uses this lock too, including direct builds and runs.
+                        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        blocker = cache_use_blocker(cache)
+                        if blocker:
+                            skipped.append(blocker)
+                            break
+                        for directory in ("incremental", "deps"):
+                            try:
+                                directory_fd = os.open(
+                                    directory, flags, dir_fd=profile_fd
+                                )
+                            except FileNotFoundError:
+                                continue
+                            handles.callback(os.close, directory_fd)
+                            physical = Path(f"/proc/self/fd/{directory_fd}").resolve(
+                                strict=True
+                            )
+                            if not physical.is_relative_to(cache):
+                                skipped.append(
+                                    "artifact directory is outside the cache"
+                                )
+                                continue
+                            for artifact in os.listdir(directory_fd):
+                                status = os.stat(
+                                    artifact, dir_fd=directory_fd, follow_symlinks=False
+                                )
+                                is_dir = stat.S_ISDIR(status.st_mode)
+                                if not is_dir and not stat.S_ISREG(status.st_mode):
+                                    continue
+                                last_use = (
+                                    status.st_mtime
+                                    if is_dir
+                                    else max(status.st_atime, status.st_mtime)
+                                )
+                                if last_use >= stale_before:
+                                    continue
+                                if is_dir:
+                                    shutil.rmtree(artifact, dir_fd=directory_fd)
+                                else:
+                                    os.unlink(artifact, dir_fd=directory_fd)
+                                removed += 1
+                except OSError:
+                    # Busy Cargo locks, symlinks, missing locks and I/O errors fail closed.
+                    skipped.append("unsafe, busy, or unreadable cache profile")
+    except OSError:
+        skipped.append("cache inspection or deletion failed")
+    return removed, "; ".join(dict.fromkeys(skipped)) or "none"
 
 
 def main() -> int:
@@ -165,6 +284,10 @@ def main() -> int:
         except BlockingIOError:
             print(f"Waiting for local Cargo cache: {cache}", file=sys.stderr)
             fcntl.flock(lock, fcntl.LOCK_EX)
+        removed, skipped = remove_stale_artifacts(cache)
+        log.write(
+            f"stale_artifacts_removed={removed}\nstale_artifacts_skip_reason={skipped}\n".encode()
+        )
         with subprocess.Popen(
             ["cargo", *args], env=env, stderr=subprocess.PIPE
         ) as child:
