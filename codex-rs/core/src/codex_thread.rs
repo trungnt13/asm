@@ -889,6 +889,22 @@ impl CodexThread {
             .await
     }
 
+    /// Captures complete replay history for an idle temporary root fork without saving it.
+    /// Other threads return `None` and continue using their normal store-backed history.
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub async fn ephemeral_fork_history(&self) -> CodexResult<Option<Vec<RolloutItem>>> {
+        let Some(history) = &self.session.ephemeral_rollout_items else {
+            return Ok(None);
+        };
+        let active_turn = self.session.active_turn.lock().await;
+        if active_turn.is_some() {
+            return Err(CodexErr::InvalidRequest(
+                "cannot save a temporary fork while a turn is running".to_string(),
+            ));
+        }
+        Ok(Some(history.lock().await.clone()))
+    }
+
     pub async fn load_history(
         &self,
         include_archived: bool,
