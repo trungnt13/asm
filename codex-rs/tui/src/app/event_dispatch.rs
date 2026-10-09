@@ -9,6 +9,7 @@ use super::resize_reflow::trailing_run_start;
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::app_event::RecapTrigger;
+use crate::app_event::SideConversationMode;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::ForkGoalContinuation;
 use crate::app_server_session::UnsupportedLegacyPermissionProfile;
@@ -105,6 +106,7 @@ impl App {
                 AppEvent::OpenAgentPicker
                     | AppEvent::SelectAgentThread(_)
                     | AppEvent::StartSide { .. }
+                    | AppEvent::SideConversationAction { .. }
                     | AppEvent::StartParallel { .. }
                     | AppEvent::ForkCurrentSession { .. }
                     | AppEvent::StartManagedWorktree {
@@ -3006,14 +3008,18 @@ impl App {
             }
             AppEvent::StartSide {
                 parent_thread_id,
+                mode,
                 user_message,
             } => {
                 return self
-                    .start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Side, user_message)
+                    .start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Side, mode, user_message)
                     .await;
             }
+            AppEvent::SideConversationAction { action } => {
+                self.apply_side_conversation_action(tui, app_server, action).await?;
+            }
             AppEvent::StartParallel { parent_thread_id, user_message } => {
-                return self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Parallel, user_message).await;
+                return self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Parallel, SideConversationMode::Side, user_message).await;
             }
             AppEvent::OpenSkillsList => {
                 self.chat_widget.open_skills_list();

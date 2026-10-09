@@ -1717,7 +1717,7 @@ impl Session {
                     ForkPersistence::Referenced {
                         inherited_item_count,
                         ..
-                    } => {
+                    } if self.ephemeral_rollout_items.is_none() => {
                         // Ancestor records remain behind history_base; only effective child
                         // settings and boundaries synthesized by snapshot processing are local.
                         rollout_items.drain(..*inherited_item_count);
@@ -1731,13 +1731,20 @@ impl Session {
                         rollout_items.clear();
                         rollout_items.push(thread_settings_applied);
                     }
-                    ForkPersistence::Copied | ForkPersistence::CopiedDeferred => {
+                    ForkPersistence::Copied
+                    | ForkPersistence::CopiedDeferred
+                    | ForkPersistence::Referenced { .. } => {
                         // Keep the copied prefix and effective child settings in one append so a
                         // cold resume cannot observe inherited settings as the latest value.
                         rollout_items.push(thread_settings_applied);
                     }
                 }
-                self.persist_rollout_items(&rollout_items).await;
+                if let Some(history) = &self.ephemeral_rollout_items {
+                    // Transfer the inherited prefix once; later writes append only their new items.
+                    *history.lock().await = rollout_items;
+                } else {
+                    self.persist_rollout_items(&rollout_items).await;
+                }
 
                 // Agent spawn owns its final durability barrier so it can overlap the edge write.
                 let persist_context = match self.fork_persistence {
@@ -4612,6 +4619,9 @@ impl Session {
         {
             error!("failed to record rollout items: {e:#}");
             return false;
+        }
+        if let Some(history) = &self.ephemeral_rollout_items {
+            history.lock().await.extend_from_slice(items);
         }
         true
     }

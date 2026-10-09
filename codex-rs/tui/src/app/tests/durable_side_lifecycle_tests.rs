@@ -1,5 +1,11 @@
+use super::session_lifecycle_requests::HistoryCapabilities;
+use super::session_lifecycle_requests::RealtimeRequestBehavior;
+use super::session_lifecycle_requests::TurnStartBehavior;
+use super::session_lifecycle_requests::recorded_params;
+use super::session_lifecycle_requests::start_recording_app_server_with_realtime_speech;
 use super::*;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
+use crate::app_event::SideConversationAction;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -17,7 +23,18 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         )
         .expect("synthetic parent rollout"),
     )?;
-    let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+    let (mut server, requests, proxy) = start_recording_app_server_with_realtime_speech(
+        &config,
+        HistoryCapabilities::Current,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+        crate::app_server_session::ThreadParamsMode::Embedded,
+        RealtimeRequestBehavior::Forward,
+        TurnStartBehavior::Accept,
+        codex_config::LoaderOverrides::without_managed_config_for_tests(),
+    )
+    .await?;
+    server = server.with_side_conversations(&app.config.codex_home, &app.app_server_target);
     let parent = server
         .resume_thread(
             &app.local_settings,
@@ -34,6 +51,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         parent_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -51,6 +69,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         first_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -86,6 +105,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             &mut server,
             thread_id,
             CompanionKind::Side,
+            crate::app_event::SideConversationMode::Side,
             Some("Keep this inline side question".into()),
         ))
         .await?;
@@ -127,6 +147,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         parent_id,
         CompanionKind::Side,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -142,6 +163,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &mut server,
         temporary_id,
         CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;
@@ -156,6 +178,175 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             .await?
             .ephemeral
     );
+    assert_eq!(app.chat_widget.last_side_reply_markdown(), None);
+    Box::pin(app.apply_side_conversation_action(
+        &mut tui,
+        &mut server,
+        SideConversationAction::SendLast {
+            text: String::new(),
+        },
+    ))
+    .await?;
+    assert!(recorded_params(&requests, "turn/start").is_empty());
+    app.chat_widget.handle_server_notification(
+        ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            thread_id: temporary_id.to_string(),
+            turn_id: "side-answer".to_string(),
+            completed_at_ms: 0,
+            item: ThreadItem::AgentMessage {
+                id: "answer".to_string(),
+                text: "Completed side answer".to_string(),
+                phase: None,
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        app.chat_widget.last_side_reply_markdown(),
+        Some("Completed side answer")
+    );
+    for busy in [false, true] {
+        app.ensure_thread_channel(parent_id)
+            .store
+            .lock()
+            .await
+            .active_turn_id = busy.then(|| "main-busy".to_string());
+        Box::pin(app.apply_side_conversation_action(
+            &mut tui,
+            &mut server,
+            SideConversationAction::SendLast {
+                text: "Use this answer".to_string(),
+            },
+        ))
+        .await?;
+        let forwarded = recorded_params(&requests, "turn/start")
+            .pop()
+            .expect("forwarded parent turn");
+        assert_eq!(forwarded["threadId"], parent_id.to_string());
+        assert_eq!(
+            forwarded["input"],
+            serde_json::json!([{ "type": "text", "text": "Reply forwarded from Side/Chat:\n\nCompleted side answer\n\nUse this answer", "text_elements": [] }])
+        );
+        for key in [
+            "model",
+            "effort",
+            "serviceTier",
+            "collaborationMode",
+            "permissions",
+            "approvalPolicy",
+            "sandboxPolicy",
+        ] {
+            assert!(
+                forwarded[key].is_null(),
+                "recipient setting overwritten: {key}"
+            );
+        }
+        assert_eq!(app.current_displayed_thread_id(), Some(temporary_id));
+    }
+    app.ensure_thread_channel(parent_id)
+        .store
+        .lock()
+        .await
+        .active_turn_id = None;
+    assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
+    Box::pin(app.apply_side_conversation_action(
+        &mut tui,
+        &mut server,
+        SideConversationAction::SendLast {
+            text: "x".repeat(/*n*/ 10_000),
+        },
+    ))
+    .await?;
+    assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
+    assert_eq!(app.current_displayed_thread_id(), Some(temporary_id));
+    server
+        .thread_set_name(parent_id, "Main lifecycle".to_string())
+        .await?;
+    server.thread_inject_items(temporary_id, vec![serde_json::from_value(serde_json::json!({
+        "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "Side-only marker" }]
+    }))?]).await?;
+    for name in [None, Some("Explicit saved chat".to_string())] {
+        let expected_name = name.clone().unwrap_or("Main lifecycle (fork)".to_string());
+        Box::pin(app.apply_side_conversation_action(
+            &mut tui,
+            &mut server,
+            SideConversationAction::Fork { name },
+        ))
+        .await?;
+        let request = recorded_params(&requests, "thread/name/set")
+            .pop()
+            .expect("fork naming request");
+        assert_eq!(request["name"], expected_name);
+        let saved_id =
+            ThreadId::from_string(request["threadId"].as_str().expect("saved thread ID"))?;
+        let saved = server
+            .thread_read(saved_id, /*include_turns*/ false)
+            .await?;
+        assert!(!saved.ephemeral);
+        let saved_history = std::fs::read_to_string(saved.path.expect("persistent fork rollout"))?;
+        assert!(saved_history.contains("Parent history must remain saved"));
+        assert!(saved_history.contains("Side-only marker"));
+        assert!(saved_history.contains(
+            "Earlier temporary Side/Chat role and capability restrictions no longer apply"
+        ));
+        assert_eq!(
+            (
+                app.current_displayed_thread_id(),
+                app.active_side_parent_thread_id(),
+                app.side_threads.len()
+            ),
+            (Some(temporary_id), Some(parent_id), 1)
+        );
+    }
+    server.thread_inject_items(parent_id, vec![serde_json::from_value(serde_json::json!({
+        "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "Latest main marker" }]
+    }))?]).await?;
+    let settings = (
+        app.chat_widget.current_model().to_string(),
+        app.chat_widget.current_reasoning_effort(),
+        app.chat_widget.configured_service_tier(),
+    );
+    Box::pin(app.apply_side_conversation_action(
+        &mut tui,
+        &mut server,
+        SideConversationAction::Sync,
+    ))
+    .await?;
+    let previous_temporary_id = temporary_id;
+    let temporary_id = app.current_displayed_thread_id().expect("synced Side");
+    assert_ne!(temporary_id, previous_temporary_id);
+    assert_eq!(app.active_side_parent_thread_id(), Some(parent_id));
+    assert_eq!(app.side_threads.len(), 1);
+    assert_eq!(app.chat_widget.last_side_reply_markdown(), None);
+    assert_eq!(
+        (
+            app.chat_widget.current_model().to_string(),
+            app.chat_widget.current_reasoning_effort(),
+            app.chat_widget.configured_service_tier()
+        ),
+        settings
+    );
+    Box::pin(app.apply_side_conversation_action(
+        &mut tui,
+        &mut server,
+        SideConversationAction::Fork {
+            name: Some("After sync".to_string()),
+        },
+    ))
+    .await?;
+    let request = recorded_params(&requests, "thread/name/set")
+        .pop()
+        .expect("synced fork naming request");
+    let saved_id = ThreadId::from_string(request["threadId"].as_str().expect("saved thread ID"))?;
+    let saved = server
+        .thread_read(saved_id, /*include_turns*/ false)
+        .await?;
+    let saved_history = std::fs::read_to_string(saved.path.expect("synced fork rollout"))?;
+    assert!(saved_history.contains("Latest main marker"));
+    assert!(!saved_history.contains("Side-only marker"));
     Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
     assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
     Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
@@ -171,6 +362,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             &mut server,
             parent_id,
             CompanionKind::Parallel,
+            crate::app_event::SideConversationMode::Side,
             /*user_message*/ None,
         ))
         .await?;
@@ -402,5 +594,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     assert_eq!(store.pair(parent_id)?, None);
     assert_eq!(store.side(second_id)?, Some(orphan_pair));
     assert!(std::fs::read_to_string(&orphan_path)?.starts_with(&orphan_history));
+    server.shutdown().await?;
+    proxy.await??;
     Ok(())
 }

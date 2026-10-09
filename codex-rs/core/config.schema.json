@@ -7067,6 +7067,25 @@
     "browser_use": {
       "$ref": "#/definitions/BrowserUseConfigToml"
     },
+    "chat_model": {
+      "description": "Model for temporary `/chat` conversations; empty inherits the parent.",
+      "type": "string"
+    },
+    "chat_reasoning": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ReasoningEffort"
+        },
+        {
+          "enum": [
+            ""
+          ],
+          "type": "string"
+        }
+      ],
+      "default": null,
+      "description": "Initial `/chat` effort; missing or empty inherits the parent."
+    },
     "chatgpt_base_url": {
       "description": "Base URL for requests to ChatGPT (as opposed to the OpenAI API).",
       "type": "string"
