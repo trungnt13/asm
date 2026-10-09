@@ -26,7 +26,6 @@ pub struct AdaptiveReasoningConfig {
     pub max_context_bytes: usize,
     pub update_on: Vec<AdaptiveReasoningTrigger>,
     pub rubric_instructions: Option<String>,
-    pub additional_instructions: String,
 }
 
 impl Default for AdaptiveReasoningConfig {
@@ -44,7 +43,6 @@ impl Default for AdaptiveReasoningConfig {
                 AdaptiveReasoningTrigger::ToolResult,
             ],
             rubric_instructions: None,
-            additional_instructions: String::new(),
         }
     }
 }
@@ -103,12 +101,6 @@ impl AdaptiveReasoningConfig {
                         .to_string(),
                 );
             }
-        }
-        if self.additional_instructions.len() > 4096 {
-            return Err(
-                "adaptive_reasoning.additional_instructions must not exceed 4096 UTF-8 bytes"
-                    .to_string(),
-            );
         }
         Ok(())
     }
