@@ -335,11 +335,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             supports_color::on_cached(Stream::Stderr).is_some(),
         ),
     };
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_ansi(stderr_with_ansi)
-        .with_writer(std::io::stderr)
-        .with_filter(exec_stderr_env_filter());
-
     let sandbox_mode = if dangerously_bypass_approvals_and_sandbox {
         Some(SandboxMode::DangerFullAccess)
     } else {
@@ -684,6 +679,12 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
 
     let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
 
+    let fmt_layer = config.diagnostic_log_capture.then(|| {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(stderr_with_ansi)
+            .with_writer(std::io::stderr)
+            .with_filter(exec_stderr_env_filter())
+    });
     let _ = tracing_subscriber::registry()
         .with(fmt_layer)
         .with(otel_tracing_layer)
@@ -735,7 +736,11 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         strict_config,
         cloud_config_bundle: run_cloud_config_bundle,
         embedded_network_policy,
-        feedback: CodexFeedback::new(),
+        feedback: if config.diagnostic_log_capture {
+            CodexFeedback::new()
+        } else {
+            CodexFeedback::disabled()
+        },
         log_db: None,
         state_db: state_db.clone(),
         environment_manager: std::sync::Arc::new(environment_manager),

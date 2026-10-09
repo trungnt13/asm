@@ -82,6 +82,9 @@ fn now_ts() -> String {
 }
 
 pub(crate) fn maybe_init(config: &Config) {
+    if !config.diagnostic_log_capture {
+        return;
+    }
     let enabled = std::env::var("CODEX_TUI_RECORD_SESSION")
         .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
         .unwrap_or(false);
