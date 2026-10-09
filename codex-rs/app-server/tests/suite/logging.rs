@@ -75,6 +75,7 @@ async fn submission_metadata_reaches_persisted_and_feedback_logs() -> Result<()>
     .await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
+        .with_root_config("diagnostic_log_capture = true")
         .with_approval_policy("on-request")
         .with_provider_config("supports_websockets = false")
         .write(codex_home.path())?;
@@ -242,7 +243,9 @@ async fn credentials_stay_out_of_persisted_and_feedback_logs() -> Result<()> {
     let codex_home = TempDir::new()?;
     let server_uri = server.uri();
     MockResponsesConfig::new(&server_uri)
-        .with_root_config(&format!("chatgpt_base_url = \"{server_uri}/backend-api\""))
+        .with_root_config(&format!(
+            "diagnostic_log_capture = true\nchatgpt_base_url = \"{server_uri}/backend-api\""
+        ))
         .with_provider_config("requires_openai_auth = true\nsupports_websockets = false")
         .with_extra_config(&format!(
             r#"
@@ -409,7 +412,33 @@ supports_websockets = false
 #[test]
 fn standalone_app_server_emits_json_info_events() -> Result<()> {
     let codex_home = TempDir::new()?;
-    let event = app_server_json_shutdown_event("codex-app-server", &[], codex_home.path())?;
+    std::fs::write(
+        codex_home.path().join("config.toml"),
+        "[features]\nplugins = false\n",
+    )?;
+    let output = std::process::Command::new(codex_utils_cargo_bin::cargo_bin("codex-app-server")?)
+        .stdin(std::process::Stdio::null())
+        .env("CODEX_HOME", codex_home.path())
+        .env(
+            "CODEX_APP_SERVER_MANAGED_CONFIG_PATH",
+            codex_home.path().join("managed_config.toml"),
+        )
+        .env("RUST_LOG", "trace")
+        .env("LOG_FORMAT", "json")
+        .output()?;
+    anyhow::ensure!(output.status.success(), "default-off app-server failed");
+    assert_eq!(String::from_utf8(output.stderr)?, "");
+    assert!(
+        !SqliteConfig::new_for_testing(codex_home.path().abs())
+            .logs_db_path()
+            .exists()
+    );
+
+    let event = app_server_json_shutdown_event(
+        "codex-app-server",
+        &["-c", "diagnostic_log_capture=true"],
+        codex_home.path(),
+    )?;
 
     assert_eq!(
         event,
@@ -447,7 +476,7 @@ async fn sqlite_log_metrics_exports_do_not_create_log_cycles() -> Result<()> {
         std::fs::write(
             codex_home.path().join("config.toml"),
             format!(
-                "[analytics]\nenabled = true\n\n[otel.metrics_exporter.otlp-http]\nendpoint = {endpoint:?}\nprotocol = \"json\"\n"
+                "diagnostic_log_capture = true\n[analytics]\nenabled = true\n\n[otel.metrics_exporter.otlp-http]\nendpoint = {endpoint:?}\nprotocol = \"json\"\n"
             ),
         )?;
 
@@ -682,7 +711,7 @@ async fn sqlite_log_metrics_grpc_exports_do_not_create_log_cycles(grpc_status: &
     std::fs::write(
         codex_home.path().join("config.toml"),
         format!(
-            "[analytics]\nenabled = true\n\n[otel.metrics_exporter.otlp-grpc]\nendpoint = {endpoint:?}\n"
+            "diagnostic_log_capture = true\n[analytics]\nenabled = true\n\n[otel.metrics_exporter.otlp-grpc]\nendpoint = {endpoint:?}\n"
         ),
     )?;
     let _app_server = TestAppServer::builder()
@@ -742,7 +771,7 @@ async fn app_server_emits_structured_tool_call_timing_event() -> Result<()> {
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
         .enable_feature(Feature::UnifiedExec)
-        .with_root_config("compact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 100000")
+        .with_root_config("diagnostic_log_capture = true\ncompact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 100000")
         .with_provider_config("supports_websockets = false")
         .write(codex_home.path())?;
 
