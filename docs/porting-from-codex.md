@@ -105,17 +105,47 @@ Port useful upstream action, toolchain, security, and build fixes without broad 
 
 ### Operate a release
 
-Deliver the complete installable package before unrelated feature work. Reuse the existing release workflow, not a second pipeline. Keep installation separate; publication does not authorize installing binaries or restarting a shared server.
-
-Inspect failed CI jobs before release. Fix relevant code or packaging errors. For runner allocation or communication failures, inspect annotations and available logs, then rerun failed jobs without repeating successful jobs. Do not infer a code defect or change build settings from a runner failure alone. When the owner requires CI recovery first, verify the retry succeeds before dispatching the release.
-
-Before dispatch, run one bounded local live smoke turn with the default configuration and existing sign-in, without profile or model overrides. Use the paired release-source CLI/helper in an ephemeral session and temporary directory. Require a real model response and a successful read-only Code Mode command with verified output. Failure, timeout, or missing authentication blocks dispatch; do not silently skip it. Report source and result separately from package checks. Keep credentials out of CI.
-
-1. Require an explicit release request. Select the repository explicitly, for example with `gh ... -R trungnt13/asm`. Before pushing source to `origin/main`, verify the V8 prerequisite below. Release the intended commit from `origin/main`, not unpushed local work. Candidates build or reuse their own archives; do not wait for postmerge builds.
-2. Dispatch [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. The workflow owns version selection, candidate creation, builds, publication, verification, and remote `main` updates. Do not repeat these steps manually. Ordinary branch dispatch is build-only. A `main` push does not request publication.
-3. After interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Keep the original version and commit even if upstream advances. Report failures that need owner decisions. Do not invent versions or replace tags.
-4. A platform is available as soon as its checked archive and platform checksum manifest are published. The whole release is complete only when `release`, both `verify_native` jobs, and `sync_main` succeeded for that candidate. Legacy `v*` tag pushes and dispatches can publish. Require publication and both native checks. Skip `sync_main` for legacy releases. Inspect that run's recorded checks and current release metadata. Do not repeat successful checks on unchanged artifacts. A green build-only run, pushed tag, or version label does not prove publication.
-5. Fetch the result. Fast-forward local `main` only when safe. Preserve local edits and concurrent commits. Report the released commit, upstream baseline, checks, and remote/local integration status, including blocked updates.
+1. **Prepare.**
+   - Require an explicit release request. Deliver the complete installable package before unrelated feature work.
+   - Use the existing release workflow. Do not add another pipeline.
+   - Select the fork repository explicitly, for example with `gh ... -R trungnt13/asm`.
+   - Before pushing source to `origin/main`, verify the V8 prerequisite below.
+   - Release the intended commit from `origin/main`. Do not release unpushed local work.
+   - Keep installation separate. Publication does not authorize installation or a shared-server restart.
+2. **Check CI.**
+   - Inspect failed CI jobs. Fix relevant code or package errors.
+   - If runner allocation or communication fails:
+     - Inspect annotations and available logs. Rerun failed jobs, not successful jobs.
+     - Do not infer a code defect from a runner failure alone. Do not change build settings on that evidence.
+   - If the owner requires CI recovery first, verify that the retry succeeds before dispatch.
+3. **Check live use.**
+   - Before dispatch, run one local live smoke turn with a time limit.
+   - Use the default configuration and existing sign-in. Do not override the profile or model.
+   - Use the CLI/helper pair from the release source. Use an ephemeral session and a temporary directory.
+   - Require a real model response. Verify the output of a successful read-only Code Mode command.
+   - If the check fails, times out, or lacks authentication, do not dispatch. Do not skip the check.
+   - Report the source and result separately from package checks. Keep credentials out of CI.
+4. **Dispatch.**
+   - Dispatch [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`.
+   - Let the workflow select the version, create the candidate, build, publish, verify, and update remote `main`.
+   - Do not repeat these steps manually. Candidates build or reuse their archives; do not wait for postmerge builds.
+   - Ordinary branch dispatch is build-only. A `main` push does not request publication.
+5. **Recover interrupted work.**
+   - After interruption, rerun failed jobs.
+   - For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`.
+   - Keep the original version and commit, even if upstream advances. Do not invent versions or replace tags.
+   - Report failures that need owner decisions.
+6. **Verify publication.**
+   - A platform is available when its checked archive and platform checksum manifest are published.
+   - A candidate release is complete only after `release`, both `verify_native` jobs, and `sync_main` succeed for that candidate.
+   - For legacy releases:
+     - `v*` tag pushes and dispatches can publish. Require publication and both native checks.
+     - Skip `sync_main`.
+   - Inspect that run's recorded checks and current release metadata. Do not repeat successful checks on unchanged artifacts.
+   - Build-only success, a pushed tag, or a version label does not prove publication.
+7. **Finish.**
+   - Fetch the result. Fast-forward local `main` only when safe. Preserve local edits and concurrent commits.
+   - Report the released commit, upstream baseline, checks, and remote/local integration status. Include blocked updates.
 
 ### Release notes
 
