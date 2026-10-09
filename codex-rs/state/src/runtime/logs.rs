@@ -11,7 +11,11 @@ impl StateRuntime {
             return Ok(());
         }
 
-        let mut tx = self.logs_pool.begin().await?;
+        let logs_pool = self
+            .logs_pool
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("diagnostic log capture is disabled"))?;
+        let mut tx = logs_pool.begin().await?;
         let mut builder = QueryBuilder::<Sqlite>::new(
             "INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id, process_uuid, module_path, file, line, estimated_bytes) ",
         );
@@ -278,7 +282,74 @@ WHERE id IN (
         Ok(())
     }
 
+    /// Read diagnostics without enabling capture or changing historical files.
+    #[tracing::instrument(skip_all)]
+    async fn log_reader(&self) -> anyhow::Result<Option<LogReader>> {
+        match &self.logs_pool {
+            Some(pool) => Ok(Some(LogReader {
+                pool: pool.as_ref().clone(),
+            })),
+            None => LogReader::open(&self.sqlite).await,
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn query_logs(&self, query: &LogQuery) -> anyhow::Result<Vec<LogRow>> {
+        match self.log_reader().await? {
+            Some(reader) => reader.query_logs(query).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn query_feedback_logs_for_threads(
+        &self,
+        thread_ids: &[&str],
+    ) -> anyhow::Result<Vec<u8>> {
+        if thread_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self.log_reader().await? {
+            Some(reader) => reader.query_feedback_logs_for_threads(thread_ids).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Query per-thread feedback logs, capped to the per-thread SQLite retention budget.
+    pub async fn query_feedback_logs(&self, thread_id: &str) -> anyhow::Result<Vec<u8>> {
+        self.query_feedback_logs_for_threads(&[thread_id]).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn max_log_id(&self, query: &LogQuery) -> anyhow::Result<i64> {
+        match self.log_reader().await? {
+            Some(reader) => reader.max_log_id(query).await,
+            None => Ok(0),
+        }
+    }
+}
+
+/// Reads stored diagnostics without starting capture or database maintenance.
+pub struct LogReader {
+    pool: SqlitePool,
+}
+
+impl LogReader {
+    /// Open existing diagnostics without creating, migrating, or repairing the database.
+    #[tracing::instrument(skip_all)]
+    pub async fn open(sqlite: &SqliteConfig) -> anyhow::Result<Option<Self>> {
+        let path = sqlite.logs_db_path();
+        if !tokio::fs::try_exists(&path).await? {
+            return Ok(None);
+        }
+        let pool = sqlite
+            .open_read_only_pool(&path, /*busy_timeout*/ None)
+            .await?;
+        Ok(Some(Self { pool }))
+    }
+
     /// Query logs with optional filters.
+    #[tracing::instrument(skip_all)]
     pub async fn query_logs(&self, query: &LogQuery) -> anyhow::Result<Vec<LogRow>> {
         let mut builder = QueryBuilder::<Sqlite>::new(
             "SELECT id, ts, ts_nanos, level, target, feedback_log_body AS message, thread_id, process_uuid, file, line FROM logs WHERE 1 = 1",
@@ -295,12 +366,13 @@ WHERE id IN (
 
         let rows = builder
             .build_query_as::<LogRow>()
-            .fetch_all(self.logs_pool.as_ref())
+            .fetch_all(&self.pool)
             .await?;
         Ok(rows)
     }
 
     /// Query feedback logs for a set of threads, capped to the SQLite retention budget.
+    #[tracing::instrument(skip_all)]
     pub async fn query_feedback_logs_for_threads(
         &self,
         thread_ids: &[&str],
@@ -376,7 +448,7 @@ WHERE cumulative_estimated_bytes <=
         builder.push(" ORDER BY ts DESC, ts_nanos DESC, id DESC");
         let rows = builder
             .build_query_as::<FeedbackLogRow>()
-            .fetch_all(self.logs_pool.as_ref())
+            .fetch_all(&self.pool)
             .await?;
 
         let mut lines = Vec::new();
@@ -399,17 +471,13 @@ WHERE cumulative_estimated_bytes <=
         Ok(ordered_bytes)
     }
 
-    /// Query per-thread feedback logs, capped to the per-thread SQLite retention budget.
-    pub async fn query_feedback_logs(&self, thread_id: &str) -> anyhow::Result<Vec<u8>> {
-        self.query_feedback_logs_for_threads(&[thread_id]).await
-    }
-
     /// Return the max log id matching optional filters.
+    #[tracing::instrument(skip_all)]
     pub async fn max_log_id(&self, query: &LogQuery) -> anyhow::Result<i64> {
         let mut builder =
             QueryBuilder::<Sqlite>::new("SELECT MAX(id) AS max_id FROM logs WHERE 1 = 1");
         push_log_filters(&mut builder, query);
-        let row = builder.build().fetch_one(self.logs_pool.as_ref()).await?;
+        let row = builder.build().fetch_one(&self.pool).await?;
         let max_id: Option<i64> = row.try_get("max_id")?;
         Ok(max_id.unwrap_or(0))
     }
@@ -509,6 +577,7 @@ fn push_like_filters(builder: &mut QueryBuilder<Sqlite>, column: &str, filters: 
 
 #[cfg(test)]
 mod tests {
+    use super::LogReader;
     use super::StateRuntime;
     use super::format_feedback_log_line;
     use super::test_support::unique_temp_dir;
@@ -544,6 +613,24 @@ mod tests {
     async fn insert_logs_use_dedicated_log_database() {
         let now = chrono::Utc::now().timestamp();
         let codex_home = unique_temp_dir();
+        let disabled_sqlite = crate::SqliteConfig::from_sqlite_home(codex_home.as_path().abs());
+        let disabled = StateRuntime::init(disabled_sqlite.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize without logs");
+        assert!(disabled.logs_pool.is_none());
+        assert!(disabled.reclamation.is_none());
+        assert!(
+            !tokio::fs::try_exists(disabled_sqlite.logs_db_path())
+                .await
+                .expect("check absent logs")
+        );
+        assert!(
+            LogReader::open(&disabled_sqlite)
+                .await
+                .expect("read absent logs")
+                .is_none()
+        );
+        disabled.close().await;
         let runtime = StateRuntime::init(
             crate::SqliteConfig::new_for_testing(codex_home.as_path().abs()),
             "test-provider".to_string(),
@@ -574,6 +661,46 @@ mod tests {
 
         assert_eq!(logs_count, 1);
 
+        runtime.close().await;
+        let before = tokio::fs::read(&logs_path).await.expect("read stored logs");
+        let disabled = StateRuntime::init(disabled_sqlite, "test-provider".to_string())
+            .await
+            .expect("initialize with historical logs");
+        assert!(disabled.logs_pool.is_none());
+        assert!(disabled.reclamation.is_none());
+        assert_eq!(
+            disabled
+                .query_logs(&LogQuery::default())
+                .await
+                .expect("read historical logs")
+                .len(),
+            1
+        );
+        assert!(
+            disabled
+                .insert_logs(&[LogEntry {
+                    ts: now,
+                    ts_nanos: 0,
+                    level: "INFO".to_string(),
+                    target: "test".to_string(),
+                    message: None,
+                    feedback_log_body: None,
+                    thread_id: None,
+                    process_uuid: None,
+                    module_path: None,
+                    file: None,
+                    line: None,
+                }])
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            tokio::fs::read(&logs_path)
+                .await
+                .expect("read unchanged logs"),
+            before
+        );
+        disabled.close().await;
         let _ = tokio::fs::remove_dir_all(codex_home).await;
     }
 

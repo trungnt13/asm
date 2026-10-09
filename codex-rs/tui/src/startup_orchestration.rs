@@ -867,6 +867,7 @@ pub(super) async fn run_main_inner(
 
     let log_db = state_db
         .clone()
+        .filter(|_| config.diagnostic_log_capture)
         .map(|state_db| log_db::start(state_db, std::sync::Arc::new(feedback.clone())));
     let log_db_layer = log_db
         .clone()
