@@ -653,7 +653,7 @@ pub struct OtelConfigToml {
     /// Optional trace exporter
     pub trace_exporter: Option<OtelExporterKind>,
 
-    /// Metrics exporter. Defaults to `statsig`, which follows `analytics.enabled`.
+    /// Metrics exporter. Defaults to none; the built-in Statsig exporter is inactive in ASM.
     /// Custom OTLP exporters are independent of `analytics.enabled`; `none` disables metrics export.
     pub metrics_exporter: Option<OtelExporterKind>,
 
@@ -689,7 +689,7 @@ impl Default for OtelConfig {
             environment: DEFAULT_OTEL_ENVIRONMENT.to_owned(),
             exporter: OtelExporterKind::None,
             trace_exporter: OtelExporterKind::None,
-            metrics_exporter: OtelExporterKind::Statsig,
+            metrics_exporter: OtelExporterKind::None,
             span_attributes: BTreeMap::new(),
             tracestate: BTreeMap::new(),
         }
