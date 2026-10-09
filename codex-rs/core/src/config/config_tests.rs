@@ -345,6 +345,12 @@ async fn test_toml_parsing() {
             Some(ReasoningEffort::Medium),
         ),
         ("", "", None, None),
+        (
+            "gpt-6-astra",
+            "adaptive",
+            Some("gpt-6-astra"),
+            Some(ReasoningEffort::Custom("adaptive".to_string())),
+        ),
     ] {
         let config_toml: ConfigToml = toml::from_str(&format!(
             "chat_model = {model:?}\nchat_reasoning = {effort:?}"
@@ -362,7 +368,7 @@ async fn test_toml_parsing() {
             (expected_model, expected_effort)
         );
     }
-    assert!(toml::from_str::<ConfigToml>("chat_reasoning = \"invalid\"").is_err());
+    assert!(toml::from_str::<ConfigToml>("chat_reasoning = 123").is_err());
 
     let history_with_persistence = r#"
 [history]

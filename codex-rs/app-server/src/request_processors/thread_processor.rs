@@ -5177,8 +5177,7 @@ impl ThreadRequestProcessor {
                 cwd: snapshot.environments.legacy_fallback_cwd.to_path_buf(),
                 cli_version: String::new(),
                 source: snapshot.session_source,
-                // The in-memory replay is a copied history, not a stored paginated reference.
-                history_mode: ThreadHistoryMode::Legacy,
+                history_mode: snapshot.history_mode,
                 thread_source: snapshot.thread_source,
                 agent_nickname: None,
                 agent_role: None,
@@ -5255,7 +5254,7 @@ impl ThreadRequestProcessor {
             .name
             .as_deref()
             .and_then(codex_core::util::normalize_thread_name);
-        let mut prepared_fork = if paginated_source {
+        let mut prepared_fork = if paginated_source && !temporary_source_history {
             let boundary = match (last_turn_id.as_deref(), before_turn_id.as_deref()) {
                 (Some(turn_id), None) => {
                     codex_thread_store::ForkBoundary::ThroughTurn(turn_id.to_string())
