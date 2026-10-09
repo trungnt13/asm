@@ -1,4 +1,4 @@
-# Fork purpose and upstream sync
+# Personal fork guide
 
 ## Principles
 
@@ -8,9 +8,9 @@
 
 This guide overrides conflicting repository instructions, including [AGENTS.md](../AGENTS.md). Its validation and platform limits replace upstream defaults. Other coding, formatting, test-authoring, and generator rules still apply. Recorded intent does not prove implementation, integration, or publication.
 
-## ASM branding
+## Development workflow
 
-Use ASM in the README heading, GitHub repository description and release titles, introductory release prose, and descriptive workflow step labels, while clearly attributing the fork to OpenAI Codex. Keep the existing `codex` executable, crate, state and config names, archive filenames, tags, workflow names, job IDs, and CI check identities unchanged. Branding does not change what upstream links or installers provide.
+### Start or resume
 
 - Refresh Git status, branches, and worktrees before edits, including after resume.
 - For syncs and pushes, inspect remotes and fork history. For overlap or unexplained changes, inspect relevant repo sessions. Recover context from Git and sessions, not owner memory or a task diary.
@@ -80,9 +80,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `c9e0fffbbc05c36478686444f6ab1edbadfe2768`.
-- Commit date: 2026-10-08.
-- Subject: Enable parallel execution for read-only tools (#52245).
+- Last incorporated upstream commit: `2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4`.
+- Commit date: 2026-10-09.
+- Subject: Avoid an extra blank quote line when pasting text with a trailing newline (#52418).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
@@ -90,7 +90,7 @@ A full sync includes the selected upstream `main` commit and all ancestors. Capt
 
 After successful full sync, advance the marker; cherry-picks do not advance it. Verify hash, date, and subject with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`. Confirm the marker is an ancestor of the fork branch.
 
-Follow the requested sync method. Without a specified method, merge to preserve published history; rebase unpublished branches when useful. A requested rebase permits local history rewriting, not a force push unless that is also authorized. Use `git cherry-pick -x` for targeted ports and `codex/` for new branch names. Do not discard work, rewrite remote history, move existing release tags, or publish releases without explicit authorization.
+## Platforms and CI
 
 Focus on macOS and Linux (Ubuntu). Preserve inherited code and workflows for other platforms unless removal is requested. Do not add them to fork CI or releases. Other inherited workflows also need approval for changes. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on pull requests, with expensive builds conditional on relevant changes. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
 
@@ -99,7 +99,7 @@ Focus on macOS and Linux (Ubuntu). Preserve inherited code and workflows for oth
 
 Port useful upstream action, toolchain, security, and build fixes without broad matrices. Do not repeat CI locally for each edit. Do not add unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure to fork CI. The two-target V8 dependency build below is not a broad suite or canary.
 
-Leave other inherited workflows unchanged unless the task authorizes changes. Check their own triggers and repository guards: [V8 canary](../.github/workflows/v8-canary.yml) still triggers on pull requests, with expensive builds conditional on relevant changes; [CLA](../.github/workflows/cla.yml) restricts its job to the `openai` owner. The custom CI scope does not disable these workflows.
+## Releases
 
 ### Operate a release
 
@@ -190,21 +190,18 @@ Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target
 
 Deploy platform-aware `tngo-workflow/setup.py` selection before the first partial release. It selects the highest published version ready for the host; macOS must not select a Linux-only release. The installer itself keeps default Latest selection; explicit `--release` can install a ready platform before completion. Existing in-flight runs keep their frozen publication policy.
 
-Preserve these build constraints:
+### Installer
 
 - Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64 and Linux x86_64 GNU. Verify GitHub SHA-256 digests and the host `SHA256SUMS-<target>` before installing the complete canonical package archive. Reject incomplete two-binary archives in the current installer; historical releases retain their pinned installers. Do not treat an existing two-binary installation as complete. Use legacy `SHA256SUMS` only when the host manifest is absent, never after an invalid digest or manifest.
 - Reject unsupported targets and Linux without glibc 2.35+ before metadata downloads or install-state changes. Select only GNU Linux archives, without MUSL fallback. Historical MUSL-only releases require their original installer. GNU updates use separate target-qualified package directories. Preserve old MUSL packages and shared config/state.
 - Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, install locking, and safe `current` selection. Store packages under `packages/asm-standalone`. Leave upstream packages and update markers unchanged. Keep the shared Codex config/state home and `codex` command.
 - Only the owner installs updates externally. Do not fetch OpenAI/CDN or legacy npm packages. Do not support daemon-only installation. Do not write `auto-update-version`. Disable built-in update checks, prompts, commands, and daemon update loops regardless of upstream settings or markers. Neither CLI nor daemon can download or install upstream releases. Preserve ordinary daemon startup/restart independently of updates.
 
-- Pushing a `v*` tag starts the release workflow; pushing `main` alone does not publish.
-- Normal manual dispatch from a branch builds artifacts only. Normal dispatch on a `v*` tag can publish too, because publication checks the ref.
-- Every new fork release is a normal GitHub release marked Latest. Retaining an upstream `alpha` suffix in the version does not set the GitHub prerelease flag.
-- The concurrency experiment described below never publishes, including when dispatched on a tag.
+### Build experiment
 
 Optional `macos_concurrency_experiment` compares cold builds of one commit on `macos-15` with 2 and 3 Cargo jobs. Keep other settings equal. Save separate timing, resource, size, and smoke results. Never reuse postmerge artifacts. Never publish, even on tags. Measure before changing defaults. One run does not prove a general speedup.
 
-### Installer boundaries
+## Intentional behavior differences
 
 ### TUI automatic session names
 
@@ -279,17 +276,17 @@ Keep the completion footer as one dimmed logical line: `Worked for 5s • 11:05 
 
 Use ASM for the README heading, repository description, release titles/introduction, workflow step descriptions, fork TUI labels, and terminal title. Credit OpenAI Codex for origin. Preserve real upstream service/product names. Keep `codex` executable, CLI version prefix, crate, config/state, archive, tag, workflow, job, and check identifiers. Do not redirect upstream links or installers for branding.
 
-Keep [`blocking-ci.yml`](../.github/workflows/blocking-ci.yml) and [`postmerge-ci.yml`](../.github/workflows/postmerge-ci.yml) customized in place. Port useful upstream action, toolchain, security, and build fixes without restoring upstream-wide matrices.
+### Background terminal waits
 
 Allow top-level `background_terminal_min_timeout` / `background_terminal_max_timeout` in milliseconds, default 5000 / 300000. Reject zero, reversed, or unrepresentable bounds. Clamp empty `write_stdin` polls to these bounds. Show them in the tool description. End polls early on process exit.
 
 Preserve initial command waits, nonempty stdin waits, and code-mode outer `exec`/`wait` limits. Process exit alone does not resume an idle model turn.
 
-Do not repeat these checks locally for every edit or expand the custom workflows to unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure.
+### Memory reasoning effort
 
 Allow optional `[memories]` keys `extract_reasoning_effort` and `consolidation_reasoning_effort` for V1 and V2, with the existing effort type. Default to extraction `low` and consolidation `medium`, independently of parent effort. Preserve model selection and other memory behavior.
 
-## Background terminal waits
+### Transcript spacing
 
 Keep Markdown paragraphs, code blocks, and list items adjacent during streaming and after completion. Preserve blank lines inside code blocks, raw output, message boundaries, and user-message padding.
 
