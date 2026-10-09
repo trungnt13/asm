@@ -1,3 +1,4 @@
+use crate::DiagnosticLogCapture;
 use crate::LogEntry;
 use crate::LogQuery;
 use crate::LogRow;
@@ -74,6 +75,7 @@ pub use guardian_feedback::GuardianReviewRecord;
 pub use guardian_feedback::MAX_GUARDIAN_REVIEW_BYTES;
 pub use guardian_feedback::MAX_GUARDIAN_REVIEW_RECORDS;
 pub use guardian_feedback::MAX_GUARDIAN_REVIEW_RECORDS_PER_THREAD;
+pub use logs::LogReader;
 pub use memories::MemoryStore;
 pub use queued_items::SqliteQueueStore;
 pub use recovery::backup_runtime_db_for_fresh_start;
@@ -101,14 +103,14 @@ pub struct StateRuntime {
     sqlite: SqliteConfig,
     default_provider: String,
     pool: Arc<sqlx::SqlitePool>,
-    logs_pool: Arc<sqlx::SqlitePool>,
+    logs_pool: Option<Arc<sqlx::SqlitePool>>,
     thread_goals: GoalStore,
     memories: MemoryStore,
     memories_v2: Arc<tokio::sync::OnceCell<MemoryStore>>,
     thread_queue: SqliteQueueStore,
     thread_updated_at_millis: Arc<AtomicI64>,
     thread_recency_at_millis: Arc<AtomicI64>,
-    reclamation: Arc<reclamation::SqliteReclamationWorker>,
+    reclamation: Option<Arc<reclamation::SqliteReclamationWorker>>,
 }
 
 impl StateRuntime {
@@ -138,7 +140,6 @@ impl StateRuntime {
     ) -> anyhow::Result<Arc<Self>> {
         tokio::fs::create_dir_all(sqlite.home()).await?;
         let state_migrator = runtime_state_migrator();
-        let logs_migrator = runtime_logs_migrator();
         let goals_migrator = runtime_goals_migrator();
         let memories_migrator = runtime_memories_migrator();
         let queue_migrator = runtime_queue_migrator();
@@ -158,16 +159,20 @@ impl StateRuntime {
                 return Err(err);
             }
         };
-        let logs_pool = match sqlite
-            .open_logs_db(&logs_migrator, telemetry_override)
-            .await
-        {
-            Ok(db) => Arc::new(db),
-            Err(err) => {
-                warn!("failed to open logs db at {}: {err}", logs_path.display());
-                close_sqlite_pools(&[pool.as_ref()]).await;
-                return Err(err);
+        let logs_pool = if sqlite.diagnostic_log_capture() == DiagnosticLogCapture::Enabled {
+            match sqlite
+                .open_logs_db(&runtime_logs_migrator(), telemetry_override)
+                .await
+            {
+                Ok(db) => Some(Arc::new(db)),
+                Err(err) => {
+                    warn!("failed to open logs db at {}: {err}", logs_path.display());
+                    close_sqlite_pools(&[Some(pool.as_ref())]).await;
+                    return Err(err);
+                }
             }
+        } else {
+            None
         };
         let goals_pool = match sqlite
             .open_goals_db(&goals_migrator, telemetry_override)
@@ -176,7 +181,7 @@ impl StateRuntime {
             Ok(db) => Arc::new(db),
             Err(err) => {
                 warn!("failed to open goals db at {}: {err}", goals_path.display());
-                close_sqlite_pools(&[pool.as_ref(), logs_pool.as_ref()]).await;
+                close_sqlite_pools(&[Some(pool.as_ref()), logs_pool.as_deref()]).await;
                 return Err(err);
             }
         };
@@ -190,7 +195,12 @@ impl StateRuntime {
                     "failed to open memories db at {}: {err}",
                     memories_path.display()
                 );
-                close_sqlite_pools(&[pool.as_ref(), logs_pool.as_ref(), goals_pool.as_ref()]).await;
+                close_sqlite_pools(&[
+                    Some(pool.as_ref()),
+                    logs_pool.as_deref(),
+                    Some(goals_pool.as_ref()),
+                ])
+                .await;
                 return Err(err);
             }
         };
@@ -202,10 +212,10 @@ impl StateRuntime {
             Err(err) => {
                 warn!("failed to open queue db at {}: {err}", queue_path.display());
                 close_sqlite_pools(&[
-                    pool.as_ref(),
-                    logs_pool.as_ref(),
-                    goals_pool.as_ref(),
-                    memories_pool.as_ref(),
+                    Some(pool.as_ref()),
+                    logs_pool.as_deref(),
+                    Some(goals_pool.as_ref()),
+                    Some(memories_pool.as_ref()),
                 ])
                 .await;
                 return Err(err);
@@ -222,11 +232,11 @@ impl StateRuntime {
         );
         if let Err(err) = backfill_state_result {
             close_sqlite_pools(&[
-                pool.as_ref(),
-                logs_pool.as_ref(),
-                goals_pool.as_ref(),
-                memories_pool.as_ref(),
-                queue_pool.as_ref(),
+                Some(pool.as_ref()),
+                logs_pool.as_deref(),
+                Some(goals_pool.as_ref()),
+                Some(memories_pool.as_ref()),
+                Some(queue_pool.as_ref()),
             ])
             .await;
             return Err(err);
@@ -251,11 +261,11 @@ impl StateRuntime {
                 Ok(value) => value,
                 Err(err) => {
                     close_sqlite_pools(&[
-                        pool.as_ref(),
-                        logs_pool.as_ref(),
-                        goals_pool.as_ref(),
-                        memories_pool.as_ref(),
-                        queue_pool.as_ref(),
+                        Some(pool.as_ref()),
+                        logs_pool.as_deref(),
+                        Some(goals_pool.as_ref()),
+                        Some(memories_pool.as_ref()),
+                        Some(queue_pool.as_ref()),
                     ])
                     .await;
                     return Err(err);
@@ -264,7 +274,11 @@ impl StateRuntime {
         let thread_updated_at_millis = thread_updated_at_millis.unwrap_or(0);
         let thread_recency_at_millis = thread_recency_at_millis.unwrap_or(0);
         let runtime = Arc::new(Self {
-            reclamation: reclamation::SqliteReclamationWorker::spawn(sqlite.clone()),
+            reclamation: sqlite
+                .runtime_db_paths()
+                .iter()
+                .any(|db| db.background_reclamation)
+                .then(|| reclamation::SqliteReclamationWorker::spawn(sqlite.clone())),
             thread_goals: GoalStore::new(Arc::clone(&goals_pool)),
             memories: MemoryStore::new(Arc::clone(&memories_pool), Arc::clone(&pool)),
             memories_v2: Arc::new(tokio::sync::OnceCell::new()),
@@ -286,7 +300,11 @@ impl StateRuntime {
             runtime.close().await;
             return Err(err);
         }
-        runtime.start_periodic_logs_maintenance(std::time::Duration::from_secs(30 * 60));
+        if runtime.logs_pool.is_some() {
+            runtime.start_periodic_logs_maintenance(std::time::Duration::from_secs(
+                /*secs*/ 30 * 60,
+            ));
+        }
         Ok(runtime)
     }
 
@@ -310,14 +328,18 @@ impl StateRuntime {
 
     /// Close all SQLite pools and wait for outstanding pool workers to exit.
     pub async fn close(&self) {
-        self.reclamation.close().await;
+        if let Some(reclamation) = &self.reclamation {
+            reclamation.close().await;
+        }
         self.thread_queue.close().await;
         self.memories.close().await;
         if let Some(memories) = self.memories_v2.get() {
             memories.close().await;
         }
         self.thread_goals.close().await;
-        self.logs_pool.close().await;
+        if let Some(logs_pool) = &self.logs_pool {
+            logs_pool.close().await;
+        }
         self.pool.close().await;
     }
 
@@ -354,8 +376,8 @@ impl StateRuntime {
     }
 }
 
-async fn close_sqlite_pools(pools: &[&SqlitePool]) {
-    for pool in pools {
+async fn close_sqlite_pools(pools: &[Option<&SqlitePool>]) {
+    for pool in pools.iter().flatten() {
         pool.close().await;
     }
 }
