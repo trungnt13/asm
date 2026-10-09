@@ -243,6 +243,8 @@ async fn new_config(
         startup_warnings: Vec::new(),
         bypass_hook_trust: false,
         model,
+        chat_model: None,
+        chat_reasoning: None,
         daybreak_enabled: false,
         service_tier: None,
         subagent_service_tiers: HashMap::new(),
