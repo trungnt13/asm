@@ -27,6 +27,10 @@ struct Args {
     /// Standalone JSON configuration containing a `network` object.
     #[arg(long, value_name = "PATH")]
     config: PathBuf,
+
+    /// Enable diagnostic logging controlled by RUST_LOG.
+    #[arg(long)]
+    diagnostic_log_capture: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,10 +76,13 @@ impl ConfigReloader for StaticConfigReloader {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
     let args = Args::parse();
+    if args.diagnostic_log_capture {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .init();
+    }
     let bytes = std::fs::read(&args.config).with_context(|| {
         format!(
             "failed to read network proxy config: {}",

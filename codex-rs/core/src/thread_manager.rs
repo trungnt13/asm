@@ -574,7 +574,10 @@ impl ThreadManager {
             if config.features.enabled(Feature::CodeModeHost)
                 || config.code_mode.disable_in_process_fallback
             {
-                Arc::new(ProcessOwnedCodeModeSessionProvider::default())
+                Arc::new(
+                    ProcessOwnedCodeModeSessionProvider::default()
+                        .with_diagnostic_log_capture(config.diagnostic_log_capture),
+                )
             } else {
                 Arc::new(DisabledCodeModeSessionProvider)
             };
@@ -660,13 +663,14 @@ impl ThreadManager {
     pub(crate) fn with_code_mode_host_program_for_tests(
         mut self,
         host_program: PathBuf,
-        _config: &Config,
+        config: &Config,
     ) -> Self {
         let Some(state) = Arc::get_mut(&mut self.state) else {
             unreachable!("new thread manager state should not be shared");
         };
         state.code_mode_session_provider = Arc::new(
-            ProcessOwnedCodeModeSessionProvider::with_host_program(host_program),
+            ProcessOwnedCodeModeSessionProvider::with_host_program(host_program)
+                .with_diagnostic_log_capture(config.diagnostic_log_capture),
         );
         self
     }

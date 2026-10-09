@@ -10,6 +10,7 @@ pub use cli::Cli;
 use anyhow::anyhow;
 use chrono::Utc;
 use codex_cloud_tasks_client::TaskStatus;
+use codex_core::config::Config;
 use codex_git_utils::current_branch_name;
 use codex_git_utils::default_branch_name;
 use codex_http_client::ClientRouteClass;
@@ -29,8 +30,6 @@ use std::time::Instant;
 use supports_color::Stream as SupportStream;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
-use util::append_error_log;
 use util::format_relative_time;
 use util::set_user_agent_suffix;
 
@@ -40,12 +39,16 @@ struct ApplyJob {
 }
 
 struct BackendContext {
+    config: Arc<Config>,
     backend: Arc<dyn codex_cloud_tasks_client::CloudBackend>,
     base_url: String,
     environment_http: RouteAwareClientPool,
 }
 
-async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext> {
+async fn init_backend(
+    user_agent_suffix: &str,
+    config: Arc<Config>,
+) -> anyhow::Result<BackendContext> {
     #[cfg(debug_assertions)]
     let use_mock = matches!(
         std::env::var("CODEX_CLOUD_TASKS_MODE").ok().as_deref(),
@@ -61,6 +64,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     if use_mock {
         let http_client_factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
         return Ok(BackendContext {
+            config,
             backend: Arc::new(codex_cloud_tasks_mock_client::MockClient),
             base_url,
             environment_http: RouteAwareClientPool::new_without_redirects_or_request_logging(
@@ -71,7 +75,8 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     }
 
     let ua = get_codex_user_agent();
-    let (auth_manager, http_client_factory) = util::load_auth_manager(Some(base_url.clone())).await;
+    let (auth_manager, http_client_factory) =
+        util::load_auth_manager(&config, Some(base_url.clone())).await;
     let environment_http = RouteAwareClientPool::new_without_redirects_or_request_logging(
         http_client_factory.clone(),
         ClientRouteClass::Api,
@@ -83,7 +88,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     } else {
         "codex-api"
     };
-    append_error_log(format!("startup: base_url={base_url} path_style={style}"));
+    tracing::debug!("startup: base_url={base_url} path_style={style}");
 
     let auth = match auth_manager.as_ref() {
         Some(manager) => manager.auth().await,
@@ -100,7 +105,7 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     };
 
     if let Some(acc) = auth.get_account_id() {
-        append_error_log(format!("auth: mode=ChatGPT account_id={acc}"));
+        tracing::debug!("auth: mode=ChatGPT account_id={acc}");
     }
 
     if !auth.uses_codex_backend() {
@@ -113,10 +118,11 @@ async fn init_backend(user_agent_suffix: &str) -> anyhow::Result<BackendContext>
     let auth_provider = codex_model_provider::auth_provider_from_auth(&auth);
     http = http.with_auth_provider(auth_provider);
     if let Some(acc) = auth.get_account_id() {
-        append_error_log(format!("auth: set ChatGPT-Account-Id header: {acc}"));
+        tracing::debug!("auth: set ChatGPT-Account-Id header: {acc}");
     }
 
     Ok(BackendContext {
+        config,
         backend: Arc::new(http),
         base_url,
         environment_http,
@@ -175,14 +181,17 @@ async fn resolve_git_ref_with_git_info(
     }
 }
 
-async fn run_exec_command(args: crate::cli::ExecCommand) -> anyhow::Result<()> {
+async fn run_exec_command(
+    args: crate::cli::ExecCommand,
+    config: Arc<Config>,
+) -> anyhow::Result<()> {
     let crate::cli::ExecCommand {
         query,
         environment,
         branch,
         attempts,
     } = args;
-    let ctx = init_backend("codex_cloud_tasks_exec").await?;
+    let ctx = init_backend("codex_cloud_tasks_exec", config).await?;
     let prompt = resolve_query_input(query)?;
     let env_id = resolve_environment_id(&ctx, &environment).await?;
     let git_ref = resolve_git_ref(branch.as_ref()).await;
@@ -206,7 +215,7 @@ async fn resolve_environment_id(ctx: &BackendContext, requested: &str) -> anyhow
         return Err(anyhow!("environment id must not be empty"));
     }
     let normalized = util::normalize_base_url(&ctx.base_url);
-    let headers = util::build_chatgpt_headers().await;
+    let headers = util::build_chatgpt_headers(&ctx.config).await;
     let environments =
         crate::env_detect::list_environments(&ctx.environment_http, &normalized, &headers).await?;
     if environments.is_empty() {
@@ -512,8 +521,11 @@ fn format_task_list_lines(
     lines
 }
 
-async fn run_status_command(args: crate::cli::StatusCommand) -> anyhow::Result<()> {
-    let ctx = init_backend("codex_cloud_tasks_status").await?;
+async fn run_status_command(
+    args: crate::cli::StatusCommand,
+    config: Arc<Config>,
+) -> anyhow::Result<()> {
+    let ctx = init_backend("codex_cloud_tasks_status", config).await?;
     let task_id = parse_task_id(&args.task_id)?;
     let summary =
         codex_cloud_tasks_client::CloudBackend::get_task_summary(&*ctx.backend, task_id).await?;
@@ -528,8 +540,11 @@ async fn run_status_command(args: crate::cli::StatusCommand) -> anyhow::Result<(
     Ok(())
 }
 
-async fn run_list_command(args: crate::cli::ListCommand) -> anyhow::Result<()> {
-    let ctx = init_backend("codex_cloud_tasks_list").await?;
+async fn run_list_command(
+    args: crate::cli::ListCommand,
+    config: Arc<Config>,
+) -> anyhow::Result<()> {
+    let ctx = init_backend("codex_cloud_tasks_list", config).await?;
     let env_filter = if let Some(env) = args.environment {
         Some(resolve_environment_id(&ctx, &env).await?)
     } else {
@@ -595,8 +610,11 @@ async fn run_list_command(args: crate::cli::ListCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_diff_command(args: crate::cli::DiffCommand) -> anyhow::Result<()> {
-    let ctx = init_backend("codex_cloud_tasks_diff").await?;
+async fn run_diff_command(
+    args: crate::cli::DiffCommand,
+    config: Arc<Config>,
+) -> anyhow::Result<()> {
+    let ctx = init_backend("codex_cloud_tasks_diff", config).await?;
     let task_id = parse_task_id(&args.task_id)?;
     let attempts = collect_attempt_diffs(&*ctx.backend, &task_id).await?;
     let selected = select_attempt(&attempts, args.attempt)?;
@@ -604,8 +622,11 @@ async fn run_diff_command(args: crate::cli::DiffCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_apply_command(args: crate::cli::ApplyCommand) -> anyhow::Result<()> {
-    let ctx = init_backend("codex_cloud_tasks_apply").await?;
+async fn run_apply_command(
+    args: crate::cli::ApplyCommand,
+    config: Arc<Config>,
+) -> anyhow::Result<()> {
+    let ctx = init_backend("codex_cloud_tasks_apply", config).await?;
     let task_id = parse_task_id(&args.task_id)?;
     let attempts = collect_attempt_diffs(&*ctx.backend, &task_id).await?;
     let selected = select_attempt(&attempts, args.attempt)?;
@@ -745,41 +766,43 @@ fn spawn_apply(
     true
 }
 
-// logging helper lives in util module
-
 // (no standalone patch summarizer needed – UI displays raw diffs)
 
 /// Entry point for the `codex cloud` subcommand.
 pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()> {
+    let overrides = cli
+        .config_overrides
+        .parse_overrides()
+        .map_err(anyhow::Error::msg)?;
+    let config = Arc::new(Config::load_with_cli_overrides(overrides).await?);
+    if config.diagnostic_log_capture {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("error")),
+            )
+            .with_ansi(std::io::stderr().is_terminal())
+            .with_writer(std::io::stderr)
+            .try_init();
+    }
     if let Some(command) = cli.command {
         return match command {
-            crate::cli::Command::Exec(args) => run_exec_command(args).await,
-            crate::cli::Command::Status(args) => run_status_command(args).await,
-            crate::cli::Command::List(args) => run_list_command(args).await,
-            crate::cli::Command::Apply(args) => run_apply_command(args).await,
-            crate::cli::Command::Diff(args) => run_diff_command(args).await,
+            crate::cli::Command::Exec(args) => run_exec_command(args, config).await,
+            crate::cli::Command::Status(args) => run_status_command(args, config).await,
+            crate::cli::Command::List(args) => run_list_command(args, config).await,
+            crate::cli::Command::Apply(args) => run_apply_command(args, config).await,
+            crate::cli::Command::Diff(args) => run_diff_command(args, config).await,
         };
     }
     let Cli { .. } = cli;
 
-    // Very minimal logging setup; mirrors other crates' pattern.
-    let default_level = "error";
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .or_else(|_| EnvFilter::try_new(default_level))
-                .unwrap_or_else(|_| EnvFilter::new(default_level)),
-        )
-        .with_ansi(std::io::stderr().is_terminal())
-        .with_writer(std::io::stderr)
-        .try_init();
-
     info!("Launching Cloud Tasks list UI");
     let BackendContext {
+        config,
         backend,
         base_url,
         environment_http,
-    } = init_backend("codex_cloud_tasks_tui").await?;
+    } = init_backend("codex_cloud_tasks_tui", config).await?;
 
     // Terminal setup
     use crossterm::ExecutableCommand;
@@ -821,11 +844,11 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
             .as_deref(),
         Some("1") | Some("true") | Some("TRUE")
     );
-    append_error_log(format!(
+    tracing::debug!(
         "startup: wham_force_internal={} ua={}",
         force_internal,
         get_codex_user_agent()
-    ));
+    );
     // Non-blocking initial load so the in-box spinner can animate
     app.status = "Loading tasks…".to_string();
     app.refresh_inflight = true;
@@ -859,7 +882,12 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
         });
     }
     // Fetch environment list in parallel so the header can show friendly names quickly.
-    spawn_environment_load(tx.clone(), base_url.clone(), environment_http.clone());
+    spawn_environment_load(
+        tx.clone(),
+        base_url.clone(),
+        environment_http.clone(),
+        Arc::clone(&config),
+    );
 
     // Try to auto-detect a likely environment id on startup and refresh if found.
     // Do this concurrently so the initial list shows quickly; on success we refetch with filter.
@@ -867,10 +895,11 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
         let tx = tx.clone();
         let base_url = base_url.clone();
         let environment_http = environment_http.clone();
+        let config = Arc::clone(&config);
         tokio::spawn(async move {
             let base_url = util::normalize_base_url(&base_url);
             // Build headers: UA + ChatGPT auth if available
-            let headers = util::build_chatgpt_headers().await;
+            let headers = util::build_chatgpt_headers(&config).await;
 
             // Run autodetect. If it fails, we keep using "All".
             let res = crate::env_detect::autodetect_environment_id(
@@ -978,27 +1007,27 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                         app::AppEvent::TasksLoaded { env, result } => {
                             // Only apply results for the current filter to avoid races.
                             if env.as_deref() != app.env_filter.as_deref() {
-                                append_error_log(format!(
+                                tracing::debug!(
                                     "refresh.drop: env={} current={}",
                                     env.clone().unwrap_or_else(|| "<all>".to_string()),
                                     app.env_filter.clone().unwrap_or_else(|| "<all>".to_string())
-                                ));
+                                );
                                 continue;
                             }
                             app.refresh_inflight = false;
                             match result {
                                 Ok(tasks) => {
-                                    append_error_log(format!(
+                                    tracing::debug!(
                                         "refresh.apply: env={} count={}",
                                         env.clone().unwrap_or_else(|| "<all>".to_string()),
                                         tasks.len()
-                                    ));
+                                    );
                                     app.tasks = tasks;
                                     if app.selected >= app.tasks.len() { app.selected = app.tasks.len().saturating_sub(1); }
                                     app.status = "Loaded tasks".to_string();
                                 }
                                 Err(e) => {
-                                    append_error_log(format!("refresh load_tasks failed: {e}"));
+                                    tracing::debug!("refresh load_tasks failed: {e}");
                                     app.status = format!("Failed to load tasks: {e}");
                                 }
                             }
@@ -1008,7 +1037,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                         app::AppEvent::NewTaskSubmitted(result) => {
                             match result {
                                 Ok(created) => {
-                                    append_error_log(format!("new-task: created id={}", created.id.0));
+                                    tracing::debug!("new-task: created id={}", created.id.0);
                                     app.status = format!("Submitted as {}", created.id.0);
                                     app.new_task = None;
                                     // Refresh tasks in background for current filter
@@ -1026,9 +1055,9 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     let _ = frame_tx.send(Instant::now());
                                 }
                                 Err(msg) => {
-                                    append_error_log(format!("new-task: submit failed: {msg}"));
+                                    tracing::debug!("new-task: submit failed: {msg}");
                                     if let Some(page) = app.new_task.as_mut() { page.submitting = false; }
-                                    app.status = format!("Submit failed: {msg}. See error.log for details.");
+                                    app.status = format!("Submit failed: {msg}");
                                     needs_redraw = true;
                                     let _ = frame_tx.send(Instant::now());
                                 }
@@ -1069,11 +1098,11 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                             if let Ok(sel) = result {
                                 // Only apply if user hasn't set a filter yet or it's different.
                                 if app.env_filter.as_deref() != Some(sel.id.as_str()) {
-                                    append_error_log(format!(
+                                    tracing::debug!(
                                         "env.select: autodetected id={} label={}",
                                         sel.id,
                                         sel.label.clone().unwrap_or_else(|| "<none>".to_string())
-                                    ));
+                                    );
                                     // Preseed environments with detected label so header can show it even before list arrives
                                     if let Some(lbl) = sel.label.clone() {
                                         let present = app.environments.iter().any(|r| r.id == sel.id);
@@ -1102,8 +1131,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     spawn_environment_load(
                                         tx.clone(),
                                         base_url.clone(),
-                                        environment_http.clone(),
-                                    );
+                                        environment_http.clone(), Arc::clone(&config));
                                     let _ = frame_tx.send(Instant::now());
                                 }
                             }
@@ -1189,10 +1217,10 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                                     let _ = tx.send(app::AppEvent::AttemptsLoaded { id: task_id, attempts });
                                                 }
                                                 Err(e) => {
-                                                    crate::util::append_error_log(format!(
+                                                    tracing::debug!(
                                                         "attempts.load failed for {}: {e}",
                                                         task_id.0
-                                                    ));
+                                                    );
                                                 }
                                             }
                                         });
@@ -1269,7 +1297,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                 && ov.task_id != id {
                                     continue;
                                 }
-                            append_error_log(format!("details failed for {}: {error}", id.0));
+                            tracing::debug!("details failed for {}: {error}", id.0);
                             let pretty = pretty_lines_from_error(&error);
                             if let Some(ov) = app.diff_overlay.as_mut() {
                                 ov.title = title.clone();
@@ -1321,7 +1349,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     }
                                 }
                                 Err(e) => {
-                                    append_error_log(format!("apply_task failed for {}: {e}", id.0));
+                                    tracing::debug!("apply_task failed for {}: {e}", id.0);
                                     app.status = format!("Apply failed: {e}");
                                 }
                             }
@@ -1448,7 +1476,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         if let Some(page) = app.new_task.as_mut() {
                                             page.best_of_n = new_value;
                                         }
-                                        append_error_log(format!("best-of.select: attempts={new_value}"));
+                                        tracing::debug!("best-of.select: attempts={new_value}");
                                         app.status = format!(
                                             "Best-of updated to {new_value} attempt{}",
                                             if new_value == 1 { "" } else { "s" }
@@ -1482,8 +1510,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                 spawn_environment_load(
                                     tx.clone(),
                                     base_url.clone(),
-                                    environment_http.clone(),
-                                );
+                                    environment_http.clone(), Arc::clone(&config));
                             }
                             // Render after opening env modal to show it instantly.
                             render_if_needed(&mut terminal, &mut app, &mut needs_redraw)?;
@@ -1509,11 +1536,11 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                     {
                                             // Submit only if we have an env id
                                             if let Some(env) = page.env_id.clone() {
-                                                append_error_log(format!(
+                                                tracing::debug!(
                                                     "new-task: submit env={} size={}",
                                                     env,
                                                     text.chars().count()
-                                                ));
+                                                );
                                                 page.submitting = true;
                                                 app.status = "Submitting new task…".to_string();
                                                 let tx = tx.clone();
@@ -1666,8 +1693,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         spawn_environment_load(
                                             tx.clone(),
                                             base_url.clone(),
-                                            environment_http.clone(),
-                                        );
+                                            environment_http.clone(), Arc::clone(&config));
                                     }
                                 }
                                 KeyCode::Left => {
@@ -1760,15 +1786,15 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         }).collect();
                                         // Keep original order (already sorted) — no need to re-sort
                                         let idx = state.selected;
-                                        if idx == 0 { app.env_filter = None; append_error_log("env.select: All"); }
+                                        if idx == 0 { app.env_filter = None; tracing::debug!("env.select: All"); }
                                         else {
                                             let env_idx = idx.saturating_sub(1);
                                             if let Some(row) = filtered.get(env_idx) {
-                                                append_error_log(format!(
+                                                tracing::debug!(
                                                     "env.select: id={} label={}",
                                                     row.id,
                                                     row.label.clone().unwrap_or_else(|| "<none>".to_string())
-                                                ));
+                                                );
                                                 app.env_filter = Some(row.id.clone());
                                             }
                                         }
@@ -1811,10 +1837,10 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                 // Ensure 'r' does not refresh tasks when the env modal is open.
                                 KeyCode::Char('r') | KeyCode::Char('R') => {
                                     if app.env_modal.is_some() { break 0; }
-                                    append_error_log(format!(
+                                    tracing::debug!(
                                         "refresh.request: env={}",
                                         app.env_filter.clone().unwrap_or_else(|| "<all>".to_string())
-                                    ));
+                                    );
                                     app.status = "Refreshing…".to_string();
                                     app.refresh_inflight = true;
                                     app.list_generation = app.list_generation.saturating_add(1);
@@ -1840,8 +1866,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                         spawn_environment_load(
                                             tx.clone(),
                                             base_url.clone(),
-                                            environment_http.clone(),
-                                        );
+                                            environment_http.clone(), Arc::clone(&config));
                                     }
                                 }
                                 KeyCode::Char('n') => {
@@ -1896,7 +1921,7 @@ pub async fn run_main(cli: Cli, _codex_linux_sandbox_exe: Option<PathBuf>) -> an
                                                         }
                                                     }
                                                     Err(e) => {
-                                                        append_error_log(format!("get_task_diff failed for {}: {e}", diff_id.0));
+                                                        tracing::debug!("get_task_diff failed for {}: {e}", diff_id.0);
                                                         match codex_cloud_tasks_client::CloudBackend::get_task_text(&*backend, diff_id.clone()).await {
                                                             Ok(text) => {
                                                                 let evt = app::AppEvent::DetailsMessagesLoaded {
@@ -2027,10 +2052,11 @@ fn spawn_environment_load(
     tx: UnboundedSender<app::AppEvent>,
     base_url: String,
     http: RouteAwareClientPool,
+    config: Arc<Config>,
 ) {
     tokio::spawn(async move {
         let base_url = util::normalize_base_url(&base_url);
-        let headers = util::build_chatgpt_headers().await;
+        let headers = util::build_chatgpt_headers(&config).await;
         let result = crate::env_detect::list_environments(&http, &base_url, &headers).await;
         let _ = tx.send(app::AppEvent::EnvironmentsLoaded(result));
     });
