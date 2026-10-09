@@ -516,9 +516,16 @@ pub(super) async fn start_recording_app_server_with_history(
         failed_thread_name,
         thread_params_mode,
         RealtimeRequestBehavior::Forward,
+        TurnStartBehavior::Forward,
         loader_overrides,
     )
     .await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TurnStartBehavior {
+    Forward,
+    Accept,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -540,6 +547,7 @@ pub(super) async fn start_recording_realtime_speech_app_server(
         /*failed_thread_name*/ None,
         crate::app_server_session::ThreadParamsMode::Embedded,
         realtime_behavior,
+        TurnStartBehavior::Forward,
         LoaderOverrides::default(),
     )
     .await
@@ -552,6 +560,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
     failed_thread_name: Option<&'static str>,
     thread_params_mode: crate::app_server_session::ThreadParamsMode,
     realtime_behavior: RealtimeRequestBehavior,
+    turn_start_behavior: TurnStartBehavior,
     loader_overrides: LoaderOverrides,
 ) -> Result<RecordingAppServer> {
     let state_db =
@@ -676,7 +685,14 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                     let fake_side_interrupt = history_capabilities
                         == HistoryCapabilities::SideGoalCancellation
                         && request.method == "turn/interrupt";
-                    let response = if fake_realtime_response || fake_side_interrupt {
+                    let response = if turn_start_behavior == TurnStartBehavior::Accept
+                        && request.method == "turn/start"
+                    {
+                        JSONRPCMessage::Response(JSONRPCResponse {
+                            id: request_id,
+                            result: serde_json::json!({"turn": {"id": "forwarded-turn", "items": [], "status": "inProgress", "error": null}}),
+                        })
+                    } else if fake_realtime_response || fake_side_interrupt {
                         JSONRPCMessage::Response(JSONRPCResponse {
                             id: request_id,
                             result: serde_json::json!({}),
