@@ -1092,8 +1092,34 @@ async fn assigned_forks_inherit_projects_for_persistent_and_ephemeral_children()
     assert_eq!(response.id, RequestId::Integer(ephemeral_id));
     let ephemeral_fork: ThreadForkResponse = serde_json::from_value(response.result)?;
     let _: serde_json::Value = server.read_notification("thread/started").await?;
-    assert_eq!(ephemeral_fork.thread.project_id, Some(project.project.id));
+    assert_eq!(
+        ephemeral_fork.thread.project_id,
+        Some(project.project.id.clone())
+    );
     assert!(ephemeral_fork.thread.ephemeral);
     assert!(ephemeral_fork.thread.path.is_none());
+
+    server.clear_message_buffer();
+    let saved_id = server
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: ephemeral_fork.thread.id,
+            ..Default::default()
+        })
+        .await?;
+    let JSONRPCMessage::Response(response) = server.read_next_message().await? else {
+        panic!("saving an ephemeral fork must respond before lifecycle notifications");
+    };
+    assert_eq!(response.id, RequestId::Integer(saved_id));
+    let saved_fork: ThreadForkResponse = serde_json::from_value(response.result)?;
+    let _: serde_json::Value = server.read_notification("thread/started").await?;
+    assert_eq!(saved_fork.thread.project_id, Some(project.project.id));
+    assert!(!saved_fork.thread.ephemeral);
+    assert!(
+        saved_fork
+            .thread
+            .path
+            .as_ref()
+            .is_some_and(|path| path.exists())
+    );
     Ok(())
 }

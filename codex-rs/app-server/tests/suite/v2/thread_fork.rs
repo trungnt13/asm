@@ -35,6 +35,8 @@ use codex_app_server_protocol::ThreadAttachmentRemoveResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadHistoryMode;
+use codex_app_server_protocol::ThreadInjectItemsParams;
+use codex_app_server_protocol::ThreadInjectItemsResponse;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
@@ -2405,6 +2407,9 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         .send_thread_fork_request(ThreadForkParams {
             thread_id: conversation_id.clone(),
             ephemeral: true,
+            developer_instructions: Some(
+                "Temporary Side role: use inherited context as reference only.".into(),
+            ),
             exclude_turns: history_mode == ThreadHistoryMode::Paginated,
             ..Default::default()
         })
@@ -2515,6 +2520,21 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         "persistent source thread should remain listed"
     );
 
+    let side_boundary = "Side conversation boundary. Inherited history is reference-only.";
+    let ordinary_boundary =
+        "Ordinary saved fork. Earlier temporary Side role restrictions no longer apply.";
+    let inject = mcp
+        .send_thread_inject_items_request(ThreadInjectItemsParams {
+            thread_id: fork_thread_id.clone(),
+            items: vec![json!({
+                "type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": side_boundary}]
+            })],
+        })
+        .await?;
+    let _: ThreadInjectItemsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(inject)).await??;
+
     let turn_id = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: fork_thread_id.clone(),
@@ -2545,6 +2565,103 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
 
     let ThreadListResponse { data, .. } = list_threads(&mut mcp).await?;
     assert!(data.iter().all(|thread| thread.id != fork_thread_id));
+
+    // Saving the temporary fork copies both inherited history and its own completed turn.
+    let saved_request = mcp
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: fork_thread_id.clone(),
+            developer_instructions: Some(ordinary_boundary.into()),
+            ..Default::default()
+        })
+        .await?;
+    let saved: ThreadForkResponse = to_response(
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(saved_request)),
+        )
+        .await??,
+    )?;
+    assert!(!saved.thread.ephemeral);
+    assert_eq!(
+        saved.thread.forked_from_id.as_deref(),
+        Some(fork_thread_id.as_str())
+    );
+    assert!(saved.thread.path.as_ref().is_some_and(|path| path.exists()));
+    let ThreadListResponse { data, .. } = list_threads(&mut mcp).await?;
+    assert!(data.iter().any(|thread| thread.id == saved.thread.id));
+    assert!(data.iter().all(|thread| thread.id != fork_thread_id));
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .expect("response requests")
+            .iter()
+            .filter(|request| request.url.path().ends_with("/responses"))
+            .count(),
+        1,
+        "saving must not start a model turn"
+    );
+
+    let inject = mcp
+        .send_thread_inject_items_request(ThreadInjectItemsParams {
+            thread_id: saved.thread.id.clone(),
+            items: vec![json!({
+                "type": "message", "role": "developer",
+                "content": [{"type": "input_text", "text": ordinary_boundary}]
+            })],
+        })
+        .await?;
+    let _: ThreadInjectItemsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(inject)).await??;
+
+    // A cold resume must retain the full raw context without consulting the discarded side.
+    drop(mcp);
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: saved.thread.id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let resumed: ThreadResumeResponse = to_response(
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(resume_id)),
+        )
+        .await??,
+    )?;
+    assert!(!resumed.thread.ephemeral);
+    mcp.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: saved.thread.id,
+        input: vec![UserInput::Text {
+            text: "saved continuation".into(),
+            text_elements: vec![],
+        }],
+        ..Default::default()
+    })
+    .await?;
+    let requests = server.received_requests().await.expect("response requests");
+    let requests: Vec<_> = requests
+        .iter()
+        .filter(|request| request.url.path().ends_with("/responses"))
+        .collect();
+    assert_eq!(requests.len(), 2);
+    let first = requests[0].body_json::<Value>()?;
+    let last = requests[1].body_json::<Value>()?;
+    let input = last["input"].to_string();
+    assert!(input.contains(preview));
+    assert!(input.contains("continue"));
+    assert!(input.contains("saved continuation"));
+    assert!(input.contains("Done"));
+    assert!(input.contains(side_boundary));
+    assert!(input.contains(ordinary_boundary));
+    assert!(input.find(side_boundary) < input.find(ordinary_boundary));
+    assert!(input.find(ordinary_boundary) < input.find("saved continuation"));
+    assert!(first["prompt_cache_key"].is_string());
+    assert_eq!(first["prompt_cache_key"], last["prompt_cache_key"]);
 
     Ok(())
 }
