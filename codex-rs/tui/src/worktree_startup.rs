@@ -156,7 +156,11 @@ pub(super) async fn prepare(
             loader_overrides.clone(),
             strict_config,
             source_bundle.clone(),
-            codex_feedback::CodexFeedback::new(),
+            if source.diagnostic_log_capture {
+                codex_feedback::CodexFeedback::new()
+            } else {
+                codex_feedback::CodexFeedback::disabled()
+            },
             /*log_db*/ None,
             state,
             Arc::new(environment),
