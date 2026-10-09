@@ -911,7 +911,7 @@ pub struct Tui {
     #[serde(default)]
     pub collapse_tool_calls_max_lines: Option<std::num::NonZeroUsize>,
 
-    /// Copy selected transcript text when the mouse button is released.
+    /// Copy selected transcript or footer text when the mouse button is released.
     /// Defaults to `auto`: enabled except in direct terminals known to forward their native
     /// copy shortcut (Ghostty 1.2+, Kitty on macOS, Windows Terminal, and VS Code on Windows).
     /// Unknown terminals, Ghostty without a recognized version, and tmux/Zellij default to copying.
