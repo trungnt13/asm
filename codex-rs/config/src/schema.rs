@@ -38,6 +38,26 @@ pub(crate) enum ConfigAskForApproval {
     Never,
 }
 
+pub(crate) fn chat_reasoning_schema(schema_gen: &mut SchemaGenerator) -> Schema {
+    SchemaObject {
+        subschemas: Some(Box::new(SubschemaValidation {
+            any_of: Some(vec![
+                schema_gen
+                    .subschema_for::<Option<codex_protocol::openai_models::ReasoningEffort>>(),
+                SchemaObject {
+                    instance_type: Some(InstanceType::String.into()),
+                    enum_values: Some(vec![Value::String(String::new())]),
+                    ..Default::default()
+                }
+                .into(),
+            ]),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+    .into()
+}
+
 /// Schema for the `[features]` map with known + legacy keys only.
 pub fn features_schema(schema_gen: &mut SchemaGenerator) -> Schema {
     let mut object = SchemaObject {
