@@ -2,6 +2,9 @@ use super::*;
 use crate::agents_md_manager::AgentsMdManager;
 use crate::agents_md_manager::SessionInstructions;
 use crate::session::Submission;
+use crate::session::adaptive_reasoning_task::AdaptiveDecisionGuard;
+use crate::session::adaptive_reasoning_task::DecisionJob;
+use crate::session::adaptive_reasoning_task::PendingAdaptiveDecision;
 use crate::session::handlers::submission_loop;
 use crate::session::step_context::StepContext;
 use crate::session::step_settings::StepSettings;
@@ -52,11 +55,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use test_case::test_case;
+use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::TryLockError;
 use tokio::sync::oneshot;
+use tokio::time::Instant;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::AbortOnDropHandle;
 
 const MODEL_A: &str = "step-activation-a";
 const MODEL_B: &str = "step-activation-b";
@@ -170,24 +176,116 @@ async fn next_step_waits_for_environment_publication_before_capturing() {
         let active = session.active_turn.lock().await;
         Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
     };
-    for (target_done, expected) in [
-        (
-            Arc::new(Notify::new()),
-            TurnSettingsUpdateOutcome::TargetUnavailable,
-        ),
-        (Arc::clone(&done), TurnSettingsUpdateOutcome::Applied),
-        (
-            Arc::clone(&done),
-            TurnSettingsUpdateOutcome::TargetUnavailable,
-        ),
+    let guard = AdaptiveDecisionGuard {
+        freshness: CancellationToken::new(),
+        deadline: Instant::now() + Duration::from_secs(/*secs*/ 10),
+    };
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(
+                &turn,
+                &original,
+                &Arc::new(Notify::new()),
+                &guard,
+                ReasoningEffort::High,
+            )
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    for scenario in [
+        "not ready",
+        "expired",
+        "superseded",
+        "superseded during publication",
+        "cancelled",
+        "busy",
+        "failed",
+        "ready",
     ] {
-        assert_eq!(
+        let started = Instant::now();
+        let freshness = CancellationToken::new();
+        let cancellation = CancellationToken::new();
+        let (sender, result) = oneshot::channel();
+        let pending = PendingAdaptiveDecision {
+            job: DecisionJob {
+                handle: AbortOnDropHandle::new(tokio::spawn(std::future::pending())),
+                result,
+            },
+            expected: Arc::clone(&original),
+            task_done: Arc::clone(&done),
+            cancellation: cancellation.clone(),
+            guard: AdaptiveDecisionGuard {
+                freshness: freshness.clone(),
+                deadline: if scenario == "expired" {
+                    started
+                } else {
+                    guard.deadline
+                },
+            },
+            started,
+        };
+        turn.extension_data.insert(Mutex::new(Some(pending)));
+        let mut sender = Some(sender);
+        if scenario != "not ready" {
+            sender
+                .take()
+                .unwrap()
+                .send(if scenario == "failed" {
+                    Err(codex_api::DecisionsError::InvalidResponse)
+                } else {
+                    Ok("high".to_string())
+                })
+                .expect("deliver decision result");
+        }
+        if scenario == "superseded" {
+            freshness.cancel();
+        }
+        if scenario == "cancelled" {
+            cancellation.cancel();
+        }
+        let permit = (scenario == "busy").then(|| {
             session
-                .apply_adaptive_turn_settings(&turn, &original, &target_done, ReasoningEffort::High)
-                .await,
-            expected,
+                .thread_settings_persistence
+                .try_acquire()
+                .expect("hold settings permit")
+        });
+        let apply = session.apply_ready_adaptive_reasoning(&turn);
+        tokio::pin!(apply);
+        if scenario == "superseded during publication" {
+            let state = session.state.lock().await;
+            assert!(futures::poll!(apply.as_mut()).is_pending());
+            freshness.cancel();
+            drop(state);
+        }
+        timeout(Duration::from_secs(/*secs*/ 10), apply)
+            .await
+            .expect("ready-only consumer does not await a result or busy permit");
+        drop(permit);
+        if scenario == "not ready" {
+            sender
+                .take()
+                .unwrap()
+                .send(Ok("high".to_string()))
+                .expect("deliver late result");
+            freshness.cancel();
+            session.apply_ready_adaptive_reasoning(&turn).await;
+        }
+        assert_eq!(
+            turn.next_step_settings.load().reasoning_effort(),
+            if scenario == "ready" {
+                Some(&ReasoningEffort::High)
+            } else {
+                original.reasoning_effort()
+            },
+            "{scenario}",
         );
     }
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(&turn, &original, &done, &guard, ReasoningEffort::Low)
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
     assert_eq!(
         turn.next_step_settings.load().reasoning_effort(),
         Some(&ReasoningEffort::High)
@@ -226,6 +324,27 @@ async fn next_step_waits_for_environment_publication_before_capturing() {
         ),
         ("next-step-model", Some(&next_cwd)),
     );
+    // Explicit shutdown must join in-flight jobs without retaining their turn.
+    session.pause_adaptive_reasoning();
+    let (job_lifetime, joined) = oneshot::channel::<()>();
+    let (_decision_reply, result) = oneshot::channel();
+    turn.extension_data
+        .insert(Mutex::new(Some(PendingAdaptiveDecision {
+            job: DecisionJob {
+                handle: AbortOnDropHandle::new(tokio::spawn(async move {
+                    let _job_lifetime = job_lifetime;
+                    std::future::pending::<()>().await;
+                })),
+                result,
+            },
+            expected: turn.next_step_settings.load_full(),
+            task_done: done,
+            cancellation: CancellationToken::new(),
+            guard,
+            started: Instant::now(),
+        })));
+    session.stop_adaptive_reasoning().await;
+    assert!(joined.await.is_err());
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
@@ -599,6 +718,27 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         .capture_step_context(Arc::clone(&turn), &CancellationToken::new())
         .await
         .expect("capture initial step");
+    let adaptive_done = {
+        let active = session.active_turn.lock().await;
+        Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
+    };
+    let (decision_reply, decision_result) = oneshot::channel();
+    let started = Instant::now();
+    turn.extension_data
+        .insert(Mutex::new(Some(PendingAdaptiveDecision {
+            job: DecisionJob {
+                handle: AbortOnDropHandle::new(tokio::spawn(std::future::pending())),
+                result: decision_result,
+            },
+            expected: Arc::clone(&before.settings),
+            task_done: adaptive_done,
+            cancellation: CancellationToken::new(),
+            guard: AdaptiveDecisionGuard {
+                freshness: CancellationToken::new(),
+                deadline: started + Duration::from_secs(/*secs*/ 10),
+            },
+            started,
+        })));
     let (submission, first_reply) = settings_submission(
         "activate-model",
         &turn.sub_id,
@@ -739,9 +879,23 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
     };
     assert!(session.adaptive_reasoning_paused());
+    decision_reply
+        .send(Ok("medium".to_string()))
+        .expect("deliver decision after manual publication");
+    session.apply_ready_adaptive_reasoning(&turn).await;
+    let guard = AdaptiveDecisionGuard {
+        freshness: CancellationToken::new(),
+        deadline: Instant::now() + Duration::from_secs(/*secs*/ 10),
+    };
     assert_eq!(
         session
-            .apply_adaptive_turn_settings(&turn, &after.settings, &done, ReasoningEffort::Low)
+            .apply_adaptive_turn_settings(
+                &turn,
+                &after.settings,
+                &done,
+                &guard,
+                ReasoningEffort::Low
+            )
             .await,
         TurnSettingsUpdateOutcome::TargetUnavailable,
     );
@@ -873,12 +1027,39 @@ async fn delayed_activation_does_not_retarget_a_task(change: TaskChangeDuringLoo
         &expected_inputs,
     ));
     assert_eq!(desired_step_settings(&session).await, desired);
+    let (decision_reply, decision_result) = oneshot::channel();
+    let started = Instant::now();
+    expected_turn
+        .extension_data
+        .insert(Mutex::new(Some(PendingAdaptiveDecision {
+            job: DecisionJob {
+                handle: AbortOnDropHandle::new(tokio::spawn(std::future::pending())),
+                result: decision_result,
+            },
+            expected: Arc::clone(&expected_inputs),
+            task_done: Arc::clone(&done),
+            cancellation: CancellationToken::new(),
+            guard: AdaptiveDecisionGuard {
+                freshness: CancellationToken::new(),
+                deadline: started + Duration::from_secs(/*secs*/ 10),
+            },
+            started,
+        })));
+    decision_reply
+        .send(Ok("high".to_string()))
+        .expect("deliver decision for old task");
+    session.apply_ready_adaptive_reasoning(&expected_turn).await;
+    let guard = AdaptiveDecisionGuard {
+        freshness: CancellationToken::new(),
+        deadline: started + Duration::from_secs(/*secs*/ 10),
+    };
     assert_eq!(
         session
             .apply_adaptive_turn_settings(
                 &expected_turn,
                 &expected_inputs,
                 &done,
+                &guard,
                 ReasoningEffort::High
             )
             .await,
