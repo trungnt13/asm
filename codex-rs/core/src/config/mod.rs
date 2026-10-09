@@ -1009,6 +1009,9 @@ pub struct Config {
     /// Resolved configuration shared by all Codex SQLite databases.
     pub sqlite: codex_state::SqliteConfig,
 
+    /// Enables diagnostic capture at process startup without changing session history.
+    pub diagnostic_log_capture: bool,
+
     /// Directory where Codex writes log files (defaults to `$CODEX_HOME/log`).
     pub log_dir: PathBuf,
 
@@ -4524,7 +4527,13 @@ impl Config {
             memories: memories_config,
             agent_interrupt_message_enabled,
             codex_home,
-            sqlite: codex_state::SqliteConfig::from_sqlite_home(sqlite_home),
+            sqlite: codex_state::SqliteConfig::from_sqlite_home(sqlite_home)
+                .with_diagnostic_log_capture(if cfg.diagnostic_log_capture.unwrap_or(false) {
+                    codex_state::DiagnosticLogCapture::Enabled
+                } else {
+                    codex_state::DiagnosticLogCapture::Disabled
+                }),
+            diagnostic_log_capture: cfg.diagnostic_log_capture.unwrap_or(false),
             log_dir,
             config_layer_stack,
             application_network_policy: Default::default(),
