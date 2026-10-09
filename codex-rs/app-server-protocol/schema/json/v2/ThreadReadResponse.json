@@ -2410,6 +2410,48 @@
         }
       ]
     },
+    "ThreadUnreadPosition": {
+      "oneOf": [
+        {
+          "description": "Explicitly marked unread, including when the thread has no turns.",
+          "properties": {
+            "type": {
+              "enum": [
+                "threadStart"
+              ],
+              "title": "ThreadStartThreadUnreadPositionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ThreadStartThreadUnreadPosition",
+          "type": "object"
+        },
+        {
+          "description": "The earliest completed result needing attention.",
+          "properties": {
+            "turnId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn"
+              ],
+              "title": "TurnThreadUnreadPositionType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "turnId",
+            "type"
+          ],
+          "title": "TurnThreadUnreadPosition",
+          "type": "object"
+        }
+      ]
+    },
     "TokenUsageBreakdown": {
       "properties": {
         "cacheWriteInputTokens": {
