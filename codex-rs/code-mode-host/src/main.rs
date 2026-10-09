@@ -26,6 +26,10 @@ struct Cli {
     )]
     listen: String,
 
+    /// Enable diagnostic logging controlled by RUST_LOG.
+    #[arg(long, env = codex_code_mode_protocol::DIAGNOSTIC_LOG_CAPTURE_ENV)]
+    diagnostic_log_capture: bool,
+
     /// Optional WebSocket endpoint that streams only raw OTLP trace batches.
     #[arg(long, value_name = "URL")]
     otel_trace_listen: Option<String>,
@@ -52,13 +56,17 @@ async fn main() -> anyhow::Result<()> {
         .map(build_trace_provider)
         .transpose()?;
     let otel_layer = otel.as_ref().and_then(OtelProvider::tracing_layer);
+    let fmt_layer = cli.diagnostic_log_capture.then(|| {
+        tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .with_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+    });
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stderr)
-                .with_ansi(false)
-                .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
-        )
+        .with(fmt_layer)
         .with(otel_layer)
         .init();
     if let Some(trace_transport) = trace_transport.as_ref() {
