@@ -1,5 +1,6 @@
 //! Exercises the real SQLite writer, feedback ring buffer, and snapshot ordering.
 use super::*;
+use codex_state::DiagnosticLogCapture;
 use codex_state::SqliteConfig;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -24,7 +25,7 @@ async fn feedback_includes_flush_and_query_failures_in_the_same_submission() -> 
     ] {
         let home = tempfile::tempdir()?;
         let sqlite = SqliteConfig::new_for_testing(home.path().abs());
-        let runtime = StateRuntime::init(sqlite.clone(), "test-provider".to_string()).await?;
+        let mut runtime = StateRuntime::init(sqlite.clone(), "test-provider".to_string()).await?;
         let pool = sqlite.open_read_write_pool(&sqlite.logs_db_path()).await?;
         let feedback = if scenario == Scenario::DisabledCapture {
             CodexFeedback::disabled()
@@ -52,6 +53,12 @@ async fn feedback_includes_flush_and_query_failures_in_the_same_submission() -> 
                 sqlx::raw_sql("PRAGMA writable_schema = ON; UPDATE sqlite_schema SET rootpage = 2147483647 WHERE name = 'logs'; PRAGMA schema_version = 1000000;").execute(&pool).await?;
             }
             Scenario::DisabledCapture => {
+                runtime.close().await;
+                runtime = StateRuntime::init(
+                    sqlite.with_diagnostic_log_capture(DiagnosticLogCapture::Disabled),
+                    "test-provider".to_string(),
+                )
+                .await?;
                 sqlx::query("INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id) VALUES (1, 0, 'INFO', 'test', 'saved before capture was disabled', ?)")
                     .bind(thread_id.to_string()).execute(&pool).await?;
             }
