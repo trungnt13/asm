@@ -406,8 +406,12 @@ pub struct ConfigToml {
     /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
+    /// Opt in to process-local Rust logs and feedback diagnostics at startup.
+    /// Defaults to false; saved conversation history is independent.
+    pub diagnostic_log_capture: Option<bool>,
+
     /// Directory where Codex writes log files. Setting this value explicitly
-    /// also enables the TUI text log in this directory.
+    /// also enables the TUI text log when diagnostic capture is enabled.
     /// Defaults to `$CODEX_HOME/log`.
     pub log_dir: Option<AbsolutePathBuf>,
 

@@ -26,11 +26,14 @@ impl StateRuntime {
                 let Some(runtime) = runtime.upgrade() else {
                     break;
                 };
-                if runtime.logs_pool.is_closed() {
+                let Some(logs_pool) = &runtime.logs_pool else {
+                    break;
+                };
+                if logs_pool.is_closed() {
                     break;
                 }
                 if let Err(err) = prune_by_age_and_size(
-                    &runtime.logs_pool,
+                    logs_pool,
                     Utc::now().timestamp(),
                     LOG_DATABASE_BUDGET_BYTES,
                 )
@@ -42,7 +45,7 @@ impl StateRuntime {
                     first_sweep = false;
                     // Preserve the startup checkpoint without waiting for readers or writers.
                     if let Err(err) = sqlx::query("PRAGMA wal_checkpoint(PASSIVE)")
-                        .execute(runtime.logs_pool.as_ref())
+                        .execute(logs_pool.as_ref())
                         .await
                     {
                         tracing::warn!("failed to checkpoint diagnostic logs: {err}");
