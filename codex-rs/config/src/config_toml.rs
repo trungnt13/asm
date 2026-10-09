@@ -166,6 +166,15 @@ pub struct FeatureToggleToml {
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
+    /// Model for temporary `/chat` conversations; empty inherits the parent.
+    pub chat_model: Option<String>,
+    /// Initial `/chat` effort; missing or empty inherits the parent.
+    #[serde(
+        default,
+        deserialize_with = "crate::config_toml::deserialize_chat_reasoning"
+    )]
+    #[schemars(schema_with = "crate::schema::chat_reasoning_schema")]
+    pub chat_reasoning: Option<ReasoningEffort>,
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak: Option<bool>,
     /// Review model override used by the `/review` feature.
@@ -1011,6 +1020,22 @@ pub fn validate_model_providers(
             .map_err(|message| format!("model_providers.{key}: {message}"))?;
     }
     Ok(())
+}
+
+pub(crate) fn deserialize_chat_reasoning<'de, D>(
+    deserializer: D,
+) -> Result<Option<ReasoningEffort>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)?
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            ReasoningEffort::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+                value,
+            ))
+        })
+        .transpose()
 }
 
 fn deserialize_model_providers<'de, D>(
