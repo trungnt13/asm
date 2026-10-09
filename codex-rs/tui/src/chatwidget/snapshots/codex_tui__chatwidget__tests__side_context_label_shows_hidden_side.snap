@@ -1,9 +1,18 @@
 ---
 source: tui/src/chatwidget/tests/side.rs
-expression: terminal.backend()
+expression: "format!(\"Side:\\n{side}\\n\\nChat:\\n{chat}\")"
 ---
+Side:
 "                                                                                "
 "                                                                                "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
-"  GPT-5.6-Sol                                                  ctrl+/ for side  "
+"  sol56                                                        ctrl+/ for side  "
+
+
+Chat:
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  sol56                                                        ctrl+/ for chat  "
