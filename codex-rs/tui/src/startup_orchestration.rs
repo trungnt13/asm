@@ -796,43 +796,48 @@ pub(super) async fn run_main_inner(
         }
     }
 
-    let (tui_file_layer, _tui_file_log_guard) = if config_toml_log_dir_configured {
-        let log_dir = config.log_dir.clone();
-        std::fs::create_dir_all(&log_dir)?;
-        let mut log_file_opts = OpenOptions::new();
-        log_file_opts.create(true).append(true);
+    let (tui_file_layer, _tui_file_log_guard) =
+        if config.diagnostic_log_capture && config_toml_log_dir_configured {
+            let log_dir = config.log_dir.clone();
+            std::fs::create_dir_all(&log_dir)?;
+            let mut log_file_opts = OpenOptions::new();
+            log_file_opts.create(true).append(true);
 
-        // Ensure the file is only readable and writable by the current user.
-        // Doing the equivalent to `chmod 600` on Windows is quite a bit more
-        // code and requires the Windows API crates.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            log_file_opts.mode(0o600);
-        }
+            // Ensure the file is only readable and writable by the current user.
+            // Doing the equivalent to `chmod 600` on Windows is quite a bit more
+            // code and requires the Windows API crates.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                log_file_opts.mode(0o600);
+            }
 
-        let log_file = log_file_opts.open(log_dir.join(TUI_LOG_FILE_NAME))?;
-        let (non_blocking, guard) = non_blocking(log_file);
-        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            let log_file = log_file_opts.open(log_dir.join(TUI_LOG_FILE_NAME))?;
+            let (non_blocking, guard) = non_blocking(log_file);
+            let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             EnvFilter::new(
                 "codex_core=info,codex_tui=info,codex_rmcp_client=info,codex_realtime_webrtc=warn",
             )
         });
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(non_blocking)
-            .with_target(true)
-            .with_ansi(false)
-            .with_span_events(
-                tracing_subscriber::fmt::format::FmtSpan::NEW
-                    | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-            )
-            .with_filter(env_filter);
-        (Some(file_layer), Some(guard))
-    } else {
-        (None, None)
-    };
+            let file_layer = tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_target(true)
+                .with_ansi(false)
+                .with_span_events(
+                    tracing_subscriber::fmt::format::FmtSpan::NEW
+                        | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                )
+                .with_filter(env_filter);
+            (Some(file_layer), Some(guard))
+        } else {
+            (None, None)
+        };
 
-    let feedback = codex_feedback::CodexFeedback::new();
+    let feedback = if config.diagnostic_log_capture {
+        codex_feedback::CodexFeedback::new()
+    } else {
+        codex_feedback::CodexFeedback::disabled()
+    };
     let feedback_layer = feedback.logger_layer();
     let feedback_metadata_layer = feedback.metadata_layer();
 
