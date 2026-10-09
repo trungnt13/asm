@@ -332,7 +332,11 @@ impl Session {
             DecisionRequest {
                 model: config.decision_model.clone(),
                 input: text,
-                instructions: format!("{RUBRIC}\n{}", config.additional_instructions),
+                instructions: format!(
+                    "{}\n{}",
+                    config.rubric_instructions.as_deref().unwrap_or(RUBRIC),
+                    config.additional_instructions,
+                ),
                 choices: allowed.iter().map(ToString::to_string).collect(),
             },
             cancellation.clone(),

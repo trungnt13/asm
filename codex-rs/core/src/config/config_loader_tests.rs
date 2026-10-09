@@ -1001,6 +1001,8 @@ approval_policy = "on-request"
 [adaptive_reasoning]
 min_effort = "minimal"
 max_effort = "max"
+rubric_instructions = "Base selection policy."
+additional_instructions = "Keep this suffix."
 "#,
     )
     .expect("write default user config");
@@ -1009,6 +1011,7 @@ max_effort = "max"
         r#"model = "gpt-work"
 [adaptive_reasoning]
 max_effort = "high"
+rubric_instructions = "Selected profile policy."
 "#,
     )
     .expect("write selected user config");
@@ -1075,6 +1078,8 @@ max_effort = "high"
         Some(codex_config::AdaptiveReasoningConfig {
             min_effort: codex_protocol::openai_models::ReasoningEffort::Minimal,
             max_effort: codex_protocol::openai_models::ReasoningEffort::High,
+            rubric_instructions: Some("Selected profile policy.".to_string()),
+            additional_instructions: "Keep this suffix.".to_string(),
             ..Default::default()
         })
     );

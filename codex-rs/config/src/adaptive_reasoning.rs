@@ -25,6 +25,7 @@ pub struct AdaptiveReasoningConfig {
     #[schemars(range(min = 128, max = 8192))]
     pub max_context_bytes: usize,
     pub update_on: Vec<AdaptiveReasoningTrigger>,
+    pub rubric_instructions: Option<String>,
     pub additional_instructions: String,
 }
 
@@ -42,6 +43,7 @@ impl Default for AdaptiveReasoningConfig {
                 AdaptiveReasoningTrigger::TurnStart,
                 AdaptiveReasoningTrigger::ToolResult,
             ],
+            rubric_instructions: None,
             additional_instructions: String::new(),
         }
     }
@@ -90,6 +92,17 @@ impl AdaptiveReasoningConfig {
             return Err(
                 "adaptive_reasoning.max_context_bytes must be between 128 and 8192".to_string(),
             );
+        }
+        if let Some(rubric) = &self.rubric_instructions {
+            if rubric.trim().is_empty() {
+                return Err("adaptive_reasoning.rubric_instructions must not be blank".to_string());
+            }
+            if rubric.len() > 4096 {
+                return Err(
+                    "adaptive_reasoning.rubric_instructions must not exceed 4096 UTF-8 bytes"
+                        .to_string(),
+                );
+            }
         }
         if self.additional_instructions.len() > 4096 {
             return Err(
