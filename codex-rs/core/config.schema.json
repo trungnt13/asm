@@ -55,6 +55,10 @@
           ],
           "default": "low"
         },
+        "rubric_instructions": {
+          "default": null,
+          "type": "string"
+        },
         "update_on": {
           "default": [
             "turn_start",
