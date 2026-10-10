@@ -424,6 +424,7 @@ impl ChatWidget {
             | ServerNotification::WindowsSandboxSetupCompleted(_)
             | ServerNotification::AccountLoginCompleted(_)
             | ServerNotification::ProjectChanged(_)
+            | ServerNotification::AdaptiveReasoningUpdated(_)
             | ServerNotification::ThreadProjectUpdated(_) => {}
             ServerNotification::ContextCompacted(_) => {}
         }

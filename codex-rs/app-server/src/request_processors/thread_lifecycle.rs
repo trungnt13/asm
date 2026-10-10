@@ -893,6 +893,8 @@ pub(super) async fn handle_pending_thread_resume_request(
     let sandbox = config_snapshot.sandbox_policy().into();
     let cwd = config_snapshot.cwd().clone();
     let ThreadConfigSnapshot {
+        adaptive_reasoning_enabled,
+        adaptive_reasoning_revision,
         model,
         disabled_plugin_ids,
         model_provider_id,
@@ -913,6 +915,8 @@ pub(super) async fn handle_pending_thread_resume_request(
     thread.session_id = session_id;
 
     let response = ThreadResumeResponse {
+        adaptive_reasoning_enabled,
+        adaptive_reasoning_revision,
         thread,
         disabled_plugin_ids,
         model,

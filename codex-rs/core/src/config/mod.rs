@@ -1062,6 +1062,8 @@ pub struct Config {
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
     pub adaptive_reasoning: codex_config::AdaptiveReasoningConfig,
+    /// Runtime-only revision seed when an evicted child session is reloaded.
+    pub adaptive_reasoning_initial_revision: u64,
     /// Optional Plan-mode-specific reasoning effort override used by the TUI.
     ///
     /// When unset, Plan mode uses the built-in Plan preset default (currently
@@ -4647,6 +4649,7 @@ impl Config {
                 .unwrap_or_default(),
             model_reasoning_effort: cfg.model_reasoning_effort,
             adaptive_reasoning,
+            adaptive_reasoning_initial_revision: 0,
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_catalog,
