@@ -176,8 +176,12 @@ async fn read_http_request(stream: &mut (impl AsyncRead + Unpin)) -> (String, Ve
 async fn adaptive_fixture(
     client: Arc<DecisionsClient>,
     configure: impl FnOnce(&mut Config),
-) -> (Arc<Session>, Arc<TurnContext>) {
-    let (session, turn, _) = make_session_and_context_with_auth_and_config_and_rx(
+) -> (
+    Arc<Session>,
+    Arc<TurnContext>,
+    async_channel::Receiver<codex_protocol::protocol::Event>,
+) {
+    let (session, turn, events) = make_session_and_context_with_auth_and_config_and_rx(
         CodexAuth::from_api_key("synthetic-primary-key"),
         Vec::new(),
         |config| {
@@ -244,7 +248,7 @@ async fn adaptive_fixture(
             },
         )
         .await;
-    (session, turn)
+    (session, turn, events)
 }
 
 fn user_task(text: &str) -> Vec<TurnInput> {
@@ -302,7 +306,7 @@ async fn finish_adaptation(adaptation: &mut tokio::task::JoinHandle<()>) {
 #[tokio::test]
 async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let cancellation = CancellationToken::new();
     let first = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -375,6 +379,29 @@ async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps()
             .reasoning_effort,
         Some(ReasoningEffort::Low)
     );
+    session.report_reasoning_effort(&first).await;
+    session.report_reasoning_effort(&next).await;
+    let reported = std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event.msg {
+            codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(update) => Some(update),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reported,
+        vec![
+            codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                turn_id: turn.sub_id.clone(),
+                reasoning_effort: Some(ReasoningEffort::Low),
+                adaptive: true,
+            },
+            codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                turn_id: turn.sub_id.clone(),
+                reasoning_effort: Some(ReasoningEffort::High),
+                adaptive: true,
+            },
+        ]
+    );
     session.stop_adaptive_reasoning().await;
 }
 
@@ -386,7 +413,7 @@ async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps()
 #[tokio::test]
 async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
         if scenario == "deadline" {
             config.adaptive_reasoning.decision_timeout_ms = 500;
         }
@@ -478,6 +505,19 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
         next.settings.effective_reasoning_effort(),
         Some(ReasoningEffort::Low)
     );
+    session.report_reasoning_effort(&next).await;
+    let update = std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| match event.msg {
+        codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(update) => Some(update),
+        _ => None,
+    });
+    assert_eq!(
+        update,
+        Some(codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+            turn_id: turn.sub_id.clone(),
+            reasoning_effort: Some(ReasoningEffort::Low),
+            adaptive: scenario != "manual",
+        })
+    );
     assert_pending_job(&turn);
     session.stop_adaptive_reasoning().await;
 }
@@ -487,7 +527,7 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
 #[tokio::test]
 async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let mut adaptation = start_adapting(
         &session,
         &turn,
@@ -509,6 +549,7 @@ async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
 
 #[test_case("disabled")]
 #[test_case("override disabled")]
+#[test_case("empty triggers")]
 #[test_case("unsupported model")]
 #[test_case("empty intersection")]
 #[test_case("single intersection")]
@@ -521,19 +562,21 @@ async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
 #[tokio::test]
 async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str) {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |config| match scenario {
-        "disabled" => config.adaptive_reasoning.enabled = false,
-        "override disabled" => {
-            config
-                .features
-                .disable(Feature::ReasoningEffortOverride)
-                .unwrap();
-        }
-        "ultra" => config.model_reasoning_effort = Some(ReasoningEffort::Ultra),
-        "persistent" => config.model_reasoning_effort = Some(ReasoningEffort::Persistent),
-        _ => {}
-    })
-    .await;
+    let (session, turn, events) =
+        adaptive_fixture(Arc::clone(&proxy.client), |config| match scenario {
+            "disabled" => config.adaptive_reasoning.enabled = false,
+            "empty triggers" => config.adaptive_reasoning.update_on.clear(),
+            "override disabled" => {
+                config
+                    .features
+                    .disable(Feature::ReasoningEffortOverride)
+                    .unwrap();
+            }
+            "ultra" => config.model_reasoning_effort = Some(ReasoningEffort::Ultra),
+            "persistent" => config.model_reasoning_effort = Some(ReasoningEffort::Persistent),
+            _ => {}
+        })
+        .await;
     let mut selected = (*turn.next_step_settings.load_full()).clone();
     match scenario {
         "unsupported model" => {
@@ -624,13 +667,40 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
     );
     assert!(adaptive.warmup.lock().unwrap().is_none());
     assert!(Arc::ptr_eq(&baseline, &turn.next_step_settings.load_full()));
+    let step = session
+        .capture_step_context(Arc::clone(&turn), &CancellationToken::new())
+        .await
+        .unwrap();
+    session.report_reasoning_effort(&step).await;
+    let updates = std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event.msg {
+            codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(update) => Some(update),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let expected = match scenario {
+        "disabled" | "feature worker" | "child" | "review" | "memory" => Vec::new(),
+        "override disabled"
+        | "empty triggers"
+        | "unsupported model"
+        | "empty intersection"
+        | "single intersection"
+        | "ultra"
+        | "persistent" => vec![codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+            turn_id: turn.sub_id.clone(),
+            reasoning_effort: step.settings.effective_reasoning_effort(),
+            adaptive: false,
+        }],
+        _ => unreachable!("defined test scenarios"),
+    };
+    assert_eq!(updates, expected);
     session.stop_adaptive_reasoning().await;
 }
 
 #[tokio::test]
 async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     session
         .services
         .thread_extension_data
@@ -689,7 +759,7 @@ async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
 #[tokio::test]
 async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: &str) {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let cancellation = CancellationToken::new();
     let mut adaptation = start_adapting(
         &session,
@@ -731,7 +801,7 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
 #[tokio::test]
 async fn stalled_warmup_shutdown_does_not_wait_for_http_or_change_history() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     session
         .services
         .thread_extension_data
@@ -769,7 +839,7 @@ async fn stalled_warmup_shutdown_does_not_wait_for_http_or_change_history() {
 #[tokio::test]
 async fn busy_settings_publication_drops_completed_decision_without_waiting() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let mut adaptation = start_adapting(
         &session,
         &turn,
@@ -807,7 +877,7 @@ async fn busy_settings_publication_drops_completed_decision_without_waiting() {
 #[tokio::test]
 async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_it(scenario: &str) {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let mut adaptation = start_adapting(
         &session,
         &turn,
@@ -850,7 +920,7 @@ async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_
 #[tokio::test]
 async fn stalled_decision_does_not_keep_session_or_turn_alive() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let adaptation = start_adapting(
         &session,
         &turn,
@@ -914,7 +984,7 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
         ],
     )
     .await;
-    let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
         config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
         config.model_provider.supports_websockets = false;
         config.update_plan_enabled = true;
@@ -985,6 +1055,64 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
     .await
     .expect("normal turn continues after decision success or bounded fallback");
     drop(reply);
+    let notifications = std::iter::from_fn(|| events.try_recv().ok())
+        .map(|event| event.msg)
+        .collect::<Vec<_>>();
+    let captured = notifications
+        .iter()
+        .filter_map(|event| match event {
+            codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(update) => {
+                Some(update.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let second_effort = match scenario {
+        "success" => ReasoningEffort::Low,
+        "failure" | "timeout" => ReasoningEffort::High,
+        _ => unreachable!("defined test scenarios"),
+    };
+    assert_eq!(
+        captured,
+        vec![
+            codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                turn_id: turn.sub_id.clone(),
+                reasoning_effort: Some(ReasoningEffort::High),
+                adaptive: true,
+            },
+            codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                turn_id: turn.sub_id.clone(),
+                reasoning_effort: Some(second_effort),
+                adaptive: true,
+            },
+        ]
+    );
+    let effort_positions = notifications
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            matches!(
+                event,
+                codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(_)
+            )
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let model_positions = notifications
+        .iter()
+        .enumerate()
+        .filter_map(|(index, event)| {
+            matches!(
+                event,
+                codex_protocol::protocol::EventMsg::RawResponseCompleted(_)
+            )
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(model_positions.len(), 2);
+    assert!(effort_positions[0] < model_positions[0]);
+    assert!(model_positions[0] < effort_positions[1]);
+    assert!(effort_positions[1] < model_positions[1]);
     let requests = requests.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(
