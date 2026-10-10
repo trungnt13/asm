@@ -4105,6 +4105,27 @@ impl ThreadRequestProcessor {
                 runtime_workspace_roots = Some(resolve_runtime_workspace_roots(restored_roots));
             }
         }
+        // A persisted fork snapshots its selected tier, unlike new-thread catalog defaults.
+        // Do not recover a parent's settings from the inherited prefix or replace a caller override.
+        let service_tier = service_tier.or_else(|| {
+            if request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key("service_tier"))
+            {
+                return None;
+            }
+            if let InitialHistory::Resumed(resumed) = &thread_history
+                && let Some(RolloutItem::SessionMeta(meta)) = resumed.history.first()
+                && meta.meta.id == resumed.conversation_id
+                && meta.meta.forked_from_id.is_some()
+                && meta.meta.thread_source == Some(codex_protocol::protocol::ThreadSource::User)
+            {
+                // Older snapshots omit the tier; only restore a recorded selection.
+                history_settings.and_then(|settings| settings.service_tier.clone().map(Some))
+            } else {
+                None
+            }
+        });
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,

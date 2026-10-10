@@ -393,6 +393,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         KeyCode::Char('f'),
         KeyModifiers::CONTROL | KeyModifiers::SHIFT,
     )];
+    let mut saved_chat_target = None;
     for phase in ["created", "switched", "synced"] {
         let chat_id = app.current_displayed_thread_id().expect("active Chat");
         assert_ne!(chat_id, parent_id);
@@ -456,7 +457,29 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
                 .await?;
                 assert_ne!(app.current_displayed_thread_id(), Some(chat_id));
             }
-            "synced" => {}
+            "synced" => {
+                Box::pin(app.apply_side_conversation_action(
+                    &mut tui,
+                    &mut server,
+                    SideConversationAction::Fork {
+                        name: Some("Saved Fast Chat".to_string()),
+                    },
+                ))
+                .await?;
+                let request = recorded_params(&requests, "thread/name/set")
+                    .pop()
+                    .expect("saved Chat naming request");
+                let saved_id = ThreadId::from_string(request["threadId"].as_str().unwrap())?;
+                let saved = server
+                    .thread_read(saved_id, /*include_turns*/ false)
+                    .await?;
+                saved_chat_target = Some(crate::resume_picker::SessionTarget {
+                    path: saved.path,
+                    thread_id: saved_id,
+                    cwd: None,
+                    history_mode: None,
+                });
+            }
             _ => unreachable!("known lifecycle phase"),
         }
     }
@@ -701,6 +724,55 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     assert_eq!(store.pair(parent_id)?, None);
     assert_eq!(store.side(second_id)?, Some(orphan_pair));
     assert!(std::fs::read_to_string(&orphan_path)?.starts_with(&orphan_history));
+    // A global default must not replace a saved Chat's tier on ordinary /resume.
+    app.cli_kv_overrides
+        .retain(|(key, _)| key != "service_tier");
+    crate::legacy_core::config::edit::ConfigEditsBuilder::for_config(&app.config)
+        .set_service_tier(Some("default".to_string()))
+        .apply()
+        .await
+        .map_err(std::io::Error::other)?;
+    let target = saved_chat_target.expect("saved Fast Chat");
+    let saved_chat_id = target.thread_id;
+    Box::pin(app.resume_target_session(&mut tui, &mut server, target)).await?;
+    for phase in ["resumed", "reattached"] {
+        assert_eq!(
+            (
+                app.current_displayed_thread_id(),
+                app.chat_widget.configured_service_tier().as_deref(),
+                app.config.service_tier.as_deref(),
+                app.chat_widget.side_conversation_active(),
+            ),
+            (
+                Some(saved_chat_id),
+                Some("priority"),
+                Some("default"),
+                false
+            ),
+        );
+        while app_events.try_recv().is_ok() {}
+        let _ = app
+            .chat_widget
+            .submit_user_message_as_plain_user_turn(crate::chatwidget::UserMessage::from(phase));
+        while let Ok(event) = app_events.try_recv() {
+            Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+        }
+        let request = recorded_params(&requests, "turn/start")
+            .pop()
+            .expect("saved Chat turn request");
+        assert_eq!(request["threadId"], saved_chat_id.to_string());
+        assert_eq!(request["input"][0]["text"], phase);
+        assert_eq!(request["serviceTier"], "priority");
+        Box::pin(app.enqueue_thread_notification(
+            saved_chat_id,
+            turn_completed_notification(saved_chat_id, "forwarded-turn", TurnStatus::Completed),
+        ))
+        .await?;
+        if phase == "resumed" {
+            Box::pin(app.select_agent_thread(&mut tui, &mut server, second_id)).await?;
+            Box::pin(app.select_agent_thread(&mut tui, &mut server, saved_chat_id)).await?;
+        }
+    }
     server.shutdown().await?;
     proxy.await??;
     Ok(())

@@ -760,8 +760,13 @@ impl App {
             .side_threads
             .get(&thread_id)
             .is_some_and(|state| state.mode == crate::app_event::SideConversationMode::Chat)
+            || (!self.side_threads.contains_key(&thread_id)
+                && snapshot
+                    .session
+                    .as_ref()
+                    .is_some_and(ThreadSessionState::is_user_fork))
         {
-            // Chat's explicit tier must also drive submissions and catalog refreshes.
+            // Chat and ordinary saved forks retain their selected tier across view rebuilds.
             config.service_tier = snapshot
                 .session
                 .as_ref()
@@ -1163,11 +1168,14 @@ impl App {
             },
         );
         self.reset_thread_event_state().await;
-        let init = self.chatwidget_init_for_forked_or_resumed_thread(
-            tui,
-            self.config.clone(),
-            initial_user_message,
-        );
+        let mut config = self.config.clone();
+        if matches!(presentation, ThreadAttachPresentation::SessionLineage)
+            && started.session.is_user_fork()
+        {
+            config.service_tier = started.session.service_tier.clone();
+        }
+        let init =
+            self.chatwidget_init_for_forked_or_resumed_thread(tui, config, initial_user_message);
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
         if matches!(
             presentation,
