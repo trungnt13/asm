@@ -112,7 +112,8 @@ fn append_item(output: &mut String, item: &ResponseItem, limit: usize) {
         ResponseItem::Message { role, content, .. } if role == "assistant" => {
             append_text(output, &format!("\n{role}: "), limit);
             for content in content.iter().take(/*n*/ 32) {
-                if let ContentItem::InputText { text } | ContentItem::OutputText { text } = content
+                if let ContentItem::InputText { text } | ContentItem::OutputText { text, .. } =
+                    content
                 {
                     append_text(output, text, limit);
                 }
