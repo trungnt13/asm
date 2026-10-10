@@ -66,6 +66,8 @@ fn adaptive_evidence_tracks_steering_back_to_the_original_task() {
         item: ResponseItem::Message {
             id: None,
             role: "user".to_string(),
+            encrypted_content: None,
+            status: None,
             content: vec![ContentItem::InputText {
                 text: "Inherited parent task.".to_string(),
             }],
@@ -125,7 +127,13 @@ fn adaptive_evidence_bounds_multibyte_task_and_recent_output() {
         ResponseItem::Message {
             id: None,
             role: "assistant".to_string(),
-            content: vec![ContentItem::OutputText { text: output }],
+            encrypted_content: None,
+            status: None,
+            content: vec![ContentItem::OutputText {
+                text: output,
+                annotations: None,
+                logprobs: None,
+            }],
             phase: None,
             internal_chat_message_metadata_passthrough: None,
         }

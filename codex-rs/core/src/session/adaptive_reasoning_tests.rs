@@ -527,8 +527,12 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
                     &[ResponseItem::Message {
                         id: None,
                         role: "assistant".to_string(),
+                        encrypted_content: None,
+                        status: None,
                         content: vec![ContentItem::OutputText {
                             text: "The result is four.".to_string(),
+                            annotations: None,
+                            logprobs: None,
                         }],
                         phase: None,
                         internal_chat_message_metadata_passthrough: None,
