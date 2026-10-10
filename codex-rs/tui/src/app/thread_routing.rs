@@ -12,6 +12,7 @@ use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::WarningNotification;
+use codex_protocol::config_types::ServiceTier;
 
 // Leave time for side-thread cleanup and unsubscribe inside the two-second exit budget.
 const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
@@ -766,6 +767,42 @@ impl App {
                 final_output_json_schema,
                 collaboration_mode,
             } => {
+                let request_model = collaboration_mode
+                    .as_ref()
+                    .map_or(model.as_str(), |mode| mode.settings.model.as_str());
+                if self
+                    .side_threads
+                    .get(&thread_id)
+                    .is_some_and(|state| state.mode == crate::app_event::SideConversationMode::Chat)
+                    && (service_tier.as_ref().and_then(|tier| tier.as_deref())
+                        != Some(ServiceTier::Fast.request_value())
+                        || !self
+                            .chat_widget
+                            .config_ref()
+                            .features
+                            .service_tier_enabled(ServiceTier::Fast.request_value())
+                        || !self
+                            .chat_widget
+                            .model_catalog()
+                            .models
+                            .iter()
+                            .any(|preset| {
+                                preset.model == request_model
+                                    && crate::service_tier_resolution::model_supports_service_tier(
+                                        preset,
+                                        ServiceTier::Fast.request_value(),
+                                    )
+                            }))
+                {
+                    let message = "Chat requires Fast; no message was sent.".to_string();
+                    if !self
+                        .chat_widget
+                        .handle_turn_start_rejection(message.clone())
+                    {
+                        self.chat_widget.add_error_message(message);
+                    }
+                    return Ok(true);
+                }
                 let mut should_start_turn = true;
                 if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
                     let mut steer_turn_id = turn_id;
