@@ -18,7 +18,7 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.drain_active_thread_events(&mut tui).await?;
+    app.drain_active_thread_events(&mut tui, &server).await?;
 
     // The old runtime's notification can arrive after this thread ID is loaded again.
     app.handle_app_server_event(
@@ -26,7 +26,7 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
         AppServerEvent::ServerNotification(Box::new(thread_closed_notification(thread_id))),
     )
     .await;
-    app.drain_active_thread_events(&mut tui).await?;
+    app.drain_active_thread_events(&mut tui, &server).await?;
     assert!(
         !std::iter::from_fn(|| events.try_recv().ok())
             .any(|event| matches!(event, AppEvent::Exit(_)))
@@ -48,7 +48,7 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
     })
     .await?;
     app.handle_app_server_event(&server, closed).await;
-    app.drain_active_thread_events(&mut tui).await?;
+    app.drain_active_thread_events(&mut tui, &server).await?;
     assert!(
         std::iter::from_fn(|| events.try_recv().ok())
             .any(|event| matches!(event, AppEvent::Exit(ExitMode::Immediate)))
@@ -129,7 +129,7 @@ async fn failed_close_status_read_reconnects_remote_or_closes_embedded() -> Resu
         )
         .await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.drain_active_thread_events(&mut tui).await?;
+        app.drain_active_thread_events(&mut tui, &session).await?;
         assert_eq!(
             (reads.load(Ordering::SeqCst), app.reconnect.offline),
             (expected_reads, offline),
