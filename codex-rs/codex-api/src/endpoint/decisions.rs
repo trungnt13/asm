@@ -5,6 +5,8 @@ use thiserror::Error;
 
 pub const DECISIONS_URL: &str = "https://api.openai.com/v1/decisions";
 const MAX_RESPONSE_BYTES: usize = 16 * 1024;
+// A byte cap also bounds tokens per input item without a tokenizer on the step path.
+const MAX_INPUT_ITEM_BYTES: usize = 8192;
 
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum DecisionsError {
@@ -73,9 +75,28 @@ impl DecisionsClient {
         {
             return Err(DecisionsError::InvalidRequest);
         }
+        let mut input_items = Vec::new();
+        let mut remaining = input;
+        while !remaining.is_empty() {
+            let mut end = remaining.floor_char_boundary(remaining.len().min(MAX_INPUT_ITEM_BYTES));
+            if remaining.len() > MAX_INPUT_ITEM_BYTES
+                && let Some(newline) = remaining[..end].rfind('\n')
+            {
+                end = newline + 1;
+            }
+            let (text, rest) = remaining.split_at(end);
+            input_items
+                .push(json!({"role": "user", "content": [{"type": "input_text", "text": text}]}));
+            remaining = rest;
+        }
+        tracing::debug!(
+            input_bytes = input.len(),
+            input_items = input_items.len(),
+            "Decisions input bounded"
+        );
         let body = json!({
             "model": model,
-            "input": [{"role": "user", "content": [{"type": "input_text", "text": input}]}],
+            "input": input_items,
             "questions": [{
                 "type": "choice",
                 "name": "reasoning_effort",
