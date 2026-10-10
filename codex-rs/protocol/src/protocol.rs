@@ -607,6 +607,9 @@ pub struct ThreadSettingsOverrides {
     /// effort, or `None` to leave the existing value unchanged.
     pub effort: Option<Option<ReasoningEffortConfig>>,
 
+    /// Changes only this live session; it is never persisted as a thread default.
+    pub adaptive_reasoning_enabled: Option<bool>,
+
     /// Updated reasoning summary preference (honored only for reasoning-capable models).
     pub summary: Option<ReasoningSummaryConfig>,
 
@@ -1517,6 +1520,9 @@ pub enum EventMsg {
     /// Captured effort used by the next main model step.
     ReasoningEffortUpdated(ReasoningEffortUpdatedEvent),
 
+    /// Runtime automatic reasoning mode changed.
+    AdaptiveReasoningUpdated(AdaptiveReasoningUpdatedEvent),
+
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
     ThreadSettingsApplied(ThreadSettingsAppliedEvent),
@@ -2319,6 +2325,14 @@ pub struct TurnStartedEvent {
     pub model_context_window: Option<i64>,
     #[serde(default)]
     pub collaboration_mode_kind: ModeKind,
+}
+
+/// Reports the runtime mode without changing saved reasoning preferences.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct AdaptiveReasoningUpdatedEvent {
+    pub enabled: bool,
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
 }
 
 /// Reports captured step effort without changing the thread's saved settings.
@@ -4122,6 +4136,11 @@ pub struct SessionConfiguredEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortConfig>,
 
+    /// Automatic reasoning mode when the session starts.
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    pub adaptive_reasoning_revision: u64,
+
     /// Runtime proxy bind addresses, when the managed proxy was started for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4163,6 +4182,10 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: Option<ActivePermissionProfile>,
             cwd: AbsolutePathBuf,
             reasoning_effort: Option<ReasoningEffortConfig>,
+            #[serde(default)]
+            adaptive_reasoning_enabled: bool,
+            #[serde(default)]
+            adaptive_reasoning_revision: u64,
             network_proxy: Option<SessionNetworkProxyRuntime>,
             rollout_path: Option<PathBuf>,
         }
@@ -4195,6 +4218,8 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: wire.active_permission_profile,
             cwd: wire.cwd,
             reasoning_effort: wire.reasoning_effort,
+            adaptive_reasoning_enabled: wire.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: wire.adaptive_reasoning_revision,
             network_proxy: wire.network_proxy,
             rollout_path: wire.rollout_path,
         })
@@ -6394,6 +6419,8 @@ mod tests {
         let event = Event {
             id: "1234".to_string(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
+                adaptive_reasoning_enabled: false,
+                adaptive_reasoning_revision: 0,
                 session_id,
                 thread_id,
                 forked_from_id: None,
@@ -6418,6 +6445,8 @@ mod tests {
             "id": "1234",
             "msg": {
                 "type": "session_configured",
+                "adaptive_reasoning_enabled": false,
+                "adaptive_reasoning_revision": 0,
                 "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c7",
                 "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
                 "model": "codex-mini-latest",

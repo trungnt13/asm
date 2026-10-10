@@ -2443,6 +2443,8 @@ async fn thread_session_state_from_thread_start_response(
         local_settings,
     )
     .await?;
+    session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
+    session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response
         .thread
@@ -2482,6 +2484,8 @@ async fn thread_session_state_from_thread_resume_response(
         local_settings,
     )
     .await?;
+    session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
+    session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.collaboration_mode = response.collaboration_mode.clone().map(Box::new);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
@@ -2520,6 +2524,8 @@ async fn thread_session_state_from_thread_fork_response(
         local_settings,
     )
     .await?;
+    session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
+    session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
@@ -2586,6 +2592,8 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host,
@@ -4179,6 +4187,8 @@ mod tests {
         let forked_from_id = ThreadId::new();
         let read_only_profile = PermissionProfile::read_only();
         let response = ThreadResumeResponse {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
                 originator: None,

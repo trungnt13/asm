@@ -2115,9 +2115,16 @@ impl Session {
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         let state = self.state.lock().await;
-        state
+        let mut snapshot = state
             .session_configuration
-            .thread_config_snapshot(state.session_configuration.environments.clone())
+            .thread_config_snapshot(state.session_configuration.environments.clone());
+        let adaptive = self.adaptive_reasoning_state(
+            snapshot.adaptive_reasoning_enabled,
+            snapshot.adaptive_reasoning_revision,
+        );
+        snapshot.adaptive_reasoning_enabled = adaptive.enabled;
+        snapshot.adaptive_reasoning_revision = adaptive.revision;
+        snapshot
     }
 
     pub(crate) async fn configured_environment_selections(&self) -> Vec<TurnEnvironmentSelection> {

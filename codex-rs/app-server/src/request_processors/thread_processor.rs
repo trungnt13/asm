@@ -1632,6 +1632,8 @@ impl ThreadRequestProcessor {
         let thread_originator = config_snapshot.originator.clone();
 
         let response = ThreadStartResponse {
+            adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model,
@@ -4419,6 +4421,8 @@ impl ThreadRequestProcessor {
 
                 let thread_originator = config_snapshot.originator.clone();
                 let response = ThreadResumeResponse {
+                    adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+                    adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
                     thread,
                     disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
                     model: session_configured.model,
@@ -5759,6 +5763,8 @@ impl ThreadRequestProcessor {
             thread_response_active_permission_profile(config_snapshot.active_permission_profile);
         let thread_originator = config_snapshot.originator.clone();
         let response = ThreadForkResponse {
+            adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),

@@ -402,7 +402,85 @@ async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps()
             },
         ]
     );
+    session.pause_adaptive_reasoning().await;
+    assert!(
+        !session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_enabled
+    );
+    assert_eq!(selected_effort(&turn), Some(ReasoningEffort::High));
+    session
+        .set_adaptive_reasoning_enabled(/*enabled*/ true)
+        .await
+        .unwrap();
+    assert!(
+        session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_enabled
+    );
+    let transitions = std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event.msg {
+            codex_protocol::protocol::EventMsg::AdaptiveReasoningUpdated(update) => {
+                Some((update.enabled, update.adaptive_reasoning_revision))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(transitions, vec![(false, 1), (true, 2)]);
+    let snapshot = session.thread_config_snapshot().await;
+    assert_eq!(
+        (
+            snapshot.adaptive_reasoning_enabled,
+            snapshot.adaptive_reasoning_revision
+        ),
+        (true, 2)
+    );
+    session
+        .set_adaptive_reasoning_enabled(/*enabled*/ true)
+        .await
+        .unwrap();
+    assert_eq!(
+        session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_revision,
+        2
+    );
+    assert!(
+        events.try_recv().is_err(),
+        "idempotent ON emits no duplicate transition"
+    );
+    session
+        .set_adaptive_reasoning_enabled(/*enabled*/ false)
+        .await
+        .unwrap();
+    session
+        .set_adaptive_reasoning_enabled(/*enabled*/ true)
+        .await
+        .unwrap();
+    let revisions = std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event.msg {
+            codex_protocol::protocol::EventMsg::AdaptiveReasoningUpdated(update) => {
+                Some((update.enabled, update.adaptive_reasoning_revision))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        revisions,
+        vec![(false, 3), (true, 4)],
+        "ABA transitions retain distinct revisions"
+    );
     session.stop_adaptive_reasoning().await;
+    assert!(
+        session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_enabled,
+        "shutdown retains the requested mode for eviction restoration"
+    );
 }
 
 #[test_case("assistant")]
@@ -484,7 +562,7 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
             .await;
         }
         "manual" => {
-            session.pause_adaptive_reasoning();
+            session.pause_adaptive_reasoning().await;
         }
         _ => unreachable!("defined test scenarios"),
     }
@@ -694,6 +772,91 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
         _ => unreachable!("defined test scenarios"),
     };
     assert_eq!(updates, expected);
+    session
+        .set_adaptive_reasoning_enabled(/*enabled*/ false)
+        .await
+        .unwrap();
+    if scenario == "disabled" {
+        session
+            .set_adaptive_reasoning_enabled(/*enabled*/ true)
+            .await
+            .unwrap();
+        assert!(
+            session
+                .thread_config_snapshot()
+                .await
+                .adaptive_reasoning_enabled
+        );
+        assert!(
+            !turn.config.adaptive_reasoning.enabled,
+            "runtime opt-in does not rewrite config"
+        );
+        let mut adaptation = start_adapting(
+            &session,
+            &turn,
+            &user_task("Check arithmetic."),
+            AdaptiveReasoningTrigger::TurnStart,
+            &CancellationToken::new(),
+        );
+        let request = proxy.request().await;
+        request
+            .reply
+            .send((
+                200,
+                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
+            ))
+            .unwrap();
+        finish_adaptation(&mut adaptation).await;
+        assert_eq!(selected_effort(&turn), Some(ReasoningEffort::High));
+        assert_eq!(
+            session.thread_settings_snapshot().await.reasoning_effort,
+            Some(ReasoningEffort::Low)
+        );
+        let captured = session
+            .capture_step_context(Arc::clone(&turn), &CancellationToken::new())
+            .await
+            .unwrap();
+        session
+            .set_adaptive_reasoning_enabled(/*enabled*/ false)
+            .await
+            .unwrap();
+        session.report_reasoning_effort(&captured).await;
+        let reported = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| match event.msg {
+                codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(update) => Some(update),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reported,
+            vec![codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                turn_id: turn.sub_id.clone(),
+                reasoning_effort: Some(ReasoningEffort::High),
+                adaptive: false,
+            }]
+        );
+        assert!(
+            !session
+                .thread_config_snapshot()
+                .await
+                .adaptive_reasoning_enabled
+        );
+    } else {
+        assert!(
+            session
+                .set_adaptive_reasoning_enabled(/*enabled*/ true)
+                .await
+                .is_err(),
+            "unsupported modes reject runtime opt-in"
+        );
+        assert!(
+            !session
+                .thread_config_snapshot()
+                .await
+                .adaptive_reasoning_enabled
+        );
+        assert!(proxy.requests.try_recv().is_err());
+    }
     session.stop_adaptive_reasoning().await;
 }
 
@@ -907,7 +1070,7 @@ async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_
     .expect("HTTP completed and publisher reached serialized settings preparation");
     match scenario {
         "superseded" => session.invalidate_adaptive_reasoning(),
-        "manual" => session.pause_adaptive_reasoning(),
+        "manual" => session.pause_adaptive_reasoning().await,
         "shutdown" => state.shutting_down = true,
         _ => unreachable!("defined test scenarios"),
     }

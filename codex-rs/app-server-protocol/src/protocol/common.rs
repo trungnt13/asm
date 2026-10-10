@@ -1979,6 +1979,8 @@ server_notification_definitions! {
     ThreadTokenUsageUpdated => "thread/tokenUsage/updated" (v2::ThreadTokenUsageUpdatedNotification),
     TurnStarted => "turn/started" (v2::TurnStartedNotification),
     ReasoningEffortUpdated => "turn/reasoningEffortUpdated" (v2::ReasoningEffortUpdatedNotification),
+    #[experimental("thread/adaptiveReasoningUpdated")]
+    AdaptiveReasoningUpdated => "thread/adaptiveReasoningUpdated" (v2::AdaptiveReasoningUpdatedNotification),
     HookStarted => "hook/started" (v2::HookStartedNotification),
     TurnCompleted => "turn/completed" (v2::TurnCompletedNotification),
     HookCompleted => "hook/completed" (v2::HookCompletedNotification),
@@ -3239,6 +3241,8 @@ mod tests {
         let response = ClientResponse::ThreadStart {
             request_id: RequestId::Integer(7),
             response: v2::ThreadStartResponse {
+                adaptive_reasoning_enabled: false,
+                adaptive_reasoning_revision: 0,
                 disabled_plugin_ids: Vec::new(),
                 thread: v2::Thread {
                     originator: None,
@@ -4550,6 +4554,8 @@ mod tests {
             ServerNotification::ThreadSettingsUpdated(v2::ThreadSettingsUpdatedNotification {
                 thread_id: "thr_123".to_string(),
                 thread_settings: v2::ThreadSettings {
+                    adaptive_reasoning_enabled: false,
+                    adaptive_reasoning_revision: 0,
                     disabled_plugin_ids: Vec::new(),
                     cwd: absolute_path("/tmp/repo"),
                     approval_policy: v2::AskForApproval::Never,
