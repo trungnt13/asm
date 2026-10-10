@@ -79,7 +79,8 @@ async fn run_decision(
         )) => {
             match result {
                 Ok(result) => {
-                    tracing::debug!(success = result.is_ok(), latency_ms = started.elapsed().as_millis(),
+                    tracing::debug!(success = result.is_ok(), selected_effort = ?result.as_ref().ok(),
+                        latency_ms = started.elapsed().as_millis(),
                         "adaptive reasoning request completed");
                     let _ = sender.send(result);
                 },
