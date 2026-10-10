@@ -22,7 +22,7 @@ pub struct AdaptiveReasoningConfig {
     pub max_effort: ReasoningEffort,
     #[schemars(range(min = 1, max = 5000))]
     pub decision_timeout_ms: u64,
-    #[schemars(range(min = 128, max = 8192))]
+    #[schemars(range(min = 128, max = 32768))]
     pub max_context_bytes: usize,
     pub update_on: Vec<AdaptiveReasoningTrigger>,
     pub rubric_instructions: Option<String>,
@@ -86,9 +86,9 @@ impl AdaptiveReasoningConfig {
                 "adaptive_reasoning.decision_timeout_ms must be between 1 and 5000".to_string(),
             );
         }
-        if !(128..=8192).contains(&self.max_context_bytes) {
+        if !(128..=32768).contains(&self.max_context_bytes) {
             return Err(
-                "adaptive_reasoning.max_context_bytes must be between 128 and 8192".to_string(),
+                "adaptive_reasoning.max_context_bytes must be between 128 and 32768".to_string(),
             );
         }
         if let Some(rubric) = &self.rubric_instructions {

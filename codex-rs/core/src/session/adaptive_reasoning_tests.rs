@@ -163,7 +163,7 @@ async fn read_http_request(stream: &mut (impl AsyncRead + Unpin)) -> (String, Ve
                 .then(|| value.trim().parse::<usize>().unwrap())
         })
         .unwrap_or_default();
-    assert!(length <= 16 * 1024, "bounded decision body");
+    assert!(length <= 64 * 1024, "bounded decision body");
     while bytes.len() < header_end + length {
         let count = stream.read(&mut chunk).await.unwrap();
         assert_ne!(count, 0, "complete HTTP body");
@@ -1155,12 +1155,36 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
         config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
         config.model_provider.supports_websockets = false;
         config.update_plan_enabled = true;
+        if scenario == "success" {
+            config.adaptive_reasoning.max_context_bytes = 32768;
+        }
         if scenario == "timeout" {
             config.adaptive_reasoning.decision_timeout_ms = 500;
         }
     })
     .await;
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    if scenario == "success" {
+        session
+            .record_conversation_items(
+                &turn,
+                &turn.initial_settings.model_info,
+                &[ResponseItem::Message {
+                    id: None,
+                    role: "assistant".to_string(),
+                    encrypted_content: None,
+                    status: None,
+                    content: vec![ContentItem::OutputText {
+                        text: "Bounded history evidence. ".repeat(/*n*/ 2000),
+                        annotations: None,
+                        logprobs: None,
+                    }],
+                    phase: None,
+                    internal_chat_message_metadata_passthrough: None,
+                }],
+            )
+            .await;
+    }
     let task = "Check a harmless arithmetic result.";
     if scenario == "success" {
         use codex_protocol::AgentPath;
@@ -1221,6 +1245,20 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
             .await;
     }
     let first = proxy.request().await;
+    if scenario == "success" {
+        let chunks = first.body["input"].as_array().unwrap();
+        assert!(chunks.len() > 1);
+        let text = chunks
+            .iter()
+            .map(|item| {
+                let text = item["content"][0]["text"].as_str().unwrap();
+                assert!(text.len() <= 8192);
+                text
+            })
+            .collect::<String>();
+        assert_eq!(text.len(), 32768);
+        assert!(text.contains("Bounded history evidence."));
+    }
     assert!(
         first.body["input"][0]["content"][0]["text"]
             .as_str()

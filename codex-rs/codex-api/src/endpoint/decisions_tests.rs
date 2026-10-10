@@ -63,6 +63,50 @@ async fn decisions_sends_complete_choice_contract_and_preserves_rubric() {
         Ok("high".to_string()),
     );
     server.verify().await;
+    for (input, chunks) in [
+        ("a".repeat(/*n*/ 32768), vec!["a".repeat(/*n*/ 8192); 4]),
+        (
+            "界".repeat(/*n*/ 10922),
+            [vec!["界".repeat(/*n*/ 2730); 4], vec!["界界".to_string()]].concat(),
+        ),
+        (
+            format!("{}\n{}", "a".repeat(/*n*/ 8190), "b".repeat(/*n*/ 8192)),
+            vec![
+                format!("{}\n", "a".repeat(/*n*/ 8190)),
+                "b".repeat(/*n*/ 8192),
+            ],
+        ),
+    ] {
+        server.reset().await;
+        Mock::given(method("POST"))
+            .and(body_json(json!({
+                "model": "gpt-6-luna",
+                "input": chunks.iter().map(|text| json!({
+                    "role": "user", "content": [{"type": "input_text", "text": text}]
+                })).collect::<Vec<_>>(),
+                "questions": [{"type": "choice", "name": "reasoning_effort",
+                    "instructions": rubric, "choices": [{"value": "low"}, {"value": "high"}]}]
+            })))
+            .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
+                "answers": [{"type": "choice", "name": "reasoning_effort", "choice": "high"}]
+            })))
+            .expect(/*r*/ 1)
+            .mount(&server)
+            .await;
+        assert_eq!(
+            client()
+                .choose_effort_at(
+                    &format!("{}/v1/decisions", server.uri()),
+                    "gpt-6-luna",
+                    &input,
+                    rubric,
+                    &["low".to_string(), "high".to_string()],
+                )
+                .await,
+            Ok("high".to_string())
+        );
+        server.verify().await;
+    }
 }
 
 #[tokio::test]
