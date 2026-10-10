@@ -36,7 +36,7 @@ The local Cargo wrapper uses the source checkout's absolute `scripts/local-rustc
 
 The local Cargo wrapper locks build/check/Clippy/nextest commands per effective cache and saves input details plus Cargo fingerprint reasons under the main checkout's `.agents/dev-build-cache/<date>/`. On Linux with Python 3.11+, stale-artifact cleanup requires complete process visibility, no detected cache users or Rust build/editor processes, and each profile's native Cargo lock. Hold that lock during deletion. Skip cleanup on other hosts or uncertain activity. Use descriptor-relative traversal; reject symlink directories and artifacts outside the physical cache. Log removed counts and skip reasons. The three-day artifact-age rule remains: `incremental` directory modification time, or the latest `deps` file access/modification time. Age does not prove checkout inactivity; removal can force recompilation even for an active checkout. An explicit `CARGO_LOG` retains its filter. Inspect logs before blaming cache loss. Active wrapper commands also prevent reusable-checkout release or switching. `cargo run` keeps interactive I/O without holding the cache lock for a live app. CI and Windows behavior stay unchanged. Direct Cargo bypasses these protections and must finish before checkout release. Shared executable paths still belong to the last build; verify their producing checkout before handoff.
 
-For ordinary local runtime or UI checks, run `"$(python3 ../scripts/local-cargo.py --print-target-dir)/dev-small/codex" --no-daemon` from `codex-rs`. This uses the current embedded backend without changing or stopping a shared daemon; the sibling `codex-code-mode-host` supports code mode. Test daemon or remote behavior separately when it matters: `codex agents` and `--remote` cannot use `--no-daemon`.
+For ordinary local runtime or UI checks, run `"$(python3 ../scripts/local-cargo.py --print-target-dir)/dev-small/codex" --no-daemon` from `codex-rs`, with the [real-session isolation rules](#real-session-checks). This uses the current embedded backend without changing or stopping a shared daemon; the sibling `codex-code-mode-host` supports code mode. Test daemon or remote behavior separately when it matters: `codex agents` and `--remote` cannot use `--no-daemon`.
 
 Before handoff, verify both executables exist, CLI `--version`, and `--help` for each. A help check does not prove model requests or tools work. When safe, hand off both before automated checks finish. Report their verified absolute paths, build time, a manual check, and pending checks. Rebuild both after runtime edits. Never present old binaries as current. Get permission before replacing installed `codex`.
 
@@ -59,6 +59,15 @@ New tests or snapshot coverage require an explicit user request; implementation 
 Run required generators for changed inputs. Keep schemas, dependency locks, and Bazel data correct, even without Bazel CI. Reuse correct upstream outputs.
 
 Do not default to whole-crate or workspace suites. If focused checks cannot verify the outcome or establish safety, explain the gap and ask before expanding suites. A clean merge is not validation. Claim upstream CI passed only after verification.
+
+### Real-session checks
+
+- First decide whether changed behavior needs a real session. State the behavior and expected result. Use existing focused checks when sufficient; do not replay every feature or session. The release smoke turn below remains required.
+- Use a private temporary `CODEX_HOME` and `diagnostic_log_capture = true`. Do not use ephemeral mode. Save session history for debugging without adding test sessions to personal history.
+- Provision only needed configuration, authentication, and resources securely. Keep the intended profile and model. Set session, database, and log paths inside the test home; do not copy personal history or share mutable state through symlinks.
+- Use a temporary working directory unless the behavior needs a specific checkout. Use `--no-daemon` unless testing daemon or remote behavior; then use an isolated test server, not the personal shared daemon.
+- Record exact created session IDs, commands, binary/source identity, expected and actual results. Retain rollouts, output, and diagnostic logs in a private task evidence directory before cleanup. Never include credentials in reports or commits.
+- Keep a failed test home until triage is complete. Remove only task-owned test state after required evidence is retained. Never classify personal sessions as disposable by title alone.
 
 ### Commit, integrate, report
 
@@ -121,7 +130,7 @@ Port useful upstream action, toolchain, security, and build fixes without broad 
 3. **Check live use.**
    - Before dispatch, run one local live smoke turn with a time limit.
    - Use the default configuration and existing sign-in. Do not override the profile or model.
-   - Use the CLI/helper pair from the release source. Use an ephemeral session and a temporary directory.
+   - Use the CLI/helper pair from the release source. Follow the [real-session isolation rules](#real-session-checks).
    - Require a real model response. Verify the output of a successful read-only Code Mode command.
    - If the check fails, times out, or lacks authentication, do not dispatch. Do not skip the check.
    - Report the source and result separately from package checks. Keep credentials out of CI.
