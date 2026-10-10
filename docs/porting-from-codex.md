@@ -249,16 +249,33 @@ The built-in Statsig metrics exporter is inactive in ASM, including optimized re
 
 ### Adaptive reasoning
 
-Allow opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require both `features.step_model_switching` and `features.reasoning_effort_override`. Use the Decisions API to select a supported ordinary effort within `min_effort` / `max_effort`; never change models, service tiers, execution modes, permissions, or saved defaults. Preserve Ultra and Persistent selections. Adapt ordinary root conversations only; keep subagents and internal workers unchanged.
+Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
 
-- Default `enabled` to `false`, `decision_model` to `"gpt-6-luna"`, and `decision_model_api_env` to `"OPENAI_API_KEY"`. The latter names an environment variable, not a secret. Use the backend process's environment. Do not provision credentials, fall back to another credential source, log keys or evidence, or route requests through Guardian.
-- Default `min_effort` to `"low"`, `max_effort` to `"max"`, `decision_timeout_ms` to `200`, `max_context_bytes` to `8192`, and `update_on` to `["turn_start", "tool_result"]`. Validate ordinary ordered bounds, a nonblank model, an ASCII environment-variable identifier, a timeout of 1–5000 ms, and an evidence budget of 128–8192 UTF-8 bytes. Missing credentials, unsupported models, cancellations, refusals, invalid answers, and request failures retain the current effort. Do not retry Decisions requests on the sampling path.
-- Allow optional `rubric_instructions` as the only instruction setting: use it instead of the entire built-in effort-selection rubric, without a suffix; omission retains the built-in default. Require a nonblank replacement of at most 4096 UTF-8 bytes. Keep allowed outputs and runtime constraints enforced in code regardless of instruction content. Bound text evidence independently; exclude images and encrypted reasoning. Do not inject the classifier's instructions or result into the main conversation. The synthetic warm-up retains its separate minimal instructions. **P0 manual review:** classifier evidence and instructions can exceed 1000 tokens; evidence is capped at 8192 bytes and rubric instructions at 4096 bytes, each below the 10K-token item limit.
-- Send one tiny synthetic warm-up request in the background when an eligible session starts. Skip warm-up when no trigger or supported effort within the configured bounds is available. Reuse its pooled Decisions client for real requests. Discard the warm-up answer; do not change history or settings. Bound warm-up to two seconds and abort and join it during shutdown. Do not retry, periodically ping, or add configuration knobs. Warm-up can incur one billable request; it does not guarantee a warm backend or connection.
-- Start real decisions in the background at turn start and after tool results. Before capturing a request, consume only a ready, current result within its deadline; otherwise retain the current effort. Never await Decisions HTTP on the sampling path. A result may apply to a later uncaptured step, not necessarily the initial step. Skip unchanged evidence. Accepted user, assistant, or tool evidence invalidates older decisions; reject results after cancellation, task replacement, shutdown, settings changes, or their deadline. Do not wait for a busy settings-publication permit.
-- Reuse live step-settings validation and publication. Preserve the original request-effort pin, append-only trusted effort updates, reconnect behavior, and explicit compaction handling. Successful explicit model or effort changes pause adaptation in the current backend session; ordinary turn-start baseline fields do not. Do not add public protocol fields, Desktop controls, or persistent pause records for this version.
+| Setting | Default | Validation |
+| --- | --- | --- |
+| `enabled` | `false` | Opt-in only |
+| `decision_model` | `"gpt-6-luna"` | Nonblank |
+| `decision_model_api_env` | `"OPENAI_API_KEY"` | ASCII environment-variable identifier, not a secret |
+| `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
+| `decision_timeout_ms` | `200` | 1–5000 ms |
+| `max_context_bytes` | `8192` | 128–8192 UTF-8 bytes |
+| `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
+| `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
-The feature works for clients using this backend; it does not replace Desktop's backend. Report decision latency and fallbacks without sensitive input. The real-request deadline bounds decision eligibility and local publication, not API latency; prefix preservation does not guarantee backend cache hits. Decisions uses HTTP, not the Responses WebSocket. Verify live update ordering and backend acceptance separately from mock checks before claiming them.
+- Adapt ordinary root conversations only. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, saved defaults, subagents, and internal workers unchanged.
+- Read credentials only from the named backend environment variable. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
+- If set, use `rubric_instructions` instead of the built-in rubric, without a suffix. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
+- Exclude images and encrypted reasoning. **P0 manual review:** bound evidence and instructions separately using the table limits. Both can exceed 1000 tokens. Keep each below the 10K-token item limit.
+- At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
+- Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
+- At turn start and after tool results, start decisions in the background. Skip unchanged evidence. Do not retry or await Decisions HTTP on the sampling path. Do not wait for a busy settings-publication permit.
+- Before request capture, apply only ready, current results within deadline. Otherwise, keep current effort. Results can apply to later uncaptured steps, not necessarily the initial step.
+- For missing credentials, unsupported models, cancellation, refusals, invalid answers, or request failure, keep current effort.
+- On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
+- Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
+- After successful explicit model or effort changes, pause adaptation for this backend session. For ordinary turn-start baseline fields, do not pause. Do not add public protocol fields, Desktop controls, or persistent pause records.
+- Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
+- Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance separately from mock checks before making claims.
 
 ### TUI automatic session names
 
