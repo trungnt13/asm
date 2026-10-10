@@ -95,6 +95,11 @@ async fn run_decision(
         }
     }
     let started = Instant::now();
+    tracing::debug!(
+        input_bytes = request.input.len(),
+        instructions_bytes = request.instructions.len(),
+        "adaptive reasoning request started"
+    );
     tokio::select! {
         biased;
         _ = cancellation.cancelled() => {},
@@ -137,7 +142,8 @@ async fn run_decision(
                 latency_ms = started.elapsed().as_millis(), "adaptive reasoning decision");
         }) => {
             if result.is_err() {
-                tracing::debug!("adaptive reasoning request deadline");
+                tracing::debug!(latency_ms = started.elapsed().as_millis(),
+                    "adaptive reasoning request deadline");
             }
         }
     }
