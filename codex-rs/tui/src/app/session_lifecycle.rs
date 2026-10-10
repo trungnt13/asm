@@ -642,10 +642,13 @@ impl App {
         // widget before its transcript state is transferred. Events routed after
         // deactivation are retained separately for that thread.
         if let Some(mut receiver) = self.active_thread_rx.take() {
+            // Keep follow-ups with the departing widget, not the next active thread.
+            self.chat_widget.set_thread_switch_pending(/*pending*/ true);
             while let Ok(event) = receiver.try_recv() {
-                self.handle_thread_event_now_recovering_file_changes(event)
-                    .await;
+                self.handle_live_thread_event(app_server, event).await;
             }
+            self.chat_widget
+                .set_thread_switch_pending(/*pending*/ false);
             self.active_thread_rx = Some(receiver);
         }
         self.store_active_thread_receiver().await;
@@ -756,17 +759,16 @@ impl App {
         resume_restored_queue: bool,
     ) -> Result<()> {
         let mut config = self.config.clone();
-        if self
-            .side_threads
-            .get(&thread_id)
-            .is_some_and(|state| state.mode == crate::app_event::SideConversationMode::Chat)
-            || (!self.side_threads.contains_key(&thread_id)
-                && snapshot
-                    .session
-                    .as_ref()
-                    .is_some_and(ThreadSessionState::is_user_fork))
+        if self.side_threads.get(&thread_id).is_some_and(|state| {
+            state.kind == CompanionKind::Parallel
+                || state.mode == crate::app_event::SideConversationMode::Chat
+        }) || (!self.side_threads.contains_key(&thread_id)
+            && snapshot
+                .session
+                .as_ref()
+                .is_some_and(ThreadSessionState::is_user_fork))
         {
-            // Chat and ordinary saved forks retain their selected tier across view rebuilds.
+            // Chat and saved user forks retain their selected tier across view rebuilds.
             config.service_tier = snapshot
                 .session
                 .as_ref()
@@ -1108,6 +1110,7 @@ impl App {
                 if let Err(err) = self
                     .replace_chat_widget_with_app_server_thread(
                         tui,
+                        app_server,
                         started,
                         ThreadAttachPresentation::Fresh,
                         initial_user_message,
@@ -1137,6 +1140,7 @@ impl App {
     pub(super) async fn replace_chat_widget_with_app_server_thread(
         &mut self,
         tui: &mut tui::Tui,
+        app_server: &AppServerSession,
         started: AppServerStartedThread,
         presentation: ThreadAttachPresentation,
         initial_user_message: Option<crate::chatwidget::UserMessage>,
@@ -1145,10 +1149,12 @@ impl App {
         // resume/fork flows pass `None` so they cannot replay old history and then auto-submit a new
         // user turn by accident.
         if let Some(mut receiver) = self.active_thread_rx.take() {
+            self.chat_widget.set_thread_switch_pending(/*pending*/ true);
             while let Ok(event) = receiver.try_recv() {
-                self.handle_thread_event_now_recovering_file_changes(event)
-                    .await;
+                self.handle_live_thread_event(app_server, event).await;
             }
+            self.chat_widget
+                .set_thread_switch_pending(/*pending*/ false);
             self.active_thread_rx = Some(receiver);
         }
         self.store_active_thread_receiver().await;
@@ -1477,6 +1483,7 @@ impl App {
         match self
             .replace_chat_widget_with_app_server_thread(
                 tui,
+                app_server,
                 resumed,
                 ThreadAttachPresentation::SessionLineage,
                 /*initial_user_message*/ None,

@@ -6,7 +6,6 @@
 
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
-use crate::app_event::ThreadTitleDestination;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::TurnInterruptParams;
@@ -937,13 +936,15 @@ impl App {
                                 ),
                             )
                         };
-                    // Only explicit choices may override the saved server profile.
+                    // App-wide overrides may belong to another displayed thread. Only explicit
+                    // choices matching this thread's authoritative settings may override it.
                     let explicit_profile = self
                         .runtime_permission_profile_override
                         .as_ref()
                         .filter(|profile| {
                             profile.turn_override
                                 == RuntimePermissionProfileTurnOverride::LegacySandbox
+                                && profile.matches_config(config)
                         });
                     let permissions_override = Self::turn_permissions_override_from_config(
                         config,
@@ -1867,15 +1868,20 @@ impl App {
     /// refreshes from the backend. Refresh failures are treated as "thread is only inspectable by
     /// historical id now" and converted into closed picker entries instead of deleting them, so
     /// the stable traversal order remains intact for review and keyboard navigation.
-    pub(super) async fn drain_active_thread_events(&mut self, tui: &mut tui::Tui) -> Result<()> {
+    pub(super) async fn drain_active_thread_events(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &AppServerSession,
+    ) -> Result<()> {
         let frame_deadline = Instant::now() + tui::TARGET_FRAME_INTERVAL;
-        self.drain_active_thread_events_until(tui, frame_deadline)
+        self.drain_active_thread_events_until(tui, app_server, frame_deadline)
             .await
     }
 
     pub(super) async fn drain_active_thread_events_until(
         &mut self,
         tui: &mut tui::Tui,
+        app_server: &AppServerSession,
         frame_deadline: Instant,
     ) -> Result<()> {
         let Some(mut rx) = self.active_thread_rx.take() else {
@@ -1885,10 +1891,7 @@ impl App {
         let mut disconnected = false;
         loop {
             match rx.try_recv() {
-                Ok(event) => {
-                    self.handle_thread_event_now_recovering_file_changes(event)
-                        .await
-                }
+                Ok(event) => self.handle_live_thread_event(app_server, event).await,
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     disconnected = true;
@@ -2309,21 +2312,8 @@ impl App {
             // thread, so unrelated shutdowns cannot consume this marker.
             self.pending_shutdown_exit_thread_id = None;
         }
-        let automatic_title_prompt = self.automatic_thread_title_prompt(&event).await;
         let had_active_modal = self.chat_widget.has_active_modal();
-        self.handle_thread_event_now_recovering_file_changes(event)
-            .await;
-        if let Some(prompt) = automatic_title_prompt
-            && let Some(thread_id) = self.active_thread_id
-        {
-            self.generate_thread_title(
-                app_server,
-                thread_id,
-                ThreadTitleDestination::Automatic,
-                prompt.prompt,
-                prompt.request,
-            );
-        }
+        self.handle_live_thread_event(app_server, event).await;
         if !had_active_modal
             && self.chat_widget.has_active_modal()
             && self.startup_protected_input_boundary
