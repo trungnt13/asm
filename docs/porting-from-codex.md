@@ -270,7 +270,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 - At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
 - Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
 - At turn start and after tools that need another step, start decisions in the background. Skip unchanged evidence. Do not retry or await Decisions HTTP on the sampling path. Do not wait for a busy settings-publication permit.
-- Before request capture, apply only ready, current results within deadline. Otherwise, keep current effort. Results can apply to later uncaptured steps, not necessarily the initial step.
+- On decision completion, publish a current result within its original deadline through live next-step settings. Do not wait for a request boundary. Keep captured requests unchanged. Later evidence invalidates pending decisions, not already applied settings. The first step may retain its original effort.
 - For missing credentials, unsupported models, cancellation, refusals, invalid answers, or request failure, keep current effort.
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
 - Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.

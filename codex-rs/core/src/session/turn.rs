@@ -270,7 +270,6 @@ pub(crate) async fn run_turn(
         &cancellation_token,
     )
     .await;
-    sess.apply_ready_adaptive_reasoning(&turn_context).await;
 
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = match sess
@@ -493,8 +492,6 @@ pub(crate) async fn run_turn(
             )
             .await;
         }
-
-        sess.apply_ready_adaptive_reasoning(&turn_context).await;
 
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match next_step_context.take() {
