@@ -80,7 +80,10 @@ impl CodeModeSessionProvider for ProcessOwnedGrpcCodeModeSessionProvider {
                     .keep_alive_while_idle(/*enabled*/ true)
                     .connect_with_connector_lazy(service_fn(move |_| {
                         let host_program = host_program.clone();
-                        async move { HostConnection::spawn(&host_program, diagnostic_log_capture).map(TokioIo::new) }
+                        async move {
+                            HostConnection::spawn(&host_program, diagnostic_log_capture)
+                                .map(TokioIo::new)
+                        }
                     }));
                 GrpcCodeModeSessionProvider::with_channel(channel)
             });
@@ -107,8 +110,12 @@ impl HostConnection {
             .kill_on_drop(/*kill_on_drop*/ true);
         scrub_non_inheritable_env_vars(command.as_std_mut());
         command.env(
-            codex_code_mode_protocol::DIAGNOSTIC_LOG_CAPTURE_ENV,
-            if diagnostic_log_capture { "1" } else { "0" },
+            codex_code_mode::DIAGNOSTIC_LOG_CAPTURE_ENV,
+            if diagnostic_log_capture {
+                "true"
+            } else {
+                "false"
+            },
         );
         let mut child = command.spawn()?;
         let stdin = child
