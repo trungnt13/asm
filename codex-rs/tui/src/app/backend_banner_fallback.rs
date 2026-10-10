@@ -10,6 +10,7 @@ use crate::service_tier_resolution;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ModeKind;
+use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ReasoningEffort;
 
 impl App {
@@ -61,6 +62,24 @@ impl App {
             return;
         };
         let target = switch.model;
+        let is_chat = self
+            .side_threads
+            .get(&thread_id)
+            .is_some_and(|state| state.mode == crate::app_event::SideConversationMode::Chat);
+        if is_chat
+            && (!self
+                .chat_widget
+                .config_ref()
+                .features
+                .service_tier_enabled(ServiceTier::Fast.request_value())
+                || !service_tier_resolution::model_supports_service_tier(
+                    &target,
+                    ServiceTier::Fast.request_value(),
+                ))
+        {
+            // Chat cannot use a fallback that omits its required tier.
+            return;
+        }
         let entering_reserve = target.model == crate::model_catalog::LUNA_RESERVE_MODEL;
         if entering_reserve && !self.chat_widget.prepare_luna_reserve_return() {
             self.chat_widget.show_unavailable_reserve_recovery();
@@ -84,12 +103,16 @@ impl App {
             model: Some(target.model.clone()),
             effort: Some(effort.clone()),
             collaboration_mode: Some(mode.clone()),
-            service_tier: service_tier_resolution::service_tier_update_for_core(
-                self.chat_widget.config_ref(),
-                &self.local_settings.notices,
-                &target.model,
-                &self.model_catalog.try_list_models().unwrap_or_default(),
-            ),
+            service_tier: if is_chat {
+                Some(Some(ServiceTier::Fast.request_value().to_string()))
+            } else {
+                service_tier_resolution::service_tier_update_for_core(
+                    self.chat_widget.config_ref(),
+                    &self.local_settings.notices,
+                    &target.model,
+                    &self.model_catalog.try_list_models().unwrap_or_default(),
+                )
+            },
             ..ThreadSettingsUpdateParams::default()
         };
         // Older remote servers can decline this method. Keep the existing recovery UI in that
