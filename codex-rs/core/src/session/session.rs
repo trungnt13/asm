@@ -1869,7 +1869,7 @@ impl Session {
                 next_internal_sub_id: AtomicU64::new(0),
             });
             let initial_adaptive = config.adaptive_reasoning.enabled
-                && super::adaptive_reasoning::root_user_session(
+                && super::adaptive_reasoning::ordinary_agent_session(
                     &session_configuration.session_source,
                     session_configuration.thread_source.as_ref(),
                 );

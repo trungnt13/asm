@@ -134,7 +134,7 @@ impl Session {
         }
         let root = {
             let state = self.state.lock().await;
-            root_user_session(
+            ordinary_agent_session(
                 &step.turn.session_source,
                 state.session_configuration.thread_source.as_ref(),
             )
@@ -174,7 +174,7 @@ impl Session {
     ) {
         if !self.adaptive_reasoning_enabled(config.adaptive_reasoning.enabled)
             || config.adaptive_reasoning.update_on.is_empty()
-            || !root_user_session(&source.session_source, source.thread_source.as_ref())
+            || !ordinary_agent_session(&source.session_source, source.thread_source.as_ref())
         {
             return;
         }
@@ -329,7 +329,7 @@ impl Session {
             return;
         };
         if state.shutting_down
-            || !root_user_session(
+            || !ordinary_agent_session(
                 &turn.session_source,
                 state.session_configuration.thread_source.as_ref(),
             )
@@ -344,11 +344,17 @@ impl Session {
         self.invalidate_adaptive_reasoning();
         *pending = None;
         if !config.update_on.contains(&trigger)
-            || evidence.task.is_empty()
             || cancellation.is_cancelled()
             || self.adaptive_reasoning_paused()
             || Instant::now() >= deadline
         {
+            return;
+        }
+        if evidence.encrypted_task_unavailable || evidence.task.is_empty() {
+            if evidence.encrypted_task_unavailable {
+                tracing::debug!(thread.id = %self.thread_id(), reason = "encrypted_task_unavailable",
+                    "adaptive reasoning skipped");
+            }
             return;
         }
         let session = self
@@ -399,10 +405,7 @@ impl Session {
     }
 }
 
-fn allowed_efforts(
-    config: &AdaptiveReasoningConfig,
-    model: &ModelInfo,
-) -> Vec<ReasoningEffort> {
+fn allowed_efforts(config: &AdaptiveReasoningConfig, model: &ModelInfo) -> Vec<ReasoningEffort> {
     ORDINARY_EFFORTS
         .iter()
         .skip_while(|effort| *effort != &config.min_effort)
@@ -422,10 +425,16 @@ fn allowed_efforts(
         .collect()
 }
 
-pub(super) fn root_user_session(
+pub(super) fn ordinary_agent_session(
     source: &SessionSource,
     thread_source: Option<&ThreadSource>,
 ) -> bool {
+    if matches!(
+        source,
+        SessionSource::SubAgent(codex_protocol::protocol::SubAgentSource::ThreadSpawn { .. })
+    ) {
+        return matches!(thread_source, None | Some(ThreadSource::Subagent));
+    }
     matches!(
         source,
         SessionSource::Cli
