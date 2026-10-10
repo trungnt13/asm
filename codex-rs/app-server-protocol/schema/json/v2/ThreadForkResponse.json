@@ -3102,6 +3102,18 @@
     }
   },
   "properties": {
+    "adaptiveReasoningEnabled": {
+      "default": false,
+      "description": "Current session-only automatic reasoning mode; never a saved preference.",
+      "type": "boolean"
+    },
+    "adaptiveReasoningRevision": {
+      "default": 0,
+      "description": "Monotonic session revision for ordering mode updates.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "approvalPolicy": {
       "$ref": "#/definitions/AskForApproval"
     },

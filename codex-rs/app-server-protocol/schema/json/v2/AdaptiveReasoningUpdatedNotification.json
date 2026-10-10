@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
+  "properties": {
+    "adaptiveReasoningRevision": {
+      "default": 0,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "enabled",
+    "threadId"
+  ],
+  "title": "AdaptiveReasoningUpdatedNotification",
+  "type": "object"
+}

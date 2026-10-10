@@ -603,10 +603,11 @@ pub(super) async fn submission_loop(
                     should_exit
                 }
                 Op::ThreadSettings {
-                    thread_settings,
+                    mut thread_settings,
                     reply,
                 } => {
-                    let _settings_guard = thread_settings::acquire_persistence_lock(&sess).await;
+                    let adaptive_enabled = thread_settings.adaptive_reasoning_enabled.take();
+                    let persistent = thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default();
                     let manual_reasoning = thread_settings.model.is_some()
                         || thread_settings.effort.is_some()
                         || thread_settings.collaboration_mode.is_some();
@@ -614,16 +615,38 @@ pub(super) async fn submission_loop(
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
                     };
-                    match thread_settings::update(&sess, thread_settings).await {
+                    let result = async {
+                        if adaptive_enabled.is_some() && persistent {
+                            return Err(CodexErr::InvalidRequest("adaptive reasoning mode must be updated separately from persistent thread settings".to_string()));
+                        }
+                        let _settings_guard = if adaptive_enabled.is_none() {
+                            Some(thread_settings::acquire_persistence_lock(&sess).await)
+                        } else {
+                            None
+                        };
+                        let snapshot = if adaptive_enabled.is_none() {
+                            Some(thread_settings::update(&sess, thread_settings).await
+                                .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?)
+                        } else {
+                            None
+                        };
+                        if manual_reasoning {
+                            sess.pause_adaptive_reasoning().await;
+                        }
+                        if let Some(enabled) = adaptive_enabled {
+                            sess.set_adaptive_reasoning_enabled(enabled).await?;
+                        }
+                        Ok::<_, CodexErr>(snapshot)
+                    }.await;
+                    match result {
                         Ok(snapshot) => {
-                            if manual_reasoning {
-                                sess.pause_adaptive_reasoning();
-                            }
                             // Reply first: the caller may hold a lock its event consumer needs.
                             if let Some(reply) = reply {
                                 let _ = reply.send(Ok(()));
                             }
-                            thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            if let Some(snapshot) = snapshot {
+                                thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            }
                         }
                         Err(error) => {
                             let message = format!("invalid thread settings override: {error}");

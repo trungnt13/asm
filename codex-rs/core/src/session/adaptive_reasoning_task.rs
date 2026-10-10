@@ -70,7 +70,7 @@ impl DecisionJob {
     }
 }
 
-#[tracing::instrument(skip_all)]
+#[tracing::instrument(skip_all, fields(thread.id = tracing::field::Empty, turn.id = tracing::field::Empty, kind = tracing::field::Empty))]
 async fn run_decision(
     client: Arc<DecisionsClient>,
     request: DecisionRequest,
@@ -79,6 +79,21 @@ async fn run_decision(
     target: DecisionTarget,
     completion: oneshot::Sender<()>,
 ) {
+    let span = tracing::Span::current();
+    match &target {
+        DecisionTarget::Discard => {
+            span.record("kind", "warmup");
+        }
+        DecisionTarget::Adaptive { session, turn, .. } => {
+            span.record("kind", "step");
+            if let Some(session) = session.upgrade() {
+                span.record("thread.id", session.thread_id().to_string());
+            }
+            if let Some(turn) = turn.upgrade() {
+                span.record("turn.id", &turn.sub_id);
+            }
+        }
+    }
     let started = Instant::now();
     tokio::select! {
         biased;
