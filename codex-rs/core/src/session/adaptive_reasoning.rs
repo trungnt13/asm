@@ -2,6 +2,7 @@ use super::adaptive_reasoning_evidence::AdaptiveEvidence;
 use super::adaptive_reasoning_task::AdaptiveDecisionGuard;
 use super::adaptive_reasoning_task::DecisionJob;
 use super::adaptive_reasoning_task::DecisionRequest;
+use super::adaptive_reasoning_task::DecisionTarget;
 use super::adaptive_reasoning_task::PendingAdaptiveDecision;
 use super::input_queue::TurnInput;
 use super::session::Session;
@@ -18,7 +19,6 @@ use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
-use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
@@ -26,7 +26,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tokio::sync::oneshot::error::TryRecvError;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -180,7 +179,8 @@ impl Session {
                 choices: vec!["low".to_string(), "medium".to_string()],
             },
             session.shutdown.child_token(),
-            &guard,
+            guard,
+            DecisionTarget::Discard,
         );
         *session
             .warmup
@@ -226,8 +226,8 @@ impl Session {
 
     #[tracing::instrument(skip_all)]
     pub(super) async fn adapt_reasoning(
-        &self,
-        turn: &TurnContext,
+        self: &Arc<Self>,
+        turn: &Arc<TurnContext>,
         input: &[TurnInput],
         trigger: AdaptiveReasoningTrigger,
         cancellation: &CancellationToken,
@@ -264,7 +264,7 @@ impl Session {
                 .as_ref()
                 .and_then(|active| active.task.as_ref())
                 .and_then(|task| {
-                    (std::ptr::eq(task.turn_context.as_ref(), turn)
+                    (Arc::ptr_eq(&task.turn_context, turn)
                         && !task.cancellation_token.is_cancelled())
                     .then(|| Arc::clone(&task.done))
                 })
@@ -344,73 +344,15 @@ impl Session {
                 choices: allowed.iter().map(ToString::to_string).collect(),
             },
             cancellation.clone(),
-            &guard,
-        );
-        *pending = Some(PendingAdaptiveDecision {
-            job,
-            expected,
-            task_done,
-            cancellation,
             guard,
-            started,
-        });
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub(super) async fn apply_ready_adaptive_reasoning(&self, turn: &TurnContext) {
-        let Some(slot) = turn
-            .extension_data
-            .get::<Mutex<Option<PendingAdaptiveDecision>>>()
-        else {
-            return;
-        };
-        let Ok(mut slot) = slot.try_lock() else {
-            return;
-        };
-        let Some(pending) = slot.as_mut() else {
-            return;
-        };
-        if pending.cancellation.is_cancelled()
-            || pending.guard.freshness.is_cancelled()
-            || Instant::now() >= pending.guard.deadline
-        {
-            *slot = None;
-            return;
-        }
-        let selected = match pending.job.result.try_recv() {
-            Ok(Ok(selected)) => selected,
-            Ok(Err(error)) => {
-                tracing::debug!(%error, "adaptive reasoning fallback");
-                *slot = None;
-                return;
-            }
-            Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Closed) => {
-                *slot = None;
-                return;
-            }
-        };
-        let pending = slot.take().expect("ready decision");
-        drop(slot);
-        let Ok(effort) = selected.parse::<ReasoningEffort>() else {
-            return;
-        };
-        if !ORDINARY_EFFORTS.contains(&effort)
-            || pending.expected.effective_reasoning_effort().as_ref() == Some(&effort)
-        {
-            return;
-        }
-        let outcome = self
-            .apply_adaptive_turn_settings(
-                turn,
-                &pending.expected,
-                &pending.task_done,
-                &pending.guard,
-                effort.clone(),
-            )
-            .await;
-        tracing::debug!(%effort, applied = outcome == TurnSettingsUpdateOutcome::Applied,
-            latency_ms = pending.started.elapsed().as_millis(), "adaptive reasoning decision");
+            DecisionTarget::Adaptive {
+                session: Arc::downgrade(self),
+                turn: Arc::downgrade(turn),
+                expected,
+                task_done,
+            },
+        );
+        *pending = Some(PendingAdaptiveDecision { job, cancellation });
     }
 }
 
