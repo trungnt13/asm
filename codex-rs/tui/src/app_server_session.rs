@@ -2443,6 +2443,7 @@ async fn thread_session_state_from_thread_start_response(
         local_settings,
     )
     .await?;
+    session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response
         .thread
         .daybreak_enabled
@@ -2481,6 +2482,7 @@ async fn thread_session_state_from_thread_resume_response(
         local_settings,
     )
     .await?;
+    session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.collaboration_mode = response.collaboration_mode.clone().map(Box::new);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
@@ -2518,6 +2520,7 @@ async fn thread_session_state_from_thread_fork_response(
         local_settings,
     )
     .await?;
+    session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
 }
@@ -2583,6 +2586,7 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host,
         thread_id,
@@ -3740,7 +3744,7 @@ mod tests {
             )
             .expect("create source rollout"),
         )?;
-        let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
         let mut preset = crate::test_support::TEST_MODEL_PRESETS
             .iter()
             .find(|preset| preset.model == "gpt-5.5")
@@ -3758,16 +3762,67 @@ mod tests {
         assert!(app_server.require_fast_service_tier(&config).is_err());
         config.features.enable(Feature::FastMode)?;
 
-        let resumed = app_server
-            .resume_thread(
-                &LocalSettings::from(&config),
-                config,
-                thread_id,
-                ResumeModelSettings::RestoreFromThread,
-            )
-            .await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &LocalSettings::from(&config),
+            config.clone(),
+            thread_id,
+            ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
 
         assert_eq!(resumed.session.service_tier, None);
+
+        config.service_tier = Some("priority".to_string());
+        let forked =
+            Box::pin(app_server.fork_thread(&LocalSettings::from(&config), config, thread_id))
+                .await?;
+        let fork_id = forked.session.thread_id;
+        assert_eq!(forked.session.service_tier.as_deref(), Some("priority"));
+        app_server.shutdown().await?;
+
+        // A disk default applies to new sessions, not the selected tier of a saved fork.
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            "service_tier = \"default\"\n[features]\nfast_mode = true\n",
+        )?;
+        let config = build_config(&codex_home).await;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &LocalSettings::from(&config),
+            config,
+            fork_id,
+            ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
+        assert_eq!(
+            (
+                resumed.session.model.as_str(),
+                resumed.session.service_tier.as_deref(),
+                resumed.session.thread_source.as_ref(),
+            ),
+            (
+                "gpt-5.5",
+                Some("priority"),
+                Some(&codex_protocol::protocol::ThreadSource::User),
+            ),
+        );
+        app_server.shutdown().await?;
+
+        // An explicit launch choice still overrides the saved tier on cold resume.
+        let config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .cli_overrides(vec![("service_tier".to_string(), "default".into())])
+            .build()
+            .await?;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &LocalSettings::from(&config),
+            config,
+            fork_id,
+            ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
+        assert_eq!(resumed.session.service_tier.as_deref(), Some("default"));
         app_server.shutdown().await?;
         Ok(())
     }

@@ -27,6 +27,7 @@ pub(crate) struct MessageHistoryMetadata {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadSessionState {
+    pub(crate) thread_source: Option<codex_protocol::protocol::ThreadSource>,
     pub(crate) daybreak_enabled: bool,
     pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,
     pub(crate) thread_id: ThreadId,
@@ -58,6 +59,11 @@ pub(crate) struct ThreadSessionState {
 }
 
 impl ThreadSessionState {
+    pub(crate) fn is_user_fork(&self) -> bool {
+        self.forked_from_id.is_some()
+            && self.thread_source == Some(codex_protocol::protocol::ThreadSource::User)
+    }
+
     pub(crate) fn set_cwd_retargeting_implicit_runtime_workspace_root(
         &mut self,
         cwd: AbsolutePathBuf,

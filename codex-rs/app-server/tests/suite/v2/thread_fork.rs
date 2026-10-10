@@ -2360,7 +2360,8 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
 ) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
-    let config = MockResponsesConfig::new(&server.uri());
+    let config =
+        MockResponsesConfig::new(&server.uri()).with_root_config("service_tier = \"default\"");
     let config = match history_mode {
         ThreadHistoryMode::Legacy => config,
         ThreadHistoryMode::Paginated => config.enable_feature(Feature::Sqlite),
@@ -2574,6 +2575,8 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         .send_thread_fork_request(ThreadForkParams {
             thread_id: fork_thread_id.clone(),
             developer_instructions: Some(ordinary_boundary.into()),
+            service_tier: Some(Some("flex".to_string())),
+            thread_source: Some(codex_app_server_protocol::ThreadSource::User),
             ..Default::default()
         })
         .await?;
@@ -2585,6 +2588,7 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         .await??,
     )?;
     assert!(!saved.thread.ephemeral);
+    assert_eq!(saved.service_tier.as_deref(), Some("flex"));
     assert_eq!(saved.thread.history_mode, history_mode);
     assert_eq!(
         saved.thread.forked_from_id.as_deref(),
@@ -2639,6 +2643,7 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
     )?;
     assert!(!resumed.thread.ephemeral);
     assert_eq!(resumed.thread.history_mode, history_mode);
+    assert_eq!(resumed.service_tier.as_deref(), Some("flex"));
     mcp.start_turn_and_wait_for_completion(TurnStartParams {
         thread_id: saved.thread.id,
         input: vec![UserInput::Text {
@@ -2656,6 +2661,7 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
     assert_eq!(requests.len(), 2);
     let first = requests[0].body_json::<Value>()?;
     let last = requests[1].body_json::<Value>()?;
+    assert_eq!(last["service_tier"], "flex");
     let input = last["input"].to_string();
     assert!(input.contains(preview));
     assert!(input.contains("continue"));

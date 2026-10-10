@@ -670,9 +670,15 @@ impl App {
                         }
                     }
                 };
+                let mut widget_config = config.clone();
+                if let Some(started) = &resumed
+                    && started.session.is_user_fork()
+                {
+                    widget_config.service_tier = started.session.service_tier.clone();
+                }
                 let init = crate::chatwidget::ChatWidgetInit {
                     local_settings: local_settings.clone(),
-                    config: config.clone(),
+                    config: widget_config,
                     frame_requester: tui.frame_requester(),
                     app_event_tx: app_event_tx.clone(),
                     workspace_command_runner: Some(workspace_command_runner.clone()),
