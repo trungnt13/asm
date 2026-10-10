@@ -48,7 +48,7 @@ Use optimized or cross-platform local builds only on request or to reproduce aff
 
 ### Validate narrowly
 
-Select checks for changed behavior and conflict resolutions, not sync size.
+Verify the user's intended outcome with evidence suited to it. Select focused checks for that outcome, changed behavior, and conflict resolutions, not sync size. Narrow validation limits scope, not required evidence.
 
 - **Documentation:** review wording and local links. Run `git diff --check`. Do not build or test.
 - **Rust:** use `just test -p <crate> <test-filter>`, not direct `cargo test`. Format changed code. Use targeted Clippy when needed. Update affected assertions and snapshots together before checks. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
@@ -58,11 +58,11 @@ New tests or snapshot coverage require an explicit user request; implementation 
 
 Run required generators for changed inputs. Keep schemas, dependency locks, and Bazel data correct, even without Bazel CI. Reuse correct upstream outputs.
 
-Do not default to whole-crate or workspace suites. If narrow checks cannot establish safety, explain the gap and ask before expanding. A clean merge is not validation. Claim upstream CI passed only after verification.
+Do not default to whole-crate or workspace suites. If focused checks cannot verify the outcome or establish safety, explain the gap and ask before expanding suites. A clean merge is not validation. Claim upstream CI passed only after verification.
 
 ### Commit, integrate, report
 
-Implementation requests, including documentation edits, authorize commits and local `main` integration unless the owner says otherwise. The lead agent owns completion, including delegated work. After narrow checks pass and owner decisions are resolved, commit immediately. Then integrate. Wait for manual testing or separate approval only on request. **Done means committed and verified in local `main`**, not another worktree or a binary handoff. Releases follow separate completion rules below.
+Implementation requests, including documentation edits, authorize commits and local `main` integration unless the owner says otherwise. The lead agent owns completion, including delegated work. Once the validation requirements above are met and owner decisions are resolved, commit immediately. Then integrate. Wait for manual testing or separate approval only on request. **Done means committed in local `main` with the user's intended outcome verified**, not another worktree or a binary handoff. If verification is blocked, report the gap and blocker rather than claim completion. Releases follow separate completion rules below.
 
 - Inspect the staged diff. Include only finished task changes, their tests, generated files, and intent.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. Correct local configuration if needed. Get approval before rewriting published history solely for attribution.
