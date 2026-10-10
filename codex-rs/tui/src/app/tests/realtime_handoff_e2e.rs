@@ -145,6 +145,7 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
     let other_id = other.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         other,
         super::super::session_lifecycle::ThreadAttachPresentation::Fresh,
         /*initial_user_message*/ None,
@@ -162,7 +163,7 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
                         &app_server,
                         event.expect("embedded app-server should stay connected"),
                     ).await;
-                    app.drain_active_thread_events(&mut tui).await?;
+                    app.drain_active_thread_events(&mut tui, &app_server).await?;
                 }
                 event = app_events.recv() => {
                     let event = event.expect("TUI event stream should stay open");
@@ -271,7 +272,7 @@ async fn delegated_core_events_keep_private_output_hidden_and_deliver_final_spee
                     let completed = matches!(&event, AppServerEvent::ServerNotification(notification)
                         if matches!(notification.as_ref(), ServerNotification::TurnCompleted(_)));
                     app.handle_app_server_event(&app_server, event).await;
-                    app.drain_active_thread_events(&mut tui).await?;
+                    app.drain_active_thread_events(&mut tui, &app_server).await?;
                     if completed {
                         break Ok::<_, color_eyre::Report>(());
                     }

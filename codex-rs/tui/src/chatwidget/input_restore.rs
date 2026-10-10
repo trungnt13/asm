@@ -362,7 +362,9 @@ impl ChatWidget {
                         .rejected_steer_history_records
                         .push_back(pending.history_record);
                 }
-                if let Some((message, history_record)) = self.pop_next_queued_user_message() {
+                if !self.input_queue.thread_switch_pending
+                    && let Some((message, history_record)) = self.pop_next_queued_user_message()
+                {
                     let source = message.source;
                     self.submit_user_message_with_history_and_shell_escape_policy(
                         message.into_user_message(),
@@ -693,5 +695,9 @@ impl ChatWidget {
 
     pub(crate) fn set_queue_autosend_suppressed(&mut self, suppressed: bool) {
         self.input_queue.suppress_queue_autosend = suppressed;
+    }
+
+    pub(crate) fn set_thread_switch_pending(&mut self, pending: bool) {
+        self.input_queue.thread_switch_pending = pending;
     }
 }
