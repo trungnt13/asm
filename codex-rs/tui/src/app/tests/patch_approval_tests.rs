@@ -100,9 +100,17 @@ async fn enqueue_pending_patch(app: &mut App, thread_id: ThreadId) -> Result<()>
     app.enqueue_thread_request(thread_id, request).await
 }
 
-async fn drain_pending_patch(app: &mut App, tui: &mut crate::tui::Tui) -> Result<()> {
-    app.drain_active_thread_events_until(tui, Instant::now() + Duration::from_secs(/*secs*/ 1))
-        .await
+async fn drain_pending_patch(
+    app: &mut App,
+    tui: &mut crate::tui::Tui,
+    app_server: &AppServerSession,
+) -> Result<()> {
+    app.drain_active_thread_events_until(
+        tui,
+        app_server,
+        Instant::now() + Duration::from_secs(/*secs*/ 1),
+    )
+    .await
 }
 
 fn open_patch(app: &mut App, rx: &mut UnboundedReceiver<AppEvent>) -> ApplyPatchApprovalRequest {
@@ -168,7 +176,7 @@ async fn active_patch_approval_pager_preserves_changes_and_accepts_once() -> Res
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut app_server = start_config_write_test_app_server(&app).await?;
     enqueue_pending_patch(&mut app, thread_id).await?;
-    drain_pending_patch(&mut app, &mut tui).await?;
+    drain_pending_patch(&mut app, &mut tui, &app_server).await?;
 
     let request = open_patch(&mut app, &mut rx);
     assert_eq!(request.changes, expected_changes());
@@ -224,9 +232,10 @@ async fn active_patch_approval_pager_preserves_changes_and_accepts_once() -> Res
 async fn active_patch_approval_cancel_and_resolved_replay() -> Result<()> {
     let (mut app, mut rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
+    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     enqueue_pending_patch(&mut app, thread_id).await?;
-    drain_pending_patch(&mut app, &mut tui).await?;
+    drain_pending_patch(&mut app, &mut tui, &app_server).await?;
     assert_eq!(open_patch(&mut app, &mut rx).changes, expected_changes());
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -239,9 +248,10 @@ async fn active_patch_approval_cancel_and_resolved_replay() -> Result<()> {
 
     app.enqueue_thread_request(thread_id, request(thread_id))
         .await?;
-    drain_pending_patch(&mut app, &mut tui).await?;
+    drain_pending_patch(&mut app, &mut tui, &app_server).await?;
     assert!(!app.chat_widget.has_active_view());
     assert!(rx.try_recv().is_err());
+    app_server.shutdown().await?;
     Ok(())
 }
 
@@ -249,6 +259,7 @@ async fn active_patch_approval_cancel_and_resolved_replay() -> Result<()> {
 async fn active_patch_approval_preserves_deferred_startup_protection() -> Result<()> {
     let (mut app, mut rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
+    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     enqueue_pending_patch(&mut app, thread_id).await?;
     app.startup_protected_input_boundary = true;
@@ -256,7 +267,7 @@ async fn active_patch_approval_preserves_deferred_startup_protection() -> Result
         agent_message_delta_notification(thread_id, TURN_ID, "agent-1", "streaming"),
         /*replay_kind*/ None,
     );
-    drain_pending_patch(&mut app, &mut tui).await?;
+    drain_pending_patch(&mut app, &mut tui, &app_server).await?;
     assert!(!app.chat_widget.has_active_view());
     assert!(app.startup_pending_protected_request);
 
@@ -277,6 +288,7 @@ async fn active_patch_approval_preserves_deferred_startup_protection() -> Result
         /*replay_kind*/ None,
     );
     assert_eq!(open_patch(&mut app, &mut rx).changes, expected_changes());
+    app_server.shutdown().await?;
     Ok(())
 }
 
