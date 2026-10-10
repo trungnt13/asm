@@ -46,6 +46,7 @@ from .v2_all import PlanDeltaNotification
 from .v2_all import ProcessExitedNotification
 from .v2_all import ProcessOutputDeltaNotification
 from .v2_all import ProjectChangedNotification
+from .v2_all import ReasoningEffortUpdatedNotification
 from .v2_all import ReasoningSummaryPartAddedNotification
 from .v2_all import ReasoningSummaryTextDeltaNotification
 from .v2_all import ReasoningTextDeltaNotification
@@ -131,6 +132,7 @@ KnownNotificationPayload: TypeAlias = (
     | ProcessExitedNotification
     | ProcessOutputDeltaNotification
     | ProjectChangedNotification
+    | ReasoningEffortUpdatedNotification
     | ReasoningSummaryPartAddedNotification
     | ReasoningSummaryTextDeltaNotification
     | ReasoningTextDeltaNotification
@@ -259,6 +261,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "turn/diff/updated": TurnDiffUpdatedNotification,
     "turn/moderationMetadata": TurnModerationMetadataNotification,
     "turn/plan/updated": TurnPlanUpdatedNotification,
+    "turn/reasoningEffortUpdated": ReasoningEffortUpdatedNotification,
     "turn/started": TurnStartedNotification,
     "warning": WarningNotification,
     "windows/worldWritableWarning": WindowsWorldWritableWarningNotification,
@@ -284,6 +287,7 @@ DIRECT_TURN_ID_NOTIFICATION_TYPES: tuple[type[BaseModel], ...] = (
     ModelSafetyBufferingUpdatedNotification,
     ModelVerificationNotification,
     PlanDeltaNotification,
+    ReasoningEffortUpdatedNotification,
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
