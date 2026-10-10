@@ -708,6 +708,7 @@ impl App {
                     self.restore_runtime_permissions(session, cached);
                 }
                 store.session = Some(session.clone());
+                store.inferred_session = snapshot.inferred_session;
                 if !is_replay_only && self.primary_thread_id == Some(thread_id) {
                     self.primary_session_configured = Some(session.clone());
                 }
