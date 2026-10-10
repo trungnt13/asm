@@ -279,6 +279,10 @@ impl SessionConfiguration {
             .map(|config| config.permission_profile.clone())
             .unwrap_or_else(|| self.permission_profile_state.snapshot());
         ThreadConfigSnapshot {
+            adaptive_reasoning_enabled: self.original_config_do_not_use.adaptive_reasoning.enabled,
+            adaptive_reasoning_revision: self
+                .original_config_do_not_use
+                .adaptive_reasoning_initial_revision,
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -1877,6 +1881,15 @@ impl Session {
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
             });
+            let initial_adaptive = config.adaptive_reasoning.enabled
+                && super::adaptive_reasoning::root_user_session(
+                    &session_configuration.session_source,
+                    session_configuration.thread_source.as_ref(),
+                );
+            let adaptive_state = sess.adaptive_reasoning_state(
+                initial_adaptive,
+                config.adaptive_reasoning_initial_revision,
+            );
             sess.start_adaptive_reasoning_warmup(&config, &session_configuration);
             if let Some(startup) = &startup {
                 startup.set_session(Arc::clone(&sess));
@@ -1911,6 +1924,8 @@ impl Session {
                     permission_profile: thread_config.permission_profile,
                     active_permission_profile: thread_config.active_permission_profile,
                     reasoning_effort: thread_config.reasoning_effort,
+                    adaptive_reasoning_enabled: adaptive_state.enabled,
+                    adaptive_reasoning_revision: adaptive_state.revision,
                     rollout_path,
                 }),
             })

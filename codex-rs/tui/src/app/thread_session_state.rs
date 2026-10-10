@@ -87,6 +87,8 @@ impl App {
             session
         } else {
             ThreadSessionState {
+                adaptive_reasoning_enabled: false,
+                adaptive_reasoning_revision: 0,
                 thread_source: None,
                 daybreak_enabled: false,
                 windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -175,6 +177,8 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
