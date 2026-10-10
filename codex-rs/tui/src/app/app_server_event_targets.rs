@@ -80,6 +80,9 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ThreadQueueChanged(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::AdaptiveReasoningUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::ReasoningEffortUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
@@ -261,6 +264,8 @@ mod tests {
 
     fn test_thread_settings() -> ThreadSettings {
         ThreadSettings {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: codex_app_server_protocol::AskForApproval::Never,

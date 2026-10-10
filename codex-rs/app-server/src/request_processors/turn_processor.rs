@@ -919,6 +919,7 @@ impl TurnRequestProcessor {
         }
 
         Ok(codex_protocol::protocol::ThreadSettingsOverrides {
+            adaptive_reasoning_enabled: None,
             disabled_plugin_ids,
             environments: environment_requests,
             runtime_workspace_roots,
@@ -955,7 +956,7 @@ impl TurnRequestProcessor {
                 /*environment_requests*/ None,
             )
             .await;
-        let thread_settings = self
+        let mut thread_settings = self
             .build_thread_settings_overrides(
                 thread.as_ref(),
                 ThreadSettingsBuildParams {
@@ -976,7 +977,13 @@ impl TurnRequestProcessor {
             )
             .await?;
 
-        if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
+        thread_settings.adaptive_reasoning_enabled = params.adaptive_reasoning_enabled;
+        if params.adaptive_reasoning_enabled.is_some() {
+            thread
+                .update_thread_settings(thread_settings)
+                .await
+                .map_err(|error| invalid_request(error.to_string()))?;
+        } else if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
             self.submit_core_op(
                 request_id,
                 thread.as_ref(),
@@ -989,7 +996,19 @@ impl TurnRequestProcessor {
             .map_err(|err| internal_error(format!("failed to update thread settings: {err}")))?;
         }
 
-        Ok(ThreadSettingsUpdateResponse {})
+        let adaptive = if params.adaptive_reasoning_enabled.is_some() {
+            let snapshot = thread.config_snapshot().await;
+            Some((
+                snapshot.adaptive_reasoning_enabled,
+                snapshot.adaptive_reasoning_revision,
+            ))
+        } else {
+            None
+        };
+        Ok(ThreadSettingsUpdateResponse {
+            adaptive_reasoning_enabled: adaptive.map(|(enabled, _)| enabled),
+            adaptive_reasoning_revision: adaptive.map(|(_, revision)| revision),
+        })
     }
 
     async fn thread_inject_items_response_inner(

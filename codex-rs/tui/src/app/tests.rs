@@ -4863,6 +4863,8 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_cwd = test_path_buf("/tmp/main").abs();
     let shared_root = test_path_buf("/tmp/shared").abs();
     let primary_session = ThreadSessionState {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
         daybreak_enabled: false,
         windows_sandbox_host: WindowsSandboxHost::Local,
         approval_policy: AskForApproval::OnRequest,
@@ -6234,6 +6236,8 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
     };
     let make_header = |is_first| -> Arc<dyn HistoryCell> {
         let session = ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -6863,6 +6867,8 @@ async fn replace_goal_confirmation_snapshot() {
 
 pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -7969,6 +7975,8 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     let make_header = |is_first| {
         let session = ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -8043,6 +8051,8 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
     let base_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -9353,6 +9363,8 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
 
         let thread_id = ThreadId::new();
         let event = crate::session_state::ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -10036,6 +10048,8 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
     let notification = ThreadSettingsUpdatedNotification {
         thread_id: inactive_thread_id.to_string(),
         thread_settings: ThreadSettings {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_absolute_path("/tmp/thread-settings"),
             approval_policy: AskForApproval::OnRequest,
@@ -10101,6 +10115,8 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     let thread_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

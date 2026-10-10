@@ -88,6 +88,10 @@ static LIVE_THREADS: Gauge = Gauge::new("core.threads.live");
 
 #[derive(Clone, Debug)]
 pub struct ThreadConfigSnapshot {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    pub adaptive_reasoning_revision: u64,
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,

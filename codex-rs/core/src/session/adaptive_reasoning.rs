@@ -49,8 +49,15 @@ Return one of the supplied choices. Recent evidence is listed newest first.";
 #[path = "adaptive_reasoning_tests.rs"]
 mod tests;
 
+#[derive(Clone, Copy)]
+pub(crate) struct AdaptiveReasoningState {
+    pub enabled: bool,
+    pub revision: u64,
+}
+
 struct AdaptiveSession {
-    paused: AtomicBool,
+    mode: OnceLock<StdMutex<AdaptiveReasoningState>>,
+    ever_enabled: AtomicBool,
     warmup_started: AtomicBool,
     client: OnceLock<Result<Arc<DecisionsClient>, DecisionsError>>,
     shutdown: CancellationToken,
@@ -62,7 +69,8 @@ impl Default for AdaptiveSession {
     fn default() -> Self {
         let shutdown = CancellationToken::new();
         Self {
-            paused: AtomicBool::new(/*v*/ false),
+            mode: OnceLock::new(),
+            ever_enabled: AtomicBool::new(/*v*/ false),
             warmup_started: AtomicBool::new(/*v*/ false),
             client: OnceLock::new(),
             evidence: StdMutex::new(shutdown.child_token()),
@@ -96,23 +104,10 @@ impl AdaptiveSession {
     }
 }
 
+#[path = "adaptive_reasoning_control.rs"]
+mod control;
+
 impl Session {
-    pub(super) fn pause_adaptive_reasoning(&self) {
-        self.services
-            .thread_extension_data
-            .get_or_init(AdaptiveSession::default)
-            .paused
-            .store(/*val*/ true, Ordering::Release);
-        self.invalidate_adaptive_reasoning();
-    }
-
-    pub(super) fn adaptive_reasoning_paused(&self) -> bool {
-        self.services
-            .thread_extension_data
-            .get::<AdaptiveSession>()
-            .is_some_and(|state| state.paused.load(Ordering::Acquire))
-    }
-
     // Accepted evidence calls this under state; scheduling/publication also use the settings permit.
     pub(super) fn invalidate_adaptive_reasoning(&self) {
         if let Some(session) = self.services.thread_extension_data.get::<AdaptiveSession>() {
@@ -128,7 +123,13 @@ impl Session {
     #[tracing::instrument(skip_all)]
     pub(super) async fn report_reasoning_effort(&self, step: &super::step_context::StepContext) {
         let config = &step.turn.config.adaptive_reasoning;
-        if !config.enabled {
+        let mode_enabled = self.adaptive_reasoning_enabled(config.enabled);
+        let ever_enabled = self
+            .services
+            .thread_extension_data
+            .get::<AdaptiveSession>()
+            .is_some_and(|session| session.ever_enabled.load(Ordering::Acquire));
+        if !config.enabled && !ever_enabled {
             return;
         }
         let root = {
@@ -142,7 +143,8 @@ impl Session {
             return;
         }
         let reasoning_effort = step.settings.effective_reasoning_effort();
-        let adaptive = !config.update_on.is_empty()
+        let adaptive = mode_enabled
+            && !config.update_on.is_empty()
             && !self.adaptive_reasoning_paused()
             && self
                 .services
@@ -170,7 +172,7 @@ impl Session {
         config: &Config,
         source: &SessionConfiguration,
     ) {
-        if !config.adaptive_reasoning.enabled
+        if !self.adaptive_reasoning_enabled(config.adaptive_reasoning.enabled)
             || config.adaptive_reasoning.update_on.is_empty()
             || !root_user_session(&source.session_source, source.thread_source.as_ref())
         {
@@ -197,7 +199,7 @@ impl Session {
             .services
             .thread_extension_data
             .get_or_init(AdaptiveSession::default);
-        if session.paused.load(Ordering::Acquire)
+        if self.adaptive_reasoning_paused()
             || session.warmup_started.swap(/*val*/ true, Ordering::AcqRel)
         {
             return;
@@ -233,7 +235,6 @@ impl Session {
         let Some(session) = self.services.thread_extension_data.get::<AdaptiveSession>() else {
             return;
         };
-        session.paused.store(/*val*/ true, Ordering::Release);
         session.shutdown.cancel();
         let pending = {
             let active = self.active_turn.lock().await;
@@ -273,7 +274,7 @@ impl Session {
         cancellation: &CancellationToken,
     ) {
         let config = &turn.config.adaptive_reasoning;
-        if !config.enabled || self.adaptive_reasoning_paused() {
+        if !self.adaptive_reasoning_enabled(config.enabled) {
             return;
         }
         let started = Instant::now();
@@ -398,7 +399,10 @@ impl Session {
     }
 }
 
-fn allowed_efforts(config: &AdaptiveReasoningConfig, model: &ModelInfo) -> Vec<ReasoningEffort> {
+fn allowed_efforts(
+    config: &AdaptiveReasoningConfig,
+    model: &ModelInfo,
+) -> Vec<ReasoningEffort> {
     ORDINARY_EFFORTS
         .iter()
         .skip_while(|effort| *effort != &config.min_effort)
@@ -418,7 +422,10 @@ fn allowed_efforts(config: &AdaptiveReasoningConfig, model: &ModelInfo) -> Vec<R
         .collect()
 }
 
-fn root_user_session(source: &SessionSource, thread_source: Option<&ThreadSource>) -> bool {
+pub(super) fn root_user_session(
+    source: &SessionSource,
+    thread_source: Option<&ThreadSource>,
+) -> bool {
     matches!(
         source,
         SessionSource::Cli
