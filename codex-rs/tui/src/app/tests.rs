@@ -636,6 +636,7 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         AppServerStartedThread {
             session: test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf()),
             turns: Vec::new(),
@@ -1020,8 +1021,9 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         app.enqueue_thread_notification(thread_id, event).await?;
     }
 
+    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.drain_active_thread_events_until(&mut tui, Instant::now())
+    app.drain_active_thread_events_until(&mut tui, &app_server, Instant::now())
         .await?;
     assert_eq!(
         app.chat_widget.token_usage(),
@@ -1044,7 +1046,8 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         "ordinary notifications left by the frame deadline must not block terminal input"
     );
 
-    app.drain_active_thread_events(&mut tui).await?;
+    app.drain_active_thread_events(&mut tui, &app_server)
+        .await?;
     assert!(
         app.active_thread_rx
             .as_ref()
@@ -1062,6 +1065,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         }
     );
 
+    app_server.shutdown().await?;
     Ok(())
 }
 
@@ -2824,6 +2828,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(resumed.blocks_direct_input);
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &app_server,
             resumed,
             crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
             /*initial_user_message*/ None,
@@ -6794,6 +6799,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     while events.try_recv().is_ok() {}
     app.transcript_cells = vec![plain_line_cell("Previous thread transcript")];
     app.deferred_history_lines = vec![Line::from("Previous pending history").into()];
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.insert_history_lines(vec![Line::from("Previous pending history")]);
     app.chat_widget
@@ -6804,6 +6810,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     let next_thread_id = ThreadId::new();
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         AppServerStartedThread {
             session: test_thread_session(next_thread_id, test_path_buf("/tmp/next")),
             turns: vec![test_turn(
@@ -6830,7 +6837,6 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     assert!(!tui.is_alt_screen_active());
     assert!(app.transcript_cells.is_empty());
     assert!(app.deferred_history_lines.is_empty());
-    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     // The reset must still run if the transport disconnects before queued events are handled.
     app.reconnect.offline = true;
     while let Ok(event) = events.try_recv() {
@@ -6866,7 +6872,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
         .join("\n");
     assert!(!rendered.contains("Previous thread transcript"));
     assert!(!rendered.contains("Previous queued history"));
-    assert_snapshot!(rendered);
+    assert_snapshot!(rendered.replace(CODEX_CLI_VERSION, "<VERSION>"));
     app_server.shutdown().await?;
     Ok(())
 }
