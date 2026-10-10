@@ -235,7 +235,7 @@ impl Session {
             )
             .await;
         if manual_reasoning && outcome == TurnSettingsUpdateOutcome::Applied {
-            self.pause_adaptive_reasoning();
+            self.pause_adaptive_reasoning().await;
         }
         outcome
     }
