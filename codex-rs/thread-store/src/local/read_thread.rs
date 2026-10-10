@@ -285,6 +285,7 @@ async fn read_thread_from_rollout_path(
     thread.forked_from_id = meta_line.meta.forked_from_id;
     thread.parent_thread_id = meta_line.meta.parent_thread_id;
     thread.history_mode = meta_line.meta.history_mode;
+    thread.thread_source = meta_line.meta.thread_source;
     if let Some(model_provider) = meta_line
         .meta
         .model_provider
@@ -596,6 +597,34 @@ mod tests {
         let active_path =
             write_session_file(home.path(), "2025-01-03T12-00-00", uuid).expect("session file");
 
+        let mut lines = std::fs::read_to_string(&active_path)
+            .expect("read fixture")
+            .lines()
+            .map(codex_rollout::parse_rollout_line)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parse fixture");
+        let RolloutItem::SessionMeta(meta) = &mut lines[0].item else {
+            panic!("fixture should start with session metadata");
+        };
+        meta.meta.thread_source = Some(codex_protocol::protocol::ThreadSource::User);
+        let mut inherited = lines[0].clone();
+        let RolloutItem::SessionMeta(meta) = &mut inherited.item else {
+            unreachable!("cloned session metadata");
+        };
+        meta.meta.id = ThreadId::new();
+        meta.meta.thread_source = Some(codex_protocol::protocol::ThreadSource::GuardianReview);
+        lines.insert(1, inherited);
+        std::fs::write(
+            &active_path,
+            lines
+                .iter()
+                .map(|line| serde_json::to_string(line).expect("serialize fixture"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .expect("write fixture");
+
         let thread = store
             .read_thread(ReadThreadParams {
                 thread_id,
@@ -605,7 +634,13 @@ mod tests {
             .await
             .expect("read thread");
 
-        assert_eq!(thread.thread_id, thread_id);
+        assert_eq!(
+            (thread.thread_id, thread.thread_source),
+            (
+                thread_id,
+                Some(codex_protocol::protocol::ThreadSource::User)
+            ),
+        );
         assert_eq!(thread.rollout_path, Some(active_path));
         assert_eq!(thread.archived_at, None);
         assert_eq!(thread.preview, "Hello from user");
