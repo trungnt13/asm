@@ -3753,6 +3753,21 @@ class ReasoningEffortOption(BaseModel):
     reasoning_effort: Annotated[ReasoningEffort, Field(alias="reasoningEffort")]
 
 
+class ReasoningEffortUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    adaptive: Annotated[
+        bool,
+        Field(
+            description="Automatic mode is active, including when a decision falls back to current effort."
+        ),
+    ]
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class ReasoningTextReasoningItemContent(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4416,6 +4431,24 @@ class ThreadEnvironmentDisconnectedServerNotification(BaseModel):
         Field(title="Thread/environment/disconnectedNotificationMethod"),
     ]
     params: EnvironmentConnectionNotification
+
+
+class TurnReasoningEffortUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["turn/reasoningEffortUpdated"],
+        Field(title="Turn/reasoningEffortUpdatedNotificationMethod"),
+    ]
+    params: ReasoningEffortUpdatedNotification
 
 
 class ItemAgentMessageDeltaServerNotification(BaseModel):
@@ -13192,6 +13225,7 @@ class ServerNotification(
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
+        | TurnReasoningEffortUpdatedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
         | HookCompletedServerNotification
@@ -13283,6 +13317,7 @@ class ServerNotification(
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
+        | TurnReasoningEffortUpdatedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
         | HookCompletedServerNotification

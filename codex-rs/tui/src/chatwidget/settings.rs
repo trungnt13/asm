@@ -185,6 +185,8 @@ impl ChatWidget {
     /// so the footer reflects it without waiting for the next mode switch.
     /// Passing `None` resets to the Plan-mode preset default.
     pub(crate) fn set_plan_mode_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_adaptive_turn_id = self.turn_lifecycle.last_turn_id.clone();
         self.config.plan_mode_reasoning_effort = effort.clone();
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
@@ -206,6 +208,8 @@ impl ChatWidget {
     /// Does not touch the active Plan mask — Plan reasoning is controlled
     /// exclusively by the Plan preset and `set_plan_mode_reasoning_effort`.
     pub(crate) fn set_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_adaptive_turn_id = self.turn_lifecycle.last_turn_id.clone();
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
             /*model*/ None,
             Some(effort.clone()),
@@ -309,6 +313,8 @@ impl ChatWidget {
 
     /// Set the model in the widget's config copy and stored collaboration mode.
     pub(crate) fn set_model(&mut self, model: &str) {
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_adaptive_turn_id = self.turn_lifecycle.last_turn_id.clone();
         if model != self.current_model() {
             if self.current_model() == crate::model_catalog::LUNA_RESERVE_MODEL {
                 self.clear_reserve_return();
@@ -598,6 +604,15 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_effective_collaboration_mode(&mut self, mode: CollaborationMode) {
+        let current = self.effective_collaboration_mode();
+        if current.mode != mode.mode
+            || current.model() != mode.model()
+            || current.reasoning_effort() != mode.reasoning_effort()
+        {
+            self.status_state.captured_step_reasoning = None;
+            self.status_state.suppressed_adaptive_turn_id =
+                self.turn_lifecycle.last_turn_id.clone();
+        }
         let mode_kind = mode.mode;
         let settings = mode.settings;
         if mode_kind == ModeKind::Default {
@@ -727,6 +742,8 @@ impl ChatWidget {
         if !self.collaboration_modes_enabled() {
             return;
         }
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_adaptive_turn_id = self.turn_lifecycle.last_turn_id.clone();
         let previous_mode = self.active_mode_kind();
         let previous_model = self.current_model().to_string();
         let previous_effort = self.effective_reasoning_effort();

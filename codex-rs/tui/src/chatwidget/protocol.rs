@@ -86,7 +86,28 @@ impl ChatWidget {
             ServerNotification::ThreadSettingsUpdated(notification) => {
                 self.on_thread_settings_updated(notification);
             }
+            ServerNotification::ReasoningEffortUpdated(notification) => {
+                if !from_replay
+                    && !(notification.adaptive
+                        && self.status_state.suppressed_adaptive_turn_id.as_deref()
+                            == Some(&notification.turn_id))
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                    && self.turn_lifecycle.last_turn_id.as_deref() == Some(&notification.turn_id)
+                    && !self.input_queue.user_turn_pending_start
+                {
+                    self.status_state.captured_step_reasoning =
+                        Some(super::status_state::CapturedStepReasoning {
+                            effort: notification.reasoning_effort,
+                            adaptive: notification.adaptive,
+                        });
+                    self.refresh_status_surfaces();
+                }
+            }
             ServerNotification::TurnStarted(notification) => {
+                self.status_state.captured_step_reasoning = None;
+                self.status_state.suppressed_adaptive_turn_id = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {

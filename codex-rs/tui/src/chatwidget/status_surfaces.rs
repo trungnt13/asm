@@ -1013,6 +1013,14 @@ impl ChatWidget {
     }
 
     fn reasoning_display_name(&self) -> String {
+        if let Some(step) = &self.status_state.captured_step_reasoning {
+            let label = Self::status_line_reasoning_effort_label(step.effort.as_ref());
+            return if step.adaptive {
+                format!("{label}·auto")
+            } else {
+                label
+            };
+        }
         let effort = self.effective_reasoning_effort();
         Self::status_line_reasoning_effort_label(effort.as_ref())
     }

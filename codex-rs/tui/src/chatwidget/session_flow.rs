@@ -101,6 +101,8 @@ impl ChatWidget {
         }
         self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_adaptive_turn_id = None;
         self.clear_safety_buffering();
         self.thread_name = session.thread_name.clone();
         self.current_goal_status_indicator = None;
@@ -324,6 +326,8 @@ impl ChatWidget {
         );
         self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_adaptive_turn_id = None;
         self.review = Default::default();
         self.transcript.take_active_cell();
         self.transcript.reset_copy_history();

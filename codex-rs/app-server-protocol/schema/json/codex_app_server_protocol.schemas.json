@@ -5087,6 +5087,26 @@
           "properties": {
             "method": {
               "enum": [
+                "turn/reasoningEffortUpdated"
+              ],
+              "title": "Turn/reasoningEffortUpdatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ReasoningEffortUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/reasoningEffortUpdatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "hook/started"
               ],
               "title": "Hook/startedNotificationMethod",
@@ -18381,6 +18401,39 @@
           "description",
           "reasoningEffort"
         ],
+        "type": "object"
+      },
+      "ReasoningEffortUpdatedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Reports captured step effort without changing the thread's saved settings.",
+        "properties": {
+          "adaptive": {
+            "description": "Automatic mode is active, including when a decision falls back to current effort.",
+            "type": "boolean"
+          },
+          "reasoningEffort": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/ReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "turnId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "adaptive",
+          "threadId",
+          "turnId"
+        ],
+        "title": "ReasoningEffortUpdatedNotification",
         "type": "object"
       },
       "ReasoningItemContent": {

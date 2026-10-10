@@ -547,6 +547,8 @@ pub(crate) async fn run_turn(
             .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
             .await;
 
+            sess.report_reasoning_effort(step_context.as_ref()).await;
+
             run_sampling_request(
                 Arc::clone(&sess),
                 Arc::clone(&step_context),
@@ -2133,6 +2135,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::ThreadRolledBack(_)
         | EventMsg::TurnStarted(_)
         | EventMsg::ThreadSettingsApplied(_)
+        | EventMsg::ReasoningEffortUpdated(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)
         | EventMsg::UserMessage(_)

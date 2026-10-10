@@ -686,6 +686,44 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
     );
 
     assert_eq!(chat.current_model(), "gpt-5.4");
+    chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    let effort = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+        thread_id: thread_id.to_string(),
+        turn_id: "captured-turn".to_string(),
+        reasoning_effort: Some(ReasoningEffortConfig::Low),
+        adaptive: true,
+    };
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(effort.clone()),
+        /*replay_kind*/ None,
+    );
+    let mut permissions_only = thread_settings_for_test("gpt-5.4", thread_id);
+    permissions_only.thread_settings.approvals_reviewer =
+        codex_app_server_protocol::ApprovalsReviewer::User;
+    chat.handle_server_notification(
+        ServerNotification::ThreadSettingsUpdated(permissions_only),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Reasoning),
+        Some("low·auto".to_string())
+    );
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(effort),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Reasoning),
+        Some("low·auto".to_string())
+    );
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::High)
+    );
+    assert_eq!(
+        chat.config_ref().approvals_reviewer,
+        ApprovalsReviewer::User
+    );
 }
 
 #[tokio::test]

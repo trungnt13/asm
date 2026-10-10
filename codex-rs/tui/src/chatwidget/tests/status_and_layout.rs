@@ -4114,6 +4114,100 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
 
     assert_eq!(status_line_text(&chat), Some("xhi".to_string()));
     assert_eq!(chat.last_terminal_title, Some("xhigh".to_string()));
+
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    let notification = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+        thread_id: thread_id.to_string(),
+        turn_id: "captured-turn".to_string(),
+        reasoning_effort: Some(ReasoningEffortConfig::Low),
+        adaptive: true,
+    };
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("low·auto".to_string()));
+    assert_eq!(chat.last_terminal_title, Some("low·auto".to_string()));
+    assert_eq!(
+        chat.effective_reasoning_effort(),
+        Some(ReasoningEffortConfig::XHigh)
+    );
+    chat.turn_lifecycle.finish();
+    chat.refresh_status_surfaces();
+    assert_eq!(status_line_text(&chat), Some("low·auto".to_string()));
+
+    for stale in [
+        codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+            thread_id: ThreadId::new().to_string(),
+            ..notification.clone()
+        },
+        codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+            turn_id: "older-turn".to_string(),
+            ..notification.clone()
+        },
+    ] {
+        chat.handle_server_notification(
+            ServerNotification::ReasoningEffortUpdated(stale),
+            /*replay_kind*/ None,
+        );
+        assert_eq!(status_line_text(&chat), Some("low·auto".to_string()));
+    }
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(notification.clone()),
+        Some(ReplayKind::ResumeInitialMessages),
+    );
+    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(
+            codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+                reasoning_effort: Some(ReasoningEffortConfig::High),
+                adaptive: false,
+                ..notification.clone()
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
+    chat.handle_server_notification(
+        ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: thread_id.to_string(),
+            turn: AppServerTurn {
+                id: "next-turn".to_string(),
+                root_turn_id: None,
+                items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
+                items: Vec::new(),
+                status: AppServerTurnStatus::InProgress,
+                error: None,
+                started_at: Some(0),
+                completed_at: None,
+                duration_ms: None,
+            },
+        }),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(
+            codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+                turn_id: "next-turn".to_string(),
+                reasoning_effort: None,
+                ..notification
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("def·auto".to_string()));
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::Ultra));
+    assert_eq!(status_line_text(&chat), Some("ult".to_string()));
 }
 
 #[tokio::test]
@@ -4159,7 +4253,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
     chat.show_welcome_banner = false;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     chat.local_settings.tui.status_line = Some(vec!["model-with-reasoning".to_string()]);
@@ -4175,9 +4269,41 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw plan-mode footer");
+    let baseline_footer = normalized_backend_snapshot(terminal.backend());
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(
+            codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "captured-turn".to_string(),
+                reasoning_effort: Some(ReasoningEffortConfig::Low),
+                adaptive: true,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw adaptive footer");
+    let adaptive_footer = normalized_backend_snapshot(terminal.backend());
+    chat.add_status_output(
+        /*refreshing_rate_limits*/ false, /*request_id*/ None,
+    );
+    let status = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .filter(|line| line.contains("reasoning low"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(status.contains("low (adaptive; baseline medium)"));
     assert_chatwidget_snapshot!(
         "status_line_model_with_reasoning_plan_mode_footer",
-        normalized_backend_snapshot(terminal.backend())
+        format!(
+            "{baseline_footer}\n\nCaptured adaptive step:\n{adaptive_footer}\n\nApplied status:\n{status}"
+        )
     );
 }
 

@@ -1512,6 +1512,9 @@ pub enum EventMsg {
     #[serde(rename = "task_started", alias = "turn_started")]
     TurnStarted(TurnStartedEvent),
 
+    /// Captured effort used by the next main model step.
+    ReasoningEffortUpdated(ReasoningEffortUpdatedEvent),
+
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
     ThreadSettingsApplied(ThreadSettingsAppliedEvent),
@@ -2314,6 +2317,15 @@ pub struct TurnStartedEvent {
     pub model_context_window: Option<i64>,
     #[serde(default)]
     pub collaboration_mode_kind: ModeKind,
+}
+
+/// Reports captured step effort without changing the thread's saved settings.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct ReasoningEffortUpdatedEvent {
+    pub turn_id: String,
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
+    /// Automatic mode is active, including when a decision falls back to current effort.
+    pub adaptive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]

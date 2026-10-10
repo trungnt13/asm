@@ -274,7 +274,8 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 - For missing credentials, unsupported models, cancellation, refusals, invalid answers, request failure, or timeout, keep current effort. A Decisions failure must not stop the main step.
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
 - Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
-- After successful explicit model or effort changes, pause adaptation for this backend session. For ordinary turn-start baseline fields, do not pause. Do not add public protocol fields, Desktop controls, or persistent pause records.
+- After successful explicit model or effort changes, pause adaptation for this backend session. For ordinary turn-start baseline fields, do not pause. Do not add Desktop controls or persistent pause records.
+- Before each main request in an enabled root conversation, report the captured effort through `turn/reasoningEffortUpdated`. Mark whether adaptive mode is active, including fallback steps. Show the captured effort in the TUI statusline and `/status`, separate from the unchanged baseline. Keep the last step visible after completion; clear it when a new turn or explicit settings change starts.
 - Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
 - Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance separately from mock checks before making claims.
 

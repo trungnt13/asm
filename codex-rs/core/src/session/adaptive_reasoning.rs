@@ -125,6 +125,46 @@ impl Session {
         }
     }
 
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn report_reasoning_effort(&self, step: &super::step_context::StepContext) {
+        let config = &step.turn.config.adaptive_reasoning;
+        if !config.enabled {
+            return;
+        }
+        let root = {
+            let state = self.state.lock().await;
+            root_user_session(
+                &step.turn.session_source,
+                state.session_configuration.thread_source.as_ref(),
+            )
+        };
+        if !root {
+            return;
+        }
+        let reasoning_effort = step.settings.effective_reasoning_effort();
+        let adaptive = !config.update_on.is_empty()
+            && !self.adaptive_reasoning_paused()
+            && self
+                .services
+                .model_client
+                .reasoning_effort_override_enabled(&step.settings.model_info)
+            && reasoning_effort
+                .as_ref()
+                .is_none_or(|effort| ORDINARY_EFFORTS.contains(effort))
+            && allowed_efforts(config, &step.settings.model_info).len() >= 2;
+        self.send_event(
+            &step.turn,
+            codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(
+                codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                    turn_id: step.turn.sub_id.clone(),
+                    reasoning_effort,
+                    adaptive,
+                },
+            ),
+        )
+        .await;
+    }
+
     pub(super) fn start_adaptive_reasoning_warmup(
         &self,
         config: &Config,

@@ -233,6 +233,22 @@ impl ChatWidget {
                 .or_else(|| self.config.model_reasoning_effort.clone())
                 .or(model_default_reasoning_effort),
         );
+        let captured_reasoning_label =
+            self.status_state
+                .captured_step_reasoning
+                .as_ref()
+                .map(|step| {
+                    let effort = step
+                        .effort
+                        .as_ref()
+                        .map_or("none", ReasoningEffortConfig::as_str);
+                    let baseline = reasoning_effort_override
+                        .as_ref()
+                        .and_then(Option::as_ref)
+                        .map_or("none", ReasoningEffortConfig::as_str);
+                    let source = if step.adaptive { "adaptive" } else { "step" };
+                    format!("{effort} ({source}; baseline {baseline})")
+                });
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
             .rate_limit_snapshots_by_limit_id
             .values()
@@ -258,6 +274,7 @@ impl ChatWidget {
             self.model_display_name(),
             collaboration_mode,
             reasoning_effort_override,
+            captured_reasoning_label,
             agents_summary,
             refreshing_rate_limits,
         );

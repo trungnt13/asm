@@ -3624,6 +3624,37 @@
       "minLength": 1,
       "type": "string"
     },
+    "ReasoningEffortUpdatedNotification": {
+      "description": "Reports captured step effort without changing the thread's saved settings.",
+      "properties": {
+        "adaptive": {
+          "description": "Automatic mode is active, including when a decision falls back to current effort.",
+          "type": "boolean"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adaptive",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "ReasoningSummary": {
       "description": "A summary of the reasoning performed by the model. This can be useful for debugging and understanding the model's reasoning process. See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#reasoning-summaries",
       "oneOf": [
@@ -7568,6 +7599,26 @@
         "params"
       ],
       "title": "Turn/startedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "turn/reasoningEffortUpdated"
+          ],
+          "title": "Turn/reasoningEffortUpdatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ReasoningEffortUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Turn/reasoningEffortUpdatedNotification",
       "type": "object"
     },
     {

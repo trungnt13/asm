@@ -549,6 +549,18 @@ pub struct TurnStartedNotification {
     pub turn: Turn,
 }
 
+/// Reports captured step effort without changing the thread's saved settings.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ReasoningEffortUpdatedNotification {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    /// Automatic mode is active, including when a decision falls back to current effort.
+    pub adaptive: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
