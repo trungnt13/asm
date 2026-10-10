@@ -48,11 +48,28 @@ impl DecisionsClient {
         instructions: &str,
         choices: &[String],
     ) -> Result<String, DecisionsError> {
+        self.choose_effort_at(DECISIONS_URL, model, input, instructions, choices)
+            .await
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn choose_effort_at(
+        &self,
+        url: &str,
+        model: &str,
+        input: &str,
+        instructions: &str,
+        choices: &[String],
+    ) -> Result<String, DecisionsError> {
         if model.trim().is_empty()
             || input.trim().is_empty()
             || instructions.trim().is_empty()
-            || choices.is_empty()
+            || !(2..=255).contains(&choices.len())
             || choices.iter().any(|choice| choice.trim().is_empty())
+            || choices
+                .iter()
+                .enumerate()
+                .any(|(index, choice)| choices[..index].contains(choice))
         {
             return Err(DecisionsError::InvalidRequest);
         }
@@ -68,7 +85,7 @@ impl DecisionsClient {
         });
         let mut response = self
             .client
-            .post(DECISIONS_URL)
+            .post(url)
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -110,3 +127,7 @@ impl DecisionsClient {
             .ok_or(DecisionsError::InvalidResponse)
     }
 }
+
+#[cfg(test)]
+#[path = "decisions_tests.rs"]
+mod tests;
