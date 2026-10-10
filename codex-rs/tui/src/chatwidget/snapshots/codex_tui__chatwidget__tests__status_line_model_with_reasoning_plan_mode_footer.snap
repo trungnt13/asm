@@ -1,9 +1,21 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: normalized_backend_snapshot(terminal.backend())
+expression: "format!(\"{baseline_footer}\\n\\nCaptured adaptive step:\\n{adaptive_footer}\\n\\nApplied status:\\n{status}\")"
 ---
 "                                                                                "
 "                                                                                "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  52 med                                             Plan mode (⇧tab to cycle)  "
+
+
+Captured adaptive step:
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  52 low·auto                                        Plan mode (⇧tab to cycle)  "
+
+
+Applied status:
+  Model:               gpt-5.2 (reasoning low (adaptive; baseline medium),
