@@ -693,6 +693,13 @@ impl App {
         if self.keymap.app.toggle_fast_mode.is_pressed(key_event)
             && self.chat_widget.can_toggle_fast_mode_from_keybinding()
         {
+            if self.current_displayed_thread_id().is_some_and(|thread_id| {
+                self.side_threads
+                    .get(&thread_id)
+                    .is_some_and(|state| state.mode == crate::app_event::SideConversationMode::Chat)
+            }) {
+                return true;
+            }
             self.chat_widget.toggle_fast_mode_from_ui();
             return true;
         }
