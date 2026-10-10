@@ -61,7 +61,6 @@ impl App {
                         .add_error_message("Side/Chat has no completed reply to send.".into());
                     return Ok(());
                 };
-                let prefix = "Reply forwarded from Side/Chat:\n\n";
                 let extra = if text.trim().is_empty() {
                     ""
                 } else {
@@ -70,9 +69,8 @@ impl App {
                 let separator = if extra.is_empty() { "" } else { "\n\n" };
                 // Bound the complete user-requested item before allocating a copy. The byte
                 // cap conservatively limits it to 10K tokens without tokenizer work.
-                if prefix
+                if reply
                     .len()
-                    .saturating_add(reply.len())
                     .saturating_add(extra.len())
                     .saturating_add(separator.len())
                     > 10_000
@@ -80,7 +78,7 @@ impl App {
                     self.chat_widget.add_error_message("The forwarded reply and extra message exceed 10,000 bytes; use /export instead.".into());
                     return Ok(());
                 }
-                let message = format!("{prefix}{reply}{separator}{extra}");
+                let message = format!("{reply}{separator}{extra}");
                 let request_id = app_server.next_request_id();
                 // Omitted settings preserve the recipient's configuration. The server atomically
                 // starts or steers its turn, avoiding a busy/idle race and a second request.

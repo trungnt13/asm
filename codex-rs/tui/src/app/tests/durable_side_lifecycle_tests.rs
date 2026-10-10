@@ -218,7 +218,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             &mut tui,
             &mut server,
             SideConversationAction::SendLast {
-                text: "Use this answer".to_string(),
+                text: if busy { "Use this answer" } else { "" }.to_string(),
             },
         ))
         .await?;
@@ -228,7 +228,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         assert_eq!(forwarded["threadId"], parent_id.to_string());
         assert_eq!(
             forwarded["input"],
-            serde_json::json!([{ "type": "text", "text": "Reply forwarded from Side/Chat:\n\nCompleted side answer\n\nUse this answer", "text_elements": [] }])
+            serde_json::json!([{ "type": "text", "text": if busy { "Completed side answer\n\nUse this answer" } else { "Completed side answer" }, "text_elements": [] }])
         );
         for key in [
             "model",
@@ -354,6 +354,113 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     assert!(Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
     assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
     assert!(app.side_threads.is_empty());
+
+    let models = Box::pin(server.bootstrap(&app.config))
+        .await?
+        .available_models;
+    let fast_model = models
+        .iter()
+        .find(|model| model.service_tiers.iter().any(|tier| tier.id == "priority"))
+        .expect("a Fast-supported model")
+        .model
+        .clone();
+    app.chat_widget.set_model(&fast_model);
+    app.chat_widget
+        .set_service_tier(Some("default".to_string()));
+    app.config.service_tier = Some("default".to_string());
+    app.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
+    app.cli_kv_overrides.extend([
+        (
+            "service_tier".to_string(),
+            TomlValue::String("default".to_string()),
+        ),
+        (
+            "tui.status_line".to_string(),
+            TomlValue::Array(vec![TomlValue::String("fast-mode".to_string())]),
+        ),
+    ]);
+    app.model_catalog = Arc::new(crate::model_catalog::ModelCatalog::new(models));
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        parent_id,
+        CompanionKind::Side,
+        crate::app_event::SideConversationMode::Chat,
+        /*user_message*/ None,
+    ))
+    .await?;
+    app.keymap.app.toggle_fast_mode = vec![crate::key_hint::KeyBinding::new(
+        KeyCode::Char('f'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    )];
+    for phase in ["created", "switched", "synced"] {
+        let chat_id = app.current_displayed_thread_id().expect("active Chat");
+        assert_ne!(chat_id, parent_id);
+        assert_eq!(
+            (
+                app.chat_widget.configured_service_tier().as_deref(),
+                app.chat_widget.current_service_tier(),
+                app.config.service_tier.as_deref(),
+            ),
+            (Some("priority"), Some("priority"), Some("default")),
+        );
+        // Model refresh must not recompute Chat's tier from the parent's config.
+        app.chat_widget.set_model(&fast_model);
+        assert_eq!(app.chat_widget.current_service_tier(), Some("priority"));
+        assert!(render_bottom_popup(&app.chat_widget, /*width*/ 120).contains("F:on"));
+        assert!(app.chat_widget.can_toggle_fast_mode_from_keybinding());
+        Box::pin(app.handle_shared_app_keymap_action(
+            &mut tui,
+            &mut server,
+            KeyEvent::new(
+                KeyCode::Char('f'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+        ))
+        .await;
+        assert_eq!(app.chat_widget.current_service_tier(), Some("priority"));
+        while app_events.try_recv().is_ok() {}
+        let _ = app
+            .chat_widget
+            .submit_user_message_as_plain_user_turn(crate::chatwidget::UserMessage::from(phase));
+        while let Ok(event) = app_events.try_recv() {
+            Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+        }
+        let request = recorded_params(&requests, "turn/start")
+            .pop()
+            .expect("Chat turn request");
+        assert_eq!(request["threadId"], chat_id.to_string());
+        assert_eq!(request["input"][0]["text"], phase);
+        assert_eq!(request["serviceTier"], "priority");
+        Box::pin(app.enqueue_thread_notification(
+            chat_id,
+            turn_completed_notification(chat_id, "forwarded-turn", TurnStatus::Completed),
+        ))
+        .await?;
+        match phase {
+            "created" => {
+                Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+                assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
+                assert_eq!(
+                    app.chat_widget.configured_service_tier().as_deref(),
+                    Some("default")
+                );
+                Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+            }
+            "switched" => {
+                Box::pin(app.apply_side_conversation_action(
+                    &mut tui,
+                    &mut server,
+                    SideConversationAction::Sync,
+                ))
+                .await?;
+                assert_ne!(app.current_displayed_thread_id(), Some(chat_id));
+            }
+            "synced" => {}
+            _ => unreachable!("known lifecycle phase"),
+        }
+    }
+    assert!(Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
 
     for selected_view in ["child", "parent"] {
         Box::pin(app.select_agent_thread(&mut tui, &mut server, parent_id)).await?;
