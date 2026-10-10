@@ -78,6 +78,84 @@ async fn backend_banner_fallback_updates_task_settings_and_keeps_notice() -> Res
         let response = fallback_response();
         let generation = app.rate_limit_hard_stop_generation;
         let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.side_threads.insert(
+            thread_id,
+            SideThreadState {
+                mode: crate::app_event::SideConversationMode::Chat,
+                ..SideThreadState::new(ThreadId::new())
+            },
+        );
+        let original_mode = app.chat_widget.effective_collaboration_mode();
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::RateLimitsLoaded {
+                request_id: 1,
+                origin: RateLimitRefreshOrigin::StatusCommand { request_id: 0 },
+                hard_stop_generation: generation,
+                result: Ok(response.clone()),
+            },
+        )
+        .await?;
+        assert_eq!(
+            (
+                app.chat_widget.effective_collaboration_mode(),
+                app.chat_widget.current_service_tier(),
+                requests.lock().unwrap().len(),
+            ),
+            (original_mode, Some("priority"), 0),
+        );
+        let mut rejected = app
+            .chat_widget
+            .submit_user_message_as_plain_user_turn(UserMessage::from("Keep this Chat question"))
+            .expect("pending Chat submission");
+        let submitted = std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>();
+        assert!(submitted.iter().any(|event| {
+            match event {
+                AppEvent::InsertHistoryCell(cell) => {
+                    lines_to_single_string(&cell.display_lines(/*width*/ 80))
+                        .contains("Keep this Chat question")
+                }
+                _ => false,
+            }
+        }));
+        while ops.try_recv().is_ok() {}
+        if let AppCommand::UserTurn { service_tier, .. } = &mut rejected {
+            *service_tier = Some(Some("default".to_string()));
+        } else {
+            unreachable!("plain user turn");
+        }
+        assert!(
+            app.try_submit_active_thread_op_via_app_server(&mut server, thread_id, &rejected)
+                .await?
+        );
+        assert!(requests.lock().unwrap().is_empty());
+        for unsupported in ["model", "feature"] {
+            let mut rejected = rejected.clone();
+            if let AppCommand::UserTurn {
+                service_tier,
+                collaboration_mode,
+                ..
+            } = &mut rejected
+            {
+                *service_tier = Some(Some("priority".to_string()));
+                if unsupported == "model" {
+                    collaboration_mode.as_mut().unwrap().settings.model =
+                        "gpt-5.6-terra".to_string();
+                }
+            }
+            app.chat_widget
+                .set_feature_enabled(Feature::FastMode, /*enabled*/ unsupported != "feature");
+            assert!(
+                app.try_submit_active_thread_op_via_app_server(&mut server, thread_id, &rejected)
+                    .await?
+            );
+            assert!(requests.lock().unwrap().is_empty());
+        }
+        app.chat_widget
+            .set_feature_enabled(Feature::FastMode, /*enabled*/ true);
+        app.chat_widget.apply_external_edit(String::new());
+        app.side_threads.remove(&thread_id);
         app.handle_event(
             &mut tui,
             &mut server,
@@ -128,8 +206,8 @@ async fn backend_banner_fallback_updates_task_settings_and_keeps_notice() -> Res
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(notices.len(), 1);
-        insta::assert_snapshot!("backend_banner_fallback_notice", notices[0]);
+        assert_eq!(notices.len(), 4);
+        insta::assert_snapshot!("backend_banner_fallback_notice", notices.join("\n\n"));
         assert!(!queued.iter().any(|event| matches!(
             event,
             AppEvent::PersistModelSelection { .. } | AppEvent::CodexOp(_)
