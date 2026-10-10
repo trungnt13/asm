@@ -64,6 +64,59 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             .ephemeral
     );
 
+    // A completion drained during switching must leave its follow-up on Main.
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, parent_id)).await?;
+    app.enqueue_thread_notification(
+        parent_id,
+        turn_started_notification(parent_id, "queued-main-turn"),
+    )
+    .await?;
+    app.drain_active_thread_events(&mut tui, &server).await?;
+    app.chat_widget
+        .apply_external_edit("Main-only queued follow-up".to_string());
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(
+        app.chat_widget.queued_user_message_texts(),
+        vec!["Main-only queued follow-up".to_string()],
+    );
+    while app_events.try_recv().is_ok() {}
+    requests.lock().expect("request recorder lock").clear();
+    app.enqueue_thread_notification(
+        parent_id,
+        turn_completed_notification(parent_id, "queued-main-turn", TurnStatus::Completed),
+    )
+    .await?;
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, first_id)).await?;
+    while let Ok(event) = app_events.try_recv() {
+        assert!(!matches!(event, AppEvent::CodexOp(Op::UserTurn { .. })));
+    }
+    assert!(recorded_params(&requests, "turn/start").is_empty());
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, parent_id)).await?;
+    while let Ok(event) = app_events.try_recv() {
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
+    let request = recorded_params(&requests, "turn/start")
+        .pop()
+        .expect("Main's restored follow-up");
+    assert_eq!(
+        (
+            request["threadId"].clone(),
+            request["input"][0]["text"].clone()
+        ),
+        (
+            serde_json::json!(parent_id.to_string()),
+            serde_json::json!("Main-only queued follow-up"),
+        ),
+    );
+    app.enqueue_thread_notification(
+        parent_id,
+        turn_completed_notification(parent_id, "forwarded-turn", TurnStatus::Completed),
+    )
+    .await?;
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, first_id)).await?;
+
+    requests.lock().expect("request recorder lock").clear();
     Box::pin(app.start_companion_conversation(
         &mut tui,
         &mut server,
@@ -584,6 +637,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     );
     Box::pin(app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &server,
         resumed,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,
@@ -622,6 +676,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         .await?;
     Box::pin(app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &server,
         parent,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,
@@ -678,6 +733,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         .await?;
     Box::pin(app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &server,
         orphan,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,
@@ -773,6 +829,70 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             Box::pin(app.select_agent_thread(&mut tui, &mut server, saved_chat_id)).await?;
         }
     }
+    // Parallel's selected tier must survive changes to main's persisted default.
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        saved_chat_id,
+        CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
+        /*user_message*/ None,
+    ))
+    .await?;
+    let parallel_id = app
+        .current_displayed_thread_id()
+        .expect("tier probe Parallel");
+    assert_ne!(parallel_id, saved_chat_id);
+    app.chat_widget
+        .set_service_tier(Some("priority".to_string()));
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut server,
+        AppEvent::PersistServiceTierSelection {
+            service_tier: Some("priority".to_string()),
+        },
+    ))
+    .await?;
+    assert_eq!(app.chat_widget.current_service_tier(), Some("priority"));
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(saved_chat_id));
+    app.chat_widget
+        .set_service_tier(Some("default".to_string()));
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut server,
+        AppEvent::PersistServiceTierSelection {
+            service_tier: Some("default".to_string()),
+        },
+    ))
+    .await?;
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    assert_eq!(app.current_displayed_thread_id(), Some(parallel_id));
+    let configured_tier = app.chat_widget.configured_service_tier();
+    let displayed_tier = app.chat_widget.current_service_tier().map(str::to_string);
+    while app_events.try_recv().is_ok() {}
+    let _ = app.chat_widget.submit_user_message_as_plain_user_turn(
+        crate::chatwidget::UserMessage::from("tier probe after main default change"),
+    );
+    while let Ok(event) = app_events.try_recv() {
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
+    let request = recorded_params(&requests, "turn/start")
+        .pop()
+        .expect("tier probe Parallel turn/start");
+    assert_eq!(request["threadId"], parallel_id.to_string());
+    assert_eq!(
+        (
+            configured_tier,
+            displayed_tier,
+            request["serviceTier"].clone()
+        ),
+        (
+            Some("priority".to_string()),
+            Some("priority".to_string()),
+            serde_json::json!("priority"),
+        ),
+    );
     server.shutdown().await?;
     proxy.await??;
     Ok(())

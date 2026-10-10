@@ -44,6 +44,28 @@ pub(super) struct AutomaticTitlePrompt {
 
 impl App {
     #[tracing::instrument(skip_all)]
+    pub(super) async fn handle_live_thread_event(
+        &mut self,
+        app_server: &AppServerSession,
+        event: ThreadBufferedEvent,
+    ) {
+        let automatic_title_prompt = self.automatic_thread_title_prompt(&event).await;
+        self.handle_thread_event_now_recovering_file_changes(event)
+            .await;
+        if let Some(prompt) = automatic_title_prompt
+            && let Some(thread_id) = self.active_thread_id
+        {
+            self.generate_thread_title(
+                app_server,
+                thread_id,
+                ThreadTitleDestination::Automatic,
+                prompt.prompt,
+                prompt.request,
+            );
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
     pub(super) async fn automatic_thread_title_prompt(
         &mut self,
         event: &ThreadBufferedEvent,
