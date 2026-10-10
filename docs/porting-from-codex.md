@@ -89,9 +89,9 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated upstream commit: `806d9732c974bc8a51b8317c1bd8985544fe627c`.
+- Last incorporated upstream commit: `de8fab6d7adfcef8b4ce6f02f3b5c8be4092015a`.
 - Commit date: 2026-10-10.
-- Subject: Report exec runtime resets before accepting further requests (#52825).
+- Subject: Upgrade `rmcp` to `3.5.1` and harden lifecycle tests (#52972).
 
 Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
 
