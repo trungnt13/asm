@@ -169,7 +169,7 @@ impl Session {
             freshness: session.shutdown.child_token(),
             deadline: Instant::now() + Duration::from_secs(/*secs*/ 2),
         };
-        let warmup = DecisionJob::start(
+        let (warmup, _) = DecisionJob::start(
             client,
             DecisionRequest {
                 model: config.adaptive_reasoning.decision_model.clone(),
@@ -300,10 +300,6 @@ impl Session {
             state.history.annotated_items(),
             config.max_context_bytes,
         );
-        if text == evidence.previous {
-            return;
-        }
-        evidence.previous = text.clone();
         self.invalidate_adaptive_reasoning();
         *pending = None;
         if !config.update_on.contains(&trigger)
@@ -331,7 +327,7 @@ impl Session {
             return;
         };
         let cancellation = cancellation.child_token();
-        let job = DecisionJob::start(
+        let (job, completed) = DecisionJob::start(
             client,
             DecisionRequest {
                 model: config.decision_model.clone(),
@@ -353,6 +349,12 @@ impl Session {
             },
         );
         *pending = Some(PendingAdaptiveDecision { job, cancellation });
+        // Publication and shutdown need these locks. Wait only after releasing them,
+        // and do not let the caller capture its main step until publication finishes.
+        drop(pending);
+        drop(evidence);
+        drop(_settings_guard);
+        let _ = completed.await;
     }
 }
 

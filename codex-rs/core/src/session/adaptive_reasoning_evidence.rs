@@ -10,7 +10,6 @@ use codex_protocol::user_input::UserInput;
 pub(super) struct AdaptiveEvidence {
     pub(super) task: String,
     steer: String,
-    pub(super) previous: String,
 }
 
 impl AdaptiveEvidence {

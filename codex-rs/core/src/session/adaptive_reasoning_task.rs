@@ -7,6 +7,7 @@ use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use std::sync::Arc;
 use std::sync::Weak;
 use tokio::sync::Notify;
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
@@ -55,15 +56,17 @@ impl DecisionJob {
         cancellation: CancellationToken,
         guard: AdaptiveDecisionGuard,
         target: DecisionTarget,
-    ) -> Self {
+    ) -> (Self, oneshot::Receiver<()>) {
+        let (completion, completed) = oneshot::channel();
         let handle = AbortOnDropHandle::new(tokio::spawn(run_decision(
             client,
             request,
             cancellation,
             guard,
             target,
+            completion,
         )));
-        Self { handle }
+        (Self { handle }, completed)
     }
 }
 
@@ -74,6 +77,7 @@ async fn run_decision(
     cancellation: CancellationToken,
     guard: AdaptiveDecisionGuard,
     target: DecisionTarget,
+    completion: oneshot::Sender<()>,
 ) {
     let started = Instant::now();
     tokio::select! {
@@ -122,4 +126,5 @@ async fn run_decision(
             }
         }
     }
+    let _ = completion.send(());
 }

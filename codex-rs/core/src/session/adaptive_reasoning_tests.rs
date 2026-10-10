@@ -273,34 +273,53 @@ fn assert_pending_job(turn: &TurnContext) {
     );
 }
 
+fn start_adapting(
+    session: &Arc<Session>,
+    turn: &Arc<TurnContext>,
+    input: &[TurnInput],
+    trigger: AdaptiveReasoningTrigger,
+    cancellation: &CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    let session = Arc::clone(session);
+    let turn = Arc::clone(turn);
+    let input = input.to_vec();
+    let cancellation = cancellation.clone();
+    tokio::spawn(async move {
+        session
+            .adapt_reasoning(&turn, &input, trigger, &cancellation)
+            .await;
+    })
+}
+
 #[tracing::instrument(skip_all)]
-async fn finish_job(turn: &TurnContext) {
-    let slot = turn
-        .extension_data
-        .get::<Mutex<Option<PendingAdaptiveDecision>>>()
-        .unwrap();
-    let mut pending = slot.lock().await.take().expect("owned pending job");
-    timeout(Duration::from_secs(/*secs*/ 5), &mut pending.job.handle)
+async fn finish_adaptation(adaptation: &mut tokio::task::JoinHandle<()>) {
+    timeout(Duration::from_secs(/*secs*/ 5), adaptation)
         .await
-        .expect("decision job completed")
-        .expect("decision task succeeded");
+        .expect("bounded pre-step decision returned")
+        .expect("adaptive caller completed");
 }
 
 #[tokio::test]
-async fn adaptive_job_is_nonblocking_and_updates_only_uncaptured_step() {
+async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let cancellation = CancellationToken::new();
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &cancellation,
-        )
-        .await;
-    assert_pending_job(&turn);
+    let first = session
+        .capture_step_context(Arc::clone(&turn), &cancellation)
+        .await
+        .unwrap();
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &cancellation,
+    );
     let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "pre-step barrier awaits held HTTP response"
+    );
     assert!(
         request
             .headers
@@ -323,13 +342,6 @@ async fn adaptive_job_is_nonblocking_and_updates_only_uncaptured_step() {
         request.body["input"][0]["content"][0]["text"],
         "Current user task:\nCheck a harmless arithmetic result.\nRecent evidence (newest first):\n"
     );
-    let first = timeout(
-        Duration::from_millis(/*millis*/ 500),
-        session.capture_step_context(Arc::clone(&turn), &cancellation),
-    )
-    .await
-    .expect("step capture does not wait for HTTP")
-    .unwrap();
     request
         .reply
         .send((
@@ -337,7 +349,8 @@ async fn adaptive_job_is_nonblocking_and_updates_only_uncaptured_step() {
             json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
         ))
         .unwrap();
-    finish_job(&turn).await;
+    finish_adaptation(&mut adaptation).await;
+    assert_pending_job(&turn);
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::High));
     let next = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -380,16 +393,6 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
     })
     .await;
     let cancellation = CancellationToken::new();
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &cancellation,
-        )
-        .await;
-    assert_pending_job(&turn);
-    let request = proxy.request().await;
     let first = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
         .await
@@ -397,6 +400,18 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
     assert_eq!(
         first.settings.effective_reasoning_effort(),
         Some(ReasoningEffort::Low)
+    );
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &cancellation,
+    );
+    let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "pre-step barrier awaits held HTTP response"
     );
     match scenario {
         "assistant" => {
@@ -453,7 +468,7 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
             json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
         ))
         .unwrap();
-    finish_job(&turn).await;
+    finish_adaptation(&mut adaptation).await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     let next = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -463,14 +478,7 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
         next.settings.effective_reasoning_effort(),
         Some(ReasoningEffort::Low)
     );
-    assert!(
-        turn.extension_data
-            .get::<Mutex<Option<PendingAdaptiveDecision>>>()
-            .unwrap()
-            .lock()
-            .await
-            .is_none()
-    );
+    assert_pending_job(&turn);
     session.stop_adaptive_reasoning().await;
 }
 
@@ -480,17 +488,21 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
 async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &CancellationToken::new(),
-        )
-        .await;
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &CancellationToken::new(),
+    );
+    let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "failure response has not released the barrier yet"
+    );
+    request.reply.send((status, body)).unwrap();
+    finish_adaptation(&mut adaptation).await;
     assert_pending_job(&turn);
-    proxy.request().await.reply.send((status, body)).unwrap();
-    finish_job(&turn).await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     session.stop_adaptive_reasoning().await;
 }
@@ -578,14 +590,14 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
     let baseline = turn.next_step_settings.load_full();
     let source = session.state.lock().await.session_configuration.clone();
     session.start_adaptive_reasoning_warmup(&turn.config, &source);
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &CancellationToken::new(),
-        )
-        .await;
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &CancellationToken::new(),
+    );
+    finish_adaptation(&mut adaptation).await;
     assert!(
         timeout(Duration::from_millis(/*millis*/ 25), proxy.requests.recv())
             .await
@@ -679,24 +691,30 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
     let mut proxy = DecisionProxy::start().await;
     let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let cancellation = CancellationToken::new();
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &cancellation,
-        )
-        .await;
-    assert_pending_job(&turn);
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &cancellation,
+    );
     let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "pre-step barrier awaits held HTTP response"
+    );
     match scenario {
         "turn cancelled" => {
             cancellation.cancel();
-            finish_job(&turn).await;
+            finish_adaptation(&mut adaptation).await;
         }
         "session shutdown" => session.stop_adaptive_reasoning().await,
         _ => unreachable!("defined test scenarios"),
     }
+    if scenario == "session shutdown" {
+        finish_adaptation(&mut adaptation).await;
+    }
+    session.stop_adaptive_reasoning().await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     assert!(
         turn.extension_data
@@ -752,16 +770,18 @@ async fn stalled_warmup_shutdown_does_not_wait_for_http_or_change_history() {
 async fn busy_settings_publication_drops_completed_decision_without_waiting() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &CancellationToken::new(),
-        )
-        .await;
-    assert_pending_job(&turn);
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &CancellationToken::new(),
+    );
     let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "pre-step barrier awaits held HTTP response"
+    );
     let permit = session.thread_settings_persistence.acquire().await.unwrap();
     request
         .reply
@@ -770,9 +790,12 @@ async fn busy_settings_publication_drops_completed_decision_without_waiting() {
             json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
         ))
         .unwrap();
-    timeout(Duration::from_millis(/*millis*/ 500), finish_job(&turn))
-        .await
-        .expect("automatic publisher does not wait for busy settings permit");
+    timeout(
+        Duration::from_millis(/*millis*/ 500),
+        finish_adaptation(&mut adaptation),
+    )
+    .await
+    .expect("automatic publisher does not wait for busy settings permit");
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     drop(permit);
     session.stop_adaptive_reasoning().await;
@@ -785,16 +808,18 @@ async fn busy_settings_publication_drops_completed_decision_without_waiting() {
 async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_it(scenario: &str) {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &CancellationToken::new(),
-        )
-        .await;
-    assert_pending_job(&turn);
+    let mut adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &CancellationToken::new(),
+    );
     let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "pre-step barrier awaits held HTTP response"
+    );
     let mut state = session.state.lock().await;
     request
         .reply
@@ -817,7 +842,7 @@ async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_
         _ => unreachable!("defined test scenarios"),
     }
     drop(state);
-    finish_job(&turn).await;
+    finish_adaptation(&mut adaptation).await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     session.stop_adaptive_reasoning().await;
 }
@@ -826,16 +851,20 @@ async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_
 async fn stalled_decision_does_not_keep_session_or_turn_alive() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
-    session
-        .adapt_reasoning(
-            &turn,
-            &user_task("Check a harmless arithmetic result."),
-            AdaptiveReasoningTrigger::TurnStart,
-            &CancellationToken::new(),
-        )
-        .await;
-    assert_pending_job(&turn);
+    let adaptation = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check a harmless arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &CancellationToken::new(),
+    );
     let request = proxy.request().await;
+    assert!(
+        !adaptation.is_finished(),
+        "pre-step barrier awaits held HTTP response"
+    );
+    adaptation.abort();
+    let _ = adaptation.await;
     let session_weak = Arc::downgrade(&session);
     let turn_weak = Arc::downgrade(&turn);
     session
@@ -853,18 +882,21 @@ async fn stalled_decision_does_not_keep_session_or_turn_alive() {
     drop(request.reply);
 }
 
+#[test_case("success")]
+#[test_case("failure")]
+#[test_case("timeout")]
 #[tokio::test]
-async fn regular_turn_publishes_completed_decision_before_tool_continuation() {
+async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
     use crate::tasks::RegularTask;
     use codex_protocol::protocol::TurnAbortReason;
     use core_test_support::responses;
 
     let mut proxy = DecisionProxy::start().await;
     let primary = responses::start_mock_server().await;
-    let requests = responses::mount_response_sequence(
+    let requests = responses::mount_sse_sequence(
         &primary,
         vec![
-            responses::sse_response(responses::sse(vec![
+            responses::sse(vec![
                 responses::ev_function_call(
                     "plan-call",
                     "update_plan",
@@ -874,12 +906,11 @@ async fn regular_turn_publishes_completed_decision_before_tool_continuation() {
                     .to_string(),
                 ),
                 responses::ev_completed("plan-response"),
-            ]))
-            .set_delay(Duration::from_secs(/*secs*/ 3)),
-            responses::sse_response(responses::sse(vec![
+            ]),
+            responses::sse(vec![
                 responses::ev_assistant_message("final-message", "The result is four."),
                 responses::ev_completed("final-response"),
-            ])),
+            ]),
         ],
     )
     .await;
@@ -887,6 +918,9 @@ async fn regular_turn_publishes_completed_decision_before_tool_continuation() {
         config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
         config.model_provider.supports_websockets = false;
         config.update_plan_enabled = true;
+        if scenario == "timeout" {
+            config.adaptive_reasoning.decision_timeout_ms = 500;
+        }
     })
     .await;
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
@@ -898,33 +932,59 @@ async fn regular_turn_publishes_completed_decision_before_tool_continuation() {
     session
         .spawn_task(Arc::clone(&turn), input, RegularTask::new())
         .await;
-    let decision = proxy.request().await;
-    timeout(Duration::from_secs(/*secs*/ 5), async {
-        while requests.requests().is_empty() {
-            tokio::time::sleep(Duration::from_millis(/*millis*/ 1)).await;
-        }
-    })
-    .await
-    .expect(
-        "regular turn captured first step and sent primary request without waiting for decision",
+    let first = proxy.request().await;
+    tokio::time::sleep(Duration::from_millis(/*millis*/ 100)).await;
+    assert!(
+        requests.requests().is_empty(),
+        "main inference waits for initial decision"
     );
-    assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
-    decision
+    first
         .reply
         .send((
             200,
             json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
         ))
         .unwrap();
-    finish_job(&turn).await;
+    let second = proxy.request().await;
+    tokio::time::sleep(Duration::from_millis(/*millis*/ 100)).await;
+    assert_eq!(
+        requests.requests().len(),
+        1,
+        "tool continuation waits for its decision"
+    );
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::High));
+    assert!(
+        second.body["input"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Plan updated")
+    );
+    let mut reply = Some(second.reply);
+    match scenario {
+        "success" => reply
+            .take()
+            .unwrap()
+            .send((
+                200,
+                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"low"}]}),
+            ))
+            .unwrap(),
+        "failure" => reply
+            .take()
+            .unwrap()
+            .send((503, json!({"error":"synthetic"})))
+            .unwrap(),
+        "timeout" => {}
+        _ => unreachable!("defined test scenarios"),
+    }
     timeout(Duration::from_secs(/*secs*/ 5), async {
         while session.active_turn.lock().await.is_some() {
             tokio::time::sleep(Duration::from_millis(/*millis*/ 1)).await;
         }
     })
     .await
-    .expect("regular tool continuation completed");
+    .expect("normal turn continues after decision success or bounded fallback");
+    drop(reply);
     let requests = requests.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(
@@ -941,15 +1001,20 @@ async fn regular_turn_publishes_completed_decision_before_tool_continuation() {
                 .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let low = json!({"type":"configuration_update", "reasoning":{"effort":"low"}});
     let high = json!({"type":"configuration_update", "reasoning":{"effort":"high"}});
-    assert_eq!(updates, vec![vec![low.clone()], vec![low, high]]);
+    let low = json!({"type":"configuration_update", "reasoning":{"effort":"low"}});
+    let expected = match scenario {
+        "success" => vec![vec![high.clone()], vec![high, low]],
+        "failure" | "timeout" => vec![vec![high.clone()], vec![high]],
+        _ => unreachable!("defined test scenarios"),
+    };
+    assert_eq!(updates, expected);
     assert_eq!(
         requests
             .iter()
             .map(|request| request.body_json()["reasoning"]["effort"].clone())
             .collect::<Vec<_>>(),
-        vec![json!("low"), json!("low")]
+        vec![json!("high"), json!("high")]
     );
     let first_input = requests[0].input();
     let second_input = requests[1].input();
@@ -965,6 +1030,10 @@ async fn regular_turn_publishes_completed_decision_before_tool_continuation() {
             .settings
             .reasoning_effort,
         Some(ReasoningEffort::Low)
+    );
+    assert!(
+        proxy.requests.try_recv().is_err(),
+        "two main steps require exactly two real decisions"
     );
     session.stop_adaptive_reasoning().await;
 }
