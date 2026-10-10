@@ -80,6 +80,9 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ThreadQueueChanged(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::ReasoningEffortUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::ThreadSettingsUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
@@ -367,6 +370,18 @@ mod tests {
         let target = server_notification_thread_target(&notification);
 
         assert_eq!(target, ServerNotificationThreadTarget::Thread(thread_id));
+        let effort = ServerNotification::ReasoningEffortUpdated(
+            codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "captured-turn".to_string(),
+                reasoning_effort: None,
+                adaptive: true,
+            },
+        );
+        assert_eq!(
+            server_notification_thread_target(&effort),
+            ServerNotificationThreadTarget::Thread(thread_id)
+        );
     }
 
     #[test]

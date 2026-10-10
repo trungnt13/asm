@@ -421,6 +421,7 @@ export type { RateLimitWindow } from "./RateLimitWindow";
 export type { RawResponseCompletedNotification } from "./RawResponseCompletedNotification";
 export type { RawResponseItemCompletedNotification } from "./RawResponseItemCompletedNotification";
 export type { ReasoningEffortOption } from "./ReasoningEffortOption";
+export type { ReasoningEffortUpdatedNotification } from "./ReasoningEffortUpdatedNotification";
 export type { ReasoningSummaryPartAddedNotification } from "./ReasoningSummaryPartAddedNotification";
 export type { ReasoningSummaryTextDeltaNotification } from "./ReasoningSummaryTextDeltaNotification";
 export type { ReasoningTextDeltaNotification } from "./ReasoningTextDeltaNotification";
