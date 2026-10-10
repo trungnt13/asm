@@ -356,7 +356,10 @@ impl LocalAgentControl {
         {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
-        let mut environment_selections = self.runtime.registry.evicted_environments(thread_id);
+        let evicted_runtime_state = self.runtime.registry.evicted_runtime_state(thread_id);
+        let mut environment_selections = evicted_runtime_state
+            .as_ref()
+            .map(|state| state.environments.clone());
 
         let stored_thread = state
             .read_stored_thread(ReadThreadParams {
@@ -495,6 +498,14 @@ impl LocalAgentControl {
                 .map_err(CodexErr::InvalidRequest)?;
             }
         }
+        // Reload restores this child's runtime toggle, never the parent's current preference.
+        config.adaptive_reasoning.enabled = evicted_runtime_state
+            .as_ref()
+            .is_some_and(|state| state.adaptive_reasoning_enabled);
+        config.adaptive_reasoning_initial_revision = evicted_runtime_state.as_ref().map_or(
+            /*default*/ 0,
+            |state| state.adaptive_reasoning_revision,
+        );
         let parent_thread_id = owner_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id())
             .or(stored_parent_thread_id);
@@ -662,7 +673,7 @@ impl LocalAgentControl {
                     let residency_pin = runtime
                         .pin_v2_residency(&state, &reloaded_thread.thread)
                         .await?;
-                    runtime.registry.clear_evicted_environments(thread_id);
+                    runtime.registry.clear_evicted_runtime_state(thread_id);
                     residency_slot.commit(reloaded_thread.thread_id);
                     // Register before listeners can forward events from the resumed thread.
                     if let Some((client_metadata, source)) = subagent_analytics {
@@ -692,7 +703,7 @@ impl LocalAgentControl {
                     if let Some(parent_thread_id) = owner_thread_id {
                         self.validate_loaded_v2_child(&thread, parent_thread_id)?;
                     }
-                    self.runtime.registry.clear_evicted_environments(thread_id);
+                    self.runtime.registry.clear_evicted_runtime_state(thread_id);
                     drop(residency_slot);
                     return self.runtime.pin_v2_residency(&state, &thread).await;
                 }
@@ -703,11 +714,12 @@ impl LocalAgentControl {
 
     pub(super) async fn spawn_agent_internal(
         &self,
-        config: Config,
+        mut config: Config,
         initial_input: SpawnInitialInput,
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        config.adaptive_reasoning_initial_revision = 0;
         let membership = self.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
         let state = self.runtime.upgrade()?;
@@ -717,6 +729,17 @@ impl LocalAgentControl {
             .as_ref()
             .and_then(SessionSource::parent_thread_id)
             .or(options.parent_thread_id);
+        if let Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id, ..
+        })) = session_source.as_ref()
+        {
+            // Freeze the parent's live toggle after child role and model overrides.
+            // Later parent changes do not belong to this child's runtime state.
+            config.adaptive_reasoning.enabled = match state.get_thread(*parent_thread_id).await {
+                Ok(parent) => parent.config_snapshot().await.adaptive_reasoning_enabled,
+                Err(_) => false,
+            };
+        }
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
                 &InitialHistory::New,
