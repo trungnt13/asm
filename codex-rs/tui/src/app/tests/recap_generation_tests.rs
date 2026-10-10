@@ -110,6 +110,7 @@ stream_max_retries = 0
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         started,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,
