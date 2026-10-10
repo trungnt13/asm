@@ -511,8 +511,8 @@ consolidation_reasoning_effort = "high"
         ("decision_model_api_env = 'KEY-SECRET'", "ASCII environment"),
         ("decision_timeout_ms = 0", "between 1 and 5000"),
         ("decision_timeout_ms = 5001", "between 1 and 5000"),
-        ("max_context_bytes = 127", "between 128 and 8192"),
-        ("max_context_bytes = 8193", "between 128 and 8192"),
+        ("max_context_bytes = 127", "between 128 and 32768"),
+        ("max_context_bytes = 32769", "between 128 and 32768"),
         ("rubric_instructions = ''", "must not be blank"),
         ("rubric_instructions = '  '", "must not be blank"),
     ]
@@ -533,6 +533,10 @@ consolidation_reasoning_effort = "high"
         assert!(error.to_string().contains(expected), "{patch}: {error}");
     }
     let mut boundary = adaptive_config.adaptive_reasoning.clone();
+    for limit in [8193, 16384, 32768] {
+        boundary.max_context_bytes = limit;
+        boundary.validate().expect("larger context budget is valid");
+    }
     boundary.rubric_instructions = Some("é".repeat(/*n*/ 2048));
     boundary
         .validate()

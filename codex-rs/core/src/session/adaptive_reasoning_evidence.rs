@@ -20,12 +20,15 @@ impl AdaptiveEvidence {
         history: &[ResponseItemEnvelope],
         limit: usize,
     ) -> String {
+        // Keep scan work bounded, but let larger byte budgets reach more history and parts.
+        let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
+        let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
         let mut incoming = String::new();
         let mut encrypted_input = false;
-        for item in input.iter().take(/*n*/ 128) {
+        for item in input.iter().take(item_limit) {
             match item {
                 TurnInput::UserInput { content, .. } => {
-                    for item in content.iter().take(/*n*/ 32) {
+                    for item in content.iter().take(part_limit) {
                         if let UserInput::Text { text, .. } = item {
                             append_text(&mut incoming, text, limit / 3);
                         }
@@ -58,7 +61,7 @@ impl AdaptiveEvidence {
             }
         }
         if self.task.is_empty() {
-            for envelope in history.iter().rev().take(/*n*/ 128) {
+            for envelope in history.iter().rev().take(item_limit) {
                 if !envelope.metadata.as_ref().is_some_and(|metadata| {
                     metadata.user_input_order.is_some() && !metadata.compaction_output
                 }) {
@@ -67,7 +70,7 @@ impl AdaptiveEvidence {
                 if let ResponseItem::Message { role, content, .. } = &envelope.item
                     && role == "user"
                 {
-                    for item in content.iter().take(/*n*/ 32) {
+                    for item in content.iter().take(part_limit) {
                         if let ContentItem::InputText { text } = item {
                             append_text(&mut self.task, text, limit / 3);
                         }
@@ -86,7 +89,7 @@ impl AdaptiveEvidence {
             append_text(&mut text, &self.steer, limit * 2 / 3);
         }
         append_text(&mut text, "\nRecent evidence (newest first):\n", limit);
-        for envelope in history.iter().rev().take(/*n*/ 128) {
+        for envelope in history.iter().rev().take(item_limit) {
             if text.len() >= limit {
                 break;
             }
@@ -95,7 +98,7 @@ impl AdaptiveEvidence {
                 .as_ref()
                 .is_some_and(|metadata| metadata.compaction_output)
             {
-                append_item(&mut text, &envelope.item, limit);
+                append_item(&mut text, envelope, limit, part_limit);
             }
         }
         text
@@ -107,11 +110,26 @@ fn append_text(output: &mut String, text: &str, limit: usize) {
     output.push_str(&text[..text.floor_char_boundary(remaining.min(text.len()))]);
 }
 
-fn append_item(output: &mut String, item: &ResponseItem, limit: usize) {
-    match item {
-        ResponseItem::Message { role, content, .. } if role == "assistant" => {
+fn append_item(
+    output: &mut String,
+    envelope: &ResponseItemEnvelope,
+    limit: usize,
+    part_limit: usize,
+) {
+    match &envelope.item {
+        ResponseItem::Message { role, content, .. }
+            if role == "assistant"
+                || (role == "user"
+                    && envelope
+                        .metadata
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.user_input_order.is_some())) =>
+        {
             append_text(output, &format!("\n{role}: "), limit);
-            for content in content.iter().take(/*n*/ 32) {
+            for content in content.iter().take(part_limit) {
+                if output.len() >= limit {
+                    break;
+                }
                 if let ContentItem::InputText { text } | ContentItem::OutputText { text, .. } =
                     content
                 {
@@ -129,7 +147,10 @@ fn append_item(output: &mut String, item: &ResponseItem, limit: usize) {
             match &payload.body {
                 FunctionCallOutputBody::Text(text) => append_text(output, text, limit),
                 FunctionCallOutputBody::ContentItems(items) => {
-                    for item in items.iter().take(/*n*/ 32) {
+                    for item in items.iter().take(part_limit) {
+                        if output.len() >= limit {
+                            break;
+                        }
                         if let FunctionCallOutputContentItem::InputText { text } = item {
                             append_text(output, text, limit);
                         }

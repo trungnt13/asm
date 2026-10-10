@@ -31,7 +31,7 @@
         "max_context_bytes": {
           "default": 8192,
           "format": "uint",
-          "maximum": 8192.0,
+          "maximum": 32768.0,
           "minimum": 128.0,
           "type": "integer"
         },
