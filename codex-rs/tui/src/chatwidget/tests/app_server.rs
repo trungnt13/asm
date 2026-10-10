@@ -691,6 +691,12 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
 
     assert_eq!(chat.current_model(), "gpt-5.4");
     chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 1);
+    chat.handle_server_notification(
+        ServerNotification::ThreadSettingsUpdated(thread_settings_for_test("gpt-5.4", thread_id)),
+        Some(ReplayKind::ResumeInitialMessages),
+    );
+    assert!(chat.adaptive_reasoning_enabled());
     let effort = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
         thread_id: thread_id.to_string(),
         turn_id: "captured-turn".to_string(),
@@ -702,6 +708,8 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
         /*replay_kind*/ None,
     );
     let mut permissions_only = thread_settings_for_test("gpt-5.4", thread_id);
+    permissions_only.thread_settings.adaptive_reasoning_enabled = true;
+    permissions_only.thread_settings.adaptive_reasoning_revision = 1;
     permissions_only.thread_settings.approvals_reviewer =
         codex_app_server_protocol::ApprovalsReviewer::User;
     chat.handle_server_notification(

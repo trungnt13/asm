@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: "format!(\"{baseline_footer}\\n\\nCaptured adaptive step:\\n{adaptive_footer}\\n\\nApplied status:\\n{status}\")"
+expression: "format!(\"{baseline_footer}\\n\\nCaptured adaptive step:\\n{adaptive_footer}\\n\\nApplied status:\\n{status}\\n\\nMode transitions:\\n{transitions}\")"
 ---
 "                                                                                "
 "                                                                                "
@@ -19,3 +19,7 @@ Captured adaptive step:
 
 Applied status:
   Model:               gpt-5.2 (reasoning low (adaptive; baseline medium),
+
+Mode transitions:
+• Adaptive reasoning turned on.
+• Adaptive reasoning turned off.

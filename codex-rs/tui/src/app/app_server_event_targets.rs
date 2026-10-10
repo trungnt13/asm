@@ -375,6 +375,17 @@ mod tests {
         let target = server_notification_thread_target(&notification);
 
         assert_eq!(target, ServerNotificationThreadTarget::Thread(thread_id));
+        let mode = ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: true,
+                adaptive_reasoning_revision: 1,
+            },
+        );
+        assert_eq!(
+            server_notification_thread_target(&mode),
+            ServerNotificationThreadTarget::Thread(thread_id)
+        );
         let effort = ServerNotification::ReasoningEffortUpdated(
             codex_app_server_protocol::ReasoningEffortUpdatedNotification {
                 thread_id: thread_id.to_string(),

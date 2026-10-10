@@ -83,6 +83,8 @@ impl App {
                 // thread-scoped state from the currently active session.
                 session.collaboration_mode = None;
                 session.daybreak_enabled = false;
+                session.adaptive_reasoning_enabled = false;
+                session.adaptive_reasoning_revision = 0;
             }
             session
         } else {

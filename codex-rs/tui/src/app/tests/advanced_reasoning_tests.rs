@@ -80,6 +80,7 @@ async fn switching_from_ultra_thread_restores_configured_plan_effort() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(ultra_session),
             turns: Vec::new(),
@@ -92,6 +93,7 @@ async fn switching_from_ultra_thread_restores_configured_plan_effort() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(normal_session),
             turns: Vec::new(),

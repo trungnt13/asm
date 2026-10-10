@@ -4,4 +4,4 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(crate::
 ---
 › Ask ASM to do anything
 
-  55 def·/tmp/project        Plan mode
+  55 def·auto·/tmp/project   Plan mode

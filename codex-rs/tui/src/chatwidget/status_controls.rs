@@ -249,9 +249,22 @@ impl ChatWidget {
                         .as_ref()
                         .and_then(Option::as_ref)
                         .map_or("none", ReasoningEffortConfig::as_str);
-                    let source = if step.adaptive { "adaptive" } else { "step" };
+                    let source = if self.adaptive_reasoning_enabled() {
+                        "adaptive"
+                    } else {
+                        "step"
+                    };
                     format!("{effort} ({source}; baseline {baseline})")
                 });
+        let captured_reasoning_label = captured_reasoning_label.or_else(|| {
+            self.adaptive_reasoning_enabled().then(|| {
+                let effort = reasoning_effort_override
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .map_or("none", ReasoningEffortConfig::as_str);
+                format!("{effort} (adaptive; baseline {effort})")
+            })
+        });
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
             .rate_limit_snapshots_by_limit_id
             .values()

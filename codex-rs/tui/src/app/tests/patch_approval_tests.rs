@@ -300,6 +300,7 @@ async fn replayed_patch_approval_pager_recovers_stored_turn_changes() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(thread_id, cwd)),
             turns: vec![test_turn(
