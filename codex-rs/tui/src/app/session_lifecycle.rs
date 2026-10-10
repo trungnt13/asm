@@ -666,6 +666,19 @@ impl App {
                 &mut snapshot,
             )
             .await;
+        if snapshot.inferred_session && !session_verified {
+            if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
+                channel.receiver = Some(receiver);
+                channel.store.lock().await.active = false;
+            }
+            if let Some(previous_thread_id) = previous_thread_id {
+                self.activate_thread_channel(previous_thread_id).await;
+            }
+            self.add_agents_overview_error(format!(
+                "Failed to load settings for agent thread {thread_id}."
+            ));
+            return Ok(());
+        }
         if !is_replay_only
             && !self.side_threads.contains_key(&thread_id)
             && snapshot.session.as_ref().is_some_and(|session| {

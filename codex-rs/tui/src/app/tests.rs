@@ -3315,6 +3315,59 @@ async fn select_uncached_agent_thread_still_refreshes_liveness() -> Result<()> {
     assert_eq!(app.active_thread_id, None);
     assert_eq!(app.agent_navigation.get(&thread_id), None);
     app_server.shutdown().await?;
+    // A cached inferred child still requires an authoritative resume before selection.
+    let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
+    let (mut server, requests, proxy) =
+        session_lifecycle_requests::start_recording_app_server_with_history(
+            &app.config,
+            session_lifecycle_requests::HistoryCapabilities::ResumeFails,
+            /*blocked_thread_list*/ None,
+            /*failed_thread_name*/ None,
+            crate::app_server_session::ThreadParamsMode::Embedded,
+            LoaderOverrides::without_managed_config_for_tests(),
+        )
+        .await?;
+    let primary = server.start_thread(&app.config).await?;
+    let primary_id = primary.session.thread_id;
+    app.enqueue_primary_thread_session(primary.session, primary.turns)
+        .await?;
+    let child = server.start_thread(&app.config).await?;
+    let child_id = child.session.thread_id;
+    let channel =
+        ThreadEventChannel::new_with_session(/*capacity*/ 4, child.session, child.turns);
+    channel.store.lock().await.inferred_session = true;
+    app.thread_event_channels.insert(child_id, channel);
+    while events.try_recv().is_ok() {}
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, child_id)).await?;
+    assert_eq!(app.active_thread_id, Some(primary_id));
+    assert_eq!(app.chat_widget.thread_id(), Some(primary_id));
+    assert!(app.active_thread_rx.is_some());
+    let child_channel = app
+        .thread_event_channels
+        .get(&child_id)
+        .expect("child channel retained");
+    assert!(child_channel.receiver.is_some());
+    let child_store = child_channel.store.lock().await;
+    assert!(!child_store.active);
+    assert!(child_store.inferred_session);
+    drop(child_store);
+    let primary_store = app
+        .thread_event_channels
+        .get(&primary_id)
+        .expect("primary channel retained")
+        .store
+        .lock()
+        .await;
+    assert!(primary_store.active);
+    drop(primary_store);
+    assert_eq!(
+        session_lifecycle_requests::recorded_params(&requests, "thread/resume").len(),
+        1
+    );
+    let error = next_history_message(&mut events).replace(&child_id.to_string(), "CHILD");
+    assert_snapshot!(error, @"■ Failed to load settings for agent thread CHILD.");
+    server.shutdown().await?;
+    proxy.abort();
     Ok(())
 }
 
