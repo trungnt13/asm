@@ -313,6 +313,13 @@ pub(crate) struct AgentPickerThreadRefresh {
     pub(crate) archived_thread_ids: std::collections::HashSet<ThreadId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdaptiveReasoningAction {
+    Toggle,
+    Enable,
+    Disable,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
@@ -1265,6 +1272,11 @@ pub(crate) enum AppEvent {
 
     /// Update the current reasoning effort in the running app and widget.
     UpdateReasoningEffort(Option<ReasoningEffort>),
+
+    SetAdaptiveReasoning {
+        thread_id: ThreadId,
+        action: AdaptiveReasoningAction,
+    },
 
     /// Change Reserve effort only on the task that opened the picker, without saving defaults.
     UpdateLunaReserveReasoning {
