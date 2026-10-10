@@ -596,13 +596,15 @@ pub(crate) async fn run_turn(
                         .await;
                 }
                 can_drain_pending_input = true;
-                sess.adapt_reasoning(
-                    &turn_context,
-                    &[],
-                    codex_config::AdaptiveReasoningTrigger::ToolResult,
-                    &cancellation_token,
-                )
-                .await;
+                if model_needs_follow_up {
+                    sess.adapt_reasoning(
+                        &turn_context,
+                        &[],
+                        codex_config::AdaptiveReasoningTrigger::ToolResult,
+                        &cancellation_token,
+                    )
+                    .await;
+                }
                 // Process async hooks only after sampling and its tools have finished.
                 drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ false).await;
                 let (has_pending_input, token_status) = async {

@@ -33,8 +33,12 @@ impl AdaptiveEvidence {
         if !incoming.is_empty() {
             if self.task.is_empty() {
                 self.task = incoming;
-            } else if incoming != self.task {
-                self.steer = incoming;
+            } else {
+                self.steer = if incoming == self.task {
+                    String::new()
+                } else {
+                    incoming
+                };
             }
         }
         if self.task.is_empty() {
@@ -119,3 +123,7 @@ fn append_item(output: &mut String, item: &ResponseItem, limit: usize) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+#[path = "adaptive_reasoning_evidence_tests.rs"]
+mod tests;
