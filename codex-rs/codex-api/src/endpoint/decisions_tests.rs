@@ -200,15 +200,14 @@ async fn decisions_validates_credentials_and_requests_before_network() {
 
 #[tokio::test]
 async fn decisions_bounds_observed_response_bytes_including_chunked_bodies() {
+    // Keep the accepted 16 KiB budget independent of the implementation constant.
+    let response_limit = 16 * 1024;
     let answer =
         json!({"answers": [{"type": "choice", "name": "reasoning_effort", "choice": "low"}]})
             .to_string();
     for (limit, expected) in [
-        (MAX_RESPONSE_BYTES, Ok("low".to_string())),
-        (
-            MAX_RESPONSE_BYTES + 1,
-            Err(DecisionsError::ResponseTooLarge),
-        ),
+        (response_limit, Ok("low".to_string())),
+        (response_limit + 1, Err(DecisionsError::ResponseTooLarge)),
     ] {
         let server = MockServer::start().await;
         let body = format!("{answer}{}", " ".repeat(limit - answer.len()));
