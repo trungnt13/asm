@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .v2_all import AccountLoginCompletedNotification
 from .v2_all import AccountRateLimitsUpdatedNotification
 from .v2_all import AccountUpdatedNotification
+from .v2_all import AdaptiveReasoningUpdatedNotification
 from .v2_all import AgentMessageDeltaNotification
 from .v2_all import AppListUpdatedNotification
 from .v2_all import AuthRecoveryNotification
@@ -96,6 +97,7 @@ KnownNotificationPayload: TypeAlias = (
     AccountLoginCompletedNotification
     | AccountRateLimitsUpdatedNotification
     | AccountUpdatedNotification
+    | AdaptiveReasoningUpdatedNotification
     | AgentMessageDeltaNotification
     | AppListUpdatedNotification
     | AuthRecoveryNotification
@@ -226,6 +228,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "remoteControl/status/changed": RemoteControlStatusChangedNotification,
     "serverRequest/resolved": ServerRequestResolvedNotification,
     "skills/changed": SkillsChangedNotification,
+    "thread/adaptiveReasoningUpdated": AdaptiveReasoningUpdatedNotification,
     "thread/archived": ThreadArchivedNotification,
     "thread/attachment/updated": ThreadAttachmentUpdatedNotification,
     "thread/closed": ThreadClosedNotification,

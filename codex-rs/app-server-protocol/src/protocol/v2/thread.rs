@@ -186,6 +186,12 @@ pub struct MockExperimentalMethodResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadStartResponse {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -234,6 +240,9 @@ impl ThreadStartResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSettingsUpdateParams {
+    /// Changes only this live session. Omitted/null preserves the mode.
+    #[ts(optional = nullable)]
+    pub adaptive_reasoning_enabled: Option<bool>,
     pub thread_id: String,
     /// Replace this thread's disabled plugin IDs.
     /// Omitted/null preserves the list; [] clears it.
@@ -296,12 +305,25 @@ pub struct ThreadSettingsUpdateParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadSettingsUpdateResponse {}
+pub struct ThreadSettingsUpdateResponse {
+    /// Confirms runtime mode after a mode-only update; absent on older servers.
+    #[serde(default)]
+    pub adaptive_reasoning_enabled: Option<bool>,
+    /// Revision of the confirmed mode; absent on older servers.
+    #[serde(default)]
+    pub adaptive_reasoning_revision: Option<u64>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSettings {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
     /// Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
     #[serde(default)]
     pub disabled_plugin_ids: Vec<String>,
@@ -322,6 +344,17 @@ pub struct ThreadSettings {
     pub multi_agent_mode: MultiAgentMode,
     /// @deprecated Reports the saved setting; `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,
+}
+
+/// Reports an immediate runtime-mode change, before any subsequent model step.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AdaptiveReasoningUpdatedNotification {
+    pub thread_id: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -434,6 +467,12 @@ pub struct ThreadResumeParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadResumeResponse {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -639,6 +678,12 @@ pub struct ThreadForkParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadForkResponse {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,

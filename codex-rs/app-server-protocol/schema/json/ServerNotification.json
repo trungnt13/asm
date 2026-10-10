@@ -95,6 +95,28 @@
       ],
       "type": "object"
     },
+    "AdaptiveReasoningUpdatedNotification": {
+      "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
+      "properties": {
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "threadId"
+      ],
+      "type": "object"
+    },
     "AdditionalFileSystemPermissions": {
       "properties": {
         "entries": {
@@ -6154,6 +6176,18 @@
             }
           ]
         },
+        "adaptiveReasoningEnabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
@@ -7628,6 +7662,26 @@
         "params"
       ],
       "title": "Turn/reasoningEffortUpdatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/adaptiveReasoningUpdated"
+          ],
+          "title": "Thread/adaptiveReasoningUpdatedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/AdaptiveReasoningUpdatedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/adaptiveReasoningUpdatedNotification",
       "type": "object"
     },
     {

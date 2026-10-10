@@ -306,7 +306,7 @@ async fn next_step_waits_for_environment_publication_before_capturing() {
         ("next-step-model", Some(&next_cwd)),
     );
     // Explicit shutdown must join in-flight jobs without retaining their turn.
-    session.pause_adaptive_reasoning();
+    session.pause_adaptive_reasoning().await;
     let (job_lifetime, joined) = oneshot::channel::<()>();
     turn.extension_data
         .insert(Mutex::new(Some(PendingAdaptiveDecision {

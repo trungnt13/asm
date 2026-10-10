@@ -176,6 +176,8 @@ pub(crate) fn thread_settings_from_config_snapshot(
     config_snapshot: &ThreadConfigSnapshot,
 ) -> ThreadSettings {
     ThreadSettings {
+        adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+        adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
         disabled_plugin_ids: config_snapshot.disabled_plugin_ids.clone(),
         cwd: config_snapshot.cwd().clone(),
         approval_policy: config_snapshot.approval_policy.into(),

@@ -9,6 +9,7 @@ use crate::thread_state::resolve_server_request_on_thread_listener;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
 use codex_app_server_protocol::AccountRateLimitsUpdatedNotification;
+use codex_app_server_protocol::AdaptiveReasoningUpdatedNotification;
 use codex_app_server_protocol::AdditionalPermissionProfile as V2AdditionalPermissionProfile;
 use codex_app_server_protocol::AuthRecoveryNotification;
 use codex_app_server_protocol::CodexErrorInfo as V2CodexErrorInfo;
@@ -183,6 +184,17 @@ pub(crate) async fn apply_bespoke_event_handling(
             };
             outgoing
                 .send_server_notification(ServerNotification::TurnStarted(notification))
+                .await;
+        }
+        EventMsg::AdaptiveReasoningUpdated(payload) => {
+            outgoing
+                .send_server_notification(ServerNotification::AdaptiveReasoningUpdated(
+                    AdaptiveReasoningUpdatedNotification {
+                        thread_id: conversation_id.to_string(),
+                        enabled: payload.enabled,
+                        adaptive_reasoning_revision: payload.adaptive_reasoning_revision,
+                    },
+                ))
                 .await;
         }
         EventMsg::ReasoningEffortUpdated(payload) => {
@@ -3242,6 +3254,35 @@ mod tests {
                     .as_object()
                     .unwrap()
                     .contains_key("reasoningEffort")
+            );
+        }
+
+        for enabled in [false, true] {
+            apply_bespoke_event_handling(
+                Event {
+                    id: "mode-update".to_string(),
+                    msg: EventMsg::AdaptiveReasoningUpdated(
+                        codex_protocol::protocol::AdaptiveReasoningUpdatedEvent {
+                            enabled,
+                            adaptive_reasoning_revision: 0,
+                        },
+                    ),
+                },
+                conversation_id,
+                Arc::clone(&conversation),
+                Arc::clone(&thread_manager),
+                outgoing.clone(),
+                Arc::clone(&thread_state),
+                thread_watch_manager.clone(),
+            )
+            .await;
+            let notification = recv_broadcast_notification(&mut rx).await?;
+            assert_eq!(
+                serde_json::to_value(notification)?,
+                serde_json::json!({
+                    "method": "thread/adaptiveReasoningUpdated",
+                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "adaptiveReasoningRevision": 0},
+                })
             );
         }
 
