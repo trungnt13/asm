@@ -263,12 +263,13 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
 - Adapt ordinary root conversations only. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, saved defaults, subagents, and internal workers unchanged.
+- If fewer than two efforts remain, skip Decisions and warm-up; keep current effort.
 - Read credentials only from the named backend environment variable. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
 - If set, use `rubric_instructions` instead of the built-in rubric, without a suffix. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
 - Exclude images and encrypted reasoning. **P0 manual review:** bound evidence and instructions separately using the table limits. Both can exceed 1000 tokens. Keep each below the 10K-token item limit.
 - At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
 - Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
-- At turn start and after tool results, start decisions in the background. Skip unchanged evidence. Do not retry or await Decisions HTTP on the sampling path. Do not wait for a busy settings-publication permit.
+- At turn start and after tools that need another step, start decisions in the background. Skip unchanged evidence. Do not retry or await Decisions HTTP on the sampling path. Do not wait for a busy settings-publication permit.
 - Before request capture, apply only ready, current results within deadline. Otherwise, keep current effort. Results can apply to later uncaptured steps, not necessarily the initial step.
 - For missing credentials, unsupported models, cancellation, refusals, invalid answers, or request failure, keep current effort.
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
