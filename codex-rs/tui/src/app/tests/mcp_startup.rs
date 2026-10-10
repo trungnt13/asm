@@ -37,6 +37,7 @@ async fn subagent_mcp_startup_settles_while_cached_servers_remain_deferred() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 subagent_thread_id,
