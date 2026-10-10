@@ -469,6 +469,90 @@ consolidation_reasoning_effort = "high"
         }
     );
 
+    assert_eq!(
+        serde_json::to_value(&config.adaptive_reasoning).expect("serialize adaptive defaults"),
+        serde_json::json!({
+            "enabled": false,
+            "decision_model": "gpt-6-luna",
+            "decision_model_api_env": "OPENAI_API_KEY",
+            "min_effort": "low",
+            "max_effort": "max",
+            "decision_timeout_ms": 200,
+            "max_context_bytes": 8192,
+            "update_on": ["turn_start", "tool_result"],
+            "rubric_instructions": null,
+        })
+    );
+    let adaptive = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[adaptive_reasoning]\nenabled = true\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\n";
+    let adaptive_config = Config::load_from_base_config_with_overrides(
+        toml::from_str(adaptive).expect("adaptive settings should parse"),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("enabled adaptive settings should load with both features");
+    assert_eq!(
+        adaptive_config.adaptive_reasoning,
+        codex_config::AdaptiveReasoningConfig {
+            enabled: true,
+            min_effort: ReasoningEffort::Minimal,
+            max_effort: ReasoningEffort::High,
+            update_on: vec![codex_config::AdaptiveReasoningTrigger::ToolResult],
+            rubric_instructions: Some("Select effort using my policy.".to_string()),
+            ..config.adaptive_reasoning.clone()
+        }
+    );
+    for (patch, expected) in [
+        ("min_effort = 'ultra'", "ordinary levels"),
+        ("max_effort = 'persistent'", "ordinary levels"),
+        ("min_effort = 'high'\nmax_effort = 'low'", "must not exceed"),
+        ("decision_model = ' '", "must not be blank"),
+        ("decision_model_api_env = '9KEY'", "ASCII environment"),
+        ("decision_model_api_env = 'KEY-SECRET'", "ASCII environment"),
+        ("decision_timeout_ms = 0", "between 1 and 5000"),
+        ("decision_timeout_ms = 5001", "between 1 and 5000"),
+        ("max_context_bytes = 127", "between 128 and 8192"),
+        ("max_context_bytes = 8193", "between 128 and 8192"),
+        ("rubric_instructions = ''", "must not be blank"),
+        ("rubric_instructions = '  '", "must not be blank"),
+    ]
+    .into_iter()
+    .map(|(patch, expected)| (patch.to_string(), expected))
+    .chain([(
+        format!("rubric_instructions = '{}'", "é".repeat(/*n*/ 2049)),
+        "4096 UTF-8 bytes",
+    )]) {
+        let error = Config::load_from_base_config_with_overrides(
+            toml::from_str(&format!("[adaptive_reasoning]\n{patch}"))
+                .expect("invalid bounds still deserialize"),
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").abs(),
+        )
+        .await
+        .expect_err("invalid adaptive settings should fail config loading");
+        assert!(error.to_string().contains(expected), "{patch}: {error}");
+    }
+    let mut boundary = adaptive_config.adaptive_reasoning.clone();
+    boundary.rubric_instructions = Some("é".repeat(/*n*/ 2048));
+    boundary
+        .validate()
+        .expect("rubric instructions allow 4096 UTF-8 bytes");
+    for missing in ["reasoning_effort_override", "step_model_switching"] {
+        let error = Config::load_from_base_config_with_overrides(
+            toml::from_str(
+                &adaptive.replace(&format!("{missing} = true"), &format!("{missing} = false")),
+            )
+            .expect("feature settings should parse"),
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").abs(),
+        )
+        .await
+        .expect_err("adaptive reasoning requires both feature gates");
+        assert!(error.to_string().contains(
+            "requires features.reasoning_effort_override and features.step_model_switching"
+        ));
+    }
+
     let legacy_memories_cfg =
         toml::from_str::<ConfigToml>("[memories]\nno_memories_if_mcp_or_web_search = true\n")
             .expect("legacy memories TOML should deserialize");

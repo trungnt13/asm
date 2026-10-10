@@ -1,3 +1,4 @@
+mod adaptive_reasoning;
 mod application_requirements;
 mod auth_policy;
 mod auto_rename;
@@ -52,6 +53,8 @@ pub mod types;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 
+pub use adaptive_reasoning::AdaptiveReasoningConfig;
+pub use adaptive_reasoning::AdaptiveReasoningTrigger;
 pub use application_requirements::ApplicationNetworkRequirementsToml;
 pub use application_requirements::ApplicationRequirementsToml;
 pub use auth_policy::ManagedAuthPolicy;

@@ -297,6 +297,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
+    sess.stop_adaptive_reasoning().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();
@@ -606,12 +607,18 @@ pub(super) async fn submission_loop(
                     reply,
                 } => {
                     let _settings_guard = thread_settings::acquire_persistence_lock(&sess).await;
+                    let manual_reasoning = thread_settings.model.is_some()
+                        || thread_settings.effort.is_some()
+                        || thread_settings.collaboration_mode.is_some();
                     let thread_settings = WithTurnExtensionData {
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
                     };
                     match thread_settings::update(&sess, thread_settings).await {
                         Ok(snapshot) => {
+                            if manual_reasoning {
+                                sess.pause_adaptive_reasoning();
+                            }
                             // Reply first: the caller may hold a lock its event consumer needs.
                             if let Some(reply) = reply {
                                 let _ = reply.send(Ok(()));

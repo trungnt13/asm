@@ -157,6 +157,8 @@ maplit = { workspace = true }
 opentelemetry = { workspace = true }
 predicates = { workspace = true }
 pretty_assertions = { workspace = true }
+rcgen = { workspace = true }
+reqwest = { workspace = true }
 test-case = "3.3.1"
 opentelemetry_sdk = { workspace = true, features = [
     "experimental_metrics_custom_reader",
@@ -168,6 +170,7 @@ test-log = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-test = { workspace = true, features = ["no-env-filter"] }
+tokio-rustls = { workspace = true }
 walkdir = { workspace = true }
 wiremock = { workspace = true }
 zstd = { workspace = true }

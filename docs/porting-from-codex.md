@@ -247,6 +247,37 @@ Keep direct user-facing errors and warnings, exit status, structured protocol ev
 
 The built-in Statsig metrics exporter is inactive in ASM, including optimized releases and account-change reloads. Retain its config spelling for compatibility and default `otel.metrics_exporter` to `none`. Preserve explicitly configured OTLP collectors. Local `runtime_metrics` remains opt-in and uses a manual reader without a reporting timer or network exporter when no exporter is configured. Do not perform the unsolicited session-storage size telemetry scan. Upstream tests do not validate these fork-specific disabled paths; use focused existing checks rather than broad upstream retesting.
 
+### Adaptive reasoning
+
+Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
+
+| Setting | Default | Validation |
+| --- | --- | --- |
+| `enabled` | `false` | Opt-in only |
+| `decision_model` | `"gpt-6-luna"` | Nonblank |
+| `decision_model_api_env` | `"OPENAI_API_KEY"` | ASCII environment-variable identifier, not a secret |
+| `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
+| `decision_timeout_ms` | `200` | 1–5000 ms |
+| `max_context_bytes` | `8192` | 128–8192 UTF-8 bytes |
+| `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
+| `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
+
+- Adapt ordinary root conversations only. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, saved defaults, subagents, and internal workers unchanged.
+- If fewer than two efforts remain, skip Decisions and warm-up; keep current effort.
+- Read credentials only from the named backend environment variable. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
+- If set, use `rubric_instructions` instead of the built-in rubric, without a suffix. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
+- Exclude images and encrypted reasoning. **P0 manual review:** bound evidence and instructions separately using the table limits. Both can exceed 1000 tokens. Keep each below the 10K-token item limit.
+- At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
+- Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
+- Before each main step with an enabled trigger, collect current evidence and await Decisions and validation. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit.
+- Publish a current result within its original deadline through live next-step settings. Keep captured requests unchanged. Later evidence invalidates pending decisions, not already applied settings.
+- For missing credentials, unsupported models, cancellation, refusals, invalid answers, request failure, or timeout, keep current effort. A Decisions failure must not stop the main step.
+- On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
+- Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
+- After successful explicit model or effort changes, pause adaptation for this backend session. For ordinary turn-start baseline fields, do not pause. Do not add public protocol fields, Desktop controls, or persistent pause records.
+- Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
+- Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance separately from mock checks before making claims.
+
 ### TUI automatic session names
 
 `[auto_rename]` controls automatic naming in the TUI only. It does not change Desktop naming, the conversation model, stored history, or `/rename` suggestions. Defaults remain enabled, first user message, user-message context, one-time naming, 36 title characters, and a 960-byte initial prompt. Automatic naming prefers `gpt-6-luna` at low effort only with OpenAI, a ChatGPT account, and an available catalog entry; otherwise use the conversation model. Manual `/rename` suggestions retain their upstream model selection.

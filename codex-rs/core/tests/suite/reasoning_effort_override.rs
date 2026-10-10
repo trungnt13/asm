@@ -610,6 +610,8 @@ async fn reasoning_effort_override_preserves_prefix_and_only_appends_on_change(
     use_responses_lite: bool,
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
+    let credential_env = "CODEX_TEST_ADAPTIVE_REASONING_UNSET_KEY";
+    assert!(std::env::var_os(credential_env).is_none());
     let server = responses::start_mock_server().await;
     let mut mocks = Vec::new();
     for id in ["first", "changed", "unchanged", "lowered"] {
@@ -621,6 +623,11 @@ async fn reasoning_effort_override_preserves_prefix_and_only_appends_on_change(
     let test = override_builder()
         .with_model_info_override("gpt-5.4", move |model| {
             model.use_responses_lite = use_responses_lite;
+        })
+        .with_config(move |config| {
+            config.features.enable(Feature::StepModelSwitching).unwrap();
+            config.adaptive_reasoning.enabled = true;
+            config.adaptive_reasoning.decision_model_api_env = credential_env.to_string();
         })
         .build_with_auto_env(&server)
         .await?;

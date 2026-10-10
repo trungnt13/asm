@@ -6,6 +6,75 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AdaptiveReasoningConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_model": {
+          "default": "gpt-6-luna",
+          "type": "string"
+        },
+        "decision_model_api_env": {
+          "default": "OPENAI_API_KEY",
+          "type": "string"
+        },
+        "decision_timeout_ms": {
+          "default": 200,
+          "format": "uint64",
+          "maximum": 5000.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "max_context_bytes": {
+          "default": 8192,
+          "format": "uint",
+          "maximum": 8192.0,
+          "minimum": 128.0,
+          "type": "integer"
+        },
+        "max_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "max"
+        },
+        "min_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "low"
+        },
+        "rubric_instructions": {
+          "default": null,
+          "type": "string"
+        },
+        "update_on": {
+          "default": [
+            "turn_start",
+            "tool_result"
+          ],
+          "items": {
+            "$ref": "#/definitions/AdaptiveReasoningTrigger"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "AdaptiveReasoningTrigger": {
+      "enum": [
+        "turn_start",
+        "tool_result"
+      ],
+      "type": "string"
+    },
     "AgentRoleToml": {
       "additionalProperties": false,
       "properties": {
@@ -6967,6 +7036,9 @@
   },
   "description": "Base config deserialized from ~/.codex/config.toml.",
   "properties": {
+    "adaptive_reasoning": {
+      "$ref": "#/definitions/AdaptiveReasoningConfig"
+    },
     "agents": {
       "allOf": [
         {
