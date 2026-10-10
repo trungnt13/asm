@@ -939,6 +939,68 @@ async fn esc_interrupt_sends_all_pending_steers_immediately_and_keeps_existing_d
             .iter()
             .any(|cell| lines_to_single_string(cell).contains("second pending steer"))
     );
+
+    // A completion drained during navigation must retain its retry in the source widget.
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let source_thread_id = ThreadId::new();
+    chat.thread_id = Some(source_thread_id);
+    chat.on_task_started();
+    let history_record = UserMessageHistoryRecord::Override(UserMessageHistoryOverride {
+        text: "Deferred steer history".to_string(),
+        text_elements: Vec::new(),
+    });
+    chat.input_queue.pending_steers.push_back(PendingSteer {
+        history_record: history_record.clone(),
+        ..pending_steer("Deferred steer payload")
+    });
+    chat.input_queue
+        .queued_user_messages
+        .push_back(UserMessage::from("queued draft").into());
+    chat.input_queue
+        .queued_user_message_history_records
+        .push_back(UserMessageHistoryRecord::UserMessageText);
+    chat.input_queue.submit_pending_steers_after_interrupt = true;
+    chat.set_thread_switch_pending(/*pending*/ true);
+    chat.on_interrupted_turn(TurnAbortReason::Interrupted);
+
+    assert_no_submit_op(&mut op_rx);
+    assert!(chat.input_queue.pending_steers.is_empty());
+    assert_eq!(
+        chat.queued_user_message_texts(),
+        vec!["Deferred steer payload", "queued draft"]
+    );
+    assert_eq!(
+        chat.input_queue.queued_user_message_history_records,
+        VecDeque::from([history_record, UserMessageHistoryRecord::UserMessageText])
+    );
+    assert!(!chat.maybe_send_next_queued_input());
+    assert_no_submit_op(&mut op_rx);
+
+    chat.set_thread_switch_pending(/*pending*/ false);
+    assert!(chat.maybe_send_next_queued_input());
+    assert_eq!(chat.thread_id, Some(source_thread_id));
+    assert_eq!(chat.queued_user_message_texts(), vec!["queued draft"]);
+    assert_eq!(
+        chat.input_queue.queued_user_message_history_records,
+        VecDeque::from([UserMessageHistoryRecord::UserMessageText])
+    );
+    match next_submit_op(&mut op_rx) {
+        Op::UserTurn { items, .. } => assert_eq!(
+            items,
+            vec![UserInput::Text {
+                text: "Deferred steer payload".to_string(),
+                text_elements: Vec::new(),
+            }]
+        ),
+        other => panic!("expected deferred steer submission, got {other:?}"),
+    }
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+            event,
+            AppEvent::AppendMessageHistoryEntry { thread_id, text }
+                if thread_id == source_thread_id && text == "Deferred steer history"
+        ))
+    );
 }
 
 #[tokio::test]

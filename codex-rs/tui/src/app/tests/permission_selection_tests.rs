@@ -1,16 +1,64 @@
 //! Permission selection through the existing app-server settings API.
 
+use super::session_lifecycle_requests::HistoryCapabilities;
+use super::session_lifecycle_requests::RealtimeRequestBehavior;
+use super::session_lifecycle_requests::TurnStartBehavior;
+use super::session_lifecycle_requests::recorded_params;
+use super::session_lifecycle_requests::start_recording_app_server_with_realtime_speech;
 use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let mut server = start_config_write_test_app_server(&app).await?;
-    let started = server.start_thread(&app.config).await?;
-    let thread_id = started.session.thread_id;
+    app.config.ephemeral = false;
+    let thread_id = ThreadId::from_string(
+        &app_test_support::create_fake_rollout(
+            app.config.codex_home.as_path(),
+            "2025-01-05T12-00-00",
+            "2025-01-05T12:00:00Z",
+            "Keep the parent's saved permission context",
+            Some(app.config.model_provider_id.as_str()),
+            /*git_info*/ None,
+        )
+        .expect("saved parent rollout"),
+    )?;
+    let (mut server, requests, proxy) = start_recording_app_server_with_realtime_speech(
+        &app.config,
+        HistoryCapabilities::Current,
+        /*blocked_thread_list*/ None,
+        /*failed_thread_name*/ None,
+        crate::app_server_session::ThreadParamsMode::Embedded,
+        RealtimeRequestBehavior::Forward,
+        TurnStartBehavior::Accept,
+        codex_config::LoaderOverrides::without_managed_config_for_tests(),
+    )
+    .await?;
+    server = server.with_side_conversations(&app.config.codex_home, &app.app_server_target);
+    let started = server
+        .resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            thread_id,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+        )
+        .await?;
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    Box::pin(app.start_companion_conversation(
+        &mut tui,
+        &mut server,
+        thread_id,
+        CompanionKind::Parallel,
+        crate::app_event::SideConversationMode::Side,
+        /*user_message*/ None,
+    ))
+    .await?;
+    let parallel_id = app.current_displayed_thread_id().expect("saved Parallel");
+    assert_ne!(parallel_id, thread_id);
+    let parallel_permissions = app.chat_widget.config_ref().permissions.clone();
+    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
     // A previously selected custom profile may have left a profile-specific proxy cached.
     let home = tempdir()?;
     std::fs::write(
@@ -96,7 +144,42 @@ proxy_url = "http://127.0.0.1:43128"
         app.runtime_permission_profile_override,
         Some(RuntimePermissionProfileOverride::from_config(&app.config))
     );
+    app.chat_widget.handle_server_notification(
+        turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
+        /*replay_kind*/ None,
+    );
+    // The matching explicit choice still reaches main's next turn.
+    for (target, expected_permissions) in [(thread_id, Some(profile_id)), (parallel_id, None)] {
+        if target == parallel_id {
+            Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+            assert_eq!(
+                app.chat_widget
+                    .config_ref()
+                    .permissions
+                    .permission_profile(),
+                parallel_permissions.permission_profile(),
+            );
+        }
+        while events.try_recv().is_ok() {}
+        let _ = app.chat_widget.submit_user_message_as_plain_user_turn(
+            crate::chatwidget::UserMessage::from("preserve this thread's permissions"),
+        );
+        while let Ok(event) = events.try_recv() {
+            Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+        }
+        let request = recorded_params(&requests, "turn/start")
+            .pop()
+            .expect("permission-preserving turn/start");
+        assert_eq!(
+            (request["threadId"].clone(), request["permissions"].clone()),
+            (
+                serde_json::json!(target.to_string()),
+                serde_json::json!(expected_permissions),
+            ),
+        );
+    }
     server.shutdown().await?;
+    proxy.await??;
     Ok(())
 }
 
@@ -269,8 +352,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     }))?]).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     while events.try_recv().is_ok() {}
-    app.change_working_directory(&mut tui, &mut server, client_home.path().abs())
-        .await;
+    Box::pin(app.change_working_directory(&mut tui, &mut server, client_home.path().abs())).await;
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     insta::assert_snapshot!(next_history_message(&mut events), @"■ Changing directories with an unconfirmed named profile is not supported.");
     let side = server
@@ -297,11 +379,11 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     // Both the accepted request and its confirmed descendant remain server-owned.
     for _ in 0..2 {
         let previous_thread_id = app.chat_widget.thread_id();
-        app.handle_event(
+        Box::pin(app.handle_event(
             &mut tui,
             &mut server,
             AppEvent::ForkCurrentSession { name: None },
-        )
+        ))
         .await?;
         assert_ne!(app.chat_widget.thread_id(), previous_thread_id);
         assert_eq!(

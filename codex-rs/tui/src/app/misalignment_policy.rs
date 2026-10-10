@@ -136,6 +136,7 @@ impl App {
                 .as_ref()
                 .filter(|profile| {
                     profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
+                        && profile.matches_config(config)
                 });
         let permissions_override = Self::turn_permissions_override_from_config(
             config,

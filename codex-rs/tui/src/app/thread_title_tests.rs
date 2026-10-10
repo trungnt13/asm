@@ -302,6 +302,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         started,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,
@@ -675,6 +676,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         started.turns.push(historical_turn);
         Box::pin(restored.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &app_server,
             started,
             ThreadAttachPresentation::SessionLineage,
             /*initial_user_message*/ None,
@@ -796,6 +798,95 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         Some("Updated title".to_string())
     );
     std::fs::remove_dir(app.automatic_title_record_path(thread_id))?;
+    app_server.shutdown().await?;
+
+    // Foreground and switch drains share the same interval and deduplication rules.
+    let mut app = make_test_app().await;
+    app.local_settings.auto_rename.enabled = true;
+    app.local_settings.auto_rename.auto_update = true;
+    app.local_settings.auto_rename.auto_update_interval_turns =
+        std::num::NonZeroUsize::new(/*n*/ 3).expect("positive interval");
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let started = app_server.start_thread(&app.config).await?;
+    let thread_id = started.session.thread_id;
+    app.enqueue_primary_thread_session(started.session, started.turns)
+        .await?;
+    app.save_automatic_thread_title(
+        &mut app_server,
+        thread_id,
+        "Owned title".to_string(),
+        Default::default(),
+    )
+    .await;
+    let second = app_server.start_thread(&app.config).await?;
+    let second_id = second.session.thread_id;
+    app.ensure_thread_channel(second_id)
+        .store
+        .lock()
+        .await
+        .set_session(second.session, second.turns);
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    for (turn_id, switch) in [("foreground-drain", false), ("switch-drain", true)] {
+        let completion = title_completion_event(
+            &mut app,
+            thread_id,
+            turn_id,
+            TurnStatus::Completed,
+            Some("Keep this user's completion"),
+        )
+        .await?;
+        let ThreadBufferedEvent::Notification(notification) = completion else {
+            unreachable!()
+        };
+        app.enqueue_thread_notification(thread_id, *notification)
+            .await?;
+        if switch {
+            Box::pin(app.select_agent_thread(&mut tui, &mut app_server, second_id)).await?;
+        } else {
+            app.drain_active_thread_events(&mut tui, &app_server)
+                .await?;
+        }
+        assert!(
+            app.automatic_thread_titles[&thread_id]
+                .completed_turns
+                .contains(turn_id)
+        );
+        assert!(app.pending_thread_titles.is_empty());
+    }
+    Box::pin(app.select_agent_thread(&mut tui, &mut app_server, thread_id)).await?;
+    // Replaying a counted completion must not consume another interval slot.
+    for turn_id in ["switch-drain", "third-completion"] {
+        let completion = title_completion_event(
+            &mut app,
+            thread_id,
+            turn_id,
+            TurnStatus::Completed,
+            Some("Next naming context"),
+        )
+        .await?;
+        let ThreadBufferedEvent::Notification(notification) = completion else {
+            unreachable!()
+        };
+        app.enqueue_thread_notification(thread_id, *notification)
+            .await?;
+        if turn_id == "third-completion" {
+            Box::pin(app.select_agent_thread(&mut tui, &mut app_server, second_id)).await?;
+        } else {
+            app.drain_active_thread_events(&mut tui, &app_server)
+                .await?;
+        }
+        assert_eq!(
+            app.pending_thread_titles
+                .contains_key(&(thread_id, ThreadTitleDestination::Automatic)),
+            turn_id == "third-completion",
+        );
+    }
+    assert!(
+        !app.pending_thread_titles
+            .keys()
+            .any(|(id, _)| *id == second_id)
+    );
+    app.stop_automatic_thread_titles(thread_id);
     app_server.shutdown().await?;
     Ok(())
 }
@@ -1067,6 +1158,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     let thread_id = started.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         started,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,
@@ -1292,6 +1384,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                             let second = app_server.start_thread(&app.config).await?;
                             app.replace_chat_widget_with_app_server_thread(
                                 &mut tui,
+                                &app_server,
                                 second,
                                 ThreadAttachPresentation::SessionLineage,
                                 /*initial_user_message*/ None,
