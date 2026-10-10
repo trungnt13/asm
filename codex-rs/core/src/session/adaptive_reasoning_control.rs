@@ -2,7 +2,7 @@ use super::AdaptiveReasoningState;
 use super::AdaptiveSession;
 use super::ORDINARY_EFFORTS;
 use super::allowed_efforts;
-use super::root_user_session;
+use super::ordinary_agent_session;
 use crate::session::session::Session;
 use codex_features::Feature;
 use codex_protocol::error::CodexErr;
@@ -95,7 +95,7 @@ impl Session {
                         .reasoning_effort(),
                 )
             };
-            if !root_user_session(&source, thread_source.as_ref()) {
+            if !ordinary_agent_session(&source, thread_source.as_ref()) {
                 return Err(CodexErr::InvalidRequest(
                     "adaptive reasoning is unavailable for internal worker sessions".to_string(),
                 ));

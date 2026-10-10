@@ -9,6 +9,7 @@ use codex_protocol::user_input::UserInput;
 #[derive(Default)]
 pub(super) struct AdaptiveEvidence {
     pub(super) task: String,
+    pub(super) encrypted_task_unavailable: bool,
     steer: String,
 }
 
@@ -20,16 +21,32 @@ impl AdaptiveEvidence {
         limit: usize,
     ) -> String {
         let mut incoming = String::new();
+        let mut encrypted_input = false;
         for item in input.iter().take(/*n*/ 128) {
-            if let TurnInput::UserInput { content, .. } = item {
-                for item in content.iter().take(/*n*/ 32) {
-                    if let UserInput::Text { text, .. } = item {
-                        append_text(&mut incoming, text, limit / 3);
+            match item {
+                TurnInput::UserInput { content, .. } => {
+                    for item in content.iter().take(/*n*/ 32) {
+                        if let UserInput::Text { text, .. } = item {
+                            append_text(&mut incoming, text, limit / 3);
+                        }
                     }
                 }
+                TurnInput::InterAgentCommunication(communication) => {
+                    // Assigned tasks and steering are untrusted text, not message metadata.
+                    if communication.encrypted_content.is_none() {
+                        append_text(&mut incoming, &communication.content, limit / 3);
+                    } else {
+                        encrypted_input = true;
+                        self.encrypted_task_unavailable = true;
+                    }
+                }
+                TurnInput::FunctionCallOutput(_) | TurnInput::ResponseItem(_) => {}
             }
         }
         if !incoming.is_empty() {
+            if !encrypted_input {
+                self.encrypted_task_unavailable = false;
+            }
             if self.task.is_empty() {
                 self.task = incoming;
             } else {
