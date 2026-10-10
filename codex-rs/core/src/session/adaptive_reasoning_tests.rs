@@ -1147,7 +1147,7 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
         ],
     )
     .await;
-    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+    let (session, mut turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
         config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
         config.model_provider.supports_websockets = false;
         config.update_plan_enabled = true;
@@ -1157,15 +1157,73 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
     })
     .await;
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    let mut input = user_task("Check a harmless arithmetic result.");
-    let TurnInput::UserInput { metadata, .. } = &mut input[0] else {
-        unreachable!("accepted user task")
-    };
-    metadata.acceptance_order = Some(session.reserve_user_input_order().await);
-    session
-        .spawn_task(Arc::clone(&turn), input, RegularTask::new())
+    let task = "Check a harmless arithmetic result.";
+    if scenario == "success" {
+        use codex_protocol::AgentPath;
+        use codex_protocol::ThreadId;
+        use codex_protocol::protocol::InterAgentCommunication;
+        use codex_protocol::protocol::SubAgentSource;
+        let parent_id = ThreadId::new();
+        let child_path = AgentPath::root().join("worker").unwrap();
+        let source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: parent_id,
+            depth: 1,
+            agent_path: Some(child_path.clone()),
+            agent_nickname: Some("worker".to_string()),
+            agent_role: None,
+        });
+        {
+            let mut state = session.state.lock().await;
+            state.session_configuration.session_source = source.clone();
+            state.session_configuration.thread_source = Some(ThreadSource::Subagent);
+            state.session_configuration.parent_thread_id = Some(parent_id);
+        }
+        crate::session::handlers::inter_agent_communication(
+            &session,
+            turn.sub_id.clone(),
+            InterAgentCommunication::new(
+                AgentPath::root(),
+                child_path,
+                Vec::new(),
+                task.to_string(),
+                /*trigger_turn*/ true,
+            ),
+            Default::default(),
+        )
         .await;
+        turn = session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .task
+            .as_ref()
+            .unwrap()
+            .turn_context
+            .clone();
+        assert_eq!(
+            (&turn.session_source, turn.parent_thread_id),
+            (&source, Some(parent_id))
+        );
+    } else {
+        let mut input = user_task(task);
+        let TurnInput::UserInput { metadata, .. } = &mut input[0] else {
+            unreachable!("accepted user task")
+        };
+        metadata.acceptance_order = Some(session.reserve_user_input_order().await);
+        session
+            .spawn_task(Arc::clone(&turn), input, RegularTask::new())
+            .await;
+    }
     let first = proxy.request().await;
+    assert!(
+        first.body["input"][0]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(task),
+        "the real Decisions request contains this accepted task before main inference"
+    );
     tokio::time::sleep(Duration::from_millis(/*millis*/ 100)).await;
     assert!(
         requests.requests().is_empty(),
@@ -1308,6 +1366,20 @@ async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
         vec![json!("high"), json!("high")]
     );
     let first_input = requests[0].input();
+    if scenario == "success" {
+        let mail = first_input
+            .iter()
+            .find(|item| item["type"] == "agent_message")
+            .expect("actual mailbox delivery is present in the primary request");
+        assert_eq!(
+            (&mail["author"], &mail["recipient"], &mail["content"]),
+            (
+                &json!("/root"),
+                &json!("/root/worker"),
+                &json!([{"type":"input_text", "text": task}])
+            )
+        );
+    }
     let second_input = requests[1].input();
     assert_eq!(&second_input[..first_input.len()], first_input.as_slice());
     assert_eq!(
