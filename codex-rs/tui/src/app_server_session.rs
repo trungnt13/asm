@@ -1402,12 +1402,37 @@ impl AppServerSession {
             .wrap_err("thread/metadata/update failed while syncing git branch")
     }
 
+    #[tracing::instrument(skip_all)]
     pub(crate) async fn thread_settings_update(
         &mut self,
         params: ThreadSettingsUpdateParams,
     ) -> Result<bool> {
+        Ok(self.request_thread_settings_update(params).await?.is_some())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn adaptive_reasoning_update(
+        &mut self,
+        params: ThreadSettingsUpdateParams,
+    ) -> Result<Option<u64>> {
+        let requested = params.adaptive_reasoning_enabled;
+        Ok(self
+            .request_thread_settings_update(params)
+            .await?
+            .and_then(|response| {
+                (requested.is_some() && response.adaptive_reasoning_enabled == requested)
+                    .then_some(response.adaptive_reasoning_revision)
+                    .flatten()
+            }))
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn request_thread_settings_update(
+        &mut self,
+        params: ThreadSettingsUpdateParams,
+    ) -> Result<Option<ThreadSettingsUpdateResponse>> {
         if !self.thread_settings_update_supported {
-            return Ok(false);
+            return Ok(None);
         }
         let request_id = self.next_request_id();
         match self
@@ -1418,7 +1443,7 @@ impl AppServerSession {
             })
             .await
         {
-            Ok(_) => Ok(true),
+            Ok(response) => Ok(Some(response)),
             Err(TypedRequestError::Server { source, .. })
                 if is_thread_settings_update_unsupported(&source) =>
             {
@@ -1428,7 +1453,7 @@ impl AppServerSession {
                 // downgrade so local TUI setting changes stay best-effort instead
                 // of showing an error every time the user changes model, effort, or mode.
                 self.thread_settings_update_supported = false;
-                Ok(false)
+                Ok(None)
             }
             Err(err) => Err(err).wrap_err("thread/settings/update failed in TUI"),
         }
@@ -4261,7 +4286,7 @@ mod tests {
         let forked_from_id = ThreadId::new();
         let read_only_profile = PermissionProfile::read_only();
         let response = ThreadResumeResponse {
-            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_enabled: true,
             adaptive_reasoning_revision: 0,
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
@@ -4367,6 +4392,7 @@ mod tests {
         .await
         .expect("resume response should map");
         assert_eq!(started.session.forked_from_id, Some(forked_from_id));
+        assert!(started.session.adaptive_reasoning_enabled);
         assert_eq!(
             started.session.runtime_workspace_roots,
             response.runtime_workspace_roots
@@ -4384,6 +4410,7 @@ mod tests {
         let (mut chat, _sender, _events, mut commands) =
             crate::chatwidget::tests::helpers::make_chatwidget_manual_with_sender().await;
         chat.handle_thread_session(started.session);
+        assert!(chat.adaptive_reasoning_enabled());
         insta::assert_snapshot!(
             "resumed_plan_mode",
             crate::chatwidget::tests::helpers::normalize_snapshot_paths(

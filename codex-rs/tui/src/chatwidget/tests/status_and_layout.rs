@@ -4181,7 +4181,7 @@ async fn terminal_title_model_updates_on_model_change_without_manual_refresh() {
 
 #[tokio::test]
 async fn status_line_and_terminal_title_reasoning_render_only_effort() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.local_settings.tui.status_line = Some(vec!["reasoning".to_string()]);
     chat.local_settings.tui.terminal_title = Some(vec!["reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
@@ -4196,6 +4196,17 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: true,
+                adaptive_reasoning_revision: 1,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("xhi·auto".to_string()));
     let notification = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
         thread_id: thread_id.to_string(),
         turn_id: "captured-turn".to_string(),
@@ -4237,7 +4248,17 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
         ServerNotification::ReasoningEffortUpdated(notification.clone()),
         /*replay_kind*/ None,
     );
-    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
+    assert_eq!(status_line_text(&chat), Some("hig·auto".to_string()));
+    chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: false,
+                adaptive_reasoning_revision: 2,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
     chat.handle_server_notification(
         ServerNotification::ReasoningEffortUpdated(notification.clone()),
         Some(ReplayKind::ResumeInitialMessages),
@@ -4274,6 +4295,17 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
     );
     assert_eq!(status_line_text(&chat), Some("hig".to_string()));
     chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: true,
+                adaptive_reasoning_revision: 3,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(status_line_text(&chat), Some("hig·auto".to_string()));
+    chat.handle_server_notification(
         ServerNotification::ReasoningEffortUpdated(
             codex_app_server_protocol::ReasoningEffortUpdatedNotification {
                 turn_id: "next-turn".to_string(),
@@ -4285,7 +4317,79 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
     );
     assert_eq!(status_line_text(&chat), Some("def·auto".to_string()));
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::Ultra));
+    chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: false,
+                adaptive_reasoning_revision: 4,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
     assert_eq!(status_line_text(&chat), Some("ult".to_string()));
+    // Confirmed commands set the latest display without announcing transitions.
+    drain_insert_history(&mut rx);
+    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 5);
+    chat.set_adaptive_reasoning_enabled(/*enabled*/ false, /*revision*/ 6);
+    assert!(drain_insert_history(&mut rx).is_empty());
+    for (enabled, revision) in [(true, 5), (false, 6), (true, 5), (false, 6)] {
+        chat.handle_server_notification(
+            ServerNotification::AdaptiveReasoningUpdated(
+                codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                    thread_id: thread_id.to_string(),
+                    enabled,
+                    adaptive_reasoning_revision: revision,
+                },
+            ),
+            /*replay_kind*/ None,
+        );
+        assert!(!chat.adaptive_reasoning_enabled());
+    }
+    let transitions = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .filter(|line| line.contains("Adaptive reasoning turned"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transitions,
+        vec![
+            "• Adaptive reasoning turned on.",
+            "• Adaptive reasoning turned off."
+        ]
+    );
+    // An ACK can overtake both a manual-off event and the subsequent on event.
+    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 7);
+    chat.announce_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 7);
+    drain_insert_history(&mut rx);
+    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 9);
+    for (enabled, revision) in [(false, 8), (true, 9)] {
+        chat.handle_server_notification(
+            ServerNotification::AdaptiveReasoningUpdated(
+                codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                    thread_id: thread_id.to_string(),
+                    enabled,
+                    adaptive_reasoning_revision: revision,
+                },
+            ),
+            /*replay_kind*/ None,
+        );
+        assert!(chat.adaptive_reasoning_enabled());
+    }
+    let transitions = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .filter(|line| line.contains("Adaptive reasoning turned"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transitions,
+        vec![
+            "• Adaptive reasoning turned off.",
+            "• Adaptive reasoning turned on."
+        ]
+    );
 }
 
 #[tokio::test]
@@ -4352,6 +4456,16 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     chat.thread_id = Some(thread_id);
     chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
     chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: true,
+                adaptive_reasoning_revision: 5,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    chat.handle_server_notification(
         ServerNotification::ReasoningEffortUpdated(
             codex_app_server_protocol::ReasoningEffortUpdatedNotification {
                 thread_id: thread_id.to_string(),
@@ -4369,18 +4483,46 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     chat.add_status_output(
         /*refreshing_rate_limits*/ false, /*request_id*/ None,
     );
-    let status = drain_insert_history(&mut rx)
+    let lines = drain_insert_history(&mut rx)
         .into_iter()
         .flatten()
         .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+    let status = lines
+        .iter()
         .filter(|line| line.contains("reasoning low"))
+        .cloned()
         .collect::<Vec<_>>()
         .join("\n");
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
+    chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: false,
+                adaptive_reasoning_revision: 6,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    let transitions = lines
+        .into_iter()
+        .chain(
+            drain_insert_history(&mut rx)
+                .into_iter()
+                .flatten()
+                .map(|line| line.to_string()),
+        )
+        .filter(|line| line.contains("Adaptive reasoning turned"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(transitions.contains("Adaptive reasoning turned on."));
+    assert!(transitions.contains("Adaptive reasoning turned off."));
     assert!(status.contains("low (adaptive; baseline medium)"));
     assert_chatwidget_snapshot!(
         "status_line_model_with_reasoning_plan_mode_footer",
         format!(
-            "{baseline_footer}\n\nCaptured adaptive step:\n{adaptive_footer}\n\nApplied status:\n{status}"
+            "{baseline_footer}\n\nCaptured adaptive step:\n{adaptive_footer}\n\nApplied status:\n{status}\n\nMode transitions:\n{transitions}"
         )
     );
 }
