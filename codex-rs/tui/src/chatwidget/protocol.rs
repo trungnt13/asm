@@ -88,8 +88,26 @@ impl ChatWidget {
             ServerNotification::ThreadGoalCleared(notification) => {
                 self.on_thread_goal_cleared(notification.thread_id.as_str());
             }
-            ServerNotification::ThreadSettingsUpdated(notification) => {
+            ServerNotification::ThreadSettingsUpdated(mut notification) => {
+                if from_replay {
+                    notification.thread_settings.adaptive_reasoning_enabled =
+                        self.adaptive_reasoning_enabled();
+                    notification.thread_settings.adaptive_reasoning_revision =
+                        self.status_state.adaptive_reasoning_revision;
+                }
                 self.on_thread_settings_updated(notification);
+            }
+            ServerNotification::AdaptiveReasoningUpdated(notification) => {
+                if !from_replay
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                {
+                    self.announce_adaptive_reasoning_enabled(
+                        notification.enabled,
+                        notification.adaptive_reasoning_revision,
+                    );
+                }
             }
             ServerNotification::ReasoningEffortUpdated(notification) => {
                 if !from_replay
@@ -105,7 +123,6 @@ impl ChatWidget {
                     self.status_state.captured_step_reasoning =
                         Some(super::status_state::CapturedStepReasoning {
                             effort: notification.reasoning_effort,
-                            adaptive: notification.adaptive,
                         });
                     self.refresh_status_surfaces();
                 }
@@ -424,7 +441,6 @@ impl ChatWidget {
             | ServerNotification::WindowsSandboxSetupCompleted(_)
             | ServerNotification::AccountLoginCompleted(_)
             | ServerNotification::ProjectChanged(_)
-            | ServerNotification::AdaptiveReasoningUpdated(_)
             | ServerNotification::ThreadProjectUpdated(_) => {}
             ServerNotification::ContextCompacted(_) => {}
         }

@@ -70,6 +70,7 @@ fn test_user_message(id: &str, text: &str) -> ThreadItem {
 fn empty_thread_snapshot(app: &App, thread_id: ThreadId) -> ThreadEventSnapshot {
     ThreadEventSnapshot {
         output_tps: None,
+        inferred_session: false,
         delegated_turns: Vec::new(),
         session: Some(test_thread_session(thread_id, app.config.cwd.to_path_buf())),
         turns: Vec::new(),
@@ -693,6 +694,7 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: vec![voice.id.clone()],
             session: Some(test_thread_session(source, app.config.cwd.to_path_buf())),
             turns: vec![voice, typed],
@@ -870,6 +872,7 @@ async fn buffered_voice_items_reconcile_captions_after_thread_switch() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: vec!["buffered-turn".into()],
             session: Some(test_thread_session(source, app.config.cwd.to_path_buf())),
             turns: Vec::new(),
@@ -953,6 +956,7 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: vec!["started".into(), "evicted".into(), "interrupted".into()],
             session: Some(test_thread_session(source, app.config.cwd.to_path_buf())),
             turns: Vec::new(),
@@ -1403,6 +1407,7 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(original, app.config.cwd.to_path_buf())),
             turns: vec![Turn {

@@ -1046,6 +1046,14 @@ impl App {
         {
             return Ok(());
         }
+        if let ServerNotification::AdaptiveReasoningUpdated(mode) = &notification {
+            self.apply_adaptive_reasoning_to_cached_session(
+                thread_id,
+                mode.enabled,
+                mode.adaptive_reasoning_revision,
+            )
+            .await;
+        }
         let mut confirmed_profile = None;
         if let ServerNotification::ThreadSettingsUpdated(notification) = &notification {
             self.apply_thread_settings_to_cached_session(thread_id, &notification.thread_settings)
@@ -1126,6 +1134,7 @@ impl App {
                 && let Some(session) = inferred_session
             {
                 guard.session = Some(session);
+                guard.inferred_session = true;
             }
             let previous_pending_status = guard.side_parent_pending_status();
             let turn_stopped = match &notification {
@@ -1164,6 +1173,16 @@ impl App {
         }
 
         // Settings snapshots do not belong in the transcript queue: apply them in receive order.
+        if let Some(ServerNotification::AdaptiveReasoningUpdated(mode)) = notification.as_ref()
+            && self.active_thread_id == Some(thread_id)
+            && self.chat_widget.thread_id() == Some(thread_id)
+        {
+            self.chat_widget.announce_adaptive_reasoning_enabled(
+                mode.enabled,
+                mode.adaptive_reasoning_revision,
+            );
+            notification = None;
+        }
         if let Some(ServerNotification::ThreadSettingsUpdated(settings)) = notification.as_ref()
             && self.active_thread_id == Some(thread_id)
             && self.chat_widget.thread_id() == Some(thread_id)
@@ -1273,6 +1292,8 @@ impl App {
         };
         let mut session = parent_session.or_else(|| self.primary_session_configured.clone())?;
         session.thread_id = thread_id;
+        session.adaptive_reasoning_enabled = false;
+        session.adaptive_reasoning_revision = 0;
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),
@@ -1599,15 +1620,16 @@ impl App {
     ) -> bool {
         !is_replay_only
             && !self.side_threads.contains_key(&thread_id)
-            && snapshot.session.as_ref().is_none_or(|session| {
-                session.model.trim().is_empty()
-                    || session.rollout_path.is_none()
-                    || (self.primary_thread_id != Some(thread_id)
-                        && session
-                            .active_permission_profile
-                            .as_ref()
-                            .is_some_and(|profile| !profile.id.starts_with(':')))
-            })
+            && (snapshot.inferred_session
+                || snapshot.session.as_ref().is_none_or(|session| {
+                    session.model.trim().is_empty()
+                        || session.rollout_path.is_none()
+                        || (self.primary_thread_id != Some(thread_id)
+                            && session
+                                .active_permission_profile
+                                .as_ref()
+                                .is_some_and(|profile| !profile.id.starts_with(':')))
+                }))
     }
 
     pub(super) async fn apply_refreshed_snapshot_thread(
@@ -1628,6 +1650,7 @@ impl App {
             snapshot.output_tps = store.output_tps;
         }
         snapshot.session = Some(session);
+        snapshot.inferred_session = false;
         snapshot.turns = turns;
         snapshot
             .events
