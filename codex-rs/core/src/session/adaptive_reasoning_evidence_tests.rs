@@ -121,8 +121,8 @@ fn adaptive_evidence_tracks_steering_back_to_the_original_task() {
 
 #[test]
 fn adaptive_evidence_bounds_multibyte_task_and_recent_output() {
-    let task = "界".repeat(/*n*/ 4096);
-    let output = "é".repeat(/*n*/ 4096);
+    let task = "界".repeat(/*n*/ 32768);
+    let output = "é".repeat(/*n*/ 32768);
     let history = vec![
         ResponseItem::Message {
             id: None,
@@ -139,7 +139,7 @@ fn adaptive_evidence_bounds_multibyte_task_and_recent_output() {
         }
         .into(),
     ];
-    for limit in [128, 8192] {
+    for limit in [128, 8192, 8193, 16384, 32768] {
         for agent_input in [false, true] {
             let input = if agent_input {
                 TurnInput::InterAgentCommunication(InterAgentCommunication::new(
@@ -164,5 +164,88 @@ fn adaptive_evidence_bounds_multibyte_task_and_recent_output() {
             assert!(text.starts_with("Current user task:\n界"));
             assert!(text.contains("\nassistant: é"));
         }
+    }
+    let message = |role: &str, content: Vec<ContentItem>, metadata| ResponseItemEnvelope {
+        item: ResponseItem::Message {
+            id: None,
+            role: role.to_string(),
+            encrypted_content: None,
+            status: None,
+            content,
+            phase: None,
+            internal_chat_message_metadata_passthrough: None,
+        },
+        metadata,
+    };
+    let user_metadata = Some(codex_history::CodexHarnessMetadata {
+        user_input_order: Some(0),
+        ..Default::default()
+    });
+    let mut history = vec![message(
+        "user",
+        vec![ContentItem::InputText {
+            text: "EARLIER_USER_CONSTRAINT".to_string(),
+        }],
+        user_metadata.clone(),
+    )];
+    history.extend((0..140).map(|_| {
+        message(
+            "assistant",
+            vec![ContentItem::OutputText {
+                text: "Routine evidence.".to_string(),
+                annotations: None,
+                logprobs: None,
+            }],
+            /*metadata*/ None,
+        )
+    }));
+    history.push(message(
+        "assistant",
+        (0..40)
+            .map(|part| ContentItem::OutputText {
+                text: if part == 39 {
+                    "LATE_ASSISTANT_PART".to_string()
+                } else {
+                    "Short part. ".to_string()
+                },
+                annotations: None,
+                logprobs: None,
+            })
+            .collect(),
+        /*metadata*/ None,
+    ));
+    history.push(message(
+        "user",
+        vec![ContentItem::InputText {
+            text: "INJECTED_INSTRUCTIONS".to_string(),
+        }],
+        /*metadata*/ None,
+    ));
+    history.push(message(
+        "user",
+        vec![ContentItem::InputText {
+            text: "COMPACTION_OUTPUT".to_string(),
+        }],
+        Some(codex_history::CodexHarnessMetadata {
+            compaction_output: true,
+            ..user_metadata.unwrap()
+        }),
+    ));
+    for (limit, includes_more_history) in [(8192, false), (16384, true), (32768, true)] {
+        let mut evidence = AdaptiveEvidence {
+            task: "Current task.".to_string(),
+            ..Default::default()
+        };
+        let text = evidence.collect(&[], &history, limit);
+        assert!(text.len() <= limit);
+        assert_eq!(
+            (
+                text.contains("\nuser: EARLIER_USER_CONSTRAINT"),
+                text.contains("LATE_ASSISTANT_PART"),
+                text.contains("INJECTED_INSTRUCTIONS"),
+                text.contains("COMPACTION_OUTPUT"),
+            ),
+            (includes_more_history, includes_more_history, false, false)
+        );
     }
 }
