@@ -92,6 +92,14 @@ impl App {
         }
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
+            if enabled
+                && store.session.as_ref().is_some_and(|session| {
+                    revision > session.adaptive_reasoning_revision
+                        && !session.adaptive_reasoning_enabled
+                })
+            {
+                store.reasoning_state.suppressed_turn_id = None;
+            }
             if let Some(session) = store.session.as_mut()
                 && revision > session.adaptive_reasoning_revision
             {
