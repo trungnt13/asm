@@ -226,12 +226,6 @@ impl ChatWidget {
             reasoning_summary_parts: Vec::new(),
             status_state: StatusState {
                 adaptive_reasoning_enabled,
-                adaptive_reasoning_revision: 0,
-                adaptive_reasoning_error: None,
-                adaptive_reasoning_failure_episode: 0,
-                announced_adaptive_reasoning_revision: 0,
-                announced_adaptive_reasoning_enabled: adaptive_reasoning_enabled,
-                announced_adaptive_failures: Default::default(),
                 ..Default::default()
             },
             review: ReviewState::default(),

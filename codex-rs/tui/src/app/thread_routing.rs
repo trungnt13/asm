@@ -1199,10 +1199,6 @@ impl App {
                 mode.error,
                 mode.failure_episode,
             );
-            self.chat_widget.announce_adaptive_reasoning_enabled(
-                mode.enabled,
-                mode.adaptive_reasoning_revision,
-            );
             notification = None;
         }
         if let Some(ServerNotification::ThreadSettingsUpdated(settings)) = notification.as_ref()

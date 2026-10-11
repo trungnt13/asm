@@ -11,20 +11,14 @@ use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use std::sync::Arc;
 use std::sync::Weak;
 use tokio::sync::Notify;
-use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::AbortOnDropHandle;
 
 pub(super) struct DecisionRequest {
     pub(super) model: String,
     pub(super) input: String,
     pub(super) instructions: String,
     pub(super) choices: Vec<String>,
-}
-
-pub(super) struct DecisionJob {
-    pub(super) handle: AbortOnDropHandle<()>,
 }
 
 pub(super) enum DecisionTarget {
@@ -46,48 +40,13 @@ pub(super) struct AdaptiveDecisionGuard {
     pub(super) deadline: Instant,
 }
 
-pub(super) struct PendingAdaptiveDecision {
-    pub(super) job: DecisionJob,
-    pub(super) cancellation: CancellationToken,
-}
-
-impl Drop for PendingAdaptiveDecision {
-    fn drop(&mut self) {
-        self.cancellation.cancel();
-    }
-}
-
-impl DecisionJob {
-    pub(super) fn start(
-        client: Arc<DecisionsClient>,
-        request: DecisionRequest,
-        cancellation: CancellationToken,
-        guard: AdaptiveDecisionGuard,
-        target: DecisionTarget,
-        attempt: Option<DecisionAttempt>,
-    ) -> (Self, oneshot::Receiver<()>) {
-        let (completion, completed) = oneshot::channel();
-        let handle = AbortOnDropHandle::new(tokio::spawn(run_decision(
-            client,
-            request,
-            cancellation,
-            guard,
-            target,
-            completion,
-            attempt,
-        )));
-        (Self { handle }, completed)
-    }
-}
-
 #[tracing::instrument(skip_all, fields(thread.id = tracing::field::Empty, turn.id = tracing::field::Empty, kind = tracing::field::Empty))]
-async fn run_decision(
+pub(super) async fn run_decision(
     client: Arc<DecisionsClient>,
     request: DecisionRequest,
     cancellation: CancellationToken,
     guard: AdaptiveDecisionGuard,
     target: DecisionTarget,
-    completion: oneshot::Sender<()>,
     mut attempt: Option<DecisionAttempt>,
 ) {
     let span = tracing::Span::current();
@@ -178,5 +137,4 @@ async fn run_decision(
     if let Some(attempt) = attempt {
         attempt.finish(api, disposition, selected);
     }
-    let _ = completion.send(());
 }

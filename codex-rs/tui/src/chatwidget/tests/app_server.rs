@@ -695,7 +695,9 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
 
     assert_eq!(chat.current_model(), "gpt-5.4");
     chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
-    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 1);
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true, /*revision*/ 1, /*error*/ None, /*failure_episode*/ 0,
+    );
     chat.handle_server_notification(
         ServerNotification::ThreadSettingsUpdated(thread_settings_for_test("gpt-5.4", thread_id)),
         Some(ReplayKind::ResumeInitialMessages),

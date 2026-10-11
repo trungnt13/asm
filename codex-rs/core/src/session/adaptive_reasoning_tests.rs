@@ -271,17 +271,6 @@ fn selected_effort(turn: &TurnContext) -> Option<ReasoningEffort> {
     turn.next_step_settings.load().effective_reasoning_effort()
 }
 
-fn assert_pending_job(turn: &TurnContext) {
-    let slot = turn
-        .extension_data
-        .get::<Mutex<Option<PendingAdaptiveDecision>>>()
-        .expect("eligible decision created pending slot");
-    assert!(
-        slot.try_lock().unwrap().is_some(),
-        "genuine background decision was scheduled"
-    );
-}
-
 fn start_adapting(
     session: &Arc<Session>,
     turn: &Arc<TurnContext>,
@@ -362,7 +351,11 @@ async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps()
         ))
         .unwrap();
     finish_adaptation(&mut adaptation).await;
-    assert_pending_job(&turn);
+    assert_eq!(
+        session.thread_settings_persistence.available_permits(),
+        1,
+        "completed barrier releases the publication permit"
+    );
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::High));
     let next = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -662,7 +655,11 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
             adaptive: scenario != "manual",
         })
     );
-    assert_pending_job(&turn);
+    assert_eq!(
+        session.thread_settings_persistence.available_permits(),
+        1,
+        "completed barrier releases the publication permit"
+    );
     session.stop_adaptive_reasoning().await;
 }
 
@@ -686,7 +683,11 @@ async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
     );
     request.reply.send((status, body)).unwrap();
     finish_adaptation(&mut adaptation).await;
-    assert_pending_job(&turn);
+    assert_eq!(
+        session.thread_settings_persistence.available_permits(),
+        1,
+        "completed barrier releases the publication permit"
+    );
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     let failed = session.thread_config_snapshot().await;
     assert_eq!(
@@ -839,15 +840,11 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
             .is_err(),
         "ineligible sessions make no HTTP request"
     );
-    if let Some(slot) = turn
-        .extension_data
-        .get::<Mutex<Option<PendingAdaptiveDecision>>>()
-    {
-        assert!(
-            slot.try_lock().unwrap().is_none(),
-            "no real job was scheduled"
-        );
-    }
+    assert!(adaptation.is_finished(), "ineligible barrier has returned");
+    assert!(
+        proxy.requests.try_recv().is_err(),
+        "no delayed request was scheduled"
+    );
     let adaptive = session
         .services
         .thread_extension_data
@@ -1020,7 +1017,7 @@ async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
         .unwrap()
         .take()
         .unwrap();
-    timeout(Duration::from_secs(/*secs*/ 5), &mut warmup.handle)
+    timeout(Duration::from_secs(/*secs*/ 5), &mut warmup)
         .await
         .unwrap()
         .unwrap();
@@ -1065,17 +1062,21 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
         !adaptation.is_finished(),
         "pre-step barrier awaits held HTTP response"
     );
-    match scenario {
-        "turn cancelled" => {
-            cancellation.cancel();
+    timeout(Duration::from_millis(/*millis*/ 500), async {
+        match scenario {
+            "turn cancelled" => {
+                cancellation.cancel();
+                finish_adaptation(&mut adaptation).await;
+            }
+            "session shutdown" => session.stop_adaptive_reasoning().await,
+            _ => unreachable!("defined test scenarios"),
+        }
+        if scenario == "session shutdown" {
             finish_adaptation(&mut adaptation).await;
         }
-        "session shutdown" => session.stop_adaptive_reasoning().await,
-        _ => unreachable!("defined test scenarios"),
-    }
-    if scenario == "session shutdown" {
-        finish_adaptation(&mut adaptation).await;
-    }
+    })
+    .await
+    .expect("cancellation drops held HTTP without waiting for the API deadline");
     assert_eq!(
         session
             .thread_config_snapshot()
@@ -1087,13 +1088,10 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
     session.stop_adaptive_reasoning().await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     assert!(
-        turn.extension_data
-            .get::<Mutex<Option<PendingAdaptiveDecision>>>()
-            .unwrap()
-            .lock()
-            .await
-            .is_none()
+        adaptation.is_finished(),
+        "cancellation releases the pre-step barrier"
     );
+    assert_eq!(session.thread_settings_persistence.available_permits(), 1);
     drop(request.reply);
     session.stop_adaptive_reasoning().await;
 }
@@ -1235,6 +1233,20 @@ async fn stalled_decision_does_not_keep_session_or_turn_alive() {
     );
     adaptation.abort();
     let _ = adaptation.await;
+    request
+        .reply
+        .send((
+            200,
+            json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
+        ))
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
+    assert_eq!(
+        selected_effort(&turn),
+        Some(ReasoningEffort::Low),
+        "dropping the barrier drops the request; no detached publisher can apply its late response"
+    );
+    assert_eq!(session.thread_settings_persistence.available_permits(), 1);
     let session_weak = Arc::downgrade(&session);
     let turn_weak = Arc::downgrade(&turn);
     session
@@ -1248,8 +1260,7 @@ async fn stalled_decision_does_not_keep_session_or_turn_alive() {
         }
     })
     .await
-    .expect("background HTTP target has no strong session/turn reference cycle");
-    drop(request.reply);
+    .expect("dropped step future has no strong session/turn reference cycle");
 }
 
 #[test_case("success")]

@@ -115,15 +115,11 @@ impl ChatWidget {
                         notification.error,
                         notification.failure_episode,
                     );
-                    self.announce_adaptive_reasoning_enabled(
-                        notification.enabled,
-                        notification.adaptive_reasoning_revision,
-                    );
                 }
             }
             ServerNotification::ReasoningEffortUpdated(notification) => {
-                if !from_replay
-                    && !(notification.adaptive
+                if !(from_replay
+                    || notification.adaptive
                         && self.status_state.suppressed_adaptive_turn_id.as_deref()
                             == Some(&notification.turn_id))
                     && self
