@@ -109,11 +109,6 @@ impl PendingGuardianReviewStatus {
 }
 
 #[derive(Debug)]
-pub(super) struct CapturedStepReasoning {
-    pub(super) effort: Option<codex_protocol::openai_models::ReasoningEffort>,
-}
-
-#[derive(Debug)]
 pub(super) struct StatusState {
     pub(super) adaptive_reasoning_enabled: bool,
     pub(super) adaptive_reasoning_revision: u64,
@@ -123,7 +118,8 @@ pub(super) struct StatusState {
     pub(super) announced_adaptive_reasoning_enabled: bool,
     pub(super) announced_adaptive_failures:
         std::collections::HashMap<codex_protocol::ThreadId, u64>,
-    pub(super) captured_step_reasoning: Option<CapturedStepReasoning>,
+    pub(super) captured_step_reasoning:
+        Option<codex_app_server_protocol::ReasoningEffortUpdatedNotification>,
     pub(super) suppressed_adaptive_turn_id: Option<String>,
     /// Only the active reasoning item may update the streamed heading.
     pub(super) reasoning_item_id: Option<String>,
