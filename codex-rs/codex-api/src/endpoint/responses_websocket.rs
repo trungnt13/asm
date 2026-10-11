@@ -675,6 +675,7 @@ async fn run_websocket_response_stream(
 ) -> Result<(), ApiError> {
     let mut last_server_model: Option<String> = None;
     let mut safety_buffering_treatment = SafetyBufferingTreatment::default();
+    let request_started_at = Instant::now();
     send_websocket_request(
         ws_stream,
         request_text,
@@ -743,6 +744,11 @@ async fn run_websocket_response_stream(
                         continue;
                     }
                 };
+                let completed_duration_ms = (event.kind() == "response.completed"
+                    && !timing_log_context.warmup)
+                    .then(|| {
+                        i64::try_from(request_started_at.elapsed().as_millis()).unwrap_or(i64::MAX)
+                    });
                 emit_responses_websocket_timing_event(
                     event.kind(),
                     text.as_str(),
@@ -817,7 +823,14 @@ async fn run_websocket_response_stream(
                     ));
                 }
                 match process_responses_event(event) {
-                    Ok(Some(event)) => {
+                    Ok(Some(mut event)) => {
+                        if let ResponseEvent::Completed {
+                            request_duration_ms,
+                            ..
+                        } = &mut event
+                        {
+                            *request_duration_ms = completed_duration_ms;
+                        }
                         if let ResponseEvent::Created { response_id: id } = &event {
                             response_id.clone_from(id);
                         }

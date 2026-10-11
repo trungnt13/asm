@@ -42,6 +42,7 @@ async fn flex_failure_with_retry_header_ends_stream_immediately() {
             Duration::from_secs(60),
             /*telemetry*/ None,
             /*turn_state*/ None,
+            /*request_started_at*/ None,
         );
         let error = loop {
             match stream.next().await {

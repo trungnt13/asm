@@ -59,6 +59,11 @@ impl ChatWidget {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                if let Some(tps) = notification.output_tokens_per_second
+                    && let Ok(thread_id) = ThreadId::from_string(&notification.thread_id)
+                {
+                    self.cache_output_tps(thread_id, tps);
+                }
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
                 )));

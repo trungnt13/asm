@@ -2589,6 +2589,7 @@ async fn try_run_sampling_request(
     )> = None;
     let mut should_emit_turn_diff = false;
     let mut should_emit_token_count = false;
+    let mut output_tokens_per_second = None;
     const MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE: usize = 256;
     let mut analytics_tool_call_ids = Vec::new();
     let reasoning_effort = step_context
@@ -2950,8 +2951,16 @@ async fn try_run_sampling_request(
                 response_id,
                 token_usage,
                 usage_metadata,
+                request_duration_ms,
                 end_turn,
             } => {
+                output_tokens_per_second = token_usage
+                    .as_ref()
+                    .zip(request_duration_ms)
+                    .filter(|(usage, duration)| usage.output_tokens >= 0 && *duration > 0)
+                    .map(|(usage, duration)| {
+                        usage.output_tokens as f64 * 1_000.0 / duration as f64
+                    });
                 sess.services
                     .analytics_events_client
                     .track_code_mode_tool_call(
@@ -3172,7 +3181,8 @@ async fn try_run_sampling_request(
         // counts only after pending tools resolve so clients do not see progress events while the
         // turn is waiting on the user. This also needs to happen before returning cancellation so
         // token usage already recorded from the completed response is still persisted.
-        sess.send_token_count_event(&turn_context).await;
+        sess.send_token_count_event(&turn_context, output_tokens_per_second)
+            .await;
     }
 
     if cancellation_token.is_cancelled() {
