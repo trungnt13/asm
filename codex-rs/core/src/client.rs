@@ -2579,6 +2579,7 @@ where
                     response_id,
                     token_usage,
                     usage_metadata,
+                    request_duration_ms,
                     end_turn,
                 }) => {
                     feedback_tags!(last_model_response_id = &response_id);
@@ -2602,6 +2603,7 @@ where
                             response_id,
                             token_usage,
                             usage_metadata,
+                            request_duration_ms,
                             end_turn,
                         }))
                         .await
