@@ -305,6 +305,8 @@ mod tests {
         ThreadSettings {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: AbsolutePathBuf::from_absolute_path("/tmp").expect("absolute path"),
             approval_policy: AskForApproval::OnRequest,

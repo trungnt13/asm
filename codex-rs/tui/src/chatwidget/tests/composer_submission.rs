@@ -423,6 +423,8 @@ async fn submission_preserves_text_elements_and_local_images() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -536,6 +538,8 @@ async fn submission_includes_configured_active_permission_profile() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -595,6 +599,8 @@ async fn submission_omits_active_permission_profile_for_legacy_snapshot() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -644,6 +650,8 @@ async fn submission_with_remote_and_local_images_keeps_local_placeholder_numberi
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -748,6 +756,8 @@ async fn enter_with_only_remote_images_submits_user_turn() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -821,6 +831,8 @@ async fn shift_enter_with_only_remote_images_does_not_submit_user_turn() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -866,6 +878,8 @@ async fn enter_with_only_remote_images_does_not_submit_when_modal_is_active() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -911,6 +925,8 @@ async fn enter_with_only_remote_images_does_not_submit_when_input_disabled() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -959,6 +975,8 @@ async fn submission_prefers_selected_duplicate_skill_path() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

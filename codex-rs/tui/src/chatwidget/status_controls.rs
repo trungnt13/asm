@@ -265,6 +265,14 @@ impl ChatWidget {
                 format!("{effort} (adaptive; baseline {effort})")
             })
         });
+        let captured_reasoning_label = captured_reasoning_label.map(|label| {
+            match self.status_state.adaptive_reasoning_error {
+                Some(error) if self.adaptive_reasoning_enabled() => {
+                    format!("{label}; adaptive error: {error}")
+                }
+                Some(_) | None => label,
+            }
+        });
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
             .rate_limit_snapshots_by_limit_id
             .values()

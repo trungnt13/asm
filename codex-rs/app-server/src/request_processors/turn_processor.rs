@@ -1001,13 +1001,17 @@ impl TurnRequestProcessor {
             Some((
                 snapshot.adaptive_reasoning_enabled,
                 snapshot.adaptive_reasoning_revision,
+                snapshot.adaptive_reasoning_error,
+                snapshot.adaptive_reasoning_failure_episode,
             ))
         } else {
             None
         };
         Ok(ThreadSettingsUpdateResponse {
-            adaptive_reasoning_enabled: adaptive.map(|(enabled, _)| enabled),
-            adaptive_reasoning_revision: adaptive.map(|(_, revision)| revision),
+            adaptive_reasoning_enabled: adaptive.map(|(enabled, _, _, _)| enabled),
+            adaptive_reasoning_revision: adaptive.map(|(_, revision, _, _)| revision),
+            adaptive_reasoning_error: adaptive.and_then(|(_, _, error, _)| error),
+            adaptive_reasoning_failure_episode: adaptive.map(|(_, _, _, episode)| episode),
         })
     }
 
