@@ -16,6 +16,7 @@ pub(super) struct ThreadEventSnapshot {
     pub(super) events: Vec<ThreadBufferedEvent>,
     pub(super) active_reasoning_item: Option<codex_app_server_protocol::ItemStartedNotification>,
     pub(super) input_state: Option<ThreadInputState>,
+    pub(super) output_tps: Option<(ThreadId, f64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,8 @@ pub(super) struct ThreadEventStore {
     pub(super) latest_turn_id: Option<String>,
     pub(super) pending_interrupt_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
+    // Successful throughput survives bounded buffer eviction and session refresh.
+    pub(super) output_tps: Option<(ThreadId, f64)>,
     pub(super) capacity: usize,
     pub(super) active: bool,
     pub(super) buffered_agent_message_delta_bytes: usize,
@@ -117,6 +120,7 @@ impl ThreadEventStore {
             latest_turn_id: None,
             pending_interrupt_turn_id: None,
             input_state: None,
+            output_tps: None,
             capacity,
             active: false,
             buffered_agent_message_delta_bytes: 0,
@@ -138,6 +142,12 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_session(&mut self, session: ThreadSessionState, turns: Vec<Turn>) {
+        if self
+            .output_tps
+            .is_some_and(|(thread_id, _)| thread_id != session.thread_id)
+        {
+            self.output_tps = None;
+        }
         self.session = Some(session);
         self.set_turns(turns);
     }
@@ -181,6 +191,18 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        if let ServerNotification::ThreadTokenUsageUpdated(usage) = notification.as_ref()
+            && let Some(tps) = usage.output_tokens_per_second
+            && tps.is_finite()
+            && tps >= 0.0
+            && let Ok(thread_id) = ThreadId::from_string(&usage.thread_id)
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|session| session.thread_id == thread_id)
+        {
+            self.output_tps = Some((thread_id, tps));
+        }
         let user_item = match notification.as_ref() {
             ServerNotification::ItemStarted(n) => Some((&n.turn_id, &n.item)),
             ServerNotification::ItemCompleted(n) => Some((&n.turn_id, &n.item)),
@@ -375,6 +397,7 @@ impl ThreadEventStore {
                 .collect(),
             active_reasoning_item: self.active_reasoning_item.clone(),
             input_state: self.input_state.clone(),
+            output_tps: self.output_tps,
         };
         if let Some(latest_turn_id) = &self.latest_turn_id {
             replay_filter::omit_resolved_misalignment_errors(&mut snapshot, latest_turn_id);
@@ -949,7 +972,29 @@ mod tests {
     #[test]
     fn thread_event_store_rebase_preserves_resolved_request_state() {
         let thread_id = ThreadId::new();
-        let mut store = ThreadEventStore::new(/*capacity*/ 8);
+        let mut store = ThreadEventStore::new(/*capacity*/ 2);
+        let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+        store.set_session(session.clone(), Vec::new());
+        let usage = codex_app_server_protocol::TokenUsageBreakdown {
+            total_tokens: 100,
+            input_tokens: 50,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 50,
+            reasoning_output_tokens: 20,
+        };
+        store.push_notification(ServerNotification::ThreadTokenUsageUpdated(
+            codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "turn-background".to_string(),
+                output_tokens_per_second: Some(50.0),
+                token_usage: codex_app_server_protocol::ThreadTokenUsage {
+                    total: usage.clone(),
+                    last: usage,
+                    model_context_window: None,
+                },
+            },
+        ));
         store.push_request(exec_approval_request(
             thread_id,
             "turn-approval",
@@ -963,10 +1008,19 @@ mod tests {
             },
         ));
 
+        store.push_notification(turn_started_notification(thread_id, "turn-next"));
+        assert!(!store.snapshot().events.iter().any(|event| matches!(
+            event,
+            ThreadBufferedEvent::Notification(notification)
+                if matches!(notification.as_ref(), ServerNotification::ThreadTokenUsageUpdated(_))
+        )));
+        assert_eq!(store.snapshot().output_tps, Some((thread_id, 50.0)));
+        store.set_session(session, Vec::new());
         store.rebase_buffer_after_session_refresh();
 
         let snapshot = store.snapshot();
         assert!(snapshot.events.is_empty());
+        assert_eq!(snapshot.output_tps, Some((thread_id, 50.0)));
         assert_eq!(store.has_pending_thread_approvals(), false);
     }
 

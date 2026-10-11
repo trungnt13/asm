@@ -726,6 +726,7 @@ async fn run_websocket_response_stream(
         // No request reached the backend, so this socket is still reusable.
         return Ok(());
     }
+    let request_started_at = Instant::now();
     send_websocket_request(
         ws_stream,
         request_text,
@@ -826,6 +827,11 @@ async fn run_websocket_response_stream(
                     }
                     continue;
                 }
+                let completed_duration_ms = (event.kind() == "response.completed"
+                    && !timing_log_context.warmup)
+                    .then(|| {
+                        i64::try_from(request_started_at.elapsed().as_millis()).unwrap_or(i64::MAX)
+                    });
                 emit_responses_websocket_timing_event(
                     event.kind(),
                     text.as_str(),
@@ -864,7 +870,14 @@ async fn run_websocket_response_stream(
                 let model = event.response_model();
                 // Preserve terminal usage before any accompanying notification can block.
                 let event = match process_responses_event(event) {
-                    Ok(Some(event @ ResponseEvent::Completed { .. })) => {
+                    Ok(Some(mut event @ ResponseEvent::Completed { .. })) => {
+                        if let ResponseEvent::Completed {
+                            request_duration_ms,
+                            ..
+                        } = &mut event
+                        {
+                            *request_duration_ms = completed_duration_ms;
+                        }
                         *completion = Some(event);
                         Ok(None)
                     }
