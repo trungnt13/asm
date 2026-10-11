@@ -107,6 +107,13 @@ pub(super) struct CachedProjectRootName {
 }
 
 impl ChatWidget {
+    pub(crate) fn cache_output_tps(&mut self, thread_id: ThreadId, tps: f64) {
+        if self.thread_id == Some(thread_id) && tps.is_finite() && tps >= 0.0 {
+            // Use the existing token-usage refresh; caching must not request a frame.
+            self.output_tps = Some(format!("TPS{tps:.1}"));
+        }
+    }
+
     fn status_surface_selections(&self) -> StatusSurfaceSelections {
         let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
         let (terminal_title_items, invalid_terminal_title_items) =
@@ -823,6 +830,7 @@ impl ChatWidget {
                     format_tokens_compact(self.status_line_total_usage().output_tokens)
                 )
             }),
+            StatusLineItem::OutputTps => self.output_tps.clone(),
             StatusLineItem::ThreadCredits => self
                 .estimated_thread_usage()
                 .map(|usage| usage.estimated_usage_credits_micros)
@@ -906,6 +914,7 @@ impl ChatWidget {
             StatusSurfacePreviewItem::TotalInputTokens => StatusLineItem::TotalInputTokens,
             StatusSurfacePreviewItem::CacheHitRate => StatusLineItem::CacheHitRate,
             StatusSurfacePreviewItem::TotalOutputTokens => StatusLineItem::TotalOutputTokens,
+            StatusSurfacePreviewItem::OutputTps => StatusLineItem::OutputTps,
             StatusSurfacePreviewItem::ThreadCredits => StatusLineItem::ThreadCredits,
             StatusSurfacePreviewItem::EstimatedThreadCost => StatusLineItem::EstimatedThreadCost,
             StatusSurfacePreviewItem::SessionId => StatusLineItem::SessionId,

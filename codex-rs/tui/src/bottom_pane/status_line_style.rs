@@ -49,6 +49,7 @@ impl StatusLineAccent {
             | StatusLineItem::TotalInputTokens
             | StatusLineItem::CacheHitRate
             | StatusLineItem::TotalOutputTokens
+            | StatusLineItem::OutputTps
             | StatusLineItem::ThreadCredits
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
             StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => Self::Limit,
