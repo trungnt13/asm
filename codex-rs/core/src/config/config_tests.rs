@@ -474,7 +474,7 @@ consolidation_reasoning_effort = "high"
         serde_json::json!({
             "enabled": false,
             "decision_model": "gpt-6-luna",
-            "decision_model_api_env": "OPENAI_API_KEY",
+            "decision_model_api_env": "DECISION_API_KEY",
             "min_effort": "low",
             "max_effort": "max",
             "decision_timeout_ms": 200,
@@ -483,7 +483,7 @@ consolidation_reasoning_effort = "high"
             "rubric_instructions": null,
         })
     );
-    let adaptive = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[adaptive_reasoning]\nenabled = true\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\n";
+    let adaptive = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[adaptive_reasoning]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\n";
     let adaptive_config = Config::load_from_base_config_with_overrides(
         toml::from_str(adaptive).expect("adaptive settings should parse"),
         ConfigOverrides::default(),
@@ -495,6 +495,7 @@ consolidation_reasoning_effort = "high"
         adaptive_config.adaptive_reasoning,
         codex_config::AdaptiveReasoningConfig {
             enabled: true,
+            decision_model_api_env: "CUSTOM_DECISION_KEY".to_string(),
             min_effort: ReasoningEffort::Minimal,
             max_effort: ReasoningEffort::High,
             update_on: vec![codex_config::AdaptiveReasoningTrigger::ToolResult],
