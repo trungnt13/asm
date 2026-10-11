@@ -1634,6 +1634,8 @@ impl ThreadRequestProcessor {
         let response = ThreadStartResponse {
             adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
             adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
+            adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: config_snapshot.adaptive_reasoning_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model,
@@ -4423,6 +4425,9 @@ impl ThreadRequestProcessor {
                 let response = ThreadResumeResponse {
                     adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
                     adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
+                    adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
+                    adaptive_reasoning_failure_episode: config_snapshot
+                        .adaptive_reasoning_failure_episode,
                     thread,
                     disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
                     model: session_configured.model,
@@ -5765,6 +5770,8 @@ impl ThreadRequestProcessor {
         let response = ThreadForkResponse {
             adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
             adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
+            adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: config_snapshot.adaptive_reasoning_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),

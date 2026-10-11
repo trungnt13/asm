@@ -556,9 +556,11 @@ impl ChatWidget {
         settings.collaboration_mode.settings.model = settings.model;
         settings.collaboration_mode.settings.reasoning_effort = settings.effort;
         self.set_effective_collaboration_mode(settings.collaboration_mode);
-        self.set_adaptive_reasoning_enabled(
+        self.set_adaptive_reasoning_state(
             settings.adaptive_reasoning_enabled,
             settings.adaptive_reasoning_revision,
+            settings.adaptive_reasoning_error,
+            settings.adaptive_reasoning_failure_episode,
         );
         self.refresh_effective_service_tier();
         self.refresh_status_surfaces();

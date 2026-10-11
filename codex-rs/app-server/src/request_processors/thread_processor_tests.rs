@@ -687,6 +687,8 @@ mod thread_processor_behavior_tests {
         let config_snapshot = ThreadConfigSnapshot {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             turn_extension_init: Default::default(),
             disabled_plugin_ids: Vec::new(),
             model: "gpt-5".to_string(),

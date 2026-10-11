@@ -29,6 +29,8 @@ pub(crate) struct MessageHistoryMetadata {
 pub(crate) struct ThreadSessionState {
     pub(crate) adaptive_reasoning_enabled: bool,
     pub(crate) adaptive_reasoning_revision: u64,
+    pub(crate) adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    pub(crate) adaptive_reasoning_failure_episode: u64,
     pub(crate) thread_source: Option<codex_protocol::protocol::ThreadSource>,
     pub(crate) daybreak_enabled: bool,
     pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,
