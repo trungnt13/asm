@@ -169,6 +169,7 @@ async fn responses_stream_parses_items_and_completed_end_to_end() -> Result<()> 
             response_id,
             token_usage,
             usage_metadata,
+            request_duration_ms,
             end_turn,
         } => {
             assert_eq!(response_id, "resp1");
@@ -191,6 +192,7 @@ async fn responses_stream_parses_items_and_completed_end_to_end() -> Result<()> 
                 Some(2.5)
             );
             assert!(end_turn.is_none());
+            assert!(request_duration_ms.is_some_and(|duration| duration >= 0));
         }
         other => panic!("unexpected third event: {other:?}"),
     }
