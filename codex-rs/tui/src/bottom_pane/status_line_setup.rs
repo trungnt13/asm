@@ -131,6 +131,9 @@ pub(crate) enum StatusLineItem {
     /// Total output tokens generated.
     TotalOutputTokens,
 
+    /// Latest successful request output tokens per second, including reasoning and latency.
+    OutputTps,
+
     /// Estimated credits attributed directly to the current enterprise thread.
     ThreadCredits,
 
@@ -205,6 +208,9 @@ impl StatusLineItem {
                 "Cached share of the latest request's input tokens (omitted until available)"
             }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
+            StatusLineItem::OutputTps => {
+                "Latest successful request output tokens/s, including reasoning and latency"
+            }
             StatusLineItem::ThreadCredits => {
                 "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
             }
@@ -252,6 +258,7 @@ impl StatusLineItem {
             StatusLineItem::TotalInputTokens => StatusSurfacePreviewItem::TotalInputTokens,
             StatusLineItem::CacheHitRate => StatusSurfacePreviewItem::CacheHitRate,
             StatusLineItem::TotalOutputTokens => StatusSurfacePreviewItem::TotalOutputTokens,
+            StatusLineItem::OutputTps => StatusSurfacePreviewItem::OutputTps,
             StatusLineItem::ThreadCredits => StatusSurfacePreviewItem::ThreadCredits,
             StatusLineItem::EstimatedThreadCost => StatusSurfacePreviewItem::EstimatedThreadCost,
             StatusLineItem::SessionId => StatusSurfacePreviewItem::SessionId,
@@ -735,6 +742,7 @@ mod tests {
                 StatusLineItem::ThreadCredits.to_string(),
                 StatusLineItem::EstimatedThreadCost.to_string(),
                 StatusLineItem::CacheHitRate.to_string(),
+                StatusLineItem::OutputTps.to_string(),
             ]),
             /*use_theme_colors*/ true,
             StatusSurfacePreviewData::from_iter([

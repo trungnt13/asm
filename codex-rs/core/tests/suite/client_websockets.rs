@@ -195,9 +195,11 @@ async fn responses_websocket_preserves_credit_usage_metadata() {
     while let Some(event) = stream.next().await {
         if let ResponseEvent::Completed {
             usage_metadata: metadata,
+            request_duration_ms,
             ..
         } = event.expect("websocket stream failed")
         {
+            assert!(request_duration_ms.is_some_and(|duration| duration >= 0));
             usage_metadata = metadata;
             break;
         }
