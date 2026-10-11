@@ -117,9 +117,6 @@ impl ChatWidget {
         self.status_state.adaptive_reasoning_error = session.adaptive_reasoning_error;
         self.status_state.adaptive_reasoning_failure_episode =
             session.adaptive_reasoning_failure_episode;
-        self.status_state.announced_adaptive_reasoning_revision =
-            session.adaptive_reasoning_revision;
-        self.status_state.announced_adaptive_reasoning_enabled = session.adaptive_reasoning_enabled;
         self.thread_name = session.thread_name.clone();
         self.current_goal_status_indicator = None;
         self.current_goal_status = None;
@@ -185,15 +182,6 @@ impl ChatWidget {
         match session.collaboration_mode.as_deref() {
             Some(collaboration_mode) => {
                 self.set_effective_collaboration_mode(collaboration_mode.clone());
-                self.status_state.adaptive_reasoning_enabled = session.adaptive_reasoning_enabled;
-                self.status_state.adaptive_reasoning_revision = session.adaptive_reasoning_revision;
-                self.status_state.adaptive_reasoning_error = session.adaptive_reasoning_error;
-                self.status_state.adaptive_reasoning_failure_episode =
-                    session.adaptive_reasoning_failure_episode;
-                self.status_state.announced_adaptive_reasoning_revision =
-                    session.adaptive_reasoning_revision;
-                self.status_state.announced_adaptive_reasoning_enabled =
-                    session.adaptive_reasoning_enabled;
             }
             None => {
                 self.active_collaboration_mask = Self::initial_collaboration_mask(

@@ -3,8 +3,6 @@ use crate::agents_md_manager::AgentsMdManager;
 use crate::agents_md_manager::SessionInstructions;
 use crate::session::Submission;
 use crate::session::adaptive_reasoning_task::AdaptiveDecisionGuard;
-use crate::session::adaptive_reasoning_task::DecisionJob;
-use crate::session::adaptive_reasoning_task::PendingAdaptiveDecision;
 use crate::session::handlers::submission_loop;
 use crate::session::step_context::StepContext;
 use crate::session::step_settings::StepSettings;
@@ -55,14 +53,12 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use test_case::test_case;
-use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::TryLockError;
 use tokio::sync::oneshot;
 use tokio::time::Instant;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::AbortOnDropHandle;
 
 const MODEL_A: &str = "step-activation-a";
 const MODEL_B: &str = "step-activation-b";
@@ -305,21 +301,20 @@ async fn next_step_waits_for_environment_publication_before_capturing() {
         ),
         ("next-step-model", Some(&next_cwd)),
     );
-    // Explicit shutdown must join in-flight jobs without retaining their turn.
-    session.pause_adaptive_reasoning().await;
-    let (job_lifetime, joined) = oneshot::channel::<()>();
-    turn.extension_data
-        .insert(Mutex::new(Some(PendingAdaptiveDecision {
-            job: DecisionJob {
-                handle: AbortOnDropHandle::new(tokio::spawn(async move {
-                    let _job_lifetime = job_lifetime;
-                    std::future::pending::<()>().await;
-                })),
-            },
-            cancellation: CancellationToken::new(),
-        })));
+    // This synthetic session does not run normal adaptive startup initialization.
+    session.adaptive_reasoning_state(/*initial_enabled*/ true, /*initial_revision*/ 0);
     session.stop_adaptive_reasoning().await;
-    assert!(joined.await.is_err());
+    assert!(session.adaptive_reasoning_paused());
+    let expected = turn.next_step_settings.load_full();
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(&turn, &expected, &done, &guard, ReasoningEffort::Low,)
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+        "shutdown rejects late publication without changing captured settings"
+    );
+    assert!(Arc::ptr_eq(&expected, &turn.next_step_settings.load_full()));
+    assert!(Arc::ptr_eq(&expected, &step.settings));
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 

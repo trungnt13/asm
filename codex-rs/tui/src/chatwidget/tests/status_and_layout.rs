@@ -4336,11 +4336,27 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
         /*replay_kind*/ None,
     );
     assert_eq!(status_line_text(&chat), Some("ult".to_string()));
-    // Confirmed commands set the latest display without announcing transitions.
+    // Confirmed commands announce actual transitions; their later notifications cannot repeat them.
     drain_insert_history(&mut rx);
-    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 5);
-    chat.set_adaptive_reasoning_enabled(/*enabled*/ false, /*revision*/ 6);
-    assert!(drain_insert_history(&mut rx).is_empty());
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true, /*revision*/ 5, /*error*/ None, /*failure_episode*/ 0,
+    );
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ false, /*revision*/ 6, /*error*/ None,
+        /*failure_episode*/ 0,
+    );
+    assert_eq!(
+        drain_insert_history(&mut rx)
+            .into_iter()
+            .flatten()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>(),
+        vec![
+            "• Adaptive reasoning turned on.",
+            "",
+            "• Adaptive reasoning turned off."
+        ]
+    );
     for (enabled, revision) in [(true, 5), (false, 6), (true, 5), (false, 6)] {
         chat.handle_server_notification(
             ServerNotification::AdaptiveReasoningUpdated(
@@ -4362,18 +4378,15 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
         .map(|line| line.to_string())
         .filter(|line| line.contains("Adaptive reasoning turned"))
         .collect::<Vec<_>>();
-    assert_eq!(
-        transitions,
-        vec![
-            "• Adaptive reasoning turned on.",
-            "• Adaptive reasoning turned off."
-        ]
-    );
+    assert!(transitions.is_empty());
     // An ACK can overtake both a manual-off event and the subsequent on event.
-    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 7);
-    chat.announce_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 7);
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true, /*revision*/ 7, /*error*/ None, /*failure_episode*/ 0,
+    );
     drain_insert_history(&mut rx);
-    chat.set_adaptive_reasoning_enabled(/*enabled*/ true, /*revision*/ 9);
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true, /*revision*/ 9, /*error*/ None, /*failure_episode*/ 0,
+    );
     for (enabled, revision) in [(false, 8), (true, 9)] {
         chat.handle_server_notification(
             ServerNotification::AdaptiveReasoningUpdated(
@@ -4395,13 +4408,7 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
         .map(|line| line.to_string())
         .filter(|line| line.contains("Adaptive reasoning turned"))
         .collect::<Vec<_>>();
-    assert_eq!(
-        transitions,
-        vec![
-            "• Adaptive reasoning turned off.",
-            "• Adaptive reasoning turned on."
-        ]
-    );
+    assert!(transitions.is_empty());
     // Health-only changes do not announce a mode change, and one episode warns once.
     for revision in [10, 11] {
         chat.handle_server_notification(
@@ -4445,7 +4452,18 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
         /*failure_episode*/ 1,
     );
     assert_eq!(status_line_text(&chat), Some("ult·err".to_string()));
-    assert!(drain_insert_history(&mut rx).is_empty());
+    assert_eq!(
+        drain_insert_history(&mut rx)
+            .into_iter()
+            .flatten()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>(),
+        vec![
+            "• Adaptive reasoning turned off.",
+            "",
+            "• Adaptive reasoning turned on."
+        ]
+    );
     chat.set_adaptive_reasoning_state(
         /*enabled*/ true, /*revision*/ 14, /*error*/ None,
         /*failure_episode*/ 1,
