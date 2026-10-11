@@ -72,14 +72,17 @@ Local profile rules:
 
 ### Validate narrowly
 
-Verify the intended outcome with suitable evidence. Select checks for changed behavior and conflicts, not sync size. Narrow scope does not reduce required evidence.
+Verify the intended outcome with suitable evidence. Select checks from changed inputs, fork interactions, and conflicts, not sync size. Do not default to retesting upstream behavior untouched by the fork. Use focused checks when fork interactions, failures, or unresolved concerns require them. Record the selected checks, reused evidence, and uncertainty. Never label unchecked behavior as verified. Narrow scope does not reduce required evidence.
 
 - **Documentation:** review wording/links; run `git diff --check`. No builds or tests.
-- **Rust:** use `just test -p <crate> <test-filter>`, not `cargo test`. Format changed code; use targeted Clippy when needed. Update affected assertions/snapshots together. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
+- **Rust:** use `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting below and targeted Clippy when needed. Update affected assertions/snapshots together. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
 - **Workflows/scripts:** run `actionlint` on changed workflows and small logic fixtures. Build natively only for affected packaging or approved experiments.
 - New tests/snapshot coverage require an explicit user request. Implementation alone does not authorize them. Update existing tests/snapshots only as needed; retain checks. This overrides new integration/snapshot test requirements. Report gaps and ask before additions.
-- Run required generators for changed inputs. Keep schemas, locks, and Bazel data correct without Bazel CI. Reuse correct upstream outputs.
+- **Formatting:** pass affected checkout-relative or absolute files: `just fmt --files scripts/format.py justfile`. Use `--files -- <paths>` for leading hyphens. Select changed Rust child modules explicitly; selected parents do not format unselected children. Select repository files; this local tool trusts the supplied paths. Unsupported file types fail. Formatters apply their project exclusions and report normal file errors. `just fmt --rust` formats the whole Rust workspace only; use it only when that scope is needed. Unscoped `just fmt` and CI `just fmt-check` remain full-repository commands.
+- Run required generators for changed inputs. Keep schemas, locks, and Bazel data correct without Bazel CI. Reuse upstream outputs only when verified source, generator inputs, output bytes, and provenance match the applied changes, and fork-specific input effects are unchanged. Record that evidence. Regenerate when fork edits or conflict resolution changes generator inputs/outputs, or evidence is uncertain.
 - Do not default to whole-crate/workspace suites. If focused checks cannot verify outcome or safety, explain the gap and ask before expansion. A clean merge is not validation. Verify upstream CI before claiming it passed.
+
+After approved integration, reuse PR checks and the verified binary pair only when effective source, generated files, dependencies, toolchain, features, flags, and pair provenance still match. Preserve checkout-wrapper isolation; never copy Cargo fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and rerun affected checks. Release live/package checks remain required; releases still use optimized `--release`.
 
 ### Real-session checks
 
@@ -100,7 +103,7 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`; fix local config if needed. Ask before attribution-only published-history rewrites.
 - Before branch updates, recheck the PR base. Resolve against base, fork, upstream, and this guide; verify affected behavior. For owner decisions, inspect all exposed conflicts and ask one question with recommendations. Later commits can expose more.
 - Reconcile task-owned duplicate edits without losing other work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
-- Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. PR readiness does not authorize merging.
+- Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference it in later handoffs and integration reports instead of repeating unchanged checks. Refresh changed results/status. PR readiness does not authorize merging.
 
 ### Push permissions
 
@@ -118,6 +121,12 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 - Subject: Add connection-bound reply handles for app-server requests (#53049).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Published `main` rewrites need explicit approval. Use `git cherry-pick -x` for targeted ports.
+- Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
+  - Merge: `git -c rerere.enabled=true -c rerere.autoupdate=false merge <upstream-target>`.
+  - Rebase: `git -c rerere.enabled=true -c rerere.autoupdate=false rebase <upstream-target>`.
+  - Review reused resolutions before staging; verify affected behavior under the validation rules. Rerere is not evidence of correctness.
+  - After manual resolution, record it with `git -c rerere.enabled=true -c rerere.autoupdate=false rerere`.
+  - Continue with the same flags: `git -c rerere.enabled=true -c rerere.autoupdate=false rebase --continue` or `git -c rerere.enabled=true -c rerere.autoupdate=false merge --continue`.
 - A full sync includes the chosen upstream `main` commit and all ancestors. Capture baseline and target first; report that fixed range. Focus on fork differences and affected upstream changes. Apply development validation/integration rules.
 - After each rebase, report a short high-level list of upstream changes. Group related changes, not commits. Give one plain sentence per idea, user effect, and source link. Keep status/validation separate.
 - After full sync on the branch, update the marker in that PR. Cherry-picks do not advance it. Verify with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and confirm ancestry to the fork branch.
