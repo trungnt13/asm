@@ -2327,10 +2327,44 @@ pub struct TurnStartedEvent {
     pub collaboration_mode_kind: ModeKind,
 }
 
+/// Describes a Decisions failure without exposing request or response content.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum AdaptiveReasoningError {
+    Credentials,
+    InvalidRequest,
+    Transport,
+    Timeout,
+    Http { status: u16 },
+    ResponseTooLarge,
+    InvalidResponse,
+    Rejected,
+}
+
+impl std::fmt::Display for AdaptiveReasoningError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Credentials => f.write_str("configured API key is missing; load the key in the backend environment and restart"),
+            Self::InvalidRequest => f.write_str("invalid Decisions request"),
+            Self::Transport => f.write_str("Decisions connection failed"),
+            Self::Timeout => f.write_str("Decisions request timed out"),
+            Self::Http { status } => write!(f, "Decisions HTTP {status}"),
+            Self::ResponseTooLarge => f.write_str("Decisions response exceeded the size limit"),
+            Self::InvalidResponse => f.write_str("invalid Decisions response"),
+            Self::Rejected => f.write_str("selected effort could not be applied"),
+        }
+    }
+}
+
 /// Reports the runtime mode without changing saved reasoning preferences.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct AdaptiveReasoningUpdatedEvent {
     pub enabled: bool,
+    #[serde(default)]
+    pub error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub failure_episode: u64,
     #[serde(default)]
     pub adaptive_reasoning_revision: u64,
 }
@@ -4140,6 +4174,8 @@ pub struct SessionConfiguredEvent {
     pub adaptive_reasoning_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
     pub adaptive_reasoning_revision: u64,
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub adaptive_reasoning_failure_episode: u64,
 
     /// Runtime proxy bind addresses, when the managed proxy was started for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4186,6 +4222,10 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             adaptive_reasoning_enabled: bool,
             #[serde(default)]
             adaptive_reasoning_revision: u64,
+            #[serde(default)]
+            adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+            #[serde(default)]
+            adaptive_reasoning_failure_episode: u64,
             network_proxy: Option<SessionNetworkProxyRuntime>,
             rollout_path: Option<PathBuf>,
         }
@@ -4220,6 +4260,8 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             reasoning_effort: wire.reasoning_effort,
             adaptive_reasoning_enabled: wire.adaptive_reasoning_enabled,
             adaptive_reasoning_revision: wire.adaptive_reasoning_revision,
+            adaptive_reasoning_error: wire.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: wire.adaptive_reasoning_failure_episode,
             network_proxy: wire.network_proxy,
             rollout_path: wire.rollout_path,
         })
@@ -6421,6 +6463,8 @@ mod tests {
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
                 adaptive_reasoning_enabled: false,
                 adaptive_reasoning_revision: 0,
+                adaptive_reasoning_error: None,
+                adaptive_reasoning_failure_episode: 0,
                 session_id,
                 thread_id,
                 forked_from_id: None,
@@ -6447,6 +6491,8 @@ mod tests {
                 "type": "session_configured",
                 "adaptive_reasoning_enabled": false,
                 "adaptive_reasoning_revision": 0,
+                "adaptive_reasoning_error": null,
+                "adaptive_reasoning_failure_episode": 0,
                 "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c7",
                 "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
                 "model": "codex-mini-latest",

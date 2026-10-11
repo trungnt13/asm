@@ -245,6 +245,8 @@ impl App {
                 thread_id,
                 mode.enabled,
                 mode.adaptive_reasoning_revision,
+                mode.error,
+                mode.failure_episode,
             )
             .await;
         }

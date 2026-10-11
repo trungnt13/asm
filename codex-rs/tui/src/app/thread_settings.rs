@@ -251,6 +251,8 @@ fn apply_thread_settings_to_session(session: &mut ThreadSessionState, settings: 
     if settings.adaptive_reasoning_revision >= session.adaptive_reasoning_revision {
         session.adaptive_reasoning_enabled = settings.adaptive_reasoning_enabled;
         session.adaptive_reasoning_revision = settings.adaptive_reasoning_revision;
+        session.adaptive_reasoning_error = settings.adaptive_reasoning_error;
+        session.adaptive_reasoning_failure_episode = settings.adaptive_reasoning_failure_episode;
     }
     if settings.collaboration_mode.mode == ModeKind::Default {
         session.model = settings.model.clone();

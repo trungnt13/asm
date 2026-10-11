@@ -32,6 +32,7 @@ pub use codex_protocol::dynamic_tools::DynamicToolNamespaceTool;
 pub use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
+pub use codex_protocol::protocol::AdaptiveReasoningError;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
 use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
@@ -192,6 +193,10 @@ pub struct ThreadStartResponse {
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
     pub adaptive_reasoning_revision: u64,
+    #[serde(default)]
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub adaptive_reasoning_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -312,6 +317,10 @@ pub struct ThreadSettingsUpdateResponse {
     /// Revision of the confirmed mode; absent on older servers.
     #[serde(default)]
     pub adaptive_reasoning_revision: Option<u64>,
+    #[serde(default)]
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub adaptive_reasoning_failure_episode: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
@@ -324,6 +333,10 @@ pub struct ThreadSettings {
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
     pub adaptive_reasoning_revision: u64,
+    #[serde(default)]
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub adaptive_reasoning_failure_episode: u64,
     /// Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
     #[serde(default)]
     pub disabled_plugin_ids: Vec<String>,
@@ -355,6 +368,10 @@ pub struct AdaptiveReasoningUpdatedNotification {
     pub enabled: bool,
     #[serde(default)]
     pub adaptive_reasoning_revision: u64,
+    #[serde(default)]
+    pub error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub failure_episode: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -473,6 +490,10 @@ pub struct ThreadResumeResponse {
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
     pub adaptive_reasoning_revision: u64,
+    #[serde(default)]
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub adaptive_reasoning_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -684,6 +705,10 @@ pub struct ThreadForkResponse {
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
     pub adaptive_reasoning_revision: u64,
+    #[serde(default)]
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub adaptive_reasoning_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,

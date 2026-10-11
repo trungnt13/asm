@@ -4871,6 +4871,8 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_session = ThreadSessionState {
         adaptive_reasoning_enabled: true,
         adaptive_reasoning_revision: 9,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         daybreak_enabled: false,
         windows_sandbox_host: WindowsSandboxHost::Local,
         approval_policy: AskForApproval::OnRequest,
@@ -4986,6 +4988,8 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         let authoritative = ThreadSessionState {
             adaptive_reasoning_enabled: enabled,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             ..session.clone()
         };
         let mut store = app
@@ -6307,6 +6311,8 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
         let session = ThreadSessionState {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -6936,6 +6942,8 @@ fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState 
     ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -8045,6 +8053,8 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
         let session = ThreadSessionState {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -8121,6 +8131,8 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
         .handle_thread_session(crate::session_state::ThreadSessionState {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -9436,6 +9448,8 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
         let event = crate::session_state::ThreadSessionState {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -10121,6 +10135,10 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
         thread_settings: ThreadSettings {
             adaptive_reasoning_enabled: true,
             adaptive_reasoning_revision: 1,
+            adaptive_reasoning_error: Some(
+                codex_protocol::protocol::AdaptiveReasoningError::Timeout,
+            ),
+            adaptive_reasoning_failure_episode: 1,
             disabled_plugin_ids: Vec::new(),
             cwd: test_absolute_path("/tmp/thread-settings"),
             approval_policy: AskForApproval::OnRequest,
@@ -10160,6 +10178,11 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
         .expect("inactive session should remain cached");
     assert_eq!(cached_session.model, "gpt-test");
     assert!(cached_session.adaptive_reasoning_enabled);
+    assert_eq!(
+        cached_session.adaptive_reasoning_error,
+        Some(codex_protocol::protocol::AdaptiveReasoningError::Timeout)
+    );
+    assert_eq!(cached_session.adaptive_reasoning_failure_episode, 1);
     assert!(!app.chat_widget.adaptive_reasoning_enabled());
     assert_eq!(
         cached_session.collaboration_mode.as_deref(),
@@ -10191,6 +10214,8 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
         .handle_thread_session(crate::session_state::ThreadSessionState {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

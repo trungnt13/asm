@@ -255,6 +255,7 @@ pub(crate) use submission::Submission;
 mod adaptive_reasoning;
 mod adaptive_reasoning_evidence;
 mod adaptive_reasoning_task;
+mod decision_log;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -2092,6 +2093,8 @@ impl Session {
         );
         snapshot.adaptive_reasoning_enabled = adaptive.enabled;
         snapshot.adaptive_reasoning_revision = adaptive.revision;
+        snapshot.adaptive_reasoning_error = adaptive.error;
+        snapshot.adaptive_reasoning_failure_episode = adaptive.failure_episode;
         snapshot
     }
 

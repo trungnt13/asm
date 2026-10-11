@@ -1256,6 +1256,13 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     let mut child_config = harness.config.clone();
     child_config.adaptive_reasoning.enabled = !born_adaptive;
     child_config.adaptive_reasoning_initial_revision = 999;
+    child_config.adaptive_reasoning_initial_error =
+        Some(codex_protocol::protocol::AdaptiveReasoningError::InvalidResponse);
+    child_config.adaptive_reasoning_initial_failure_episode = 999;
+    child_config
+        .adaptive_reasoning
+        .decision_model_api_env
+        .clear();
     child_config.model = Some("gpt-6.1-sol".to_string());
     let spawned_agent =
         spawn_v2_reload_test_child(&control, child_config, &parent_thread, "worker").await;
@@ -1293,8 +1300,8 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             .config_snapshot()
             .await
             .adaptive_reasoning_revision,
-        0,
-        "fresh child never inherits parent/config revision"
+        u64::from(born_adaptive),
+        "fresh child owns only its startup-health revision, never parent/config revision"
     );
     child_thread
         .session
@@ -1311,8 +1318,20 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         .await
         .adaptive_reasoning_revision;
     assert_eq!(
-        born_revision, 2,
-        "child owns its mode revision before eviction"
+        born_revision,
+        2 + u64::from(born_adaptive),
+        "child owns its mode and health revision before eviction"
+    );
+    let child_health = child_thread.config_snapshot().await;
+    assert_eq!(
+        (
+            child_health.adaptive_reasoning_error,
+            child_health.adaptive_reasoning_failure_episode
+        ),
+        (
+            born_adaptive.then_some(codex_protocol::protocol::AdaptiveReasoningError::Credentials),
+            u64::from(born_adaptive)
+        )
     );
     child_thread.session.mark_interrupted();
     *child_thread.session.active_turn.lock().await = None;
@@ -1453,6 +1472,18 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             .await
             .adaptive_reasoning_revision,
         born_revision
+    );
+    let restored_health = reloaded_child.config_snapshot().await;
+    assert_eq!(
+        (
+            restored_health.adaptive_reasoning_error,
+            restored_health.adaptive_reasoning_failure_episode
+        ),
+        (
+            child_health.adaptive_reasoning_error,
+            child_health.adaptive_reasoning_failure_episode
+        ),
+        "reload retains this child's own failure episode"
     );
     let reloaded_instructions = reloaded_child.session.inherited_instructions().await;
     assert_eq!(
