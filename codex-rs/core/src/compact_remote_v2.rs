@@ -1288,6 +1288,7 @@ mod tests {
                     amount: Some("0.125".to_string()),
                     metadata: Some(serde_json::json!({ "extra": { "label": "example" } })),
                 }),
+                request_duration_ms: None,
                 end_turn: Some(true),
             }),
         ]);
