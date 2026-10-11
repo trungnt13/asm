@@ -116,9 +116,9 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `8c0f7011674145da7e10627769fb221c74fbf7a0`.
+- Last incorporated commit: `9f3d25588b3f0bdf452d4eda919f2c2365a89bba`.
 - Date: 2026-10-11.
-- Subject: Add connection-bound reply handles for app-server requests (#53049).
+- Subject: Keep agents navigation available after a thread is archived (#53201).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Published `main` rewrites need explicit approval. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
