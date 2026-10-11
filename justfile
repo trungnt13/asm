@@ -50,9 +50,9 @@ app-server-test-client *args:
     {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" build -p codex-cli
     {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-app-server-test-client -- --codex-bin "$({{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" --print-target-dir)/{{ local_profile_dir }}/codex" {args}
 
-# Format the justfile, Rust, Bazel/Starlark, Python SDK code, and Python scripts.
-fmt:
-    @{{ python }} ../scripts/format.py
+# Format all sources, or pass --files <paths> / --rust for an explicit scope.
+fmt *args:
+    @{{ python }} ../scripts/format.py {args}
 
 # Check formatting without modifying files.
 fmt-check:
