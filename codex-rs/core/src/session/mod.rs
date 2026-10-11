@@ -5018,7 +5018,8 @@ impl Session {
                 TokenUsageContext::Sampling,
             )
             .await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
         result
     }
 
@@ -5174,7 +5175,8 @@ impl Session {
             estimated_total_tokens,
         )
         .await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn update_rate_limits(
@@ -5183,7 +5185,8 @@ impl Session {
         new_rate_limits: RateLimitSnapshot,
     ) {
         self.record_rate_limits_info(new_rate_limits).await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
@@ -5211,12 +5214,20 @@ impl Session {
         state.set_server_reasoning_included(included);
     }
 
-    pub(crate) async fn send_token_count_event(&self, turn_context: &TurnContext) {
+    pub(crate) async fn send_token_count_event(
+        &self,
+        turn_context: &TurnContext,
+        output_tokens_per_second: Option<f64>,
+    ) {
         let (info, rate_limits) = {
             let state = self.state.lock().await;
             state.token_info_and_rate_limits()
         };
-        let event = EventMsg::TokenCount(TokenCountEvent { info, rate_limits });
+        let event = EventMsg::TokenCount(TokenCountEvent {
+            info,
+            rate_limits,
+            output_tokens_per_second,
+        });
         self.send_event(turn_context, event).await;
     }
 
@@ -5225,7 +5236,8 @@ impl Session {
             let mut state = self.state.lock().await;
             state.set_token_usage_full(context_window);
         }
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn record_response_item_and_emit_turn_item(
