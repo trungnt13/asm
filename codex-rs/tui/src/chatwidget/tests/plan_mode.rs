@@ -17,6 +17,8 @@ fn plan_test_session(thread_id: ThreadId) -> crate::session_state::ThreadSession
     crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -1247,6 +1249,8 @@ async fn submit_user_message_emits_structured_plugin_mentions_from_bindings() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

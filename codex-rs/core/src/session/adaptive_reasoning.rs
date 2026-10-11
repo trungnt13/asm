@@ -4,6 +4,10 @@ use super::adaptive_reasoning_task::DecisionJob;
 use super::adaptive_reasoning_task::DecisionRequest;
 use super::adaptive_reasoning_task::DecisionTarget;
 use super::adaptive_reasoning_task::PendingAdaptiveDecision;
+use super::decision_log::DecisionApiOutcome;
+use super::decision_log::DecisionDisposition;
+use super::decision_log::DecisionLog;
+use super::decision_log::DecisionPurpose;
 use super::input_queue::TurnInput;
 use super::session::Session;
 use super::session::SessionConfiguration;
@@ -17,12 +21,14 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::AdaptiveReasoningError;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -53,11 +59,14 @@ mod tests;
 pub(crate) struct AdaptiveReasoningState {
     pub enabled: bool,
     pub revision: u64,
+    pub error: Option<AdaptiveReasoningError>,
+    pub failure_episode: u64,
 }
 
 struct AdaptiveSession {
     mode: OnceLock<StdMutex<AdaptiveReasoningState>>,
     ever_enabled: AtomicBool,
+    generation: AtomicU64,
     warmup_started: AtomicBool,
     client: OnceLock<Result<Arc<DecisionsClient>, DecisionsError>>,
     shutdown: CancellationToken,
@@ -71,6 +80,7 @@ impl Default for AdaptiveSession {
         Self {
             mode: OnceLock::new(),
             ever_enabled: AtomicBool::new(/*v*/ false),
+            generation: AtomicU64::new(/*v*/ 0),
             warmup_started: AtomicBool::new(/*v*/ false),
             client: OnceLock::new(),
             evidence: StdMutex::new(shutdown.child_token()),
@@ -107,7 +117,21 @@ impl AdaptiveSession {
 #[path = "adaptive_reasoning_control.rs"]
 mod control;
 
+#[path = "adaptive_reasoning_health.rs"]
+pub(super) mod health;
+
 impl Session {
+    fn adaptive_decision_log(self: &Arc<Self>, config: &Config) -> Option<Arc<DecisionLog>> {
+        config
+            .diagnostic_log_capture
+            .then(|| {
+                self.services.thread_extension_data.get_or_init(|| {
+                    DecisionLog::new(&config.log_dir, self.thread_id(), Arc::downgrade(self))
+                })
+            })
+            .map(|log| Arc::clone(log.as_ref()))
+    }
+
     // Accepted evidence calls this under state; scheduling/publication also use the settings permit.
     pub(super) fn invalidate_adaptive_reasoning(&self) {
         if let Some(session) = self.services.thread_extension_data.get::<AdaptiveSession>() {
@@ -167,19 +191,15 @@ impl Session {
         .await;
     }
 
-    pub(super) fn start_adaptive_reasoning_warmup(
-        &self,
-        config: &Config,
-        source: &SessionConfiguration,
-    ) {
+    fn adaptive_warmup_eligible(&self, config: &Config, source: &SessionConfiguration) -> bool {
         if !self.adaptive_reasoning_enabled(config.adaptive_reasoning.enabled)
             || config.adaptive_reasoning.update_on.is_empty()
             || !ordinary_agent_session(&source.session_source, source.thread_source.as_ref())
         {
-            return;
+            return false;
         }
         let Some(model) = self.services.thread_extension_data.get::<ModelInfo>() else {
-            return;
+            return false;
         };
         if !self
             .services
@@ -193,6 +213,17 @@ impl Session {
                 .is_some_and(|effort| !ORDINARY_EFFORTS.contains(&effort))
             || allowed_efforts(&config.adaptive_reasoning, &model).len() < 2
         {
+            return false;
+        }
+        true
+    }
+
+    pub(super) fn start_adaptive_reasoning_warmup(
+        self: &Arc<Self>,
+        config: &Config,
+        source: &SessionConfiguration,
+    ) {
+        if !self.adaptive_warmup_eligible(config, source) {
             return;
         }
         let session = self
@@ -204,8 +235,25 @@ impl Session {
         {
             return;
         }
-        let Ok(client) = session.client(config) else {
-            return;
+        let attempt = self.adaptive_decision_log(config).map(|log| {
+            log.start(
+                /*turn_id*/ None,
+                DecisionPurpose::Warmup,
+                source.step_settings.collaboration_mode.reasoning_effort(),
+            )
+        });
+        let client = match session.client(config) {
+            Ok(client) => client,
+            Err(error) => {
+                if let Some(attempt) = attempt {
+                    attempt.finish(
+                        DecisionApiOutcome::Error(error),
+                        DecisionDisposition::Warmup,
+                        /*selected*/ None,
+                    );
+                }
+                return;
+            }
         };
         let guard = AdaptiveDecisionGuard {
             freshness: session.shutdown.child_token(),
@@ -222,7 +270,11 @@ impl Session {
             },
             session.shutdown.child_token(),
             guard,
-            DecisionTarget::Discard,
+            DecisionTarget::Warmup {
+                session: Arc::downgrade(self),
+                generation: session.generation.load(Ordering::Acquire),
+            },
+            attempt,
         );
         *session
             .warmup
@@ -263,6 +315,13 @@ impl Session {
             warmup.handle.abort();
             let _ = (&mut warmup.handle).await;
         }
+        if let Some(log) = self
+            .services
+            .thread_extension_data
+            .get::<Arc<DecisionLog>>()
+        {
+            log.close();
+        }
     }
 
     #[tracing::instrument(skip_all)]
@@ -279,129 +338,160 @@ impl Session {
         }
         let started = Instant::now();
         let deadline = started + Duration::from_millis(config.decision_timeout_ms);
-        let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
-            return;
-        };
-        let expected = turn.next_step_settings.load_full();
-        if !self
-            .services
-            .model_client
-            .reasoning_effort_override_enabled(&expected.model_info)
-            || expected
-                .effective_reasoning_effort()
-                .is_some_and(|effort| !ORDINARY_EFFORTS.contains(&effort))
-        {
-            return;
-        }
-        let allowed = allowed_efforts(config, &expected.model_info);
-        if allowed.len() < 2 {
-            return;
-        }
-        let task_done = {
-            let Ok(active) = self.active_turn.try_lock() else {
+        let completed = {
+            let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
                 return;
             };
-            active
-                .as_ref()
-                .and_then(|active| active.task.as_ref())
-                .and_then(|task| {
-                    (Arc::ptr_eq(&task.turn_context, turn)
-                        && !task.cancellation_token.is_cancelled())
-                    .then(|| Arc::clone(&task.done))
-                })
-        };
-        let Some(task_done) = task_done else {
-            return;
-        };
-        let evidence = turn
-            .extension_data
-            .get_or_init(Mutex::<AdaptiveEvidence>::default);
-        let Ok(mut evidence) = evidence.try_lock() else {
-            return;
-        };
-        let pending = turn
-            .extension_data
-            .get_or_init(Mutex::<Option<PendingAdaptiveDecision>>::default);
-        let Ok(mut pending) = pending.try_lock() else {
-            return;
-        };
-        let Ok(state) = self.state.try_lock() else {
-            return;
-        };
-        if state.shutting_down
-            || !ordinary_agent_session(
-                &turn.session_source,
-                state.session_configuration.thread_source.as_ref(),
-            )
-        {
-            return;
-        }
-        let text = evidence.collect(
-            input,
-            state.history.annotated_items(),
-            config.max_context_bytes,
-        );
-        self.invalidate_adaptive_reasoning();
-        *pending = None;
-        if !config.update_on.contains(&trigger)
-            || cancellation.is_cancelled()
-            || self.adaptive_reasoning_paused()
-            || Instant::now() >= deadline
-        {
-            return;
-        }
-        if evidence.encrypted_task_unavailable || evidence.task.is_empty() {
-            if evidence.encrypted_task_unavailable {
-                tracing::debug!(thread.id = %self.thread_id(), reason = "encrypted_task_unavailable",
-                    "adaptive reasoning skipped");
+            let expected = turn.next_step_settings.load_full();
+            if !self
+                .services
+                .model_client
+                .reasoning_effort_override_enabled(&expected.model_info)
+                || expected
+                    .effective_reasoning_effort()
+                    .is_some_and(|effort| !ORDINARY_EFFORTS.contains(&effort))
+            {
+                return;
             }
-            return;
+            let allowed = allowed_efforts(config, &expected.model_info);
+            if allowed.len() < 2 {
+                return;
+            }
+            let task_done = {
+                let Ok(active) = self.active_turn.try_lock() else {
+                    return;
+                };
+                active
+                    .as_ref()
+                    .and_then(|active| active.task.as_ref())
+                    .and_then(|task| {
+                        (Arc::ptr_eq(&task.turn_context, turn)
+                            && !task.cancellation_token.is_cancelled())
+                        .then(|| Arc::clone(&task.done))
+                    })
+            };
+            let Some(task_done) = task_done else {
+                return;
+            };
+            let evidence = turn
+                .extension_data
+                .get_or_init(Mutex::<AdaptiveEvidence>::default);
+            let Ok(mut evidence) = evidence.try_lock() else {
+                return;
+            };
+            let pending = turn
+                .extension_data
+                .get_or_init(Mutex::<Option<PendingAdaptiveDecision>>::default);
+            let Ok(mut pending) = pending.try_lock() else {
+                return;
+            };
+            let Ok(state) = self.state.try_lock() else {
+                return;
+            };
+            if state.shutting_down
+                || !ordinary_agent_session(
+                    &turn.session_source,
+                    state.session_configuration.thread_source.as_ref(),
+                )
+            {
+                return;
+            }
+            let text = evidence.collect(
+                input,
+                state.history.annotated_items(),
+                config.max_context_bytes,
+            );
+            self.invalidate_adaptive_reasoning();
+            *pending = None;
+            if !config.update_on.contains(&trigger)
+                || cancellation.is_cancelled()
+                || self.adaptive_reasoning_paused()
+                || Instant::now() >= deadline
+            {
+                return;
+            }
+            if evidence.encrypted_task_unavailable || evidence.task.is_empty() {
+                if evidence.encrypted_task_unavailable {
+                    tracing::debug!(thread.id = %self.thread_id(), reason = "encrypted_task_unavailable",
+                    "adaptive reasoning skipped");
+                }
+                return;
+            }
+            let session = self
+                .services
+                .thread_extension_data
+                .get_or_init(AdaptiveSession::default);
+            let guard = AdaptiveDecisionGuard {
+                freshness: session
+                    .evidence
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .child_token(),
+                deadline,
+            };
+            drop(state);
+            let attempt = self.adaptive_decision_log(&turn.config).map(|log| {
+                log.start(
+                    Some(&turn.sub_id),
+                    DecisionPurpose::Step,
+                    expected.effective_reasoning_effort(),
+                )
+            });
+            match session.client(&turn.config) {
+                Ok(client) => {
+                    let cancellation = cancellation.child_token();
+                    let (job, completed) = DecisionJob::start(
+                        client,
+                        DecisionRequest {
+                            model: config.decision_model.clone(),
+                            input: text,
+                            instructions: config
+                                .rubric_instructions
+                                .as_deref()
+                                .unwrap_or(RUBRIC)
+                                .to_string(),
+                            choices: allowed.iter().map(ToString::to_string).collect(),
+                        },
+                        cancellation.clone(),
+                        guard,
+                        DecisionTarget::Adaptive {
+                            session: Arc::downgrade(self),
+                            turn: Arc::downgrade(turn),
+                            expected,
+                            task_done,
+                            generation: session.generation.load(Ordering::Acquire),
+                        },
+                        attempt,
+                    );
+                    *pending = Some(PendingAdaptiveDecision { job, cancellation });
+                    Ok(completed)
+                }
+                Err(error) => {
+                    if let Some(attempt) = attempt {
+                        attempt.finish(
+                            DecisionApiOutcome::Error(error),
+                            DecisionDisposition::TargetUnavailable,
+                            /*selected*/ None,
+                        );
+                    }
+                    Err((error, session.generation.load(Ordering::Acquire)))
+                }
+            }
+        };
+        // Publication and shutdown need the scheduling locks released before waiting.
+        // Capture a main step only after the decision has published settings or health.
+        match completed {
+            Ok(completed) => {
+                let _ = completed.await;
+            }
+            Err((error, generation)) => {
+                self.publish_adaptive_reasoning_error(
+                    Some(health::classify_error(error)),
+                    Some(generation),
+                )
+                .await;
+            }
         }
-        let session = self
-            .services
-            .thread_extension_data
-            .get_or_init(AdaptiveSession::default);
-        let guard = AdaptiveDecisionGuard {
-            freshness: session
-                .evidence
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .child_token(),
-            deadline,
-        };
-        drop(state);
-        let Ok(client) = session.client(&turn.config) else {
-            return;
-        };
-        let cancellation = cancellation.child_token();
-        let (job, completed) = DecisionJob::start(
-            client,
-            DecisionRequest {
-                model: config.decision_model.clone(),
-                input: text,
-                instructions: config
-                    .rubric_instructions
-                    .as_deref()
-                    .unwrap_or(RUBRIC)
-                    .to_string(),
-                choices: allowed.iter().map(ToString::to_string).collect(),
-            },
-            cancellation.clone(),
-            guard,
-            DecisionTarget::Adaptive {
-                session: Arc::downgrade(self),
-                turn: Arc::downgrade(turn),
-                expected,
-                task_done,
-            },
-        );
-        *pending = Some(PendingAdaptiveDecision { job, cancellation });
-        // Publication and shutdown need these locks. Wait only after releasing them,
-        // and do not let the caller capture its main step until publication finishes.
-        drop(pending);
-        drop(evidence);
-        drop(_settings_guard);
-        let _ = completed.await;
     }
 }
 

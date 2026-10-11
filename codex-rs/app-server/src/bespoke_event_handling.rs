@@ -193,6 +193,8 @@ pub(crate) async fn apply_bespoke_event_handling(
                         thread_id: conversation_id.to_string(),
                         enabled: payload.enabled,
                         adaptive_reasoning_revision: payload.adaptive_reasoning_revision,
+                        error: payload.error,
+                        failure_episode: payload.failure_episode,
                     },
                 ))
                 .await;
@@ -3265,6 +3267,10 @@ mod tests {
                         codex_protocol::protocol::AdaptiveReasoningUpdatedEvent {
                             enabled,
                             adaptive_reasoning_revision: 0,
+                            error: Some(codex_protocol::protocol::AdaptiveReasoningError::Http {
+                                status: 503,
+                            }),
+                            failure_episode: 1,
                         },
                     ),
                 },
@@ -3281,7 +3287,7 @@ mod tests {
                 serde_json::to_value(notification)?,
                 serde_json::json!({
                     "method": "thread/adaptiveReasoningUpdated",
-                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "adaptiveReasoningRevision": 0},
+                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "adaptiveReasoningRevision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1},
                 })
             );
         }

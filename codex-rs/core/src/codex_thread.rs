@@ -92,6 +92,8 @@ pub struct ThreadConfigSnapshot {
     pub adaptive_reasoning_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
     pub adaptive_reasoning_revision: u64,
+    pub adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    pub adaptive_reasoning_failure_episode: u64,
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,

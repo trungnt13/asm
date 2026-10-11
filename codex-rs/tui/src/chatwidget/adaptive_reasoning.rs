@@ -28,17 +28,68 @@ impl ChatWidget {
         self.refresh_status_surfaces();
     }
 
+    pub(crate) fn set_adaptive_reasoning_state(
+        &mut self,
+        enabled: bool,
+        revision: u64,
+        error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+        failure_episode: u64,
+    ) {
+        if revision < self.status_state.adaptive_reasoning_revision {
+            return;
+        }
+        self.set_adaptive_reasoning_enabled(enabled, revision);
+        self.status_state.adaptive_reasoning_error = error;
+        self.status_state.adaptive_reasoning_failure_episode = failure_episode;
+        self.announce_adaptive_reasoning_error();
+        self.refresh_status_surfaces();
+    }
+
     pub(crate) fn announce_adaptive_reasoning_enabled(&mut self, enabled: bool, revision: u64) {
         self.set_adaptive_reasoning_enabled(enabled, revision);
         if revision <= self.status_state.announced_adaptive_reasoning_revision {
             return;
         }
         self.status_state.announced_adaptive_reasoning_revision = revision;
+        if enabled == self.status_state.announced_adaptive_reasoning_enabled {
+            return;
+        }
+        self.status_state.announced_adaptive_reasoning_enabled = enabled;
         let state = if enabled { "on" } else { "off" };
         self.add_info_message(
             format!("Adaptive reasoning turned {state}."),
             /*hint*/ None,
         );
+    }
+
+    pub(super) fn announce_adaptive_reasoning_error(&mut self) {
+        if !self.adaptive_reasoning_enabled() {
+            return;
+        }
+        let (Some(thread_id), Some(error)) =
+            (self.thread_id, self.status_state.adaptive_reasoning_error)
+        else {
+            return;
+        };
+        let episode = self.status_state.adaptive_reasoning_failure_episode;
+        let announced = self
+            .status_state
+            .announced_adaptive_failures
+            .entry(thread_id)
+            .or_default();
+        if episode <= *announced {
+            return;
+        }
+        *announced = episode;
+        self.add_info_message(
+            format!("Adaptive reasoning error: {error}. Keeping the current effort; auto remains enabled."),
+            /*hint*/ None,
+        );
+    }
+
+    pub(crate) fn inherit_adaptive_reasoning_warnings(&mut self, previous: &mut Self) {
+        self.status_state.announced_adaptive_failures =
+            std::mem::take(&mut previous.status_state.announced_adaptive_failures);
     }
 
     pub(super) fn clear_captured_reasoning_for_manual_settings(&mut self) {

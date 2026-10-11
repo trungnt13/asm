@@ -94,6 +94,12 @@ impl ChatWidget {
                         self.adaptive_reasoning_enabled();
                     notification.thread_settings.adaptive_reasoning_revision =
                         self.status_state.adaptive_reasoning_revision;
+                    notification.thread_settings.adaptive_reasoning_error =
+                        self.status_state.adaptive_reasoning_error;
+                    notification
+                        .thread_settings
+                        .adaptive_reasoning_failure_episode =
+                        self.status_state.adaptive_reasoning_failure_episode;
                 }
                 self.on_thread_settings_updated(notification);
             }
@@ -103,6 +109,12 @@ impl ChatWidget {
                         .thread_id
                         .is_some_and(|id| id.to_string() == notification.thread_id)
                 {
+                    self.set_adaptive_reasoning_state(
+                        notification.enabled,
+                        notification.adaptive_reasoning_revision,
+                        notification.error,
+                        notification.failure_episode,
+                    );
                     self.announce_adaptive_reasoning_enabled(
                         notification.enabled,
                         notification.adaptive_reasoning_revision,

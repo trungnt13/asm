@@ -25,6 +25,145 @@
       ],
       "type": "object"
     },
+    "AdaptiveReasoningError": {
+      "description": "Describes a Decisions failure without exposing request or response content.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "credentials"
+              ],
+              "title": "CredentialsAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CredentialsAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidRequest"
+              ],
+              "title": "InvalidRequestAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidRequestAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "transport"
+              ],
+              "title": "TransportAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TransportAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "timeout"
+              ],
+              "title": "TimeoutAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TimeoutAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "http"
+              ],
+              "title": "HttpAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "title": "HttpAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "responseTooLarge"
+              ],
+              "title": "ResponseTooLargeAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ResponseTooLargeAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidResponse"
+              ],
+              "title": "InvalidResponseAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidResponseAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "RejectedAdaptiveReasoningError",
+          "type": "object"
+        }
+      ]
+    },
     "AgentMessageDelivery": {
       "enum": [
         "async"
@@ -3184,6 +3323,23 @@
       "default": false,
       "description": "Current session-only automatic reasoning mode; never a saved preference.",
       "type": "boolean"
+    },
+    "adaptiveReasoningError": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AdaptiveReasoningError"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "adaptiveReasoningFailureEpisode": {
+      "default": 0,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "adaptiveReasoningRevision": {
       "default": 0,

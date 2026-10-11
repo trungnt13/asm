@@ -266,6 +266,8 @@ mod tests {
         ThreadSettings {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: codex_app_server_protocol::AskForApproval::Never,
@@ -380,6 +382,8 @@ mod tests {
                 thread_id: thread_id.to_string(),
                 enabled: true,
                 adaptive_reasoning_revision: 1,
+                error: None,
+                failure_episode: 0,
             },
         );
         assert_eq!(

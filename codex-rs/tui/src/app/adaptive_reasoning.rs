@@ -28,15 +28,34 @@ impl App {
             })
             .await;
         match result {
-            Ok(Some(revision)) => {
-                self.apply_adaptive_reasoning_to_cached_session(thread_id, enabled, revision)
-                    .await;
+            Ok(Some(
+                response @ codex_app_server_protocol::ThreadSettingsUpdateResponse {
+                    adaptive_reasoning_revision: Some(revision),
+                    ..
+                },
+            )) => {
+                let error = response.adaptive_reasoning_error;
+                let failure_episode = response
+                    .adaptive_reasoning_failure_episode
+                    .unwrap_or_default();
+                self.apply_adaptive_reasoning_to_cached_session(
+                    thread_id,
+                    enabled,
+                    revision,
+                    error,
+                    failure_episode,
+                )
+                .await;
                 if self.chat_widget.thread_id() == Some(thread_id) {
-                    self.chat_widget
-                        .set_adaptive_reasoning_enabled(enabled, revision);
+                    self.chat_widget.set_adaptive_reasoning_state(
+                        enabled,
+                        revision,
+                        error,
+                        failure_episode,
+                    );
                 }
             }
-            Ok(None) => self
+            Ok(Some(_)) | Ok(None) => self
                 .chat_widget
                 .add_error_message("Adaptive reasoning is unavailable on this server.".to_string()),
             Err(error) => self
@@ -51,12 +70,16 @@ impl App {
         thread_id: ThreadId,
         enabled: bool,
         revision: u64,
+        error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+        failure_episode: u64,
     ) {
         if let Some(blank) = self.agents_overview.blank_sessions.get_mut(&thread_id)
             && revision > blank.session.adaptive_reasoning_revision
         {
             blank.session.adaptive_reasoning_enabled = enabled;
             blank.session.adaptive_reasoning_revision = revision;
+            blank.session.adaptive_reasoning_error = error;
+            blank.session.adaptive_reasoning_failure_episode = failure_episode;
         }
         if self.primary_thread_id == Some(thread_id)
             && let Some(session) = self.primary_session_configured.as_mut()
@@ -64,6 +87,8 @@ impl App {
         {
             session.adaptive_reasoning_enabled = enabled;
             session.adaptive_reasoning_revision = revision;
+            session.adaptive_reasoning_error = error;
+            session.adaptive_reasoning_failure_episode = failure_episode;
         }
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
@@ -72,6 +97,8 @@ impl App {
             {
                 session.adaptive_reasoning_enabled = enabled;
                 session.adaptive_reasoning_revision = revision;
+                session.adaptive_reasoning_error = error;
+                session.adaptive_reasoning_failure_episode = failure_episode;
             }
         }
     }

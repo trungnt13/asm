@@ -1051,6 +1051,8 @@ impl App {
                 thread_id,
                 mode.enabled,
                 mode.adaptive_reasoning_revision,
+                mode.error,
+                mode.failure_episode,
             )
             .await;
         }
@@ -1177,6 +1179,12 @@ impl App {
             && self.active_thread_id == Some(thread_id)
             && self.chat_widget.thread_id() == Some(thread_id)
         {
+            self.chat_widget.set_adaptive_reasoning_state(
+                mode.enabled,
+                mode.adaptive_reasoning_revision,
+                mode.error,
+                mode.failure_episode,
+            );
             self.chat_widget.announce_adaptive_reasoning_enabled(
                 mode.enabled,
                 mode.adaptive_reasoning_revision,
@@ -1294,6 +1302,8 @@ impl App {
         session.thread_id = thread_id;
         session.adaptive_reasoning_enabled = false;
         session.adaptive_reasoning_revision = 0;
+        session.adaptive_reasoning_error = None;
+        session.adaptive_reasoning_failure_episode = 0;
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),

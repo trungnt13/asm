@@ -851,6 +851,8 @@ fn sample_thread_start_response() -> ThreadStartResponse {
     ThreadStartResponse {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: codex_app_server_protocol::Thread {
             originator: None,

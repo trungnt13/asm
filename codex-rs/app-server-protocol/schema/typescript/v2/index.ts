@@ -8,6 +8,7 @@ export type { AccountTokenUsageDailyBucket } from "./AccountTokenUsageDailyBucke
 export type { AccountTokenUsageSummary } from "./AccountTokenUsageSummary";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
 export type { ActivePermissionProfile } from "./ActivePermissionProfile";
+export type { AdaptiveReasoningError } from "./AdaptiveReasoningError";
 export type { AdaptiveReasoningUpdatedNotification } from "./AdaptiveReasoningUpdatedNotification";
 export type { AddCreditsNudgeCreditType } from "./AddCreditsNudgeCreditType";
 export type { AddCreditsNudgeEmailStatus } from "./AddCreditsNudgeEmailStatus";

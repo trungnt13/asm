@@ -42,6 +42,8 @@ pub(crate) struct EvictedAgentRuntimeState {
     pub(crate) environments: Vec<TurnEnvironmentSelection>,
     pub(crate) adaptive_reasoning_enabled: bool,
     pub(crate) adaptive_reasoning_revision: u64,
+    pub(crate) adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    pub(crate) adaptive_reasoning_failure_episode: u64,
 }
 
 struct RegisteredAgent {

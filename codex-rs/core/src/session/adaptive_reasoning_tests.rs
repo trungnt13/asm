@@ -579,6 +579,14 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
         .unwrap();
     finish_adaptation(&mut adaptation).await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
+    assert_eq!(
+        session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_error,
+        (scenario == "deadline").then_some(AdaptiveReasoningError::Timeout),
+        "only the deadline is an API error; supersession and manual overrides are neutral"
+    );
     let next = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
         .await
@@ -626,6 +634,54 @@ async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
     finish_adaptation(&mut adaptation).await;
     assert_pending_job(&turn);
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
+    let failed = session.thread_config_snapshot().await;
+    assert_eq!(
+        (
+            failed.adaptive_reasoning_enabled,
+            failed.adaptive_reasoning_error,
+            failed.adaptive_reasoning_failure_episode
+        ),
+        (
+            true,
+            Some(if status == 503 {
+                AdaptiveReasoningError::Http { status }
+            } else {
+                AdaptiveReasoningError::InvalidResponse
+            }),
+            1
+        )
+    );
+    let before_recovery = turn.next_step_settings.load_full();
+    let mut recovery = start_adapting(
+        &session,
+        &turn,
+        &user_task("Check the same arithmetic result."),
+        AdaptiveReasoningTrigger::TurnStart,
+        &CancellationToken::new(),
+    );
+    proxy
+        .request()
+        .await
+        .reply
+        .send((
+            200,
+            json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"low"}]}),
+        ))
+        .unwrap();
+    finish_adaptation(&mut recovery).await;
+    let recovered = session.thread_config_snapshot().await;
+    assert_eq!(
+        (
+            recovered.adaptive_reasoning_error,
+            recovered.adaptive_reasoning_failure_episode,
+            recovered.adaptive_reasoning_revision
+        ),
+        (None, 1, failed.adaptive_reasoning_revision + 1)
+    );
+    assert!(
+        Arc::ptr_eq(&before_recovery, &turn.next_step_settings.load_full()),
+        "accepted unchanged effort clears health without rewriting settings"
+    );
     session.stop_adaptive_reasoning().await;
 }
 
@@ -875,6 +931,13 @@ async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
     let source = session.state.lock().await.session_configuration.clone();
     let baseline = turn.next_step_settings.load_full();
     let history = session.state.lock().await.history.clone();
+    session.adaptive_reasoning_enabled(/*initial_enabled*/ true);
+    session
+        .publish_adaptive_reasoning_error(
+            Some(AdaptiveReasoningError::Transport),
+            /*generation*/ None,
+        )
+        .await;
     session.start_adaptive_reasoning_warmup(&turn.config, &source);
     session.start_adaptive_reasoning_warmup(&turn.config, &source);
     let request = proxy.request().await;
@@ -915,6 +978,14 @@ async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
     );
     assert!(Arc::ptr_eq(&baseline, &turn.next_step_settings.load_full()));
     assert_eq!(
+        session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_error,
+        Some(AdaptiveReasoningError::Transport),
+        "warm-up success is not main-step recovery"
+    );
+    assert_eq!(
         session.state.lock().await.history.annotated_items(),
         history.annotated_items()
     );
@@ -951,6 +1022,14 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
     if scenario == "session shutdown" {
         finish_adaptation(&mut adaptation).await;
     }
+    assert_eq!(
+        session
+            .thread_config_snapshot()
+            .await
+            .adaptive_reasoning_error,
+        None,
+        "cancellation and shutdown are not Decisions failures"
+    );
     session.stop_adaptive_reasoning().await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
     assert!(

@@ -294,6 +294,8 @@ fn thread_resume_response_round_trips_initial_turns_page() {
     let response = ThreadResumeResponse {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: Thread {
             originator: Some("future_client".to_string()),

@@ -93,6 +93,8 @@ impl ThreadManagerState {
                     environments,
                     adaptive_reasoning_enabled: adaptive.adaptive_reasoning_enabled,
                     adaptive_reasoning_revision: adaptive.adaptive_reasoning_revision,
+                    adaptive_reasoning_error: adaptive.adaptive_reasoning_error,
+                    adaptive_reasoning_failure_episode: adaptive.adaptive_reasoning_failure_episode,
                 },
             );
             let removed = threads.remove(&thread_id).is_some();

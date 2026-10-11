@@ -35,6 +35,8 @@ impl Session {
             Mutex::new(AdaptiveReasoningState {
                 enabled: initial_enabled,
                 revision: initial_revision,
+                error: None,
+                failure_episode: 0,
             })
         });
         *mode
@@ -168,6 +170,8 @@ impl Session {
             Mutex::new(AdaptiveReasoningState {
                 enabled: false,
                 revision: 0,
+                error: None,
+                failure_episode: 0,
             })
         });
         let updated = {
@@ -178,6 +182,7 @@ impl Session {
                 None
             } else {
                 mode.enabled = enabled;
+                state.generation.fetch_add(/*val*/ 1, Ordering::AcqRel);
                 mode.revision = mode.revision.saturating_add(/*rhs*/ 1);
                 Some(*mode)
             }
@@ -190,6 +195,8 @@ impl Session {
                 msg: EventMsg::AdaptiveReasoningUpdated(AdaptiveReasoningUpdatedEvent {
                     enabled,
                     adaptive_reasoning_revision: updated.revision,
+                    error: updated.error,
+                    failure_episode: updated.failure_episode,
                 }),
             })
             .await;

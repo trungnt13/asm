@@ -16,6 +16,8 @@ fn thread_settings_for_test(
         thread_settings: codex_app_server_protocol::ThreadSettings {
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: AskForApproval::OnRequest,
@@ -49,6 +51,8 @@ fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::Threa
     crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
