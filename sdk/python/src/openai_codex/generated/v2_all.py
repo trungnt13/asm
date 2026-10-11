@@ -10520,6 +10520,13 @@ class ThreadTokenUsageUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    output_tokens_per_second: Annotated[
+        float | None,
+        Field(
+            alias="outputTokensPerSecond",
+            description="Successful ordinary response throughput, including request latency and reasoning output. Other usage updates and replayed updates carry `None`.",
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
     turn_id: Annotated[str, Field(alias="turnId")]

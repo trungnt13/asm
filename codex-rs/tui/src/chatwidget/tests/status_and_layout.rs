@@ -2991,9 +2991,17 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 
 #[tokio::test]
 async fn status_line_cache_hit_rate_uses_latest_request() {
-    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (frame_requester, mut draw_rx) = FrameRequester::test_channel();
+    let (mut chat, _rx, _ops) = make_chatwidget_manual_with_auth(
+        /*model_override*/ None,
+        /*has_chatgpt_account*/ false,
+        /*has_codex_backend_auth*/ false,
+        frame_requester,
+    )
+    .await;
     chat.thread_id = Some(ThreadId::new());
-    chat.local_settings.tui.status_line = Some(vec!["cache-hit-rate".to_string()]);
+    chat.local_settings.tui.status_line =
+        Some(vec!["cache-hit-rate".to_string(), "output-tps".to_string()]);
     let mut info = make_token_info(
         /*total_tokens*/ 22_000, /*context_window*/ 200_000,
     );
@@ -3003,8 +3011,81 @@ async fn status_line_cache_hit_rate_uses_latest_request() {
     info.last_token_usage.cached_input_tokens = 8_960;
     handle_token_count(&mut chat, Some(info));
     chat.refresh_status_line();
-
     assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
+    while draw_rx.try_recv().is_ok() {}
+
+    let usage = codex_app_server_protocol::TokenUsageBreakdown {
+        total_tokens: 10_600,
+        input_tokens: 10_000,
+        cached_input_tokens: 8_960,
+        cache_write_input_tokens: 0,
+        output_tokens: 600,
+        reasoning_output_tokens: 200,
+    };
+    let mut notification = codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+        thread_id: chat.thread_id.unwrap().to_string(),
+        turn_id: "turn-1".to_string(),
+        output_tokens_per_second: None,
+        token_usage: codex_app_server_protocol::ThreadTokenUsage {
+            total: usage.clone(),
+            last: usage,
+            model_context_window: Some(200_000),
+        },
+    };
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    while draw_rx.try_recv().is_ok() {}
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    let usage_redraws = std::iter::from_fn(|| draw_rx.try_recv().ok()).count();
+    notification.output_tokens_per_second = Some(50.0);
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        std::iter::from_fn(|| draw_rx.try_recv().ok()).count(),
+        usage_redraws
+    );
+    assert_eq!(chat.output_tps, Some("TPS50.0".to_string()));
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
+
+    // The app performs this refresh for token usage, not the notification cache handler.
+    chat.refresh_status_line();
+    assert_eq!(
+        status_line_text(&chat),
+        Some("Cch89.6%·TPS50.0".to_string())
+    );
+    notification.output_tokens_per_second = Some(f64::NAN);
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(chat.output_tps, Some("TPS50.0".to_string()));
+    notification.output_tokens_per_second = Some(100.0);
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        Some(ReplayKind::ThreadSnapshot),
+    );
+    assert_eq!(chat.output_tps, Some("TPS100.0".to_string()));
+    notification.output_tokens_per_second = None;
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        Some(ReplayKind::ThreadSnapshot),
+    );
+    notification.output_tokens_per_second = Some(75.0);
+    notification.thread_id = ThreadId::new().to_string();
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification),
+        /*replay_kind*/ None,
+    );
+    chat.set_token_info(/*info*/ None);
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("TPS100.0".to_string()));
 }
 
 #[tokio::test]

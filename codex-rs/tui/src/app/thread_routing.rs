@@ -1854,6 +1854,7 @@ impl App {
             store.set_session(session.clone(), turns.clone());
             store.rebase_buffer_after_session_refresh();
             snapshot.active_reasoning_item = store.active_reasoning_item.clone();
+            snapshot.output_tps = store.output_tps;
         }
         snapshot.session = Some(session);
         snapshot.turns = turns;
@@ -2091,6 +2092,9 @@ impl App {
         self.chat_widget.submit_initial_user_message_if_pending();
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();
+        }
+        if let Some((thread_id, tps)) = snapshot.output_tps {
+            self.chat_widget.cache_output_tps(thread_id, tps);
         }
         self.refresh_status_line();
     }
