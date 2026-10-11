@@ -283,6 +283,12 @@ impl SessionConfiguration {
             adaptive_reasoning_revision: self
                 .original_config_do_not_use
                 .adaptive_reasoning_initial_revision,
+            adaptive_reasoning_error: self
+                .original_config_do_not_use
+                .adaptive_reasoning_initial_error,
+            adaptive_reasoning_failure_episode: self
+                .original_config_do_not_use
+                .adaptive_reasoning_initial_failure_episode,
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -1890,11 +1896,15 @@ impl Session {
                     &session_configuration.session_source,
                     session_configuration.thread_source.as_ref(),
                 );
+            sess.adaptive_reasoning_state(
+                initial_adaptive,
+                config.adaptive_reasoning_initial_revision,
+            );
+            sess.initialize_adaptive_reasoning_health(&config, &session_configuration);
             let adaptive_state = sess.adaptive_reasoning_state(
                 initial_adaptive,
                 config.adaptive_reasoning_initial_revision,
             );
-            sess.start_adaptive_reasoning_warmup(&config, &session_configuration);
             if let Some(startup) = &startup {
                 startup.set_session(Arc::clone(&sess));
             }
@@ -1930,6 +1940,8 @@ impl Session {
                     reasoning_effort: thread_config.reasoning_effort,
                     adaptive_reasoning_enabled: adaptive_state.enabled,
                     adaptive_reasoning_revision: adaptive_state.revision,
+                    adaptive_reasoning_error: adaptive_state.error,
+                    adaptive_reasoning_failure_episode: adaptive_state.failure_episode,
                     rollout_path,
                 }),
             })
@@ -1937,6 +1949,7 @@ impl Session {
             for event in events {
                 sess.send_event_raw(event).await;
             }
+            sess.start_adaptive_reasoning_warmup(&config, &session_configuration);
             turn_environments.start_connection_event_forwarding(tx_event.clone());
 
             let startup_auth_changed = mcp_auth_changes.has_changed().unwrap_or(false);

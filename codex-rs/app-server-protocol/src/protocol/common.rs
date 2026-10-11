@@ -3243,6 +3243,8 @@ mod tests {
             response: v2::ThreadStartResponse {
                 adaptive_reasoning_enabled: false,
                 adaptive_reasoning_revision: 0,
+                adaptive_reasoning_error: None,
+                adaptive_reasoning_failure_episode: 0,
                 disabled_plugin_ids: Vec::new(),
                 thread: v2::Thread {
                     originator: None,
@@ -3297,6 +3299,42 @@ mod tests {
             },
         };
 
+        let expected_thread = json!({
+            "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "environments": null,
+            "extra": null,
+            "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "first prompt",
+            "ephemeral": true,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "legacy",
+            "modelProvider": "openai",
+            "model": null,
+            "reasoningEffort": null,
+            "createdAt": 1,
+            "updatedAt": 2,
+            "recencyAt": 3,
+            "status": {
+                "type": "idle"
+            },
+            "path": null,
+            "cwd": absolute_path_string("tmp"),
+            "cliVersion": "0.0.0",
+            "originator": null,
+            "source": "exec",
+            "canAcceptDirectInput": null,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+        });
         assert_eq!(response.id(), &RequestId::Integer(7));
         assert_eq!(response.method(), "thread/start");
         assert_eq!(
@@ -3304,42 +3342,11 @@ mod tests {
                 "method": "thread/start",
                 "id": 7,
                 "response": {
-                    "thread": {
-                        "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
-                        "environments": null,
-                        "extra": null,
-                        "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
-                        "forkedFromId": null,
-                        "parentThreadId": null,
-                        "preview": "first prompt",
-                        "ephemeral": true,
-                        "section": null,
-                        "sectionEnteredAt": null,
-                        "projectId": null,
-                        "historyMode": "legacy",
-                        "modelProvider": "openai",
-                        "model": null,
-                        "reasoningEffort": null,
-                        "createdAt": 1,
-                        "updatedAt": 2,
-                        "recencyAt": 3,
-                        "status": {
-                            "type": "idle"
-                        },
-                        "path": null,
-                        "cwd": absolute_path_string("tmp"),
-                        "cliVersion": "0.0.0",
-                        "originator": null,
-                        "source": "exec",
-                        "canAcceptDirectInput": null,
-                        "threadSource": null,
-                        "agentNickname": null,
-                        "agentRole": null,
-                        "gitInfo": null,
-                        "name": null,
-                        "daybreakEnabled": null,
-                        "turns": []
-                    },
+                    "adaptiveReasoningEnabled": false,
+                    "adaptiveReasoningRevision": 0,
+                    "adaptiveReasoningError": null,
+                    "adaptiveReasoningFailureEpisode": 0,
+                    "thread": expected_thread,
                     "model": "gpt-5",
                     "modelProvider": "openai",
                     "serviceTier": null,
@@ -4521,6 +4528,8 @@ mod tests {
                 thread_settings: v2::ThreadSettings {
                     adaptive_reasoning_enabled: false,
                     adaptive_reasoning_revision: 0,
+                    adaptive_reasoning_error: None,
+                    adaptive_reasoning_failure_episode: 0,
                     disabled_plugin_ids: Vec::new(),
                     cwd: absolute_path("/tmp/repo"),
                     approval_policy: v2::AskForApproval::Never,

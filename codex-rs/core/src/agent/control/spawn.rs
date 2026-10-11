@@ -511,6 +511,16 @@ impl LocalAgentControl {
             /*default*/ 0,
             |state| state.adaptive_reasoning_revision,
         );
+        config.adaptive_reasoning_initial_error = evicted_runtime_state
+            .as_ref()
+            .and_then(|state| state.adaptive_reasoning_error);
+        config.adaptive_reasoning_initial_failure_episode =
+            evicted_runtime_state
+                .as_ref()
+                .map_or(
+                    /*default*/ 0,
+                    |state| state.adaptive_reasoning_failure_episode,
+                );
         let parent_thread_id = owner_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id())
             .or(stored_parent_thread_id);
@@ -725,6 +735,8 @@ impl LocalAgentControl {
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
         config.adaptive_reasoning_initial_revision = 0;
+        config.adaptive_reasoning_initial_error = None;
+        config.adaptive_reasoning_initial_failure_episode = 0;
         let membership = self.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
         let state = self.runtime.upgrade()?;

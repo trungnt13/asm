@@ -11,13 +11,12 @@ pub(crate) fn compact_model_name(name: &str) -> String {
 }
 
 pub(crate) fn compact_reasoning_label(label: &str) -> String {
-    let (effort, adaptive) = label
-        .strip_suffix("·auto")
-        .map_or((label, false), |effort| (effort, true));
+    let (effort, suffix) = label
+        .split_once('·')
+        .map_or((label, None), |(effort, suffix)| (effort, Some(suffix)));
     let effort: String = effort.to_lowercase().chars().take(3).collect();
-    if adaptive {
-        format!("{effort}·auto")
-    } else {
-        effort
+    match suffix {
+        Some(suffix) => format!("{effort}·{suffix}"),
+        None => effort,
     }
 }

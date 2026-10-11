@@ -1219,6 +1219,8 @@ async fn bang_shell_enter_while_task_running_submits_run_user_shell_command() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
