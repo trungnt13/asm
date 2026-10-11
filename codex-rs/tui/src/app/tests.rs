@@ -1315,7 +1315,7 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
     app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
     assert_eq!(
         app.chat_widget.status_line_text(),
-        Some("TPS50.0".to_string())
+        Some("50tps".to_string())
     );
 
     assert_eq!(app.chat_widget.composer_text_with_pending(), "draft prompt");
