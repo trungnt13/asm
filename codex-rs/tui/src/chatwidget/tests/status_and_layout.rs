@@ -4202,6 +4202,8 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
                 thread_id: thread_id.to_string(),
                 enabled: true,
                 adaptive_reasoning_revision: 1,
+                error: None,
+                failure_episode: 0,
             },
         ),
         /*replay_kind*/ None,
@@ -4255,6 +4257,8 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
                 thread_id: thread_id.to_string(),
                 enabled: false,
                 adaptive_reasoning_revision: 2,
+                error: None,
+                failure_episode: 0,
             },
         ),
         /*replay_kind*/ None,
@@ -4300,6 +4304,8 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
                 thread_id: thread_id.to_string(),
                 enabled: true,
                 adaptive_reasoning_revision: 3,
+                error: None,
+                failure_episode: 0,
             },
         ),
         /*replay_kind*/ None,
@@ -4323,6 +4329,8 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
                 thread_id: thread_id.to_string(),
                 enabled: false,
                 adaptive_reasoning_revision: 4,
+                error: None,
+                failure_episode: 0,
             },
         ),
         /*replay_kind*/ None,
@@ -4340,6 +4348,8 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
                     thread_id: thread_id.to_string(),
                     enabled,
                     adaptive_reasoning_revision: revision,
+                    error: None,
+                    failure_episode: 0,
                 },
             ),
             /*replay_kind*/ None,
@@ -4371,6 +4381,8 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
                     thread_id: thread_id.to_string(),
                     enabled,
                     adaptive_reasoning_revision: revision,
+                    error: None,
+                    failure_episode: 0,
                 },
             ),
             /*replay_kind*/ None,
@@ -4390,6 +4402,62 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
             "• Adaptive reasoning turned on."
         ]
     );
+    // Health-only changes do not announce a mode change, and one episode warns once.
+    for revision in [10, 11] {
+        chat.handle_server_notification(
+            ServerNotification::AdaptiveReasoningUpdated(
+                codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                    thread_id: thread_id.to_string(),
+                    enabled: true,
+                    adaptive_reasoning_revision: revision,
+                    error: Some(codex_protocol::protocol::AdaptiveReasoningError::Timeout),
+                    failure_episode: 1,
+                },
+            ),
+            /*replay_kind*/ None,
+        );
+        assert_eq!(status_line_text(&chat), Some("ult·err".to_string()));
+    }
+    let warnings = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        warnings
+            .iter()
+            .filter(|line| line.contains("Adaptive reasoning error:"))
+            .count(),
+        1
+    );
+    assert!(!warnings.iter().any(|line| line.contains("turned")));
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ false,
+        /*revision*/ 12,
+        Some(codex_protocol::protocol::AdaptiveReasoningError::Timeout),
+        /*failure_episode*/ 1,
+    );
+    assert_eq!(status_line_text(&chat), Some("ult".to_string()));
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true,
+        /*revision*/ 13,
+        Some(codex_protocol::protocol::AdaptiveReasoningError::Timeout),
+        /*failure_episode*/ 1,
+    );
+    assert_eq!(status_line_text(&chat), Some("ult·err".to_string()));
+    assert!(drain_insert_history(&mut rx).is_empty());
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true, /*revision*/ 14, /*error*/ None,
+        /*failure_episode*/ 1,
+    );
+    assert_eq!(status_line_text(&chat), Some("ult·auto".to_string()));
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true,
+        /*revision*/ 11,
+        Some(codex_protocol::protocol::AdaptiveReasoningError::Timeout),
+        /*failure_episode*/ 1,
+    );
+    assert_eq!(status_line_text(&chat), Some("ult·auto".to_string()));
 }
 
 #[tokio::test]
@@ -4452,7 +4520,8 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw plan-mode footer");
     let baseline_footer = normalized_backend_snapshot(terminal.backend());
-    let thread_id = ThreadId::new();
+    let thread_id = ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8")
+        .expect("valid snapshot thread id");
     chat.thread_id = Some(thread_id);
     chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
     chat.handle_server_notification(
@@ -4461,6 +4530,8 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
                 thread_id: thread_id.to_string(),
                 enabled: true,
                 adaptive_reasoning_revision: 5,
+                error: None,
+                failure_episode: 0,
             },
         ),
         /*replay_kind*/ None,
@@ -4494,13 +4565,40 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
         .cloned()
         .collect::<Vec<_>>()
         .join("\n");
+    chat.handle_server_notification(
+        ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: true,
+                adaptive_reasoning_revision: 6,
+                error: Some(codex_protocol::protocol::AdaptiveReasoningError::Credentials),
+                failure_episode: 1,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw error footer");
+    let error_footer = normalized_backend_snapshot(terminal.backend());
+    chat.add_status_output(
+        /*refreshing_rate_limits*/ false, /*request_id*/ None,
+    );
+    let error_lines = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
     chat.handle_server_notification(
         ServerNotification::AdaptiveReasoningUpdated(
             codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
                 thread_id: thread_id.to_string(),
                 enabled: false,
-                adaptive_reasoning_revision: 6,
+                adaptive_reasoning_revision: 7,
+                error: None,
+                failure_episode: 0,
             },
         ),
         /*replay_kind*/ None,
@@ -4522,7 +4620,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     assert_chatwidget_snapshot!(
         "status_line_model_with_reasoning_plan_mode_footer",
         format!(
-            "{baseline_footer}\n\nCaptured adaptive step:\n{adaptive_footer}\n\nApplied status:\n{status}\n\nMode transitions:\n{transitions}"
+            "{baseline_footer}\n\nCaptured adaptive step:\n{adaptive_footer}\n\nApplied status:\n{status}\n\nError footer:\n{error_footer}\n\nError details:\n{error_lines}\n\nMode transitions:\n{transitions}"
         )
     );
 }
@@ -4741,6 +4839,8 @@ async fn session_configured_clears_goal_status_footer() {
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

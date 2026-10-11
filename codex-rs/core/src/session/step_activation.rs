@@ -259,20 +259,30 @@ impl Session {
         {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         }
-        tokio::time::timeout_at(
+        let unchanged = expected.effective_reasoning_effort().as_ref() == Some(&effort);
+        let outcome = tokio::time::timeout_at(
             guard.deadline,
             self.apply_turn_settings_locked(
                 &turn.sub_id,
-                TurnSettingsUpdate {
-                    effort: Some(Some(effort)),
-                    ..Default::default()
+                if unchanged {
+                    TurnSettingsUpdate::default()
+                } else {
+                    TurnSettingsUpdate {
+                        effort: Some(Some(effort)),
+                        ..Default::default()
+                    }
                 },
                 Some(expected_task_done),
                 Some(guard),
             ),
         )
         .await
-        .unwrap_or(TurnSettingsUpdateOutcome::TargetUnavailable)
+        .unwrap_or(TurnSettingsUpdateOutcome::TargetUnavailable);
+        if outcome == TurnSettingsUpdateOutcome::Applied {
+            self.publish_adaptive_reasoning_error(/*error*/ None, /*generation*/ None)
+                .await;
+        }
+        outcome
     }
 
     #[expect(
