@@ -17,5 +17,5 @@ expression: "render_lines(&view, 100)"
   [ ] model                  Current model name                                                     
   [ ] model-with-reasoning   Current model name with reasoning level                                
 ↓                                                                                                   
-  5.2 credits·~$1.82·Cch89.6%·TPS50.0                                                               
+  5.2 credits·~$1.82·Cch89.6%·50tps                                                                 
   space toggle · ←/→ reorder · enter save · esc cancel
