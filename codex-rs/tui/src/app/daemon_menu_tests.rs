@@ -81,11 +81,17 @@ async fn daemon_menu_keeps_status_but_offers_no_builtin_update() {
         is_local_daemon: true,
         is_managed_daemon: true,
     });
+    app.initialize_server_version_notice("0.154.0", Some("0.153.0"));
+    let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
+    app.chat_widget.show_bottom_pane_view(Box::new(view));
+    let overview = render_bottom_popup(&app.chat_widget, /*width*/ 80);
+    insta::assert_snapshot!(overview.lines().find(|line| line.contains("Service v")).unwrap().trim(), @"Service v0.153.0 < ASM CLI v0.154.0 · /daemon");
     app.open_daemon_menu();
     insta::assert_snapshot!(
         "asm_disabled_daemon_updates",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
+    app.chat_widget.handle_key_event(KeyCode::Esc.into());
     for source in [
         DaemonUpdateSource::PublicStable,
         DaemonUpdateSource::ThisCli,
@@ -93,6 +99,9 @@ async fn daemon_menu_keeps_status_but_offers_no_builtin_update() {
         app.confirm_daemon_update(source);
         assert!(rx.try_recv().is_err());
         assert_eq!(app.pending_update_action, None);
+        // The blocked update opens a menu; close it before the next direct call.
+        app.chat_widget.handle_key_event(KeyCode::Esc.into());
+        assert!(rx.try_recv().is_err());
     }
 
     app.open_daemon_menu();
@@ -180,9 +189,25 @@ async fn daemon_menu_keeps_status_but_offers_no_builtin_update() {
     assert!(rx.try_recv().is_err());
     app.confirm_daemon_restart();
     assert!(rx.try_recv().is_err());
-
+    app.chat_widget.handle_key_event(KeyCode::Esc.into());
     assert!(rx.try_recv().is_err());
-    assert_eq!(app.pending_update_action, None);
+
+    // Embedded mode and a missing CLI cannot offer updates or restart a daemon.
+    app.app_server_target = AppServerTarget::Embedded;
+    app.chat_widget.remote_connection = None;
+    for executable in [app.daemon_cli_executable.clone(), None] {
+        app.daemon_cli_executable = executable;
+        app.open_daemon_menu();
+        for key in [KeyCode::Enter, KeyCode::Down, KeyCode::Enter] {
+            app.chat_widget.handle_key_event(key.into());
+        }
+        assert!(rx.try_recv().is_err());
+        assert_eq!(app.pending_update_action, None);
+        app.confirm_daemon_restart();
+        assert!(rx.try_recv().is_err());
+        app.chat_widget.handle_key_event(KeyCode::Esc.into());
+        assert!(rx.try_recv().is_err());
+    }
 }
 
 #[tokio::test]
