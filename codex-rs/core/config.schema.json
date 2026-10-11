@@ -14,7 +14,7 @@
           "type": "string"
         },
         "decision_model_api_env": {
-          "default": "OPENAI_API_KEY",
+          "default": "DECISION_API_KEY",
           "type": "string"
         },
         "decision_timeout_ms": {

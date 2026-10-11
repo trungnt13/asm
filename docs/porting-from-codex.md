@@ -286,7 +286,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in only |
 | `decision_model` | `"gpt-6-luna"` | Nonblank |
-| `decision_model_api_env` | `"OPENAI_API_KEY"` | ASCII environment-variable identifier, not a secret |
+| `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
 | `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
 | `decision_timeout_ms` | `200` | 1–5000 ms |
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
@@ -295,7 +295,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 
 - Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
 - If fewer than two efforts remain, skip Decisions and warm-up; keep current effort.
-- Read credentials only from the named backend environment variable. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
+- Read credentials only from the named backend environment variable, default `DECISION_API_KEY`. Do not fall back to `OPENAI_API_KEY`; explicit variable-name overrides remain supported. Keep main-model authentication separate. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
 - If set, use `rubric_instructions` instead of the built-in rubric, without a suffix. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
 - Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, images, and encrypted reasoning. Scale scan limits with the byte budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. These scan limits and the byte budget can still omit older history; they do not promise a complete transcript.
 - **P0 manual review:** bound total evidence and rubric separately using the table limits. Split larger evidence into ordered Decisions input messages of at most 8192 UTF-8 bytes each, preferring line boundaries. Preserve text and the default single-message request. Rubric instructions remain at most 4096 bytes. Each item can exceed 1000 tokens, but its byte cap keeps it below the 10K-token item limit. Keep this evidence outside the main conversation.
