@@ -242,7 +242,7 @@ impl ChatWidget {
                 .as_ref()
                 .map(|step| {
                     let effort = step
-                        .effort
+                        .reasoning_effort
                         .as_ref()
                         .map_or("none", ReasoningEffortConfig::as_str);
                     let baseline = reasoning_effort_override

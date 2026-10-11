@@ -92,6 +92,32 @@ impl ChatWidget {
             std::mem::take(&mut previous.status_state.announced_adaptive_failures);
     }
 
+    pub(crate) fn capture_reasoning_state(&self) -> crate::session_state::ThreadReasoningState {
+        crate::session_state::ThreadReasoningState {
+            captured_step: self.status_state.captured_step_reasoning.clone(),
+            suppressed_turn_id: self.status_state.suppressed_adaptive_turn_id.clone(),
+        }
+    }
+
+    pub(crate) fn restore_reasoning_state(
+        &mut self,
+        state: crate::session_state::ThreadReasoningState,
+        latest_turn_id: Option<String>,
+    ) {
+        let Some(latest_turn_id) = latest_turn_id else {
+            return;
+        };
+        // This live identity is newer than replayed history when turn-start was evicted.
+        self.turn_lifecycle.last_turn_id = Some(latest_turn_id);
+        self.status_state.suppressed_adaptive_turn_id = state.suppressed_turn_id;
+        if let Some(notification) = state.captured_step {
+            self.handle_server_notification(
+                codex_app_server_protocol::ServerNotification::ReasoningEffortUpdated(notification),
+                /*replay_kind*/ None,
+            );
+        }
+    }
+
     pub(super) fn clear_captured_reasoning_for_manual_settings(&mut self) {
         self.status_state.captured_step_reasoning = None;
         self.status_state.suppressed_adaptive_turn_id = self.turn_lifecycle.last_turn_id.clone();
