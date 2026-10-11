@@ -118,12 +118,26 @@ impl App {
             return;
         };
         let input_state = self.chat_widget.capture_thread_input_state();
+        let reasoning_state = self.chat_widget.capture_reasoning_state();
         let recap_progress = self.recap.progress();
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
             let receiver = self.active_thread_rx.take();
             let mut store = channel.store.lock().await;
             store.active = false;
             store.input_state = input_state;
+            if self.chat_widget.thread_id() == Some(active_id) {
+                // The store may already have a newer step waiting in the active receiver.
+                if reasoning_state.suppressed_turn_id.is_some()
+                    && reasoning_state.suppressed_turn_id == store.latest_turn_id
+                {
+                    store.reasoning_state.captured_step = None;
+                    store.reasoning_state.suppressed_turn_id = reasoning_state.suppressed_turn_id;
+                } else if store.reasoning_state.captured_step.is_none() {
+                    store.reasoning_state.captured_step = reasoning_state
+                        .captured_step
+                        .filter(|step| store.latest_turn_id.as_deref() == Some(&step.turn_id));
+                }
+            }
             store.merge_recap_progress(recap_progress);
             if let Some(receiver) = receiver {
                 channel.receiver = Some(receiver);
@@ -1880,6 +1894,11 @@ impl App {
             store.rebase_buffer_after_session_refresh();
             snapshot.active_reasoning_item = store.active_reasoning_item.clone();
             snapshot.output_tps = store.output_tps;
+            snapshot.reasoning_state = store.reasoning_state.clone();
+            snapshot.latest_turn_id = store.latest_turn_id.clone();
+        } else {
+            snapshot.reasoning_state = Default::default();
+            snapshot.latest_turn_id = turns.last().map(|turn| turn.id.clone());
         }
         snapshot.session = Some(session);
         snapshot.inferred_session = false;
@@ -2111,6 +2130,8 @@ impl App {
             retained_assistant_captions,
         );
         self.restore_voice_owner_after_replay();
+        self.chat_widget
+            .restore_reasoning_state(snapshot.reasoning_state, snapshot.latest_turn_id);
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ false);
         self.chat_widget
