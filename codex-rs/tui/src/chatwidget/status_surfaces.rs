@@ -1027,7 +1027,7 @@ impl ChatWidget {
             .status_state
             .captured_step_reasoning
             .as_ref()
-            .map(|step| step.effort.clone())
+            .map(|step| step.reasoning_effort.clone())
             .unwrap_or_else(|| self.effective_reasoning_effort());
         let label = Self::status_line_reasoning_effort_label(effort.as_ref());
         if self.adaptive_reasoning_enabled() {
