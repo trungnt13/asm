@@ -73,7 +73,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::TotalInputTokens => "0 in",
             StatusSurfacePreviewItem::CacheHitRate => "Cch89.6%",
             StatusSurfacePreviewItem::TotalOutputTokens => "0 out",
-            StatusSurfacePreviewItem::OutputTps => "TPS50.0",
+            StatusSurfacePreviewItem::OutputTps => "50tps",
             StatusSurfacePreviewItem::ThreadCredits => "5.2 credits",
             StatusSurfacePreviewItem::EstimatedThreadCost => "~$1.82",
             StatusSurfacePreviewItem::SessionId => "550e8400-e29b-41d4",
