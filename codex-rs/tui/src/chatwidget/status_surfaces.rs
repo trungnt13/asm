@@ -830,7 +830,7 @@ impl ChatWidget {
                 .filter(|totals| !totals.time.is_zero())
                 .map(|totals| {
                     let rate = totals.output_tokens as f64 / totals.time.as_secs_f64();
-                    format!("{rate:.0} tok/s")
+                    format!("{rate:.0}tps")
                 }),
             StatusLineItem::ThreadCredits => self
                 .estimated_thread_usage()
