@@ -132,7 +132,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
             Compression::Zstd => RequestCompression::Zstd,
         };
 
-        let stream_response = self
+        let (stream_response, request_started_at) = self
             .session
             .stream_encoded_json_with(
                 Method::POST,
@@ -154,6 +154,7 @@ impl<T: HttpTransport> ResponsesClient<T> {
             self.session.provider().stream_idle_timeout,
             self.sse_telemetry.clone(),
             turn_state,
+            Some(request_started_at),
         ))
     }
 }
