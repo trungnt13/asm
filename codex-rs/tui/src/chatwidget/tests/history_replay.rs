@@ -23,6 +23,8 @@ async fn resumed_initial_messages_render_history() {
     let mut configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: true,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -176,6 +178,8 @@ async fn restored_conversation_ultra_remains_selected_after_switching_to_plan() 
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -467,6 +471,8 @@ async fn replayed_user_message_preserves_text_elements_and_local_images() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -543,6 +549,8 @@ async fn replayed_user_message_preserves_remote_image_urls() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -653,6 +661,8 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -730,6 +740,8 @@ async fn session_configured_preserves_profile_workspace_roots() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -781,6 +793,8 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -826,6 +840,8 @@ async fn replayed_user_message_with_only_remote_images_renders_history_cell() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -890,6 +906,8 @@ async fn replayed_user_message_with_only_local_images_renders_history_cell() {
     let configured = crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -1250,6 +1268,8 @@ async fn replayed_reasoning_item_preserves_summary_parts_and_hides_raw_reasoning
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -1305,6 +1325,8 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

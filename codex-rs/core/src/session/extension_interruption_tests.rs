@@ -68,6 +68,8 @@ async fn interrupt_if_no_pending_input_handles_cancelled_submission() {
             reasoning_effort: None,
             adaptive_reasoning_enabled: false,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             network_proxy: None,
             rollout_path: None,
         }),

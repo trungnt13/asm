@@ -86,6 +86,99 @@ class ActivePermissionProfile(BaseModel):
     ]
 
 
+class CredentialsAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["credentials"], Field(title="CredentialsAdaptiveReasoningErrorType")]
+
+
+class InvalidRequestAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["invalidRequest"], Field(title="InvalidRequestAdaptiveReasoningErrorType")
+    ]
+
+
+class TransportAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["transport"], Field(title="TransportAdaptiveReasoningErrorType")]
+
+
+class TimeoutAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["timeout"], Field(title="TimeoutAdaptiveReasoningErrorType")]
+
+
+class HttpAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Annotated[int, Field(ge=0)]
+    type: Annotated[Literal["http"], Field(title="HttpAdaptiveReasoningErrorType")]
+
+
+class ResponseTooLargeAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["responseTooLarge"], Field(title="ResponseTooLargeAdaptiveReasoningErrorType")
+    ]
+
+
+class InvalidResponseAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["invalidResponse"], Field(title="InvalidResponseAdaptiveReasoningErrorType")
+    ]
+
+
+class RejectedAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["rejected"], Field(title="RejectedAdaptiveReasoningErrorType")]
+
+
+class AdaptiveReasoningError(
+    RootModel[
+        CredentialsAdaptiveReasoningError
+        | InvalidRequestAdaptiveReasoningError
+        | TransportAdaptiveReasoningError
+        | TimeoutAdaptiveReasoningError
+        | HttpAdaptiveReasoningError
+        | ResponseTooLargeAdaptiveReasoningError
+        | InvalidResponseAdaptiveReasoningError
+        | RejectedAdaptiveReasoningError
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        CredentialsAdaptiveReasoningError
+        | InvalidRequestAdaptiveReasoningError
+        | TransportAdaptiveReasoningError
+        | TimeoutAdaptiveReasoningError
+        | HttpAdaptiveReasoningError
+        | ResponseTooLargeAdaptiveReasoningError
+        | InvalidResponseAdaptiveReasoningError
+        | RejectedAdaptiveReasoningError,
+        Field(
+            description="Describes a Decisions failure without exposing request or response content."
+        ),
+    ]
+
+
 class AdaptiveReasoningUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -94,6 +187,8 @@ class AdaptiveReasoningUpdatedNotification(BaseModel):
         int | None, Field(alias="adaptiveReasoningRevision", ge=0)
     ] = 0
     enabled: bool
+    error: AdaptiveReasoningError | None = None
+    failure_episode: Annotated[int | None, Field(alias="failureEpisode", ge=0)] = 0
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
@@ -10496,6 +10591,12 @@ class ThreadSettings(BaseModel):
             description="Current session-only automatic reasoning mode; never a saved preference.",
         ),
     ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
     adaptive_reasoning_revision: Annotated[
         int | None,
         Field(
@@ -12505,6 +12606,12 @@ class ThreadForkResponse(BaseModel):
             description="Current session-only automatic reasoning mode; never a saved preference.",
         ),
     ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
     adaptive_reasoning_revision: Annotated[
         int | None,
         Field(
@@ -12595,6 +12702,12 @@ class ThreadResumeResponse(BaseModel):
             description="Current session-only automatic reasoning mode; never a saved preference.",
         ),
     ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
     adaptive_reasoning_revision: Annotated[
         int | None,
         Field(
@@ -12705,6 +12818,12 @@ class ThreadStartResponse(BaseModel):
             description="Current session-only automatic reasoning mode; never a saved preference.",
         ),
     ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
     adaptive_reasoning_revision: Annotated[
         int | None,
         Field(
