@@ -10,6 +10,7 @@ use codex_api::AuthError;
 use codex_api::AuthProvider;
 use codex_api::Compression;
 use codex_api::Provider;
+use codex_api::ResponseEvent;
 use codex_api::ResponsesApiRequest;
 use codex_api::ResponsesClient;
 use codex_api::ResponsesOptions;
@@ -24,6 +25,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use futures::StreamExt;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
@@ -257,22 +259,27 @@ impl HttpTransport for FlakyTransport {
         let Some(body) = req.body.clone() else {
             panic!("request should have a body");
         };
-        let mut state = self
-            .state
-            .lock()
-            .expect("flaky transport state mutex should not be poisoned");
-        state.attempts += 1;
-        state
-            .requests
-            .push((body, req.headers.clone(), req.compression));
+        let attempt = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("flaky transport state mutex should not be poisoned");
+            state.attempts += 1;
+            state
+                .requests
+                .push((body, req.headers.clone(), req.compression));
+            state.attempts
+        };
 
-        if state.attempts == 1 {
+        if attempt == 1 {
+            tokio::time::sleep(Duration::from_secs(3)).await;
             return Err(TransportError::Network("first attempt fails".to_string()));
         }
+        tokio::time::sleep(Duration::from_secs(2)).await;
 
         let stream = futures::stream::iter(vec![Ok(Bytes::from(
             r#"event: message
-data: {"id":"resp-1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}]}
+data: {"type":"response.completed","response":{"id":"resp-1","usage":{"output_tokens":12,"input_tokens":0,"total_tokens":12}}}
 
 "#,
         ))]);
@@ -484,7 +491,7 @@ async fn streaming_client_adds_auth_headers() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn streaming_client_retries_on_transport_error() -> Result<()> {
     let transport = FlakyTransport::new();
 
@@ -510,7 +517,7 @@ async fn streaming_client_retries_on_transport_error() -> Result<()> {
     };
     let client = ResponsesClient::new(transport.clone(), provider, Arc::new(NoAuth));
 
-    let _stream = client
+    let mut stream = client
         .stream_request(
             request,
             ResponsesOptions {
@@ -519,6 +526,17 @@ async fn streaming_client_retries_on_transport_error() -> Result<()> {
             },
         )
         .await?;
+    let completed_duration_ms = loop {
+        match stream.next().await {
+            Some(Ok(ResponseEvent::Completed {
+                request_duration_ms,
+                ..
+            })) => break request_duration_ms,
+            Some(Ok(_)) => {}
+            event => panic!("expected successful completion, got {event:?}"),
+        }
+    };
+    assert_eq!(completed_duration_ms, Some(2_000));
     assert_eq!(transport.attempts(), 2);
     let requests = transport.requests();
     assert_eq!(requests.len(), 2);

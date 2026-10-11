@@ -100,6 +100,7 @@ impl ChatWidget {
             {
                 self.refresh_account_scoped_models();
             }
+            self.output_tps = None;
             self.backend_banner_notice_model = None;
             self.automatic_model_switch_state =
                 backend_banners::AutomaticModelSwitchState::default();

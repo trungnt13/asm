@@ -1200,6 +1200,7 @@ mod tests {
                 ),
                 RolloutItem::EventMsg(EventMsg::TokenCount(
                     codex_protocol::protocol::TokenCountEvent {
+                        output_tokens_per_second: None,
                         info: None,
                         rate_limits: None,
                     },
@@ -1327,6 +1328,7 @@ mod tests {
         live_thread
             .append_items(&[RolloutItem::EventMsg(EventMsg::TokenCount(
                 codex_protocol::protocol::TokenCountEvent {
+                    output_tokens_per_second: None,
                     info: None,
                     rate_limits: None,
                 },
