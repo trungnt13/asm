@@ -181,7 +181,7 @@ async fn adaptive_fixture(
     Arc<TurnContext>,
     async_channel::Receiver<codex_protocol::protocol::Event>,
 ) {
-    let (session, turn, events) = make_session_and_context_with_auth_and_config_and_rx(
+    let (mut session, turn, events) = make_session_and_context_with_auth_and_config_and_rx(
         CodexAuth::from_api_key("synthetic-primary-key"),
         Vec::new(),
         |config| {
@@ -229,6 +229,11 @@ async fn adaptive_fixture(
                 >= 2,
             "positive fixture advertises multiple choices inside adaptive bounds"
         );
+    }
+    if turn.config.ephemeral {
+        Arc::get_mut(&mut session)
+            .expect("unshared adaptive fixture")
+            .ephemeral_rollout_items = Some(Mutex::new(Vec::new()));
     }
     session
         .services
@@ -306,7 +311,10 @@ async fn finish_adaptation(adaptation: &mut tokio::task::JoinHandle<()>) {
 #[tokio::test]
 async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
+    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+        config.ephemeral = true;
+    })
+    .await;
     let cancellation = CancellationToken::new();
     let first = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -379,28 +387,74 @@ async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps()
             .reasoning_effort,
         Some(ReasoningEffort::Low)
     );
-    session.report_reasoning_effort(&first).await;
-    session.report_reasoning_effort(&next).await;
+    let persisted = session
+        .ephemeral_rollout_items
+        .as_ref()
+        .expect("persistence gate")
+        .lock()
+        .await;
+    let persisted_before = serde_json::to_value(&*persisted).unwrap();
+    {
+        let persistence = session.persist_rollout_items(&[]);
+        tokio::pin!(persistence);
+        assert!(
+            futures::poll!(persistence.as_mut()).is_pending(),
+            "independent persistence control blocks on the held history gate"
+        );
+    }
+    timeout(Duration::from_secs(/*secs*/ 1), async {
+        session.report_reasoning_effort(&first).await;
+        session.report_reasoning_effort(&next).await;
+    })
+    .await
+    .expect("effort reports bypass the held persistence gate");
+    drop(persisted);
+    assert_eq!(
+        serde_json::to_value(
+            &*session
+                .ephemeral_rollout_items
+                .as_ref()
+                .unwrap()
+                .lock()
+                .await,
+        )
+        .unwrap(),
+        persisted_before,
+        "transient effort events do not enter persisted history"
+    );
     let reported = std::iter::from_fn(|| events.try_recv().ok())
-        .filter_map(|event| match event.msg {
-            codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(update) => Some(update),
-            _ => None,
+        .filter(|event| {
+            matches!(
+                event.msg,
+                codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(_)
+            )
         })
         .collect::<Vec<_>>();
     assert_eq!(
-        reported,
-        vec![
-            codex_protocol::protocol::ReasoningEffortUpdatedEvent {
-                turn_id: turn.sub_id.clone(),
-                reasoning_effort: Some(ReasoningEffort::Low),
-                adaptive: true,
+        serde_json::to_value(&reported).unwrap(),
+        serde_json::to_value(vec![
+            codex_protocol::protocol::Event {
+                id: turn.sub_id.clone(),
+                msg: codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(
+                    codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                        turn_id: turn.sub_id.clone(),
+                        reasoning_effort: Some(ReasoningEffort::Low),
+                        adaptive: true,
+                    },
+                ),
             },
-            codex_protocol::protocol::ReasoningEffortUpdatedEvent {
-                turn_id: turn.sub_id.clone(),
-                reasoning_effort: Some(ReasoningEffort::High),
-                adaptive: true,
+            codex_protocol::protocol::Event {
+                id: turn.sub_id.clone(),
+                msg: codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(
+                    codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                        turn_id: turn.sub_id.clone(),
+                        reasoning_effort: Some(ReasoningEffort::High),
+                        adaptive: true,
+                    },
+                ),
             },
-        ]
+        ])
+        .unwrap()
     );
     session.pause_adaptive_reasoning().await;
     assert!(
