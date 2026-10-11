@@ -7,7 +7,8 @@ expression: "render_bottom_popup(&app.chat_widget, 80)"
   ASM updates are managed externally. Use the ASM installer to update.
 
 
-›    Install latest public stable
+     Install latest public stable
      Use this CLI build
+› 1. Restart background server
 
   enter select · esc back
