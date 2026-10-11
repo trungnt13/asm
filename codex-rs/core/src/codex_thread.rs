@@ -910,13 +910,21 @@ impl CodexThread {
         let Some(history) = &self.session.ephemeral_rollout_items else {
             return Ok(None);
         };
-        let active_turn = self.session.active_turn.lock().await;
-        if active_turn.is_some() {
-            return Err(CodexErr::InvalidRequest(
-                "cannot save a temporary fork while a turn is running".to_string(),
-            ));
+        loop {
+            {
+                let active_turn = self.session.active_turn.lock().await;
+                if active_turn.is_some() {
+                    return Err(CodexErr::InvalidRequest(
+                        "cannot save a temporary fork while a turn is running".to_string(),
+                    ));
+                }
+                if let Ok(history) = history.try_lock() {
+                    return Ok(Some(history.clone()));
+                }
+            }
+            // Wait without the turn lock, then recheck idle state before copying.
+            drop(history.lock().await);
         }
-        Ok(Some(history.lock().await.clone()))
     }
 
     pub async fn load_history(

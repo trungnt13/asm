@@ -5346,7 +5346,7 @@ impl ThreadRequestProcessor {
                 source_thread
                     .history
                     .take()
-                    .expect("temporary replay history")
+                    .ok_or_else(|| internal_error("temporary replay history is unavailable"))?
                     .items,
             )
         } else {
