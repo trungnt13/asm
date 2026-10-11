@@ -25,6 +25,12 @@ pub(crate) struct MessageHistoryMetadata {
     pub(crate) entry_count: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ThreadReasoningState {
+    pub(crate) captured_step: Option<codex_app_server_protocol::ReasoningEffortUpdatedNotification>,
+    pub(crate) suppressed_turn_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadSessionState {
     pub(crate) adaptive_reasoning_enabled: bool,

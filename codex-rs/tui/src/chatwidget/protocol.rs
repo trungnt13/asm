@@ -132,10 +132,7 @@ impl ChatWidget {
                     && self.turn_lifecycle.last_turn_id.as_deref() == Some(&notification.turn_id)
                     && !self.input_queue.user_turn_pending_start
                 {
-                    self.status_state.captured_step_reasoning =
-                        Some(super::status_state::CapturedStepReasoning {
-                            effort: notification.reasoning_effort,
-                        });
+                    self.status_state.captured_step_reasoning = Some(notification);
                     self.refresh_status_surfaces();
                 }
             }
