@@ -114,8 +114,6 @@ pub(super) struct StatusState {
     pub(super) adaptive_reasoning_revision: u64,
     pub(super) adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
     pub(super) adaptive_reasoning_failure_episode: u64,
-    pub(super) announced_adaptive_reasoning_revision: u64,
-    pub(super) announced_adaptive_reasoning_enabled: bool,
     pub(super) announced_adaptive_failures:
         std::collections::HashMap<codex_protocol::ThreadId, u64>,
     pub(super) captured_step_reasoning:
@@ -143,8 +141,6 @@ impl Default for StatusState {
             adaptive_reasoning_revision: 0,
             adaptive_reasoning_error: None,
             adaptive_reasoning_failure_episode: 0,
-            announced_adaptive_reasoning_revision: 0,
-            announced_adaptive_reasoning_enabled: false,
             announced_adaptive_failures: Default::default(),
             captured_step_reasoning: None,
             suppressed_adaptive_turn_id: None,
