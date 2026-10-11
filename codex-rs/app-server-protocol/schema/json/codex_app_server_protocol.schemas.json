@@ -25388,6 +25388,15 @@
       "ThreadTokenUsageUpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "outputTokensPerSecond": {
+            "default": null,
+            "description": "Successful ordinary response throughput, including request latency and reasoning output. Other usage updates and replayed updates carry `None`.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "threadId": {
             "type": "string"
           },
