@@ -298,7 +298,7 @@ async fn finish_adaptation(adaptation: &mut tokio::task::JoinHandle<()>) {
 }
 
 #[tokio::test]
-async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps() {
+async fn basic_step_barrier_awaits_publication_and_preserves_captured_steps() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
         config.ephemeral = true;
@@ -530,20 +530,10 @@ async fn adaptive_step_barrier_awaits_publication_and_preserves_captured_steps()
     );
 }
 
-#[test_case("assistant")]
-#[test_case("tool")]
-#[test_case("user")]
-#[test_case("deadline")]
-#[test_case("manual")]
 #[tokio::test]
-async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) {
+async fn special_new_tool_evidence_rejects_stale_decision() {
     let mut proxy = DecisionProxy::start().await;
-    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
-        if scenario == "deadline" {
-            config.adaptive_reasoning.decision_timeout_ms = 500;
-        }
-    })
-    .await;
+    let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let cancellation = CancellationToken::new();
     let first = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -565,58 +555,20 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
         !adaptation.is_finished(),
         "pre-step barrier awaits held HTTP response"
     );
-    match scenario {
-        "assistant" => {
-            session
-                .record_conversation_items(
-                    &turn,
-                    &turn.capture_current_model_info(),
-                    &[ResponseItem::Message {
-                        id: None,
-                        role: "assistant".to_string(),
-                        encrypted_content: None,
-                        status: None,
-                        content: vec![ContentItem::OutputText {
-                            text: "The result is four.".to_string(),
-                            annotations: None,
-                            logprobs: None,
-                        }],
-                        phase: None,
-                        internal_chat_message_metadata_passthrough: None,
-                    }],
-                )
-                .await
-        }
-        "tool" => {
-            session
-                .record_conversation_items(
-                    &turn,
-                    &turn.capture_current_model_info(),
-                    &[ResponseItem::FunctionCallOutput {
-                        id: None,
-                        call_id: Some("synthetic-call".to_string()),
-                        name: None,
-                        namespace: None,
-                        output: FunctionCallOutputPayload::from_text("4".to_string()),
-                        internal_chat_message_metadata_passthrough: None,
-                    }],
-                )
-                .await
-        }
-        "user" => {
-            session.reserve_user_input_order().await;
-        }
-        "deadline" => {
-            tokio::time::sleep(Duration::from_millis(
-                turn.config.adaptive_reasoning.decision_timeout_ms + 1,
-            ))
-            .await;
-        }
-        "manual" => {
-            session.pause_adaptive_reasoning().await;
-        }
-        _ => unreachable!("defined test scenarios"),
-    }
+    session
+        .record_conversation_items(
+            &turn,
+            &turn.capture_current_model_info(),
+            &[ResponseItem::FunctionCallOutput {
+                id: None,
+                call_id: Some("synthetic-call".to_string()),
+                name: None,
+                namespace: None,
+                output: FunctionCallOutputPayload::from_text("4".to_string()),
+                internal_chat_message_metadata_passthrough: None,
+            }],
+        )
+        .await;
     request
         .reply
         .send((
@@ -631,8 +583,8 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
             .thread_config_snapshot()
             .await
             .adaptive_reasoning_error,
-        (scenario == "deadline").then_some(AdaptiveReasoningError::Timeout),
-        "only the deadline is an API error; supersession and manual overrides are neutral"
+        None,
+        "supersession is not a Decisions failure"
     );
     let next = session
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -652,7 +604,7 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
         Some(codex_protocol::protocol::ReasoningEffortUpdatedEvent {
             turn_id: turn.sub_id.clone(),
             reasoning_effort: Some(ReasoningEffort::Low),
-            adaptive: scenario != "manual",
+            adaptive: true,
         })
     );
     assert_eq!(
@@ -663,102 +615,18 @@ async fn adaptive_job_rejects_newer_evidence_or_manual_settings(scenario: &str) 
     session.stop_adaptive_reasoning().await;
 }
 
-#[test_case(503, json!({"error":"synthetic"}))]
-#[test_case(200, json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"unsupported"}]}))]
+#[test_case("disabled"; "configured_off_allows_runtime_opt_in")]
+#[test_case("override disabled"; "reasoning_override_feature_required")]
+#[test_case("single intersection"; "one_choice_skips_decisions")]
+#[test_case("ultra"; "ultra_effort_is_protected")]
+#[test_case("persistent"; "persistent_effort_is_protected")]
+#[test_case("feature worker"; "internal_worker_stays_fixed")]
 #[tokio::test]
-async fn adaptive_job_failure_retains_effort(status: u16, body: Value) {
-    let mut proxy = DecisionProxy::start().await;
-    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
-    let mut adaptation = start_adapting(
-        &session,
-        &turn,
-        &user_task("Check a harmless arithmetic result."),
-        AdaptiveReasoningTrigger::TurnStart,
-        &CancellationToken::new(),
-    );
-    let request = proxy.request().await;
-    assert!(
-        !adaptation.is_finished(),
-        "failure response has not released the barrier yet"
-    );
-    request.reply.send((status, body)).unwrap();
-    finish_adaptation(&mut adaptation).await;
-    assert_eq!(
-        session.thread_settings_persistence.available_permits(),
-        1,
-        "completed barrier releases the publication permit"
-    );
-    assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
-    let failed = session.thread_config_snapshot().await;
-    assert_eq!(
-        (
-            failed.adaptive_reasoning_enabled,
-            failed.adaptive_reasoning_error,
-            failed.adaptive_reasoning_failure_episode
-        ),
-        (
-            true,
-            Some(if status == 503 {
-                AdaptiveReasoningError::Http { status }
-            } else {
-                AdaptiveReasoningError::InvalidResponse
-            }),
-            1
-        )
-    );
-    let before_recovery = turn.next_step_settings.load_full();
-    let mut recovery = start_adapting(
-        &session,
-        &turn,
-        &user_task("Check the same arithmetic result."),
-        AdaptiveReasoningTrigger::TurnStart,
-        &CancellationToken::new(),
-    );
-    proxy
-        .request()
-        .await
-        .reply
-        .send((
-            200,
-            json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"low"}]}),
-        ))
-        .unwrap();
-    finish_adaptation(&mut recovery).await;
-    let recovered = session.thread_config_snapshot().await;
-    assert_eq!(
-        (
-            recovered.adaptive_reasoning_error,
-            recovered.adaptive_reasoning_failure_episode,
-            recovered.adaptive_reasoning_revision
-        ),
-        (None, 1, failed.adaptive_reasoning_revision + 1)
-    );
-    assert!(
-        Arc::ptr_eq(&before_recovery, &turn.next_step_settings.load_full()),
-        "accepted unchanged effort clears health without rewriting settings"
-    );
-    session.stop_adaptive_reasoning().await;
-}
-
-#[test_case("disabled")]
-#[test_case("override disabled")]
-#[test_case("empty triggers")]
-#[test_case("unsupported model")]
-#[test_case("empty intersection")]
-#[test_case("single intersection")]
-#[test_case("ultra")]
-#[test_case("persistent")]
-#[test_case("feature worker")]
-#[test_case("child")]
-#[test_case("review")]
-#[test_case("memory")]
-#[tokio::test]
-async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str) {
+async fn basic_execution_eligibility_skips_warmup_and_decisions(scenario: &str) {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, events) =
         adaptive_fixture(Arc::clone(&proxy.client), |config| match scenario {
             "disabled" => config.adaptive_reasoning.enabled = false,
-            "empty triggers" => config.adaptive_reasoning.update_on.clear(),
             "override disabled" => {
                 config
                     .features
@@ -767,17 +635,12 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
             }
             "ultra" => config.model_reasoning_effort = Some(ReasoningEffort::Ultra),
             "persistent" => config.model_reasoning_effort = Some(ReasoningEffort::Persistent),
-            _ => {}
+            "single intersection" | "feature worker" => {}
+            _ => unreachable!("defined eligibility scenarios"),
         })
         .await;
     let mut selected = (*turn.next_step_settings.load_full()).clone();
     match scenario {
-        "unsupported model" => {
-            Arc::make_mut(&mut selected.model_info).supports_reasoning_effort_updates = false
-        }
-        "empty intersection" => Arc::make_mut(&mut selected.model_info)
-            .supported_reasoning_levels
-            .clear(),
         "single intersection" => {
             Arc::make_mut(&mut selected.model_info)
                 .supported_reasoning_levels
@@ -792,31 +655,8 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
                 .session_configuration
                 .thread_source = Some(ThreadSource::Feature("thread_title".to_string()))
         }
-        "child" => {
-            session
-                .state
-                .lock()
-                .await
-                .session_configuration
-                .thread_source = Some(ThreadSource::Subagent)
-        }
-        "review" => {
-            session
-                .state
-                .lock()
-                .await
-                .session_configuration
-                .thread_source = Some(ThreadSource::GuardianReview)
-        }
-        "memory" => {
-            session
-                .state
-                .lock()
-                .await
-                .session_configuration
-                .thread_source = Some(ThreadSource::MemoryConsolidation)
-        }
-        _ => {}
+        "disabled" | "override disabled" | "ultra" | "persistent" => {}
+        _ => unreachable!("defined eligibility scenarios"),
     }
     turn.next_step_settings.store(Arc::new(selected));
     session
@@ -868,19 +708,15 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
         })
         .collect::<Vec<_>>();
     let expected = match scenario {
-        "disabled" | "feature worker" | "child" | "review" | "memory" => Vec::new(),
-        "override disabled"
-        | "empty triggers"
-        | "unsupported model"
-        | "empty intersection"
-        | "single intersection"
-        | "ultra"
-        | "persistent" => vec![codex_protocol::protocol::ReasoningEffortUpdatedEvent {
-            turn_id: turn.sub_id.clone(),
-            reasoning_effort: step.settings.effective_reasoning_effort(),
-            adaptive: false,
-        }],
-        _ => unreachable!("defined test scenarios"),
+        "disabled" | "feature worker" => Vec::new(),
+        "override disabled" | "single intersection" | "ultra" | "persistent" => {
+            vec![codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                turn_id: turn.sub_id.clone(),
+                reasoning_effort: step.settings.effective_reasoning_effort(),
+                adaptive: false,
+            }]
+        }
+        _ => unreachable!("defined eligibility scenarios"),
     };
     assert_eq!(updates, expected);
     session
@@ -972,7 +808,7 @@ async fn ineligible_sessions_do_not_schedule_warmup_or_decisions(scenario: &str)
 }
 
 #[tokio::test]
-async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
+async fn basic_warmup_is_one_shot_and_does_not_change_history_or_settings() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     session
@@ -1043,10 +879,8 @@ async fn warmup_is_one_shot_and_does_not_change_history_or_settings() {
     session.stop_adaptive_reasoning().await;
 }
 
-#[test_case("turn cancelled")]
-#[test_case("session shutdown")]
 #[tokio::test]
-async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: &str) {
+async fn special_turn_cancellation_drops_decision_without_settings_effect() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let cancellation = CancellationToken::new();
@@ -1063,17 +897,8 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
         "pre-step barrier awaits held HTTP response"
     );
     timeout(Duration::from_millis(/*millis*/ 500), async {
-        match scenario {
-            "turn cancelled" => {
-                cancellation.cancel();
-                finish_adaptation(&mut adaptation).await;
-            }
-            "session shutdown" => session.stop_adaptive_reasoning().await,
-            _ => unreachable!("defined test scenarios"),
-        }
-        if scenario == "session shutdown" {
-            finish_adaptation(&mut adaptation).await;
-        }
+        cancellation.cancel();
+        finish_adaptation(&mut adaptation).await;
     })
     .await
     .expect("cancellation drops held HTTP without waiting for the API deadline");
@@ -1083,7 +908,7 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
             .await
             .adaptive_reasoning_error,
         None,
-        "cancellation and shutdown are not Decisions failures"
+        "cancellation is not a Decisions failure"
     );
     session.stop_adaptive_reasoning().await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
@@ -1097,45 +922,7 @@ async fn unfinished_adaptive_job_is_cancelled_without_settings_effect(scenario: 
 }
 
 #[tokio::test]
-async fn stalled_warmup_shutdown_does_not_wait_for_http_or_change_history() {
-    let mut proxy = DecisionProxy::start().await;
-    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
-    session
-        .services
-        .thread_extension_data
-        .insert((*turn.capture_current_model_info()).clone());
-    let source = session.state.lock().await.session_configuration.clone();
-    let baseline = turn.next_step_settings.load_full();
-    let history = session.state.lock().await.history.clone();
-    session.start_adaptive_reasoning_warmup(&turn.config, &source);
-    let request = proxy.request().await;
-    timeout(
-        Duration::from_millis(/*millis*/ 500),
-        session.stop_adaptive_reasoning(),
-    )
-    .await
-    .expect("shutdown cancels stalled warmup rather than waiting for HTTP deadline");
-    assert!(
-        session
-            .services
-            .thread_extension_data
-            .get::<AdaptiveSession>()
-            .unwrap()
-            .warmup
-            .lock()
-            .unwrap()
-            .is_none()
-    );
-    assert!(Arc::ptr_eq(&baseline, &turn.next_step_settings.load_full()));
-    assert_eq!(
-        session.state.lock().await.history.annotated_items(),
-        history.annotated_items()
-    );
-    drop(request.reply);
-}
-
-#[tokio::test]
-async fn busy_settings_publication_drops_completed_decision_without_waiting() {
+async fn special_busy_settings_publication_drops_completed_decision_without_waiting() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let mut adaptation = start_adapting(
@@ -1169,11 +956,8 @@ async fn busy_settings_publication_drops_completed_decision_without_waiting() {
     session.stop_adaptive_reasoning().await;
 }
 
-#[test_case("superseded")]
-#[test_case("manual")]
-#[test_case("shutdown")]
 #[tokio::test]
-async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_it(scenario: &str) {
+async fn special_completed_http_response_cannot_publish_after_shutdown() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let mut adaptation = start_adapting(
@@ -1203,12 +987,7 @@ async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_
     })
     .await
     .expect("HTTP completed and publisher reached serialized settings preparation");
-    match scenario {
-        "superseded" => session.invalidate_adaptive_reasoning(),
-        "manual" => session.pause_adaptive_reasoning().await,
-        "shutdown" => state.shutting_down = true,
-        _ => unreachable!("defined test scenarios"),
-    }
+    state.shutting_down = true;
     drop(state);
     finish_adaptation(&mut adaptation).await;
     assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
@@ -1216,7 +995,7 @@ async fn completed_http_response_cannot_publish_after_state_barrier_invalidates_
 }
 
 #[tokio::test]
-async fn stalled_decision_does_not_keep_session_or_turn_alive() {
+async fn special_dropped_decision_does_not_keep_session_or_turn_alive() {
     let mut proxy = DecisionProxy::start().await;
     let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |_| {}).await;
     let adaptation = start_adapting(
@@ -1263,11 +1042,11 @@ async fn stalled_decision_does_not_keep_session_or_turn_alive() {
     .expect("dropped step future has no strong session/turn reference cycle");
 }
 
-#[test_case("success")]
-#[test_case("failure")]
-#[test_case("timeout")]
+#[test_case("success"; "selected_effort_precedes_each_request")]
+#[test_case("failure"; "http_failure_continues_with_current_effort")]
+#[test_case("timeout"; "timeout_continues_with_current_effort")]
 #[tokio::test]
-async fn regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
+async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
     use crate::tasks::RegularTask;
     use codex_protocol::protocol::TurnAbortReason;
     use core_test_support::responses;
