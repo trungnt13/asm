@@ -3042,7 +3042,7 @@ async fn status_line_cache_hit_rate_uses_latest_request() {
         /*replay_kind*/ None,
     );
     let usage_redraws = std::iter::from_fn(|| draw_rx.try_recv().ok()).count();
-    notification.output_tokens_per_second = Some(50.0);
+    notification.output_tokens_per_second = Some(7.49);
     chat.handle_server_notification(
         ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
         /*replay_kind*/ None,
@@ -3051,27 +3051,24 @@ async fn status_line_cache_hit_rate_uses_latest_request() {
         std::iter::from_fn(|| draw_rx.try_recv().ok()).count(),
         usage_redraws
     );
-    assert_eq!(chat.output_tps, Some("TPS50.0".to_string()));
+    assert_eq!(chat.output_tps, Some("7tps".to_string()));
     assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
 
     // The app performs this refresh for token usage, not the notification cache handler.
     chat.refresh_status_line();
-    assert_eq!(
-        status_line_text(&chat),
-        Some("Cch89.6%·TPS50.0".to_string())
-    );
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%·7tps".to_string()));
     notification.output_tokens_per_second = Some(f64::NAN);
     chat.handle_server_notification(
         ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
         /*replay_kind*/ None,
     );
-    assert_eq!(chat.output_tps, Some("TPS50.0".to_string()));
-    notification.output_tokens_per_second = Some(100.0);
+    assert_eq!(chat.output_tps, Some("7tps".to_string()));
+    notification.output_tokens_per_second = Some(7.5);
     chat.handle_server_notification(
         ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
         Some(ReplayKind::ThreadSnapshot),
     );
-    assert_eq!(chat.output_tps, Some("TPS100.0".to_string()));
+    assert_eq!(chat.output_tps, Some("8tps".to_string()));
     notification.output_tokens_per_second = None;
     chat.handle_server_notification(
         ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
@@ -3085,7 +3082,7 @@ async fn status_line_cache_hit_rate_uses_latest_request() {
     );
     chat.set_token_info(/*info*/ None);
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("TPS100.0".to_string()));
+    assert_eq!(status_line_text(&chat), Some("8tps".to_string()));
 }
 
 #[tokio::test]
