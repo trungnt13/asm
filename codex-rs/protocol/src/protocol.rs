@@ -2043,6 +2043,11 @@ pub struct RawResponseCompletedEvent {
     pub response_id: String,
     pub token_usage: Option<TokenUsage>,
     pub usage_metadata: Option<crate::ResponseUsageMetadata>,
+    /// Wall time of this successful request, from send to completion. Failed
+    /// attempts, retry backoff, and compaction requests are not measured.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]

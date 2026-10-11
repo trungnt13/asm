@@ -1,6 +1,7 @@
 //! Agent-turn lifecycle state for `ChatWidget`.
 
 use std::collections::HashSet;
+use std::time::Duration;
 use std::time::Instant;
 
 use codex_utils_sleep_inhibitor::SleepInhibitor;
@@ -15,6 +16,17 @@ pub(super) struct TurnLifecycleState {
     /// Completion labels already inserted into this thread's visible history.
     pub(super) rendered_completion_turn_ids: HashSet<String>,
     pub(super) goal_status_active_turn_started_at: Option<Instant>,
+    /// Totals of the latest turn that reported a timed model request. They outlive the turn so the
+    /// status line keeps its rate until the next turn's first request completes.
+    pub(super) request_totals: Option<TurnRequestTotals>,
+}
+
+/// Output tokens and wall time summed over one turn's successful model requests.
+#[derive(Debug)]
+pub(super) struct TurnRequestTotals {
+    turn_id: String,
+    pub(super) output_tokens: i64,
+    pub(super) time: Duration,
 }
 
 impl TurnLifecycleState {
@@ -26,6 +38,7 @@ impl TurnLifecycleState {
             budget_limited_turn_ids: HashSet::new(),
             rendered_completion_turn_ids: HashSet::new(),
             goal_status_active_turn_started_at: None,
+            request_totals: None,
         }
     }
 
@@ -50,9 +63,25 @@ impl TurnLifecycleState {
 
     pub(super) fn reset_thread(&mut self) {
         self.finish();
+        self.request_totals = None;
         self.last_turn_id = None;
         self.budget_limited_turn_ids.clear();
         self.rendered_completion_turn_ids.clear();
+    }
+
+    pub(super) fn record_request(&mut self, turn_id: String, output_tokens: i64, time: Duration) {
+        let totals = self.request_totals.take();
+        let mut totals =
+            totals
+                .filter(|totals| totals.turn_id == turn_id)
+                .unwrap_or(TurnRequestTotals {
+                    turn_id,
+                    output_tokens: 0,
+                    time: Duration::ZERO,
+                });
+        totals.output_tokens += output_tokens;
+        totals.time += time;
+        self.request_totals = Some(totals);
     }
 
     pub(super) fn set_prevent_idle_sleep(&mut self, enabled: bool) {

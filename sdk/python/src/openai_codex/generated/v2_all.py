@@ -10520,6 +10520,13 @@ class ThreadTokenUsageUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    last_request_duration_ms: Annotated[
+        int | None,
+        Field(
+            alias="lastRequestDurationMs",
+            description="Wall time in milliseconds, from send to completion, of the successful request that produced `tokenUsage.last`. Reported once per request; null on repeated updates, compaction requests, and replay.",
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
     turn_id: Annotated[str, Field(alias="turnId")]

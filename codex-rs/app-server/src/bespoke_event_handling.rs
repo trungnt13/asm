@@ -1029,8 +1029,19 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::TokenCount(token_count_event) => {
-            handle_token_count_event(conversation_id, event_turn_id, token_count_event, &outgoing)
-                .await;
+            let last_request_duration_ms = thread_state
+                .lock()
+                .await
+                .completed_request_duration_ms
+                .take();
+            handle_token_count_event(
+                conversation_id,
+                event_turn_id,
+                token_count_event,
+                last_request_duration_ms,
+                &outgoing,
+            )
+            .await;
         }
         EventMsg::Error(ev) => {
             thread_watch_manager
@@ -1593,6 +1604,7 @@ async fn handle_token_count_event(
     conversation_id: ThreadId,
     turn_id: String,
     token_count_event: TokenCountEvent,
+    last_request_duration_ms: Option<i64>,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
     let TokenCountEvent { info, rate_limits } = token_count_event;
@@ -1601,6 +1613,7 @@ async fn handle_token_count_event(
             thread_id: conversation_id.to_string(),
             turn_id,
             token_usage,
+            last_request_duration_ms,
         };
         outgoing
             .send_server_notification(ServerNotification::ThreadTokenUsageUpdated(notification))
@@ -3480,6 +3493,7 @@ mod tests {
                                 ..Default::default()
                             }),
                             usage_metadata: None,
+                            duration_ms: None,
                         },
                     ),
                 );
@@ -3755,6 +3769,7 @@ mod tests {
                 info: Some(info),
                 rate_limits: Some(rate_limits),
             },
+            /*last_request_duration_ms*/ None,
             &outgoing,
         )
         .await;
@@ -3808,6 +3823,7 @@ mod tests {
                 info: None,
                 rate_limits: None,
             },
+            /*last_request_duration_ms*/ None,
             &outgoing,
         )
         .await;

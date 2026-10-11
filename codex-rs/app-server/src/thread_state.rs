@@ -108,6 +108,9 @@ pub(crate) struct ThreadState {
     goal_resume_lock: Arc<Mutex<()>>,
     pub(crate) pending_interrupts: PendingInterruptQueue,
     pub(crate) turn_summary: TurnSummary,
+    /// Duration of the latest completed model request, held until the token usage update that
+    /// reports the same request takes it.
+    pub(crate) completed_request_duration_ms: Option<i64>,
     pub(crate) last_terminal_turn_id: Option<String>,
     /// Lets an internal runtime replacement wait until the old listener has processed Core's
     /// `ShutdownComplete` event before that listener is superseded.
@@ -215,6 +218,9 @@ impl ThreadState {
         {
             self.turn_summary.last_agent_message =
                 Some(ThreadItem::from(CoreTurnItem::AgentMessage(item.clone())));
+        }
+        if let EventMsg::RawResponseCompleted(payload) = event {
+            self.completed_request_duration_ms = payload.duration_ms;
         }
         if let EventMsg::RawResponseCompleted(payload) = event
             && self.current_turn_history.active_turn_id() == Some(event_turn_id)

@@ -46,6 +46,7 @@ pub(super) async fn send_thread_token_usage_update_to_connection(
         thread_id: thread_id.to_string(),
         turn_id: token_usage_turn_id,
         token_usage: ThreadTokenUsage::from(info),
+        last_request_duration_ms: None,
     };
     outgoing
         .send_server_notification_to_connections(

@@ -131,6 +131,9 @@ pub(crate) enum StatusLineItem {
     /// Total output tokens generated.
     TotalOutputTokens,
 
+    /// Output tokens per second over the current turn's successful requests.
+    TokensPerSecond,
+
     /// Estimated credits attributed directly to the current enterprise thread.
     ThreadCredits,
 
@@ -205,6 +208,9 @@ impl StatusLineItem {
                 "Cached share of the latest request's input tokens (omitted until available)"
             }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
+            StatusLineItem::TokensPerSecond => {
+                "Output tokens per second of the current turn's successful requests (omitted until available)"
+            }
             StatusLineItem::ThreadCredits => {
                 "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
             }
@@ -252,6 +258,7 @@ impl StatusLineItem {
             StatusLineItem::TotalInputTokens => StatusSurfacePreviewItem::TotalInputTokens,
             StatusLineItem::CacheHitRate => StatusSurfacePreviewItem::CacheHitRate,
             StatusLineItem::TotalOutputTokens => StatusSurfacePreviewItem::TotalOutputTokens,
+            StatusLineItem::TokensPerSecond => StatusSurfacePreviewItem::TokensPerSecond,
             StatusLineItem::ThreadCredits => StatusSurfacePreviewItem::ThreadCredits,
             StatusLineItem::EstimatedThreadCost => StatusSurfacePreviewItem::EstimatedThreadCost,
             StatusLineItem::SessionId => StatusSurfacePreviewItem::SessionId,

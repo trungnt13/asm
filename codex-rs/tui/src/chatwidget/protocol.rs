@@ -59,9 +59,20 @@ impl ChatWidget {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                let request_duration_ms = notification.last_request_duration_ms;
+                if let Some(duration_ms) = request_duration_ms {
+                    self.turn_lifecycle.record_request(
+                        notification.turn_id,
+                        notification.token_usage.last.output_tokens,
+                        Duration::from_millis(u64::try_from(duration_ms).unwrap_or_default()),
+                    );
+                }
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
                 )));
+                if request_duration_ms.is_some() {
+                    self.refresh_status_line();
+                }
             }
             ServerNotification::ThreadNameUpdated(notification) => {
                 match ThreadId::from_string(&notification.thread_id) {

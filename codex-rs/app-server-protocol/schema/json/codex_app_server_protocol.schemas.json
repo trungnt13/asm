@@ -25388,6 +25388,14 @@
       "ThreadTokenUsageUpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "lastRequestDurationMs": {
+            "description": "Wall time in milliseconds, from send to completion, of the successful request that produced `tokenUsage.last`. Reported once per request; null on repeated updates, compaction requests, and replay.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "threadId": {
             "type": "string"
           },

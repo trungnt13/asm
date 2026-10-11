@@ -464,6 +464,7 @@ async fn collect_compaction_output(
                     &response_id,
                     token_usage.as_ref(),
                     usage_metadata.as_ref(),
+                    /*request_duration*/ None,
                 )
                 .await;
                 completed_response_id = Some(response_id);

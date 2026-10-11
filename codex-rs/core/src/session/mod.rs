@@ -8,6 +8,7 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -4855,6 +4856,7 @@ impl Session {
         response_id: &str,
         usage: Option<&TokenUsage>,
         usage_metadata: Option<&ResponseUsageMetadata>,
+        request_duration: Option<Duration>,
     ) {
         self.send_event(
             turn_context,
@@ -4862,6 +4864,8 @@ impl Session {
                 response_id: response_id.to_string(),
                 token_usage: usage.cloned(),
                 usage_metadata: usage_metadata.cloned(),
+                duration_ms: request_duration
+                    .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)),
             }),
         )
         .await;

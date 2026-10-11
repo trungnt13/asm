@@ -1935,6 +1935,11 @@ pub struct ThreadTokenUsageUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
     pub token_usage: ThreadTokenUsage,
+    /// Wall time in milliseconds, from send to completion, of the successful
+    /// request that produced `tokenUsage.last`. Reported once per request;
+    /// null on repeated updates, compaction requests, and replay.
+    #[ts(type = "number | null")]
+    pub last_request_duration_ms: Option<i64>,
 }
 
 /// Internal-only notification containing the exact usage from one upstream
