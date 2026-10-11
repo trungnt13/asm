@@ -14,8 +14,8 @@ This guide overrides conflicting repository instructions, including [AGENTS.md](
 
 - Refresh Git status, branches, and worktrees before edits, including after resume.
 - For syncs and pushes, inspect remotes and fork history. For overlap or unexplained changes, inspect relevant repo sessions. Recover context from Git and sessions, not owner memory or a task diary.
-- For concurrent tasks, create a named `codex/` branch and separate worktree before edits. Coordinate shared files. Assign one agent to staging and commits per checkout. Integrate one task at a time into local `main`.
-- Prefer a reusable task checkout: `python3 scripts/dev-worktree.py acquire codex/<task>`. Keep its path through builds and validation. Slots have an exclusive owner/branch lease. Owner defaults to `CODEX_THREAD_ID`; use `--owner <id>` if unset and `--slot <name>` for parallel tasks. Release with `python3 scripts/dev-worktree.py release codex/<task>` only after clean local `main` integration. Keep the detached checkout for reuse. Never clear another owner's lease or discard work; inspect and coordinate abandoned leases.
+- Create a named `codex/` task branch before edits or upstream syncs. For concurrent tasks, use a separate worktree to isolate changes, not as the final deliverable. Coordinate shared files and assign one agent to staging and commits per checkout.
+- Prefer a reusable task checkout: `python3 scripts/dev-worktree.py acquire codex/<task>`. Keep its path through builds and validation. Slots have an exclusive owner/branch lease. Owner defaults to `CODEX_THREAD_ID`; use `--owner <id>` if unset and `--slot <name>` for parallel tasks. Keep the checkout and lease while its PR is pending. Release with `python3 scripts/dev-worktree.py release codex/<task>` only after approved integration includes its branch tip in clean local `main`. Keep the detached checkout for reuse. Never clear another owner's lease or discard work; inspect and coordinate abandoned leases.
 - Preserve existing work. If it blocks progress, use another worktree. Get permission before committing or stashing unrelated work. Keep authorized stashes until restoration is verified. Never overwrite other work to clean a checkout.
 
 ### Build the binary first
@@ -69,21 +69,23 @@ Do not default to whole-crate or workspace suites. If focused checks cannot veri
 - Record exact created session IDs, commands, binary/source identity, expected and actual results. Retain rollouts, output, and diagnostic logs in a private task evidence directory before cleanup. Never include credentials in reports or commits.
 - Keep a failed test home until triage is complete. Remove only task-owned test state after required evidence is retained. Never classify personal sessions as disposable by title alone.
 
-### Commit, integrate, report
+### Commit, open a PR, report
 
-Implementation requests, including documentation edits, authorize commits and local `main` integration unless the owner says otherwise. The lead agent owns completion, including delegated work. Once the validation requirements above are met and owner decisions are resolved, commit immediately. Then integrate. Wait for manual testing or separate approval only on request. **Done means committed in local `main` with the user's intended outcome verified**, not another worktree or a binary handoff. If verification is blocked, report the gap and blocker rather than claim completion. Releases follow separate completion rules below.
+Use a PR for all implementation changes, including documentation, and upstream syncs. The lead agent owns completion, including delegated work. Once validation passes and owner decisions are resolved, commit on the task branch, push it, and open a PR against `main`. **Done means validated changes are committed, pushed, and ready for PR review.** A worktree or binary handoff alone is not completion. Do not commit directly to `main` or integrate without explicit owner approval. Releases have the workflow exception below.
 
 - Inspect the staged diff. Include only finished task changes, their tests, generated files, and intent.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`. Correct local configuration if needed. Get approval before rewriting published history solely for attribution.
-- Recheck the target branch before integration. Compare base, fork, and upstream when resolving conflicts against this guide. Verify affected behavior. For owner decisions, inspect all exposed conflicts, then ask one question with recommendations. Later commits can expose more conflicts.
-- Reconcile task-owned duplicate edits without losing other work. If integration is blocked, commit finished work and report **ready, integration blocked**, with the reason. Identify unfinished work separately.
-- Report changes, exact checks/results, skipped checks, uncertainty, commit, integration, and push status. Give the branch or worktree for remaining work.
+- Recheck the PR base before updating the branch. Compare base, fork, and upstream when resolving conflicts against this guide. Verify affected behavior. For owner decisions, inspect all exposed conflicts, then ask one question with recommendations. Later commits can expose more conflicts.
+- Reconcile task-owned duplicate edits without losing other work. If validation, pushing, or PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
+- Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State whether the PR is ready, blocked, or merged. A ready PR does not authorize merging it.
 
 ### Push permissions
 
-`origin/main` pushes, including `--force-with-lease`, have standing approval but are optional for local completion. Other force pushes, tag moves, discarding work, and releases require explicit approval. Implementation alone does not authorize publication.
+Task requests authorize task-branch commits, pushes, and PR creation, not PR merges or `main` pushes. Change local or remote `main` only with explicit owner approval. Force pushes, tag moves, discarding work, and releases also require explicit approval.
 
-Push branches with an explicit ref and `--no-follow-tags`, never all local tags. Release-triggering tag pushes require publication approval, including inherited workflow tags. Before force pushes, fetch and account for remote-only work, including workflow-created release commits. Preserve that work. Use an explicit lease against the inspected remote tip. Never refresh a failed lease and retry blindly.
+An explicit release request authorizes the existing workflow's candidate publication and verified `main` update, followed by a safe local fast-forward. It does not authorize direct source fixes on `main`; submit those through a PR first.
+
+Push branches with an explicit ref and `--no-follow-tags`, never all local tags. Release-triggering tag pushes require publication approval, including inherited workflow tags. Before authorized force pushes, fetch and account for remote-only work, including workflow-created release commits. Preserve that work. Use an explicit lease against the inspected remote tip. Never refresh a failed lease and retry blindly.
 
 ## Upstream sync
 
@@ -93,13 +95,13 @@ Push branches with an explicit ref and `--no-follow-tags`, never all local tags.
 - Commit date: 2026-10-11.
 - Subject: Add connection-bound reply handles for app-server requests (#53049).
 
-Verify the upstream URL before fetching. Use the requested sync method. Otherwise, merge into `main` to preserve published history; rebase only unpublished branches. Use `git cherry-pick -x` for targeted ports.
+Verify the upstream URL before fetching. Prepare the sync on a task branch and submit a PR. Use the requested sync method there. Otherwise, merge upstream into the task branch to preserve published history; rebase only unpublished branches. Rewrite published `main` only with explicit owner approval. Use `git cherry-pick -x` for targeted ports.
 
 A full sync includes the selected upstream `main` commit and all ancestors. Capture the old baseline and target before sync. Report that fixed range. Focus on fork differences and affected upstream changes. Apply the integration and validation rules above.
 
 After each upstream rebase, give a short, high-level list of the main upstream changes in that range. Group related changes, not individual commits. Use one plain sentence per idea to explain the change and its user effect, with a source link. Keep rebase status and validation separate.
 
-After successful full sync, advance the marker; cherry-picks do not advance it. Verify hash, date, and subject with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`. Confirm the marker is an ancestor of the fork branch.
+After successful full sync on the task branch, advance the marker in the same PR; cherry-picks do not advance it. Verify hash, date, and subject with `git show -s --format='%H%n%cs%n%s' <upstream-commit>`. Confirm the marker is an ancestor of the fork branch.
 
 ## Platforms and CI
 
