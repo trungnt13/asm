@@ -1401,15 +1401,15 @@ impl AppServerSession {
     pub(crate) async fn adaptive_reasoning_update(
         &mut self,
         params: ThreadSettingsUpdateParams,
-    ) -> Result<Option<u64>> {
+    ) -> Result<Option<ThreadSettingsUpdateResponse>> {
         let requested = params.adaptive_reasoning_enabled;
         Ok(self
             .request_thread_settings_update(params)
             .await?
             .and_then(|response| {
                 (requested.is_some() && response.adaptive_reasoning_enabled == requested)
-                    .then_some(response.adaptive_reasoning_revision)
-                    .flatten()
+                    .then_some(response)
+                    .filter(|response| response.adaptive_reasoning_revision.is_some())
             }))
     }
 
@@ -2462,6 +2462,8 @@ async fn thread_session_state_from_thread_start_response(
     .await?;
     session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
     session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
+    session.adaptive_reasoning_error = response.adaptive_reasoning_error;
+    session.adaptive_reasoning_failure_episode = response.adaptive_reasoning_failure_episode;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response
         .thread
@@ -2503,6 +2505,8 @@ async fn thread_session_state_from_thread_resume_response(
     .await?;
     session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
     session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
+    session.adaptive_reasoning_error = response.adaptive_reasoning_error;
+    session.adaptive_reasoning_failure_episode = response.adaptive_reasoning_failure_episode;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.collaboration_mode = response.collaboration_mode.clone().map(Box::new);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
@@ -2543,6 +2547,8 @@ async fn thread_session_state_from_thread_fork_response(
     .await?;
     session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
     session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
+    session.adaptive_reasoning_error = response.adaptive_reasoning_error;
+    session.adaptive_reasoning_failure_episode = response.adaptive_reasoning_failure_episode;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
@@ -2611,6 +2617,8 @@ async fn thread_session_state_from_thread_response(
     Ok(ThreadSessionState {
         adaptive_reasoning_enabled: false,
         adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host,
@@ -4206,6 +4214,8 @@ mod tests {
         let response = ThreadResumeResponse {
             adaptive_reasoning_enabled: true,
             adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
                 originator: None,

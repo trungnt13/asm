@@ -1898,6 +1898,8 @@ enabled = false
             .handle_thread_session(crate::session_state::ThreadSessionState {
                 adaptive_reasoning_enabled: false,
                 adaptive_reasoning_revision: 0,
+                adaptive_reasoning_error: None,
+                adaptive_reasoning_failure_episode: 0,
                 thread_source: None,
                 daybreak_enabled: false,
                 windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

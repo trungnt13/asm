@@ -895,6 +895,8 @@ pub(super) async fn handle_pending_thread_resume_request(
     let ThreadConfigSnapshot {
         adaptive_reasoning_enabled,
         adaptive_reasoning_revision,
+        adaptive_reasoning_error,
+        adaptive_reasoning_failure_episode,
         model,
         disabled_plugin_ids,
         model_provider_id,
@@ -917,6 +919,8 @@ pub(super) async fn handle_pending_thread_resume_request(
     let response = ThreadResumeResponse {
         adaptive_reasoning_enabled,
         adaptive_reasoning_revision,
+        adaptive_reasoning_error,
+        adaptive_reasoning_failure_episode,
         thread,
         disabled_plugin_ids,
         model,
