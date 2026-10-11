@@ -3375,24 +3375,28 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
 
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: Some(info1),
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: None,
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: Some(info2.clone()),
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: None,
             rate_limits: None,
         },
