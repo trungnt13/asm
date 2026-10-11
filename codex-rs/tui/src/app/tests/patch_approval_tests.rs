@@ -310,6 +310,8 @@ async fn replayed_patch_approval_pager_recovers_stored_turn_changes() {
             )],
             events: vec![ThreadBufferedEvent::Request(Box::new(request(thread_id)))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
