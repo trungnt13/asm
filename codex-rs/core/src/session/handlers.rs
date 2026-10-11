@@ -301,6 +301,14 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     super::async_compaction::shutdown(sess).await;
+    // Cancel the turn before starting the bounded, best-effort diagnostic drain.
+    if let Some(log) = sess
+        .services
+        .thread_extension_data
+        .get::<Arc<super::decision_log::DecisionLog>>()
+    {
+        log.close();
+    }
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();
     if let Some(shell_snapshot_prewarm) = shell_snapshot_prewarm {
         shell_snapshot_prewarm.abort();
