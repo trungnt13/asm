@@ -15,19 +15,6 @@ impl ChatWidget {
         self.status_state.adaptive_reasoning_enabled
     }
 
-    pub(crate) fn set_adaptive_reasoning_enabled(&mut self, enabled: bool, revision: u64) {
-        if revision <= self.status_state.adaptive_reasoning_revision {
-            return;
-        }
-        self.status_state.adaptive_reasoning_revision = revision;
-        let previous = self.status_state.adaptive_reasoning_enabled;
-        self.status_state.adaptive_reasoning_enabled = enabled;
-        if !previous && enabled {
-            self.status_state.suppressed_adaptive_turn_id = None;
-        }
-        self.refresh_status_surfaces();
-    }
-
     pub(crate) fn set_adaptive_reasoning_state(
         &mut self,
         enabled: bool,
@@ -38,28 +25,24 @@ impl ChatWidget {
         if revision < self.status_state.adaptive_reasoning_revision {
             return;
         }
-        self.set_adaptive_reasoning_enabled(enabled, revision);
+        if revision > self.status_state.adaptive_reasoning_revision {
+            self.status_state.adaptive_reasoning_revision = revision;
+            if enabled != self.status_state.adaptive_reasoning_enabled {
+                self.status_state.adaptive_reasoning_enabled = enabled;
+                if enabled {
+                    self.status_state.suppressed_adaptive_turn_id = None;
+                }
+                let state = if enabled { "on" } else { "off" };
+                self.add_info_message(
+                    format!("Adaptive reasoning turned {state}."),
+                    /*hint*/ None,
+                );
+            }
+        }
         self.status_state.adaptive_reasoning_error = error;
         self.status_state.adaptive_reasoning_failure_episode = failure_episode;
         self.announce_adaptive_reasoning_error();
         self.refresh_status_surfaces();
-    }
-
-    pub(crate) fn announce_adaptive_reasoning_enabled(&mut self, enabled: bool, revision: u64) {
-        self.set_adaptive_reasoning_enabled(enabled, revision);
-        if revision <= self.status_state.announced_adaptive_reasoning_revision {
-            return;
-        }
-        self.status_state.announced_adaptive_reasoning_revision = revision;
-        if enabled == self.status_state.announced_adaptive_reasoning_enabled {
-            return;
-        }
-        self.status_state.announced_adaptive_reasoning_enabled = enabled;
-        let state = if enabled { "on" } else { "off" };
-        self.add_info_message(
-            format!("Adaptive reasoning turned {state}."),
-            /*hint*/ None,
-        );
     }
 
     pub(super) fn announce_adaptive_reasoning_error(&mut self) {
