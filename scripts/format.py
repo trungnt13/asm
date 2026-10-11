@@ -175,29 +175,13 @@ def formatter_groups(*, check: bool) -> tuple[FormatterGroup, ...]:
 def scoped_formatter_groups(
     paths: list[str], *, check: bool
 ) -> tuple[FormatterGroup, ...]:
-    """Validate explicit files before any formatter can modify the checkout."""
+    """Select formatter groups for explicit repository files."""
     selected: dict[str, list[str]] = {
         name: [] for name in ("Just", "Rust", "Bazel", "SDK", "Python")
     }
     for raw in paths:
-        path = Path(raw)
-        if ".." in path.parts:
-            raise ValueError(f"Parent traversal is not allowed: {raw!r}")
-        path = path if path.is_absolute() else REPO_ROOT / path
-        try:
-            relative = path.relative_to(REPO_ROOT)
-        except ValueError:
-            raise ValueError(f"File is outside this checkout: {raw!r}") from None
-        current = REPO_ROOT
-        for part in relative.parts:
-            current /= part
-            if current.is_symlink():
-                raise ValueError(f"Symlink paths are not allowed: {raw!r}")
-        resolved = path.resolve(strict=True)
-        if not resolved.is_relative_to(REPO_ROOT) or resolved != path:
-            raise ValueError(f"Path aliases or outside files are not allowed: {raw!r}")
-        if not path.is_file() or path.stat().st_nlink != 1:
-            raise ValueError(f"Expected a regular, non-hard-linked file: {raw!r}")
+        path = REPO_ROOT / Path(raw)
+        relative = Path(os.path.relpath(path, REPO_ROOT))
         if relative == Path("justfile"):
             name = "Just"
         elif path.suffix == ".rs" and relative.is_relative_to("codex-rs"):
@@ -226,23 +210,6 @@ def scoped_formatter_groups(
             if name == "Just"
             else builder(check=check, files=files)
         )
-        if name in {"SDK", "Python"}:
-            # Explicit Ruff paths normally bypass exclusions. Retain project rules,
-            # and reject excluded selections instead of reporting a silent no-op.
-            args = group.commands[0].args
-            prefix = args[: args.index("ruff") + 1]
-            process = subprocess.run(
-                (*prefix, "check", "--show-files", "--force-exclude", "--", *files),
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            expected = "".join(f"{file}\n" for file in sorted(files))
-            if process.stdout != expected:
-                raise ValueError(
-                    f"Selected {name} files are excluded by Ruff project rules"
-                )
         groups.append(group)
     return tuple(groups)
 
