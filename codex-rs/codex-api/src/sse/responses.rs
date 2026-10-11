@@ -40,6 +40,7 @@ pub fn spawn_response_stream(
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     turn_state: Option<Arc<OnceLock<String>>>,
+    request_started_at: Option<Instant>,
 ) -> ResponseStream {
     let rate_limit_snapshots = parse_all_rate_limits(&stream_response.headers);
     let models_etag = stream_response
@@ -93,6 +94,7 @@ pub fn spawn_response_stream(
             idle_timeout,
             telemetry,
             safety_buffering_treatment,
+            request_started_at,
         )
         .await;
     });
@@ -464,6 +466,7 @@ pub fn process_responses_event(
                             response_id: resp.id,
                             token_usage: resp.usage.map(Into::into),
                             usage_metadata: resp.usage_metadata,
+                            request_duration_ms: None,
                             end_turn: if interrupted {
                                 Some(false)
                             } else {
@@ -534,6 +537,7 @@ pub async fn process_sse(
         idle_timeout,
         telemetry,
         SafetyBufferingTreatment::default(),
+        /*request_started_at*/ None,
     )
     .await;
 }
@@ -544,6 +548,7 @@ async fn process_sse_with_treatment(
     idle_timeout: Duration,
     telemetry: Option<Arc<dyn SseTelemetry>>,
     safety_buffering_treatment: SafetyBufferingTreatment,
+    request_started_at: Option<Instant>,
 ) {
     let mut stream = stream.eventsource();
     let mut response_error: Option<ApiError> = None;
@@ -602,6 +607,9 @@ async fn process_sse_with_treatment(
                 continue;
             }
         };
+        let completed_duration_ms = request_started_at
+            .filter(|_| event.kind() == "response.completed")
+            .map(|start| i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX));
         let model_verifications = event.model_verifications();
         let turn_moderation_metadata = event.turn_moderation_metadata();
         let safety_buffering = event.safety_buffering(&safety_buffering_treatment);
@@ -644,7 +652,14 @@ async fn process_sse_with_treatment(
         }
 
         match process_responses_event(event) {
-            Ok(Some(event)) => {
+            Ok(Some(mut event)) => {
+                if let ResponseEvent::Completed {
+                    request_duration_ms,
+                    ..
+                } = &mut event
+                {
+                    *request_duration_ms = completed_duration_ms;
+                }
                 let is_completed = matches!(event, ResponseEvent::Completed { .. });
                 if tx_event.send(Ok(event)).await.is_err() {
                     return;
@@ -853,12 +868,14 @@ mod tests {
                 response_id,
                 token_usage,
                 usage_metadata,
+                request_duration_ms,
                 end_turn,
             }) => {
                 assert_eq!(response_id, "resp1");
                 assert!(token_usage.is_none());
                 assert!(usage_metadata.is_none());
                 assert!(end_turn.is_none());
+                assert!(request_duration_ms.is_none());
             }
             other => panic!("unexpected third event: {other:?}"),
         }
@@ -1051,12 +1068,14 @@ mod tests {
                 response_id,
                 token_usage,
                 usage_metadata,
+                request_duration_ms,
                 end_turn,
             }) => {
                 assert_eq!(response_id, "resp1");
                 assert!(token_usage.is_none());
                 assert!(usage_metadata.is_none());
                 assert!(end_turn.is_none());
+                assert!(request_duration_ms.is_none());
             }
             other => panic!("unexpected event: {other:?}"),
         }
@@ -1547,6 +1566,7 @@ mod tests {
             idle_timeout(),
             /*telemetry*/ None,
             /*turn_state*/ None,
+            /*request_started_at*/ None,
         );
         assert_eq!(stream.upstream_request_id.as_deref(), Some("req-1"));
         let event = stream
@@ -1587,6 +1607,7 @@ mod tests {
             idle_timeout(),
             /*telemetry*/ None,
             /*turn_state*/ None,
+            /*request_started_at*/ None,
         );
         let mut events = Vec::new();
         while let Some(event) = stream.rx_event.recv().await {
@@ -1629,6 +1650,7 @@ mod tests {
                 token_usage: None,
                 usage_metadata: None,
                 end_turn: None,
+                request_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1670,6 +1692,7 @@ mod tests {
                 token_usage: None,
                 usage_metadata: None,
                 end_turn: None,
+                request_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1706,6 +1729,7 @@ mod tests {
                 token_usage: None,
                 usage_metadata: None,
                 end_turn: None,
+                request_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1742,6 +1766,7 @@ mod tests {
                 token_usage: None,
                 usage_metadata: None,
                 end_turn: None,
+                request_duration_ms: None,
             } if response_id == "resp-1"
         );
     }

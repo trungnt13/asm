@@ -504,6 +504,7 @@ pub(super) fn handle_token_count(chat: &mut ChatWidget, info: Option<TokenUsageI
             chat.handle_server_notification(
                 ServerNotification::ThreadTokenUsageUpdated(
                     codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+                        output_tokens_per_second: None,
                         thread_id: thread_id(chat),
                         turn_id: chat
                             .turn_lifecycle

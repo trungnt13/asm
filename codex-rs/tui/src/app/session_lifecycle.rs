@@ -468,13 +468,13 @@ impl App {
             }
         };
         self.agents_overview.activity.remove(&thread_id);
-        let recap_progress =
+        let (recap_progress, output_tps) =
             if live_attached && let Some(channel) = self.thread_event_channels.remove(&thread_id) {
                 let store = channel.store.lock().await;
                 if let Some(input) = store.input_state.clone() {
                     self.agents_overview.input_states.insert(thread_id, input);
                 }
-                store.recap_progress()
+                (store.recap_progress(), store.output_tps)
             } else {
                 Default::default()
             };
@@ -495,6 +495,9 @@ impl App {
         let mut store = channel.store.lock().await;
         store.set_session(session, turns);
         store.merge_recap_progress(recap_progress);
+        if store.output_tps.is_none() {
+            store.output_tps = output_tps;
+        }
         store.rebase_buffer_after_session_refresh();
         Ok(live_attached)
     }

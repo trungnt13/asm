@@ -561,6 +561,8 @@ pub(crate) struct ChatWidget {
     pub(crate) windows_sandbox_elevated_setup_complete: bool,
     token_info: Option<TokenUsageInfo>,
     token_usage_pending: bool,
+    // Cached display text; status-line refreshes do not recalculate throughput.
+    output_tps: Option<String>,
     // Status and polling use account usage reads; response streams may identify meters differently.
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,

@@ -20,6 +20,7 @@ use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::time::Duration;
@@ -59,7 +60,15 @@ impl ModelResponseInterceptor for Permit {
             futures::stream::once(async move {
                 let mut events = Vec::new();
                 let mut output_items = 0;
-                while let Some(event) = stream.next().await {
+                while let Some(mut event) = stream.next().await {
+                    if let Ok(ResponseEvent::Completed {
+                        request_duration_ms,
+                        ..
+                    }) = &mut event
+                    {
+                        // A fixed transport duration isolates core accounting from test scheduling.
+                        *request_duration_ms = Some(2_000);
+                    }
                     if matches!(&event, Ok(ResponseEvent::OutputItemDone(_))) {
                         output_items += 1;
                     }
@@ -97,11 +106,20 @@ impl Drop for Permit {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_request_gates_output_and_cancellation() -> Result<()> {
     let server = responses::start_mock_server().await;
+    let mut completed = ev_completed("r1");
+    completed["response"]["usage"] = json!({
+        "input_tokens": 30,
+        "output_tokens": 7,
+        "output_tokens_details": { "reasoning_tokens": 3 },
+        "total_tokens": 37
+    });
+    completed["response"]["usage_metadata"] = json!({ "amount": "0.125" });
+    let expected_metadata = completed["response"]["usage"].clone();
     let response = sse(vec![
         ev_response_created("r1"),
         ev_assistant_message("m1", "first"),
         ev_assistant_message("m2", "done"),
-        ev_completed("r1"),
+        completed,
     ]);
     let model = responses::mount_sse_sequence(&server, vec![response.clone(), response]).await;
     let gates = Arc::new(Gates {
@@ -145,6 +163,26 @@ async fn model_request_gates_output_and_cancellation() -> Result<()> {
         .is_err()
     );
     gates.delivered.add_permits(1);
+    let raw_completed = wait_for_event(&test.codex, |e| {
+        matches!(e, EventMsg::RawResponseCompleted(_))
+    })
+    .await;
+    let EventMsg::RawResponseCompleted(raw_completed) = raw_completed else {
+        unreachable!("expected response completion");
+    };
+    assert_eq!(
+        raw_completed.usage_metadata,
+        Some(codex_protocol::ResponseUsageMetadata {
+            amount: Some("0.125".to_string()),
+            metadata: Some(expected_metadata),
+        })
+    );
+    let token_count = wait_for_event(&test.codex, |e| matches!(e, EventMsg::TokenCount(_))).await;
+    let EventMsg::TokenCount(token_count) = token_count else {
+        unreachable!("expected token usage update");
+    };
+    // Seven total output tokens include the three reasoning tokens: 7 / 2 seconds.
+    assert_eq!(token_count.output_tokens_per_second, Some(3.5));
     wait_for_event(&test.codex, |e| matches!(e, EventMsg::TurnComplete(_))).await;
     assert_eq!(gates.cancelled.available_permits(), 0);
 
