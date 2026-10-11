@@ -110,7 +110,8 @@ impl ChatWidget {
     pub(crate) fn cache_output_tps(&mut self, thread_id: ThreadId, tps: f64) {
         if self.thread_id == Some(thread_id) && tps.is_finite() && tps >= 0.0 {
             // Use the existing token-usage refresh; caching must not request a frame.
-            self.output_tps = Some(format!("TPS{tps:.1}"));
+            let rounded_tps = tps.round();
+            self.output_tps = Some(format!("{rounded_tps}tps"));
         }
     }
 
