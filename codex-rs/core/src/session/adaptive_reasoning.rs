@@ -178,16 +178,17 @@ impl Session {
                 .as_ref()
                 .is_none_or(|effort| ORDINARY_EFFORTS.contains(effort))
             && allowed_efforts(config, &step.settings.model_info).len() >= 2;
-        self.send_event(
-            &step.turn,
-            codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(
+        // This transient UI update must not wait for rollout persistence before sampling.
+        self.deliver_event_raw(codex_protocol::protocol::Event {
+            id: step.turn.sub_id.clone(),
+            msg: codex_protocol::protocol::EventMsg::ReasoningEffortUpdated(
                 codex_protocol::protocol::ReasoningEffortUpdatedEvent {
                     turn_id: step.turn.sub_id.clone(),
                     reasoning_effort,
                     adaptive,
                 },
             ),
-        )
+        })
         .await;
     }
 
