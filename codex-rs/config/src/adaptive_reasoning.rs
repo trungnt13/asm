@@ -33,7 +33,7 @@ impl Default for AdaptiveReasoningConfig {
         Self {
             enabled: false,
             decision_model: "gpt-6-luna".to_string(),
-            decision_model_api_env: "OPENAI_API_KEY".to_string(),
+            decision_model_api_env: "DECISION_API_KEY".to_string(),
             min_effort: ReasoningEffort::Low,
             max_effort: ReasoningEffort::Max,
             decision_timeout_ms: 200,
