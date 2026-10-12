@@ -454,6 +454,8 @@ Use one dimmed logical line: `Worked for 5s • 11:05 AM • 12.4k in • 9.8k c
 
 Use ASM in README heading, repo description, release titles/introduction, workflow step descriptions, fork TUI labels, and terminal title. Credit OpenAI Codex. Preserve actual upstream service/product names.
 
+Exit summaries show `asm resume` (including remote reconnection) and `asm agents` stop guidance. Keep underlying executable names unchanged.
+
 Keep `codex` executable/version prefix, crate/config/state/archive/tag/workflow/job/check identifiers. Never redirect upstream links/installers for branding.
 
 ### Background terminal waits
