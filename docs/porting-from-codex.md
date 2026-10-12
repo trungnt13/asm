@@ -107,7 +107,8 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 ### Push permissions
 
-- Task requests authorize branch commits, pushes, and PR creation, not merges or `main` changes. Do not commit directly to `main` or integrate without explicit approval. Force pushes, tag moves, discarding work, and releases also need explicit approval.
+- Implementation requests authorize task-branch commits, pushes, and PR creation, not merges or direct implementation on `main`. Do not commit directly to `main` or merge PRs without explicit approval.
+- An authorized rebase or history reconciliation may update `main` with `--force-with-lease` without separate force-push approval. Other force pushes, tag moves, discarding work, and releases need explicit approval.
 - An explicit release request authorizes the existing workflow's candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes still require PRs.
 - Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited workflow tags, require publication approval.
 - Before authorized force pushes, fetch and preserve remote-only work, including workflow release commits. Use a lease against the inspected tip. Never refresh a failed lease and retry blindly.
@@ -120,7 +121,7 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 - Date: 2026-10-11.
 - Subject: Keep agents navigation available after a thread is archived (#53201).
 
-- Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Published `main` rewrites need explicit approval. Use `git cherry-pick -x` for targeted ports.
+- Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
   - Merge: `git -c rerere.enabled=true -c rerere.autoupdate=false merge <upstream-target>`.
   - Rebase: `git -c rerere.enabled=true -c rerere.autoupdate=false rebase <upstream-target>`.
