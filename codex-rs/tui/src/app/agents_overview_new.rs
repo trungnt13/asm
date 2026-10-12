@@ -183,11 +183,10 @@ impl App {
                         "New sessions are paused while active turns finish or are canceled. The default shutdown wait is up to one minute.",
                     );
                     if !matches!(self.app_server_target, AppServerTarget::Embedded) {
-                        message.push_str(
-                            " If the server restarts, Codex will reconnect automatically.",
-                        );
+                        message
+                            .push_str(" If the server restarts, ASM will reconnect automatically.");
                     }
-                    (Some("Codex's background server is shutting down"), message)
+                    (Some("ASM's background server is shutting down"), message)
                 } else {
                     (None, format!("Failed to start session: {error}"))
                 };
