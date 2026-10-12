@@ -5503,6 +5503,10 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
             Some(ServiceTier::Fast.request_value())
         )
     );
+    assert_eq!(
+        chat.developer_instructions.as_deref(),
+        Some(super::chat::CHAT_DEVELOPER_INSTRUCTIONS)
+    );
     assert_eq!(app.chat_widget.current_model(), "parent-thread-model");
     app.config.chat_model = None;
     app.config.chat_reasoning = None;
