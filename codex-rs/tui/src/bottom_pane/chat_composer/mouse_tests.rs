@@ -17,7 +17,7 @@ fn mouse(composer: &mut ChatComposer, area: Rect, kind: MouseEventKind, column: 
     };
     assert!(composer.prepare_mouse(event));
     composer.render(area, &mut Buffer::empty(area));
-    assert!(composer.handle_mouse(event));
+    assert!(composer.handle_mouse(event, /*pending_quote*/ &mut None));
 }
 
 #[test]
@@ -54,6 +54,19 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
         }
         assert!(composer.draft.pending_pastes.is_empty());
     }
+    composer.set_text_content("!echo hello".into(), Vec::new(), Vec::new());
+    let original_cursor = composer.current_cursor();
+    composer.attach_quote(PendingQuote::Text("selected text".into()));
+    assert_eq!(composer.current_text(), "!echo hello");
+    assert_eq!(composer.current_cursor(), original_cursor);
+    assert!(!composer.is_bang_shell_command());
+    let area = Rect { height: 8, ..area };
+    composer.render(area, &mut Buffer::empty(area));
+    let quote_area = composer.attachments.quote_area.get();
+    mouse(&mut composer, area, Down(Left), quote_area.x, quote_area.y);
+    assert!(composer.attachments.quote.is_none());
+    assert_eq!(composer.current_text(), "!echo hello");
+    assert_eq!(composer.current_cursor(), original_cursor);
 }
 
 #[test]
