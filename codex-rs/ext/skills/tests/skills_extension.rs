@@ -264,7 +264,10 @@ async fn installed_extension_uses_host_service_snapshot() -> TestResult {
         "<skill>\n<name>demo</name>\n<path>{skill_prompt_path}</path>\n{DEMO_SKILL_CONTENTS}\n</skill>"
     );
     assert_eq!(
-        vec![("developer", expected_catalog), ("user", expected_skill),],
+        vec![
+            ("developer", expected_catalog.clone()),
+            ("user", expected_skill.clone()),
+        ],
         fragments
             .iter()
             .map(|fragment| (fragment.role(), fragment.render()))
@@ -274,6 +277,75 @@ async fn installed_extension_uses_host_service_snapshot() -> TestResult {
         .get::<InjectedHostSkillPrompts>()
         .ok_or("host skill prompt marker should be set")?;
     assert!(injected_host_skill_prompts.contains_path(&skill_path_string));
+
+    let config_layer_stack = ConfigLayerStack::new(
+        vec![ConfigLayerEntry::new(
+            ConfigLayerSource::User {
+                file: AbsolutePathBuf::try_from(codex_home.join("config.toml"))?,
+                profile: None,
+            },
+            toml::from_str(
+                r#"
+[skills.bundled]
+enabled = false
+[[skills.config]]
+name = "demo"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+"#,
+            )?,
+        )],
+        Default::default(),
+        ConfigRequirementsToml::default(),
+    )?;
+    let codex_home_path = AbsolutePathBuf::try_from(codex_home.clone())?;
+    let service = HostSkillsService::new(
+        codex_home_path.clone(),
+        /*bundled_skills_enabled*/ false,
+    );
+    let base_input = HostSkillsLoadInput::new(codex_home_path, Vec::new(), config_layer_stack);
+    for role in [None, Some("reviewer"), Some("other")] {
+        let input = base_input.clone().with_agent_role(role.map(str::to_string));
+        let snapshot = service
+            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+            .await;
+        let turn_store = ExtensionData::new("scoped-turn");
+        turn_store.insert(snapshot);
+        let fragments = registry.turn_input_contributors()[0]
+            .contribute(
+                TurnInputContext {
+                    turn_id: "scoped-turn".to_string(),
+                    user_input: vec![UserInput::Text {
+                        text: "$demo".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    environments: Vec::new(),
+                },
+                /*extension_metrics*/ None,
+                &session_store,
+                &thread_store,
+                &turn_store,
+            )
+            .await;
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|fragment| {
+                    let text = fragment.render();
+                    (
+                        fragment.role(),
+                        text.contains("- demo: Demo skill."),
+                        text == expected_skill,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            if role == Some("reviewer") {
+                vec![("developer", true, false), ("user", false, true)]
+            } else {
+                Vec::new()
+            }
+        );
+    }
 
     std::fs::remove_dir_all(codex_home)?;
     Ok(())
