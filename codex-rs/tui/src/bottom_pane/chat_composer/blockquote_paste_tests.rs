@@ -113,7 +113,7 @@ fn blockquote_paste_replacing_selected_prefix_stays_literal() {
         };
         assert!(composer.prepare_mouse(event));
         composer.render(area, &mut Buffer::empty(area));
-        assert!(composer.handle_mouse(event));
+        assert!(composer.handle_mouse(event, /*pending_quote*/ &mut None));
     }
     composer.handle_paste("first\nsecond".to_string());
     assert_eq!(composer.current_text(), "first\nsecond");

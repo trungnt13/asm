@@ -857,6 +857,7 @@ pub struct Config {
 
     /// Whether to deselect read-only transcript or footer text after confirmed automatic copy.
     pub tui_copy_on_select_clear_selection: bool,
+    pub tui_click_to_quote: bool,
 
     /// Right-click text paste fallback for the fullscreen TUI.
     pub tui_right_click_paste: codex_config::types::RightClickPaste,
@@ -4782,6 +4783,7 @@ impl Config {
                 .tui
                 .as_ref()
                 .is_some_and(|tui| tui.copy_on_select_clear_selection),
+            tui_click_to_quote: cfg.tui.as_ref().is_some_and(|tui| tui.click_to_quote),
             tui_right_click_paste: cfg
                 .tui
                 .as_ref()
