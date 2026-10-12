@@ -6727,6 +6727,38 @@ async fn responses_metadata_uses_selected_harness_analytics_client() {
     }
 }
 
+pub(crate) fn install_reviewer_scoped_skills(config: &mut Config) {
+    let rules = ["review", "oracle"].map(|name| {
+        let skill_dir = config.codex_home.join("skills").join(name);
+        std::fs::create_dir_all(&skill_dir).expect("create scoped skill directory");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: reviewer skill\n---\n\nReviewer body\n"),
+        ).expect("write scoped skill");
+        format!("[[skills.config]]\nname = \"{name}\"\nenabled = true\nallowed_agent_roles = [\"reviewer\"]\n")
+    });
+    config.config_layer_stack = config
+        .config_layer_stack
+        .with_user_config(
+            &config.codex_home.join("config.toml"),
+            toml::from_str(&rules.join("\n")).expect("parse scoped skills config"),
+        )
+        .expect("add scoped skills config layer");
+}
+
+pub(crate) fn reviewer_skill_enablement(turn: &TurnContext) -> [bool; 2] {
+    let snapshot = turn.skills_snapshot();
+    ["review", "oracle"].map(|name| {
+        let skill = snapshot
+            .outcome()
+            .skills
+            .iter()
+            .find(|skill| skill.name == name)
+            .expect("scoped reviewer skill metadata should exist");
+        snapshot.outcome().is_skill_enabled(skill)
+    })
+}
+
 // todo: use online model info
 pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let (tx_event, _rx_event) = async_channel::unbounded();

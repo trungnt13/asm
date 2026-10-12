@@ -500,27 +500,46 @@ enabled = false
 
 #[test]
 fn set_skill_config_removes_entry_when_enabled() {
-    let tmp = tempdir().expect("tmpdir");
-    let codex_home = tmp.path();
-    std::fs::write(
-        codex_home.join(CONFIG_TOML_FILE),
-        r#"[[skills.config]]
-path = "/tmp/skills/demo/SKILL.md"
-enabled = false
-"#,
-    )
-    .expect("seed config");
+    for (selector, edit) in [
+        (
+            "path = \"/tmp/skills/demo/SKILL.md\"",
+            ConfigEdit::SetSkillConfig {
+                path: PathBuf::from("/tmp/skills/demo/SKILL.md"),
+                enabled: true,
+            },
+        ),
+        (
+            "name = \"oracle\"",
+            ConfigEdit::SetSkillConfigByName {
+                name: "oracle".to_string(),
+                enabled: true,
+            },
+        ),
+    ] {
+        for scope in ["", "allowed_agent_roles = [\"reviewer\"]\n"] {
+            let tmp = tempdir().expect("tmpdir");
+            let codex_home = tmp.path();
+            std::fs::write(
+                codex_home.join(CONFIG_TOML_FILE),
+                format!("[[skills.config]]\n{selector}\nenabled = false\n{scope}"),
+            )
+            .expect("seed config");
 
-    ConfigEditsBuilder::new(codex_home)
-        .with_edits([ConfigEdit::SetSkillConfig {
-            path: PathBuf::from("/tmp/skills/demo/SKILL.md"),
-            enabled: true,
-        }])
-        .apply_blocking()
-        .expect("persist");
+            ConfigEditsBuilder::new(codex_home)
+                .with_edits([edit.clone()])
+                .apply_blocking()
+                .expect("persist");
 
-    let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
-    assert_eq!(contents, "");
+            let contents =
+                std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+            let expected = if scope.is_empty() {
+                String::new()
+            } else {
+                format!("[[skills.config]]\n{selector}\nenabled = true\n{scope}")
+            };
+            assert_eq!(contents, expected);
+        }
+    }
 }
 
 #[test]

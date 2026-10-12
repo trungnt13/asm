@@ -1322,6 +1322,7 @@ impl Session {
                 .plugin_skill_snapshots_for_config(&plugins_input);
             let skills_input =
                 skills_load_input_from_config(&per_turn_config, effective_skill_roots)
+                    .with_agent_role(session_configuration.session_source.get_agent_role())
                     .with_plugin_skill_snapshots(plugin_skill_snapshots);
             let fs = primary_turn_environment
                 .map(|turn_environment| turn_environment.environment.get_filesystem());
