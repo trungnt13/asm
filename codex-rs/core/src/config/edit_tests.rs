@@ -479,48 +479,117 @@ gpt-foo = 4
 
 #[test]
 fn set_skill_config_writes_disabled_entry() {
-    let tmp = tempdir().expect("tmpdir");
-    let codex_home = tmp.path();
-
-    ConfigEditsBuilder::new(codex_home)
-        .with_edits([ConfigEdit::SetSkillConfig {
-            path: PathBuf::from("/tmp/skills/demo/SKILL.md"),
-            enabled: false,
-        }])
-        .apply_blocking()
-        .expect("persist");
-
-    let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
     let expected = r#"[[skills.config]]
 path = "/tmp/skills/demo/SKILL.md"
 enabled = false
 "#;
-    assert_eq!(contents, expected);
+    let scoped_entries = r#"[[skills.config]]
+name = "review"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+
+[[skills.config]]
+name = "oracle"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+"#;
+    for (input, preserved) in [
+        ("", ""),
+        (scoped_entries, scoped_entries),
+        (
+            r#"[skills]
+config = [{name = "review", enabled = true, allowed_agent_roles = ["reviewer"]}, {name = "oracle", enabled = true, allowed_agent_roles = ["reviewer"]}]
+"#,
+            scoped_entries,
+        ),
+        ("[skills]\nconfig = []\n", ""),
+        ("[skills]\nconfig = false\n", ""),
+        ("[skills]\nconfig = [{name = \"oracle\"}, false]\n", ""),
+    ] {
+        let tmp = tempdir().expect("tmpdir");
+        let codex_home = tmp.path();
+        std::fs::write(codex_home.join(CONFIG_TOML_FILE), input).expect("seed config");
+
+        ConfigEditsBuilder::new(codex_home)
+            .with_edits([ConfigEdit::SetSkillConfig {
+                path: PathBuf::from("/tmp/skills/demo/SKILL.md"),
+                enabled: false,
+            }])
+            .apply_blocking()
+            .expect("persist");
+
+        let contents =
+            std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
+        if input.is_empty() {
+            assert_eq!(contents, expected);
+        } else {
+            assert_eq!(
+                toml::from_str::<TomlValue>(&contents).expect("parse config"),
+                toml::from_str::<TomlValue>(&format!("{preserved}{expected}"))
+                    .expect("parse expected config")
+            );
+        }
+    }
 }
 
 #[test]
 fn set_skill_config_removes_entry_when_enabled() {
-    let tmp = tempdir().expect("tmpdir");
-    let codex_home = tmp.path();
-    std::fs::write(
-        codex_home.join(CONFIG_TOML_FILE),
-        r#"[[skills.config]]
-path = "/tmp/skills/demo/SKILL.md"
-enabled = false
-"#,
-    )
-    .expect("seed config");
+    for (selector, edit) in [
+        (
+            "path = \"/tmp/skills/demo/SKILL.md\"",
+            ConfigEdit::SetSkillConfig {
+                path: PathBuf::from("/tmp/skills/demo/SKILL.md"),
+                enabled: true,
+            },
+        ),
+        (
+            "name = \"oracle\"",
+            ConfigEdit::SetSkillConfigByName {
+                name: "oracle".to_string(),
+                enabled: true,
+            },
+        ),
+    ] {
+        for scope in ["", "allowed_agent_roles = [\"reviewer\"]\n"] {
+            for inline in [false, true] {
+                let tmp = tempdir().expect("tmpdir");
+                let codex_home = tmp.path();
+                let input = if inline {
+                    let scope = scope.trim();
+                    let scope = if scope.is_empty() {
+                        String::new()
+                    } else {
+                        format!(", {scope}")
+                    };
+                    format!("[skills]\nconfig = [{{{selector}, enabled = false{scope}}}]\n")
+                } else {
+                    format!("[[skills.config]]\n{selector}\nenabled = false\n{scope}")
+                };
+                std::fs::write(codex_home.join(CONFIG_TOML_FILE), input).expect("seed config");
 
-    ConfigEditsBuilder::new(codex_home)
-        .with_edits([ConfigEdit::SetSkillConfig {
-            path: PathBuf::from("/tmp/skills/demo/SKILL.md"),
-            enabled: true,
-        }])
-        .apply_blocking()
-        .expect("persist");
+                ConfigEditsBuilder::new(codex_home)
+                    .with_edits([edit.clone()])
+                    .apply_blocking()
+                    .expect("persist");
 
-    let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE)).expect("read config");
-    assert_eq!(contents, "");
+                let contents = std::fs::read_to_string(codex_home.join(CONFIG_TOML_FILE))
+                    .expect("read config");
+                let expected = if scope.is_empty() {
+                    String::new()
+                } else {
+                    format!("[[skills.config]]\n{selector}\nenabled = true\n{scope}")
+                };
+                if inline {
+                    assert_eq!(
+                        toml::from_str::<TomlValue>(&contents).expect("parse config"),
+                        toml::from_str::<TomlValue>(&expected).expect("parse expected config")
+                    );
+                } else {
+                    assert_eq!(contents, expected);
+                }
+            }
+        }
+    }
 }
 
 #[test]
