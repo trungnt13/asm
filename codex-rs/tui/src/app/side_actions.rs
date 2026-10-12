@@ -109,7 +109,14 @@ impl App {
                 }
             }
             SideConversationAction::Sync => {
-                let config = self.side_fork_config(CompanionKind::Side, SideConversationMode::Side);
+                let mut config = self.current_thread_fork_config();
+                config.ephemeral = true;
+                config.daybreak_enabled = false;
+                config.developer_instructions = Some(Self::side_developer_instructions(
+                    config.developer_instructions.as_deref(),
+                    CompanionKind::Side,
+                    state.mode,
+                ));
                 if state.mode == SideConversationMode::Chat
                     && let Err(error) = app_server.require_fast_service_tier(&config)
                 {
@@ -148,7 +155,10 @@ impl App {
                 if let Err(error) = app_server
                     .thread_inject_items(
                         replacement_id,
-                        vec![Self::side_boundary_prompt_item(CompanionKind::Side)],
+                        vec![Self::side_boundary_prompt_item(
+                            CompanionKind::Side,
+                            state.mode,
+                        )],
                     )
                     .await
                 {
@@ -216,7 +226,7 @@ impl App {
                 };
                 let mut config = self.current_thread_fork_config();
                 config.ephemeral = false;
-                // Only remove the exact guardrail suffix installed by Side. The saved fork has
+                // Only remove the exact guardrail suffix installed by Side/Chat. The saved fork has
                 // normal capabilities; inherited tasks remain reference context, not active work.
                 let previous = config
                     .developer_instructions
@@ -224,6 +234,9 @@ impl App {
                     .map(|instructions| {
                         instructions
                             .strip_suffix(super::side::SIDE_DEVELOPER_INSTRUCTIONS)
+                            .or_else(|| {
+                                instructions.strip_suffix(super::chat::CHAT_DEVELOPER_INSTRUCTIONS)
+                            })
                             .unwrap_or(instructions)
                             .trim_end()
                     })

@@ -103,9 +103,13 @@ mod tests {
 
     #[test]
     fn side_boundary_prompt_marks_inherited_history_reference_only() {
-        for kind in [CompanionKind::Side, CompanionKind::Parallel] {
+        for (kind, mode) in [
+            (CompanionKind::Side, SideConversationMode::Side),
+            (CompanionKind::Side, SideConversationMode::Chat),
+            (CompanionKind::Parallel, SideConversationMode::Side),
+        ] {
             assert_eq!(
-                App::side_boundary_prompt_item(kind),
+                App::side_boundary_prompt_item(kind, mode),
                 ResponseItem::Message {
                     status: None,
                     encrypted_content: None,
@@ -146,18 +150,28 @@ mod tests {
 
     #[test]
     fn side_developer_instructions_appends_existing_policy() {
-        let developer_instructions = App::side_developer_instructions(
-            Some("Existing developer policy."),
-            CompanionKind::Side,
-        );
-
-        assert!(developer_instructions.contains("Existing developer policy."));
-        assert!(
-            developer_instructions.contains("You are in a side conversation, not the main thread.")
-        );
-        assert!(
-            developer_instructions.contains("Sub-agents are off-limits in this side conversation.")
-        );
+        for (mode, instructions) in [
+            (SideConversationMode::Side, SIDE_DEVELOPER_INSTRUCTIONS),
+            (
+                SideConversationMode::Chat,
+                super::chat::CHAT_DEVELOPER_INSTRUCTIONS,
+            ),
+        ] {
+            let expected = format!("Existing developer policy.\n\n{instructions}");
+            for existing in [
+                "Existing developer policy.".to_string(),
+                format!("Existing developer policy.\n\n{SIDE_DEVELOPER_INSTRUCTIONS}"),
+                format!(
+                    "Existing developer policy.\n\n{}",
+                    super::chat::CHAT_DEVELOPER_INSTRUCTIONS
+                ),
+            ] {
+                assert_eq!(
+                    App::side_developer_instructions(Some(&existing), CompanionKind::Side, mode),
+                    expected
+                );
+            }
+        }
     }
 }
 
@@ -713,11 +727,22 @@ impl App {
     pub(super) fn side_developer_instructions(
         existing_instructions: Option<&str>,
         kind: CompanionKind,
+        mode: SideConversationMode,
     ) -> String {
         let instructions = match kind {
-            CompanionKind::Side => SIDE_DEVELOPER_INSTRUCTIONS,
+            CompanionKind::Side => match mode {
+                SideConversationMode::Side => SIDE_DEVELOPER_INSTRUCTIONS,
+                SideConversationMode::Chat => super::chat::CHAT_DEVELOPER_INSTRUCTIONS,
+            },
             CompanionKind::Parallel => super::parallel::PARALLEL_DEVELOPER_INSTRUCTIONS,
         };
+        let existing_instructions = existing_instructions.map(|existing| {
+            existing
+                .strip_suffix(SIDE_DEVELOPER_INSTRUCTIONS)
+                .or_else(|| existing.strip_suffix(super::chat::CHAT_DEVELOPER_INSTRUCTIONS))
+                .map(str::trim_end)
+                .unwrap_or(existing)
+        });
         match existing_instructions {
             Some(existing_instructions) if existing_instructions.ends_with(instructions) => {
                 existing_instructions.to_string()
@@ -729,7 +754,10 @@ impl App {
         }
     }
 
-    pub(super) fn side_boundary_prompt_item(kind: CompanionKind) -> ResponseItem {
+    pub(super) fn side_boundary_prompt_item(
+        kind: CompanionKind,
+        mode: SideConversationMode,
+    ) -> ResponseItem {
         ResponseItem::Message {
             status: None,
             encrypted_content: None,
@@ -737,7 +765,10 @@ impl App {
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
                 text: match kind {
-                    CompanionKind::Side => SIDE_BOUNDARY_PROMPT,
+                    CompanionKind::Side => match mode {
+                        SideConversationMode::Side => SIDE_BOUNDARY_PROMPT,
+                        SideConversationMode::Chat => super::chat::CHAT_BOUNDARY_PROMPT,
+                    },
                     CompanionKind::Parallel => super::parallel::PARALLEL_BOUNDARY_PROMPT,
                 }
                 .to_string(),
@@ -771,6 +802,7 @@ impl App {
         fork_config.developer_instructions = Some(Self::side_developer_instructions(
             fork_config.developer_instructions.as_deref(),
             kind,
+            mode,
         ));
         if mode == SideConversationMode::Chat {
             if let Some(model) = &self.config.chat_model {
@@ -1016,7 +1048,7 @@ impl App {
                 if let Err(err) = app_server
                     .thread_inject_items(
                         child_thread_id,
-                        vec![Self::side_boundary_prompt_item(kind)],
+                        vec![Self::side_boundary_prompt_item(kind, mode)],
                     )
                     .await
                 {

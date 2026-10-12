@@ -244,6 +244,7 @@ mod adaptive_reasoning;
 mod auto_rename;
 mod auto_rename_persistence;
 mod autorename_command;
+mod chat;
 mod clipboard;
 mod footer_selection;
 mod native_history;
