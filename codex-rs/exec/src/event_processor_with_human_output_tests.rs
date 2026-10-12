@@ -215,6 +215,10 @@ async fn config_summary_entries_include_runtime_workspace_roots() {
         .expect("set permission profile");
 
     let session_configured_event = SessionConfiguredEvent {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         session_id: SessionId::new(),
         thread_id: ThreadId::new(),
         forked_from_id: None,

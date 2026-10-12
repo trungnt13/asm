@@ -236,6 +236,20 @@ impl App {
                 .entry(thread_id)
                 .or_default();
         }
+        if let ServerNotification::AdaptiveReasoningUpdated(mode) = &notification
+            && let Ok(thread_id) = ThreadId::from_string(&mode.thread_id)
+            && self.agents_overview.blank_sessions.contains_key(&thread_id)
+            && !self.thread_event_channels.contains_key(&thread_id)
+        {
+            self.apply_adaptive_reasoning_to_cached_session(
+                thread_id,
+                mode.enabled,
+                mode.adaptive_reasoning_revision,
+                mode.error,
+                mode.failure_episode,
+            )
+            .await;
+        }
         self.track_agents_overview_notification(&notification);
         self.track_turn_agents(&notification);
         // Retained blank sessions stay subscribed after their event channels are cleared.
