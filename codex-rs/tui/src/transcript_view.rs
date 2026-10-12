@@ -96,6 +96,8 @@ pub(crate) struct TranscriptView {
     pub(crate) copy_on_select: bool,
     pub(crate) copy_on_select_clear_selection: bool,
     pub(crate) primary_selection: bool,
+    pub(crate) click_to_quote: bool,
+    pub(crate) pending_quote: Option<crate::bottom_pane::PendingQuote>,
     position: Position,
     follow_control: follow_control::FollowControl,
     copy_feedback: Option<composer_gap::CopyFeedback>,
@@ -136,6 +138,8 @@ impl Default for TranscriptView {
             copy_on_select: false,
             copy_on_select_clear_selection: false,
             primary_selection: false,
+            click_to_quote: false,
+            pending_quote: None,
             position: Position::Latest,
             follow_control: follow_control::FollowControl::default(),
             copy_feedback: None,
@@ -371,6 +375,7 @@ impl TranscriptView {
         }
         self.selection = None;
         self.select_mode = None;
+        self.pending_quote = None;
         self.copy_mode = None;
         self.release_live_reading();
         self.cache.clear();
@@ -405,6 +410,7 @@ impl TranscriptView {
 
     /// Hold the current reading position until every older page has arrived.
     pub(crate) fn jump_to_beginning(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        self.pending_quote = None;
         if self.history == TranscriptHistoryState::LoadingBeginning {
             return;
         }
@@ -417,6 +423,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn jump_to_latest(&mut self) {
+        self.pending_quote = None;
         self.cancel_search();
         self.cancel_beginning();
         self.position = Position::Latest;
@@ -429,6 +436,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn scroll(&mut self, cells: &[Arc<dyn HistoryCell>], rows: isize) {
+        self.pending_quote = None;
         if rows != 0 {
             self.last_click = None;
             self.cancel_beginning();
@@ -478,6 +486,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn jump_to_entry(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) {
+        self.pending_quote = None;
         self.cancel_beginning();
         self.release_live_reading();
         let snapshot = self.snapshot_cells();

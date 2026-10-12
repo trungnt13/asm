@@ -91,6 +91,7 @@ impl LocalSettings {
                 collapse_tool_calls_max_lines: config.tui_collapse_tool_calls_max_lines,
                 copy_on_select: config.tui_copy_on_select,
                 copy_on_select_clear_selection: config.tui_copy_on_select_clear_selection,
+                click_to_quote: config.tui_click_to_quote,
                 right_click_paste: config.tui_right_click_paste,
                 alternate_screen: config.tui_alternate_screen,
                 status_line: config.tui_status_line.clone(),

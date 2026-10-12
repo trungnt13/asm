@@ -26,7 +26,8 @@ pub(super) struct VimHistory {
 
 impl ComposerDraft {
     fn vim_history_bytes(&self) -> usize {
-        let mut bytes = self.text.len()
+        let mut bytes = self.quote.as_ref().map_or(/*default*/ 0, String::len)
+            + self.text.len()
             + self.text_elements.len()
                 * std::mem::size_of::<codex_protocol::user_input::TextElement>();
         for path in &self.local_image_paths {

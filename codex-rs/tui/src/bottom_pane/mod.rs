@@ -261,6 +261,7 @@ pub(crate) use chat_composer::ChatComposerConfig;
 pub(crate) use chat_composer::ClipboardPasteTarget;
 pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
+pub(crate) use chat_composer::PendingQuote;
 pub(crate) use chat_composer::QueuedInputAction;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer_history::HistoryEntry;
@@ -1955,8 +1956,12 @@ impl BottomPane {
         self.composer.prepare_mouse(event)
     }
 
-    pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
-        self.composer.handle_mouse(event)
+    pub(crate) fn handle_composer_mouse(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        pending_quote: &mut Option<PendingQuote>,
+    ) -> bool {
+        self.composer.handle_mouse(event, pending_quote)
     }
 
     pub(crate) fn show_view(&mut self, view: Box<dyn BottomPaneView>) {

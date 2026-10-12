@@ -531,6 +531,17 @@ Optional `[memories]` `extract_reasoning_effort` / `consolidation_reasoning_effo
 
 Keep Markdown paragraphs/code blocks/list items adjacent while streaming and completed. Preserve blanks inside code blocks, raw output, message boundaries, and user padding.
 
+### Click-to-quote
+
+`[tui] click_to_quote = true` is opt-in; default `false`:
+
+- Only the owned fullscreen transcript supports this gesture; native scrollback is unchanged.
+- Fresh mouse selections still copy normally. Clicking the existing composer attaches the selected text, not clipboard contents, as a frozen removable preview above the comment draft.
+- Clipboard-confirmed deselection retains the pending quote. Explicit deselection, navigation, or thread changes clear pending selection; no timed expiration.
+- Removing a quote preserves the draft. Clicking never sends a model request; Enter uses the existing submission pipeline with a Markdown blockquote and optional comment.
+- Reject the complete quote-plus-comment item above 10,000 UTF-8 bytes, including quoting and expanded pastes. Never truncate. Ordinary unquoted drafts retain their existing limits.
+- Quote items can exceed 1K tokens and require manual review when changed. No new hidden instructions, API fields, or history rewriting.
+
 ### Collapsed tool calls
 
 `[tui] collapse_tool_calls = true` is opt-in; default `false`. Rich fullscreen behavior:
