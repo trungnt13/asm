@@ -110,6 +110,15 @@ impl PendingGuardianReviewStatus {
 
 #[derive(Debug)]
 pub(super) struct StatusState {
+    pub(super) adaptive_reasoning_enabled: bool,
+    pub(super) adaptive_reasoning_revision: u64,
+    pub(super) adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    pub(super) adaptive_reasoning_failure_episode: u64,
+    pub(super) announced_adaptive_failures:
+        std::collections::HashMap<codex_protocol::ThreadId, u64>,
+    pub(super) captured_step_reasoning:
+        Option<codex_app_server_protocol::ReasoningEffortUpdatedNotification>,
+    pub(super) suppressed_adaptive_turn_id: Option<String>,
     /// Only the active reasoning item may update the streamed heading.
     pub(super) reasoning_item_id: Option<String>,
     /// An in-progress snapshot can omit the start of its next live reasoning update.
@@ -128,6 +137,13 @@ pub(super) struct StatusState {
 impl Default for StatusState {
     fn default() -> Self {
         Self {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
+            announced_adaptive_failures: Default::default(),
+            captured_step_reasoning: None,
+            suppressed_adaptive_turn_id: None,
             reasoning_item_id: None,
             reasoning_resume_turn_id: None,
             reasoning_recovered_after_refresh: false,

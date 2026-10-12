@@ -57,7 +57,15 @@ impl LocalSettings {
                 .effective_config()
                 .get("auto_rename")
                 .cloned()
-                .map(|value| value.try_into().expect("validated auto_rename settings"))
+                .map(|value| {
+                    value.try_into().unwrap_or_else(|error| {
+                        tracing::error!(%error, "invalid validated auto_rename settings");
+                        codex_config::AutoRenameConfig {
+                            enabled: false,
+                            ..Default::default()
+                        }
+                    })
+                })
                 .unwrap_or_default(),
             audio: Ok(Default::default()),
             transcript_mode: TranscriptMode::resolve(

@@ -109,6 +109,10 @@ fn session_configured_produces_thread_started_event() {
     let thread_id = ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8")
         .expect("thread id should parse");
     let session_configured = SessionConfiguredEvent {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         session_id: SessionId::from(thread_id),
         thread_id,
         forked_from_id: None,

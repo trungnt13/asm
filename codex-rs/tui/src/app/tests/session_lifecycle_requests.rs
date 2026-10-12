@@ -458,6 +458,7 @@ pub(super) enum HistoryCapabilities {
     LegacyDynamicToolsAndHistory,
     ForkHydrationFails,
     ReadAfterResumeFails,
+    ResumeFails,
     ItemsListFails,
     ItemsAndSummaryTurnsFail,
     ThreadListFails,
@@ -718,14 +719,17 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             id: request_id,
                             result: serde_json::json!({}),
                         })
-                    } else if (matches!(
-                        history_capabilities,
-                        HistoryCapabilities::ItemsListFails
-                            | HistoryCapabilities::ItemsAndSummaryTurnsFail
-                    ) && (request.method == "thread/items/list"
-                        || (history_capabilities == HistoryCapabilities::ItemsAndSummaryTurnsFail
-                            && request.method == "thread/turns/list"
-                            && params.is_some_and(|params| params["itemsView"] == "summary"))))
+                    } else if (history_capabilities == HistoryCapabilities::ResumeFails
+                        && request.method == "thread/resume")
+                        || (matches!(
+                            history_capabilities,
+                            HistoryCapabilities::ItemsListFails
+                                | HistoryCapabilities::ItemsAndSummaryTurnsFail
+                        ) && (request.method == "thread/items/list"
+                            || (history_capabilities
+                                == HistoryCapabilities::ItemsAndSummaryTurnsFail
+                                && request.method == "thread/turns/list"
+                                && params.is_some_and(|params| params["itemsView"] == "summary"))))
                         || (history_capabilities == HistoryCapabilities::ReadAfterResumeFails
                             && request.method == "thread/read"
                             && request_sink

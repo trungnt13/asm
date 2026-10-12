@@ -9,6 +9,7 @@ use crate::thread_state::resolve_server_request_on_thread_listener;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
 use codex_app_server_protocol::AccountRateLimitsUpdatedNotification;
+use codex_app_server_protocol::AdaptiveReasoningUpdatedNotification;
 use codex_app_server_protocol::AdditionalPermissionProfile as V2AdditionalPermissionProfile;
 use codex_app_server_protocol::AuthRecoveryNotification;
 use codex_app_server_protocol::CodexErrorInfo as V2CodexErrorInfo;
@@ -48,6 +49,7 @@ use codex_app_server_protocol::PermissionsRequestApprovalParams;
 use codex_app_server_protocol::PermissionsRequestApprovalResponse;
 use codex_app_server_protocol::RawResponseCompletedNotification;
 use codex_app_server_protocol::RawResponseItemCompletedNotification;
+use codex_app_server_protocol::ReasoningEffortUpdatedNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequestPayload;
@@ -182,6 +184,31 @@ pub(crate) async fn apply_bespoke_event_handling(
             };
             outgoing
                 .send_server_notification(ServerNotification::TurnStarted(notification))
+                .await;
+        }
+        EventMsg::AdaptiveReasoningUpdated(payload) => {
+            outgoing
+                .send_server_notification(ServerNotification::AdaptiveReasoningUpdated(
+                    AdaptiveReasoningUpdatedNotification {
+                        thread_id: conversation_id.to_string(),
+                        enabled: payload.enabled,
+                        adaptive_reasoning_revision: payload.adaptive_reasoning_revision,
+                        error: payload.error,
+                        failure_episode: payload.failure_episode,
+                    },
+                ))
+                .await;
+        }
+        EventMsg::ReasoningEffortUpdated(payload) => {
+            outgoing
+                .send_server_notification(ServerNotification::ReasoningEffortUpdated(
+                    ReasoningEffortUpdatedNotification {
+                        thread_id: conversation_id.to_string(),
+                        turn_id: payload.turn_id,
+                        reasoning_effort: payload.reasoning_effort,
+                        adaptive: payload.adaptive,
+                    },
+                ))
                 .await;
         }
         EventMsg::TurnComplete(turn_complete_event) => {
@@ -3172,6 +3199,97 @@ mod tests {
                 assert!(n.turn.items.is_empty());
             }
             other => bail!("unexpected message: {other:?}"),
+        }
+
+        for (reasoning_effort, adaptive) in [
+            (
+                Some(codex_protocol::openai_models::ReasoningEffort::High),
+                true,
+            ),
+            (
+                Some(codex_protocol::openai_models::ReasoningEffort::Low),
+                false,
+            ),
+            (None, false),
+        ] {
+            apply_bespoke_event_handling(
+                Event {
+                    id: "turn-1".to_string(),
+                    msg: EventMsg::ReasoningEffortUpdated(
+                        codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                            turn_id: "turn-1".to_string(),
+                            reasoning_effort: reasoning_effort.clone(),
+                            adaptive,
+                        },
+                    ),
+                },
+                conversation_id,
+                Arc::clone(&conversation),
+                Arc::clone(&thread_manager),
+                outgoing.clone(),
+                Arc::clone(&thread_state),
+                thread_watch_manager.clone(),
+            )
+            .await;
+            let notification = recv_broadcast_notification(&mut rx).await?;
+            let ServerNotification::ReasoningEffortUpdated(update) = &notification else {
+                bail!("unexpected message: {notification:?}");
+            };
+            assert_eq!(
+                update,
+                &ReasoningEffortUpdatedNotification {
+                    thread_id: conversation_id.to_string(),
+                    turn_id: "turn-1".to_string(),
+                    reasoning_effort: reasoning_effort.clone(),
+                    adaptive,
+                }
+            );
+            let json = serde_json::to_value(notification)?;
+            assert_eq!(json["method"], "turn/reasoningEffortUpdated");
+            assert_eq!(
+                json["params"]["reasoningEffort"],
+                serde_json::to_value(reasoning_effort)?
+            );
+            assert_eq!(json["params"]["adaptive"], adaptive);
+            assert!(
+                json["params"]
+                    .as_object()
+                    .unwrap()
+                    .contains_key("reasoningEffort")
+            );
+        }
+
+        for enabled in [false, true] {
+            apply_bespoke_event_handling(
+                Event {
+                    id: "mode-update".to_string(),
+                    msg: EventMsg::AdaptiveReasoningUpdated(
+                        codex_protocol::protocol::AdaptiveReasoningUpdatedEvent {
+                            enabled,
+                            adaptive_reasoning_revision: 0,
+                            error: Some(codex_protocol::protocol::AdaptiveReasoningError::Http {
+                                status: 503,
+                            }),
+                            failure_episode: 1,
+                        },
+                    ),
+                },
+                conversation_id,
+                Arc::clone(&conversation),
+                Arc::clone(&thread_manager),
+                outgoing.clone(),
+                Arc::clone(&thread_state),
+                thread_watch_manager.clone(),
+            )
+            .await;
+            let notification = recv_broadcast_notification(&mut rx).await?;
+            assert_eq!(
+                serde_json::to_value(notification)?,
+                serde_json::json!({
+                    "method": "thread/adaptiveReasoningUpdated",
+                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "adaptiveReasoningRevision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1},
+                })
+            );
         }
 
         for (phase, method, event) in [
