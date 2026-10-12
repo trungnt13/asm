@@ -32,6 +32,10 @@ pub struct ThreadStartupMetadata {
     active_permission_profile: Option<ActivePermissionProfile>,
     cwd: AbsolutePathBuf,
     reasoning_effort: Option<ReasoningEffort>,
+    adaptive_reasoning_enabled: bool,
+    adaptive_reasoning_revision: u64,
+    adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    adaptive_reasoning_failure_episode: u64,
     network_proxy: Option<SessionNetworkProxyRuntime>,
     rollout_path: Option<PathBuf>,
 }
@@ -54,6 +58,10 @@ impl From<&SessionConfiguredEvent> for ThreadStartupMetadata {
             active_permission_profile,
             cwd,
             reasoning_effort,
+            adaptive_reasoning_enabled,
+            adaptive_reasoning_revision,
+            adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode,
             network_proxy,
             rollout_path,
         } = event;
@@ -73,6 +81,10 @@ impl From<&SessionConfiguredEvent> for ThreadStartupMetadata {
             active_permission_profile: active_permission_profile.clone(),
             cwd: cwd.clone(),
             reasoning_effort: reasoning_effort.clone(),
+            adaptive_reasoning_enabled: *adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: *adaptive_reasoning_revision,
+            adaptive_reasoning_error: *adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: *adaptive_reasoning_failure_episode,
             network_proxy: network_proxy.clone(),
             rollout_path: rollout_path.clone(),
         }
@@ -97,6 +109,10 @@ impl ThreadStartupMetadata {
             active_permission_profile: self.active_permission_profile.clone(),
             cwd: self.cwd.clone(),
             reasoning_effort: self.reasoning_effort.clone(),
+            adaptive_reasoning_enabled: self.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: self.adaptive_reasoning_revision,
+            adaptive_reasoning_error: self.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: self.adaptive_reasoning_failure_episode,
             network_proxy: self.network_proxy.clone(),
             rollout_path: self.rollout_path.clone(),
         }

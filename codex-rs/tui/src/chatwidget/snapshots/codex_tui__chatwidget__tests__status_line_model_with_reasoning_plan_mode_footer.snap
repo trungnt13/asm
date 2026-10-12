@@ -1,9 +1,57 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: normalized_backend_snapshot(terminal.backend())
+expression: "format!(\"{baseline_footer}\\n\\nCaptured adaptive step:\\n{adaptive_footer}\\n\\nApplied status:\\n{status}\\n\\nError footer:\\n{error_footer}\\n\\nError details:\\n{error_lines}\\n\\nMode transitions:\\n{transitions}\")"
 ---
 "                                                                                "
 "                                                                                "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  52 med                                             Plan mode (⇧tab to cycle)  "
+
+
+Captured adaptive step:
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  52 low·auto                                        Plan mode (⇧tab to cycle)  "
+
+
+Applied status:
+  Model:               gpt-5.2 (reasoning low (adaptive; baseline medium),
+
+Error footer:
+"                                                                                "
+"                                                                                "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  52 low·err                                         Plan mode (⇧tab to cycle)  "
+
+
+Error details:
+• Adaptive reasoning error: configured API key is missing; load the key in the backend environment and restart. Keeping the current effort; auto remains enabled.
+
+/status
+
+  >_ ASM (v0.163.1-alpha.6)
+
+  Visit https://chatgpt.com/settings/usage for up-to-date
+  information on rate limits and credits
+
+  Model:               gpt-5.2 (reasoning low (adaptive; baseline medium);
+                       adaptive error: configured api key is missing; load the
+                       key in the backend environment and restart, summaries
+                       auto)
+  Model provider:      openai
+  Directory:           /tmp/project
+  Permissions:         Read Only (Ask for approval)
+  Agents.md:           <none>
+  Collaboration mode:  Plan
+  Session:             67e55044-10b1-426f-9247-bb680e5fe0c8
+
+  Token usage:         0 total  (0 input + 0 output)
+  Limits:              data not available yet
+
+Mode transitions:
+• Adaptive reasoning turned on.
+• Adaptive reasoning turned off.

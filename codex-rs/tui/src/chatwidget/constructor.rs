@@ -63,6 +63,11 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
+        let adaptive_reasoning_enabled = config.adaptive_reasoning.enabled
+            && !config
+                .model_reasoning_effort
+                .as_ref()
+                .is_some_and(Self::is_advanced_reasoning_effort);
         let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::default();
         let header = Self::placeholder_session_header_cell(&config);
         let active_cell = Some(header);
@@ -219,7 +224,10 @@ impl ChatWidget {
             reasoning_buffer: String::new(),
             reasoning_header: None,
             reasoning_summary_parts: Vec::new(),
-            status_state: StatusState::default(),
+            status_state: StatusState {
+                adaptive_reasoning_enabled,
+                ..Default::default()
+            },
             review: ReviewState::default(),
             active_hook_cell: None,
             pet_http_client,
