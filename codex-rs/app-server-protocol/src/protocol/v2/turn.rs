@@ -197,6 +197,9 @@ pub struct TurnStartParams {
     pub root_turn_id: Option<String>,
     #[ts(optional = nullable)]
     pub tool_output: Option<Box<TurnToolOutput>>,
+    #[experimental("turn/start.assistantMessage")]
+    #[ts(optional = nullable)]
+    pub assistant_message: Option<String>,
     /// Optional metadata to enrich Codex's ResponsesAPI turn metadata.
     ///
     /// Entries are flattened into the JSON string sent as

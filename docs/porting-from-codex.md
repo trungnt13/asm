@@ -521,6 +521,12 @@ For all three visibility/tool settings above, do not update setup-managed profil
   - `/parallel` from parallel returns to parent/replaces selected companion; older chats stay saved.
   - Block `/side`/`/btw` while viewing either open-pair member. Restore after closure; saved closed chats do not block.
   - Temporary sides retain upstream restrictions, including rejection of another companion. Only added exceptions: `/sendlast`, `/sync`, non-navigating `/fork`.
+- `send_companion_message(message)` coordinates only the live main/companion pair, in either direction:
+  - Append its declaration and callable registration when pairing, without changing the original advertised tools or instruction prefix. Responses Lite without strict third-party Code Mode Only is required for messaging; unsupported models/tool modes/servers keep ordinary companion functionality with an explicit warning. Enable delivery only after both endpoints register. Never silently migrate legacy history to fully incremental tools or enable unrelated features.
+  - Deliver an attributed assistant-role peer message through atomic turn admission: steer running recipients, start idle recipients, and return acceptance without waiting for a reply. Preserve the recipient's settings, permissions, and approvals.
+  - Resolve the counterpart from client-owned pairing, not a model-supplied ID. Serialize recipient admission before pair navigation: accepted sends precede closure; calls after closure fail. Closing or replacing a pair disables old routes; ordinary resume does not restore them. Keep historical declarations rather than rewriting earlier context.
+  - Use the agent-message validation pattern, without an additional approval warning or feature-specific 1,000-byte limit.
+  - **P0 manual review:** a peer message can exceed 1K tokens. Manually review the full attributed peer item. Its conservative 10,000-byte serialized-response-item guard keeps it below the repository's 10K-token injection limit; this is not a 1,000-byte tool limit or a change to agent transport.
 - Ctrl+/ switches without stopping. Empty-composer/no-modal Ctrl+C stops parallel, pauses active goal, returns to parent, and preserves history. Selecting subagents must not stop it.
 - Ordinary `/new`, `/clear`, `/resume`, `/fork`, `/cd`, `/worktree` navigation exits parallel. Archive/delete affects displayed parallel and returns to parent.
 - Persist pairing/transcript-display boundaries in client-local ASM state per app-server target:

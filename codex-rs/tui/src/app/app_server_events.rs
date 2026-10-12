@@ -626,6 +626,13 @@ impl App {
             return;
         }
         if let ServerRequest::DynamicToolCall { request_id, params } = &request {
+            if params.namespace.is_none()
+                && params.tool == super::companion_messages::COMPANION_MESSAGE_TOOL
+            {
+                self.send_companion_message(app_server_client, request_id.clone(), params.clone())
+                    .await;
+                return;
+            }
             if self.dynamic_tool_tasks.contains_key(request_id)
                 || (params.namespace.as_deref() != Some(crate::dynamic_tools::NAMESPACE)
                     && !app_server_client.uses_embedded_app_server())

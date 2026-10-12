@@ -215,6 +215,7 @@ pub(super) struct SideThreadState {
     pub(super) parent_thread_id: ThreadId,
     pub(super) kind: CompanionKind,
     pub(super) mode: SideConversationMode,
+    pub(super) messaging_available: bool,
     /// Parent-thread condition that changed while this side thread is visible.
     pub(super) parent_status: Option<SideParentStatus>,
 }
@@ -225,6 +226,7 @@ impl SideThreadState {
             parent_thread_id,
             kind: CompanionKind::Side,
             mode: SideConversationMode::Side,
+            messaging_available: false,
             parent_status: None,
         }
     }
@@ -1006,6 +1008,13 @@ impl App {
                         .add_error_message(format!("Failed to save parallel navigation: {error}"));
                     return Ok(AppRunControl::Continue);
                 }
+                let mut messaging_error = None;
+                for endpoint in [parent_thread_id, child_thread_id] {
+                    if let Err(error) = self.enable_companion_messages(app_server, endpoint).await {
+                        messaging_error = Some(error);
+                        break;
+                    }
+                }
                 let channel = self.ensure_thread_channel(child_thread_id);
                 {
                     let mut store = channel.store.lock().await;
@@ -1013,12 +1022,13 @@ impl App {
                 }
                 self.side_threads.insert(
                     child_thread_id,
-                    match kind {
-                        CompanionKind::Side => SideThreadState {
-                            mode,
-                            ..SideThreadState::new(parent_thread_id)
-                        },
-                        CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
+                    SideThreadState {
+                        mode,
+                        messaging_available: messaging_error.is_none(),
+                        ..match kind {
+                            CompanionKind::Side => SideThreadState::new(parent_thread_id),
+                            CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
+                        }
                     },
                 );
                 // `thread/started` is delivered after the fork response; seed navigation before
@@ -1068,6 +1078,11 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 if self.active_thread_id == Some(child_thread_id) {
+                    if let Some(error) = messaging_error {
+                        self.chat_widget.add_error_message(format!(
+                            "Companion messaging is unavailable on this pair: {error}"
+                        ));
+                    }
                     if selected_profile.is_some() {
                         self.adopt_inherited_server_selection();
                     }

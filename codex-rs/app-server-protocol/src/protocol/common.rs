@@ -891,6 +891,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadInjectItemsResponse,
     },
+    #[experimental("thread/appendTools")]
+    ThreadAppendTools => "thread/appendTools" {
+        params: v2::ThreadAppendToolsParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadAppendToolsResponse,
+    },
     SkillsList => "skills/list" {
         params: v2::SkillsListParams,
         serialization: global_shared_read("config"),

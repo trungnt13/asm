@@ -638,7 +638,7 @@ impl ContextManager {
 
     pub(crate) fn has_tool_declarations(&self) -> bool {
         self.raw_items()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
+            .any(|item| matches!(item, ResponseItem::AdditionalTools { id, .. } if !id.as_ref().is_some_and(|id| id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))))
     }
 
     /// Returns annotated history items without cloning their response payloads.

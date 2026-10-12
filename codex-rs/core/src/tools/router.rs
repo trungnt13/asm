@@ -83,7 +83,9 @@ pub(crate) fn tool_log_payload<'a>(
 
 /// One finalized tool plan: its advertised surfaces and matching executable runtimes.
 pub struct ToolRouter {
-    registry: ToolRegistry,
+    pub(crate) registry: ToolRegistry,
+    pub(crate) appended_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
+    pub(crate) appended_tools_available: bool,
     model_visible_specs: Arc<[ToolSpec]>,
     tool_mode: ToolMode,
     code_mode_tool_names: BTreeMap<String, ToolName>,
@@ -132,6 +134,8 @@ impl ToolRouter {
     ) -> Self {
         let mut router = Self {
             registry,
+            appended_tools: Vec::new(),
+            appended_tools_available: false,
             model_visible_specs: model_visible_specs.into(),
             tool_mode,
             code_mode_tool_names,

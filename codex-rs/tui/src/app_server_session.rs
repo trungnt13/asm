@@ -1516,6 +1516,7 @@ impl AppServerSession {
                     client_user_message_id: Some(client_user_message_id),
                     input: items,
                     tool_output: None,
+                    assistant_message: None,
                     responsesapi_client_metadata: None,
                     additional_context: None,
                     environments: None,

@@ -23,7 +23,7 @@ impl App {
         let Some(thread_id) = self.current_displayed_thread_id() else {
             return Ok(());
         };
-        let Some(state) = self
+        let Some(mut state) = self
             .side_threads
             .get(&thread_id)
             .cloned()
@@ -145,6 +145,14 @@ impl App {
                     );
                     return Ok(());
                 }
+                let mut messaging_error = None;
+                for endpoint in [state.parent_thread_id, replacement_id] {
+                    if let Err(error) = self.enable_companion_messages(app_server, endpoint).await {
+                        messaging_error = Some(error);
+                        break;
+                    }
+                }
+                state.messaging_available = messaging_error.is_none();
                 if let Err(error) = app_server
                     .thread_inject_items(
                         replacement_id,
@@ -174,6 +182,11 @@ impl App {
                     .select_agent_thread(tui, app_server, replacement_id)
                     .await;
                 if result.is_ok() && self.current_displayed_thread_id() == Some(replacement_id) {
+                    if let Some(error) = messaging_error {
+                        self.chat_widget.add_error_message(format!(
+                            "Companion messaging is unavailable on this pair: {error}"
+                        ));
+                    }
                     self.discard_side_thread_in_background(app_server, thread_id)
                         .await;
                     self.sync_side_thread_ui();

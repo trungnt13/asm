@@ -363,11 +363,28 @@ async fn dynamic_tool_call_round_trip_sends_text_content_items_to_model() -> Res
             responses::ev_completed("resp-1"),
         ]),
         create_final_assistant_message_sse_response("Done")?,
+        responses::sse(vec![
+            responses::ev_response_created("resp-appended"),
+            responses::ev_function_call(
+                "appended-call",
+                "send_companion_message",
+                r#"{"message":"hello"}"#,
+            ),
+            responses::ev_completed("resp-appended"),
+        ]),
+        create_final_assistant_message_sse_response("Appended tool completed")?,
     ];
     let server = create_mock_responses_server_sequence_unchecked(responses).await;
 
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    MockResponsesConfig::new(&server.uri())
+        .disable_feature(codex_features::Feature::IncrementalTools)
+        .write(codex_home.path())?;
+    let config = load_default_config_for_test(&codex_home).await;
+    let mut model = codex_core::test_support::construct_model_info_offline("mock-model", &config);
+    model.use_responses_lite = true;
+    model.tool_mode = Some(codex_protocol::openai_models::ToolMode::Direct);
+    write_models_cache_with_models(codex_home.path(), vec![model]).await?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -538,7 +555,14 @@ async fn dynamic_tool_call_round_trip_sends_text_content_items_to_model() -> Res
     .await??;
 
     let bodies = responses_bodies(&server).await?;
-    let namespace = find_tool(&bodies[0], tool_namespace)
+    let namespace = bodies[0]["input"]
+        .as_array()
+        .context("request input")?
+        .iter()
+        .filter(|item| item["type"] == "additional_tools")
+        .filter_map(|item| item["tools"].as_array())
+        .flatten()
+        .find(|tool| tool["name"] == tool_namespace)
         .context("expected explicit dynamic tool namespace in first request")?;
     assert_eq!(
         namespace,
@@ -570,6 +594,107 @@ async fn dynamic_tool_call_round_trip_sends_text_content_items_to_model() -> Res
         .context("expected function_call_output in follow-up request")?;
     let expected_payload = FunctionCallOutputPayload::from_text("dynamic-ok".to_string());
     assert_eq!(payload, expected_payload);
+
+    let appended = DynamicToolSpec::Function(DynamicToolFunctionSpec {
+        name: "send_companion_message".to_string(),
+        description: "Send a message to the paired conversation".to_string(),
+        input_schema: json!({"type":"object", "properties":{"message":{"type":"string"}}, "required":["message"], "additionalProperties":false}),
+        defer_loading: false,
+    });
+    let mut invalid_tool = serde_json::to_value(&appended)?;
+    invalid_tool["name"] = json!("bad.tool");
+    let rejected = mcp
+        .send_raw_request(
+            "thread/appendTools",
+            Some(json!({
+                "threadId": thread_id, "tools": [invalid_tool],
+            })),
+        )
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_error_message(RequestId::Integer(rejected)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert!(error.error.message.contains("dynamic tool name must match"));
+
+    // Repeating the same append is idempotent and does not add another declaration.
+    for _ in 0..2 {
+        let _: codex_app_server_protocol::ThreadAppendToolsResponse = mcp
+            .request(
+                |request_id| codex_app_server_protocol::ClientRequest::ThreadAppendTools {
+                    request_id,
+                    params: codex_app_server_protocol::ThreadAppendToolsParams {
+                        thread_id: thread_id.clone(),
+                        tools: vec![appended.clone()],
+                    },
+                },
+            )
+            .await?;
+    }
+    let _: TurnStartResponse = mcp
+        .request(
+            |request_id| codex_app_server_protocol::ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread_id.clone(),
+                    input: vec![V2UserInput::Text {
+                        text: "Use the appended tool".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            },
+        )
+        .await?;
+    let request = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_request_message(),
+    )
+    .await??;
+    let ServerRequest::DynamicToolCall { request_id, params } = request else {
+        panic!("expected appended dynamic tool callback");
+    };
+    assert_eq!(params.thread_id, thread_id);
+    assert_eq!(params.tool, "send_companion_message");
+    assert_eq!(params.arguments, json!({"message":"hello"}));
+    mcp.send_response(
+        request_id,
+        serde_json::to_value(DynamicToolCallResponse {
+            content_items: vec![DynamicToolCallOutputContentItem::InputText {
+                text: "accepted".to_string(),
+            }],
+            success: true,
+        })?,
+    )
+    .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+    let bodies = responses_bodies(&server).await?;
+    assert_eq!(bodies.len(), 4);
+    let original = bodies[1]["input"].as_array().context("original input")?;
+    let after_append = bodies[2]["input"].as_array().context("appended input")?;
+    assert_eq!(&after_append[..original.len()], original.as_slice());
+    for key in ["tools", "instructions", "model"] {
+        assert_eq!(bodies[1].get(key), bodies[2].get(key));
+    }
+    let declarations = after_append
+        .iter()
+        .filter(|item| item["type"] == "additional_tools")
+        .collect::<Vec<_>>();
+    assert_eq!(declarations.len(), 2);
+    assert_eq!(
+        declarations[1]["tools"][0]["tools"][0]["name"],
+        "send_companion_message"
+    );
+    assert_eq!(
+        function_call_output_payload(&bodies[3], "appended-call"),
+        Some(FunctionCallOutputPayload::from_text("accepted".to_string()))
+    );
 
     Ok(())
 }

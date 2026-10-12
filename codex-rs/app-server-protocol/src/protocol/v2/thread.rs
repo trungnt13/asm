@@ -1809,6 +1809,19 @@ pub struct ThreadInjectItemsResponse {}
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+pub struct ThreadAppendToolsParams {
+    pub thread_id: String,
+    pub tools: Vec<DynamicToolSpec>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadAppendToolsResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
 pub struct ThreadTurnsListParams {
     pub thread_id: String,
     /// Opaque cursor to pass to the next call to continue after the last turn.

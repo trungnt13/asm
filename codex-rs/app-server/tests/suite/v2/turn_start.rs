@@ -671,6 +671,13 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
                 responses::ev_completed("resp-2"),
             ]),
         }],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: responses::sse(vec![
+                responses::ev_response_created("resp-peer-idle"),
+                responses::ev_completed("resp-peer-idle"),
+            ]),
+        }],
     ])
     .await;
     let codex_home = TempDir::new()?;
@@ -763,6 +770,20 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
     assert_eq!(steered_turn.id, active_turn.id);
     assert_eq!(steered_turn.root_turn_id, active_turn.root_turn_id);
 
+    let peer_message = "Message Type: MESSAGE\nSender: companion\nPayload:\nCoordinate without changing permissions.";
+    let TurnStartResponse { turn: peer_steered } = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                assistant_message: Some(peer_message.to_string()),
+                ..Default::default()
+            },
+        })
+        .await?;
+    assert_eq!(peer_steered.id, active_turn.id);
+    assert_eq!(peer_steered.root_turn_id, active_turn.root_turn_id);
+
     release_response
         .send(())
         .expect("active response gate should remain open");
@@ -775,6 +796,19 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
 
     let requests = server.requests().await;
     assert_eq!(requests.len(), 2);
+    let second_body: Value = serde_json::from_slice(&requests[1])?;
+    assert!(
+        second_body["input"]
+            .as_array()
+            .context("model input")?
+            .iter()
+            .any(|item| {
+                item["role"] == "assistant"
+                    && item["content"].as_array().is_some_and(|content| {
+                        content.iter().any(|part| part["text"] == peer_message)
+                    })
+            })
+    );
     for request in requests {
         let body: Value = serde_json::from_slice(&request)?;
         assert_eq!(body["access_programs"], json!({"cyber": "daybreak_blue"}));
@@ -787,6 +821,40 @@ async fn turn_start_steers_active_turn_and_returns_active_turn_id() -> Result<()
         assert_eq!(turn_metadata["parent_turn_id"], "initiating-turn");
         assert_eq!(turn_metadata["root_turn_id"], "causal-root");
     }
+    let idle_message = "Idle companion follow-up ".repeat(60);
+    let TurnStartResponse {
+        turn: idle_peer_turn,
+    } = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                assistant_message: Some(idle_message.clone()),
+                ..Default::default()
+            },
+        })
+        .await?;
+    assert_ne!(idle_peer_turn.id, active_turn.id);
+    let _: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    let requests = server.requests().await;
+    assert_eq!(requests.len(), 3);
+    let idle_body: Value = serde_json::from_slice(&requests[2])?;
+    assert!(
+        idle_body["input"]
+            .as_array()
+            .context("model input")?
+            .iter()
+            .any(|item| {
+                item["role"] == "assistant"
+                    && item["content"].as_array().is_some_and(|content| {
+                        content.iter().any(|part| part["text"] == idle_message)
+                    })
+            })
+    );
     Ok(())
 }
 
@@ -3401,6 +3469,7 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
         .request(|request_id| ClientRequest::TurnStart {
             request_id,
             params: TurnStartParams {
+                assistant_message: None,
                 disabled_plugin_ids: None,
                 environments: None,
                 thread_id: thread.id.clone(),
@@ -3452,6 +3521,7 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
         .request(|request_id| ClientRequest::TurnStart {
             request_id,
             params: TurnStartParams {
+                assistant_message: None,
                 disabled_plugin_ids: None,
                 environments: Some(vec![TurnEnvironmentParams {
                     environment_id: LOCAL_ENVIRONMENT_ID.to_string(),

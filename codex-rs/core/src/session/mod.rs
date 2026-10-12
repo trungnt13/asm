@@ -241,6 +241,7 @@ use codex_protocol::error::Result as CodexResult;
 #[cfg(test)]
 use codex_protocol::exec_output::StreamOutput;
 
+mod appended_tools;
 pub(crate) mod async_compaction;
 mod code_mode_warning;
 mod config_refresh;
@@ -960,6 +961,7 @@ impl Session {
             thread_source,
             originator,
             dynamic_tools,
+            appended_tools: appended_tools::restore_appended_tools(&conversation_history)?,
             user_shell_override,
         };
         session_configuration
@@ -4276,7 +4278,7 @@ impl Session {
         // Wait for accepted updates to finish persisting, then keep later updates from
         // overtaking the current settings snapshot while its checkpoint is written.
         let _settings_guard = thread_settings::acquire_persistence_lock(self).await;
-        let (compacted_item, started_item) = {
+        let (compacted_item, started_item, world_state_item) = {
             let mut state = self.state.lock().await;
             let complete_replacement =
                 matches!(&installation, CompactedHistoryInstallation::Complete(_));
@@ -4342,6 +4344,15 @@ impl Session {
             for envelope in &mut items {
                 Self::assign_missing_response_item_id(&mut envelope.item);
             }
+            let mut world_state_item =
+                WorldStateItem::full(world_state_baseline.clone().into_object());
+            // Capture current accepted registrations, not the older model-visible snapshot.
+            if !state.session_configuration.appended_tools.is_empty() {
+                world_state_item.state.insert(
+                    crate::context::world_state::APPENDED_TOOL_REGISTRY.to_string(),
+                    serde_json::json!(state.session_configuration.appended_tools),
+                );
+            }
             // Goal edits are published outside the running task. Keep edits accepted after
             // the compaction input snapshot, in their original order, after its replacement.
             if complete_replacement {
@@ -4397,14 +4408,13 @@ impl Session {
                     previous_turn_settings: state.previous_turn_settings(),
                 }),
             };
-            (compacted_item, started_item)
+            (compacted_item, started_item, world_state_item)
         };
 
         if let Some((turn_context, item)) = started_item {
             // The prefix is now known to be valid; announce the install before checkpoint I/O.
             self.emit_turn_item_started(turn_context, item).await;
         }
-        let world_state_item = WorldStateItem::full(world_state_baseline.into_object());
         let rollout_items = [
             RolloutItem::Compacted(compacted_item),
             RolloutItem::WorldState(world_state_item),

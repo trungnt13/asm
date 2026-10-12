@@ -4521,6 +4521,7 @@ async fn set_rate_limits_retains_previous_credits() {
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
+        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -4644,6 +4645,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
+        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -5269,6 +5271,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
+        appended_tools: Vec::new(),
         user_shell_override: None,
     }
 }
@@ -6219,6 +6222,23 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     );
     let turn_context_baseline = turn_context.to_turn_context_item();
     let world_state = Arc::new(build_world_state_from_turn_context(&session, &turn_context).await);
+    // Registrations accepted after the compaction snapshot must survive its checkpoint.
+    let appended_tools = ["first_peer_tool", "second_peer_tool"]
+        .into_iter()
+        .map(|name| {
+            serde_json::from_value::<DynamicToolSpec>(serde_json::json!({
+                "type": "function", "name": name, "description": "Peer coordination",
+                "inputSchema": {"type":"object", "properties":{}},
+            }))
+            .expect("tool fixture")
+        })
+        .collect::<Vec<_>>();
+    session
+        .state
+        .lock()
+        .await
+        .session_configuration
+        .appended_tools = appended_tools.clone();
     let previous_turn_settings = PreviousTurnSettings {
         model: "previous-model".to_string(),
         comp_hash: Some("comp-hash".to_string()),
@@ -6302,6 +6322,28 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     let (items, _, _) = RolloutRecorder::load_rollout_items(&rollout_path)
         .await
         .expect("read checkpoints");
+    let mut replay = items.clone();
+    // A later model step can persist an older declaration snapshot after admission.
+    replay.push(RolloutItem::WorldState(WorldStateItem::patch(
+        serde_json::json!({"appended_tools": {"specs": [appended_tools[0].clone()], "available": true}})
+            .as_object().expect("world state patch").clone(),
+    )));
+    assert_eq!(
+        super::appended_tools::restore_appended_tools(&InitialHistory::Forked(replay.clone()))
+            .expect("full replay"),
+        appended_tools
+    );
+    let mut scan = codex_rollout::ModelContextScan::default();
+    for item in replay.into_iter().rev() {
+        if scan.push(item) == codex_rollout::ModelContextScanProgress::Complete {
+            break;
+        }
+    }
+    assert_eq!(
+        super::appended_tools::restore_appended_tools(&InitialHistory::Forked(scan.finish()))
+            .expect("bounded model-context replay"),
+        appended_tools
+    );
     let compaction_items = items
         .into_iter()
         .skip_while(|item| !matches!(item, RolloutItem::Compacted(_)))
@@ -6317,9 +6359,14 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     };
     assert_eq!(compacted.replacement_history, Some(live_history));
     assert_eq!(compacted.resume_metadata.as_ref(), Some(&expected));
+    let mut expected_world_state = world_state.render_full().0.into_object();
+    expected_world_state.insert(
+        "appended_tool_registry".to_string(),
+        serde_json::json!(appended_tools),
+    );
     assert_eq!(
         saved_world_state,
-        &WorldStateItem::full(world_state.render_full().0.into_object())
+        &WorldStateItem::full(expected_world_state)
     );
     assert_eq!(saved_turn_context, &turn_context_baseline);
     assert_eq!(saved_settings, &expected_settings);
@@ -6375,6 +6422,71 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
             .reconstruct_history_from_rollout(&turn_context, &items)
             .await;
         assert_eq!(rolled_back.turn_attribution, None);
+    }
+
+    // A retained registration must stop executing/advertising in strict mode, then recover.
+    for strict in [false, true, false] {
+        let mut turn = session.new_default_turn().await;
+        let context = Arc::get_mut(&mut turn).expect("unshared test context");
+        let config = Arc::make_mut(&mut context.config);
+        if strict {
+            config
+                .features
+                .enable(Feature::CodeModeOnlyStrictThirdPartyTools)
+                .unwrap();
+        } else {
+            config
+                .features
+                .disable(Feature::CodeModeOnlyStrictThirdPartyTools)
+                .unwrap();
+        }
+        update_turn_settings_for_test(context, |settings| {
+            let model = Arc::make_mut(&mut settings.model_info);
+            model.use_responses_lite = true;
+            model.tool_mode = Some(ToolMode::CodeModeOnly);
+        });
+        let mut router = ToolRouter::from_parts(
+            ToolRegistry::empty_for_test(),
+            Vec::new(),
+            ToolMode::CodeModeOnly,
+            BTreeMap::new(),
+            /*tool_namespaces_info*/ None,
+            &[],
+        );
+        session
+            .register_appended_tools(&turn, turn.model_info(), &mut router)
+            .await
+            .unwrap();
+        assert_eq!(router.appended_tools_available, !strict);
+        assert_eq!(router.appended_tools, appended_tools);
+        for name in ["first_peer_tool", "second_peer_tool"] {
+            assert_eq!(
+                router
+                    .registered_tool(&codex_tools::ToolName::plain(name))
+                    .is_some(),
+                !strict
+            );
+        }
+        assert!(router.model_visible_specs().is_empty());
+        let step = StepContext::for_test(turn).with_tool_router_for_test(Arc::new(router));
+        let normal = user_message("retained context");
+        let declaration = ResponseItem::AdditionalTools {
+            id: Some(codex_protocol::ResponseItemId::new("at_appended")),
+            role: "developer".to_string(),
+            tools: Vec::new(),
+        };
+        let input = vec![normal.clone(), declaration];
+        let prompt = super::turn::build_prompt(
+            input.clone(),
+            &step,
+            BaseInstructions {
+                text: "baseline".to_string(),
+                provenance: None,
+            },
+            /*incremental_tools*/ false,
+        );
+        assert_eq!(prompt.input, if strict { vec![normal] } else { input });
+        assert_eq!(prompt.base_instructions.text, "baseline");
     }
 }
 
@@ -6865,6 +6977,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
+        appended_tools: Vec::new(),
         user_shell_override: None,
     };
     let session_telemetry = session_telemetry(
@@ -7189,6 +7302,7 @@ async fn make_session_with_config_and_rx(
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
+        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -7323,6 +7437,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
+        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -9137,6 +9252,7 @@ where
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools,
+        appended_tools: Vec::new(),
         user_shell_override: None,
     };
     let session_telemetry = session_telemetry(

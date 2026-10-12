@@ -245,6 +245,7 @@ mod auto_rename;
 mod auto_rename_persistence;
 mod autorename_command;
 mod clipboard;
+mod companion_messages;
 mod footer_selection;
 mod native_history;
 mod owned_transcript;

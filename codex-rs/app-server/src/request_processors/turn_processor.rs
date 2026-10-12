@@ -192,6 +192,22 @@ impl TurnRequestProcessor {
         .map(|response| Some(response.into()))
     }
 
+    pub(crate) async fn thread_append_tools(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadAppendToolsParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        self.ensure_direct_input_allowed(request_id, thread.as_ref())
+            .await?;
+        super::thread_processor::validate_dynamic_tools(&params.tools).map_err(invalid_request)?;
+        thread
+            .append_tools(params.tools)
+            .await
+            .map_err(|error| invalid_request(error.to_string()))?;
+        Ok(Some(ThreadAppendToolsResponse {}.into()))
+    }
+
     pub(crate) async fn thread_inject_items(
         &self,
         request_id: &ConnectionRequestId,
@@ -541,6 +557,15 @@ impl TurnRequestProcessor {
             .check_thread_model_provider(thread.config().await.as_ref())
             .await
             .map_err(|error| config_load_error(&error))?;
+        if let Some(message) = &params.assistant_message
+            && (message.trim().is_empty()
+                || !params.input.is_empty()
+                || params.tool_output.is_some())
+        {
+            return Err(invalid_request(
+                "assistantMessage must be nonempty and cannot be combined with input or toolOutput",
+            ));
+        }
         if let Some(tool_output) = &params.tool_output {
             if !params.input.is_empty() {
                 return Err(invalid_request(
@@ -597,7 +622,12 @@ impl TurnRequestProcessor {
 
         let additional_context = map_additional_context(params.additional_context);
         let turn_has_input = !params.input.is_empty();
-        let input = if let Some(tool_output) = params.tool_output {
+        let input = if let Some(text) = params.assistant_message {
+            TurnInput::ResponseItem(codex_core::context::ContextualUserFragment::into(
+                codex_core::context::PeerMessage::new(text)
+                    .map_err(|error| invalid_request(error.to_string()))?,
+            ))
+        } else if let Some(tool_output) = params.tool_output {
             let item = ResponseItem::FunctionCallOutput {
                 id: None,
                 call_id: None,
