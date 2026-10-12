@@ -88,10 +88,53 @@ impl ChatWidget {
             ServerNotification::ThreadGoalCleared(notification) => {
                 self.on_thread_goal_cleared(notification.thread_id.as_str());
             }
-            ServerNotification::ThreadSettingsUpdated(notification) => {
+            ServerNotification::ThreadSettingsUpdated(mut notification) => {
+                if from_replay {
+                    notification.thread_settings.adaptive_reasoning_enabled =
+                        self.adaptive_reasoning_enabled();
+                    notification.thread_settings.adaptive_reasoning_revision =
+                        self.status_state.adaptive_reasoning_revision;
+                    notification.thread_settings.adaptive_reasoning_error =
+                        self.status_state.adaptive_reasoning_error;
+                    notification
+                        .thread_settings
+                        .adaptive_reasoning_failure_episode =
+                        self.status_state.adaptive_reasoning_failure_episode;
+                }
                 self.on_thread_settings_updated(notification);
             }
+            ServerNotification::AdaptiveReasoningUpdated(notification) => {
+                if !from_replay
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                {
+                    self.set_adaptive_reasoning_state(
+                        notification.enabled,
+                        notification.adaptive_reasoning_revision,
+                        notification.error,
+                        notification.failure_episode,
+                    );
+                }
+            }
+            ServerNotification::ReasoningEffortUpdated(notification) => {
+                if !(from_replay
+                    || notification.adaptive
+                        && self.status_state.suppressed_adaptive_turn_id.as_deref()
+                            == Some(&notification.turn_id))
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                    && self.turn_lifecycle.last_turn_id.as_deref() == Some(&notification.turn_id)
+                    && !self.input_queue.user_turn_pending_start
+                {
+                    self.status_state.captured_step_reasoning = Some(notification);
+                    self.refresh_status_surfaces();
+                }
+            }
             ServerNotification::TurnStarted(notification) => {
+                self.status_state.captured_step_reasoning = None;
+                self.status_state.suppressed_adaptive_turn_id = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {

@@ -255,6 +255,14 @@ pub(crate) async fn run_turn(
     required_servers.sort_unstable();
     required_servers.dedup();
 
+    sess.adapt_reasoning(
+        &turn_context,
+        &input,
+        codex_config::AdaptiveReasoningTrigger::TurnStart,
+        &cancellation_token,
+    )
+    .await;
+
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = match sess
         .capture_step_context_with_required_mcp_servers(
@@ -457,6 +465,16 @@ pub(crate) async fn run_turn(
         )
         .await;
 
+        if next_step_context.is_none() || !pending_input.is_empty() {
+            sess.adapt_reasoning(
+                &turn_context,
+                &pending_input,
+                codex_config::AdaptiveReasoningTrigger::ToolResult,
+                &cancellation_token,
+            )
+            .await;
+        }
+
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match next_step_context.take() {
             Some(step_context) if pending_input.is_empty() => step_context,
@@ -528,6 +546,8 @@ pub(crate) async fn run_turn(
             }
             .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
             .await;
+
+            sess.report_reasoning_effort(step_context.as_ref()).await;
 
             run_sampling_request(
                 Arc::clone(&sess),
@@ -2115,6 +2135,8 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::ThreadRolledBack(_)
         | EventMsg::TurnStarted(_)
         | EventMsg::ThreadSettingsApplied(_)
+        | EventMsg::ReasoningEffortUpdated(_)
+        | EventMsg::AdaptiveReasoningUpdated(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)
         | EventMsg::UserMessage(_)

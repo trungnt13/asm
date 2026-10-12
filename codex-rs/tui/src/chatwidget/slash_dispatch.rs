@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::app::WindowsSandboxHost;
+use crate::app_event::AdaptiveReasoningAction;
 use crate::app_event::ManagedWorktreeMode;
 use crate::app_event::SideConversationAction;
 use crate::app_event::SideConversationMode;
@@ -599,6 +600,7 @@ impl ChatWidget {
             SlashCommand::Export => {
                 self.show_transcript_export_popup();
             }
+            SlashCommand::Adapt => self.request_adaptive_reasoning(AdaptiveReasoningAction::Toggle),
             SlashCommand::Raw => {
                 let enabled = self.toggle_raw_output_mode_and_notify();
                 self.emit_raw_output_mode_changed(enabled);
@@ -980,6 +982,12 @@ impl ChatWidget {
                     }
                 }
                 _ => self.add_error_message("Usage: /keymap [debug]".to_string()),
+            },
+            SlashCommand::Adapt => match trimmed.to_ascii_lowercase().as_str() {
+                "" => self.request_adaptive_reasoning(AdaptiveReasoningAction::Toggle),
+                "on" => self.request_adaptive_reasoning(AdaptiveReasoningAction::Enable),
+                "off" => self.request_adaptive_reasoning(AdaptiveReasoningAction::Disable),
+                _ => self.add_error_message("Usage: /adapt [on|off]".to_string()),
             },
             SlashCommand::Raw => match trimmed.to_ascii_lowercase().as_str() {
                 "on" => {
@@ -1418,6 +1426,7 @@ impl ChatWidget {
             | SlashCommand::Raw
             | SlashCommand::Vim
             | SlashCommand::Daybreak
+            | SlashCommand::Adapt
             | SlashCommand::Diff
             | SlashCommand::App
             | SlashCommand::Rename

@@ -4,6 +4,7 @@ use super::LocalAgentControl;
 use super::LocalAgentRuntime;
 use super::runtime::AgentTreeMembership;
 use crate::agent::AgentStatus;
+use crate::agent::registry::EvictedAgentRuntimeState;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::thread_manager::ThreadManagerState;
@@ -77,6 +78,7 @@ impl ThreadManagerState {
             let runtime = &thread.session.services.local_agent_runtime;
             let _ = runtime.mailboxes.enqueue(thread_id, /*id*/ None, mail);
             let environments = thread.environment_selections().await;
+            let adaptive = thread.config_snapshot().await;
             let mut threads = manager.threads.write().await;
             if threads
                 .get(&thread_id)
@@ -85,9 +87,16 @@ impl ThreadManagerState {
                 teardown.complete();
                 return Ok(ThreadEvictionOutcome::NotCurrent);
             }
-            runtime
-                .registry
-                .save_evicted_environments(thread_id, environments);
+            runtime.registry.save_evicted_runtime_state(
+                thread_id,
+                EvictedAgentRuntimeState {
+                    environments,
+                    adaptive_reasoning_enabled: adaptive.adaptive_reasoning_enabled,
+                    adaptive_reasoning_revision: adaptive.adaptive_reasoning_revision,
+                    adaptive_reasoning_error: adaptive.adaptive_reasoning_error,
+                    adaptive_reasoning_failure_episode: adaptive.adaptive_reasoning_failure_episode,
+                },
+            );
             let removed = threads.remove(&thread_id).is_some();
             runtime.residency.remove(thread_id);
             teardown.complete();
