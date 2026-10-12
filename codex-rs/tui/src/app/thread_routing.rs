@@ -118,12 +118,26 @@ impl App {
             return;
         };
         let input_state = self.chat_widget.capture_thread_input_state();
+        let reasoning_state = self.chat_widget.capture_reasoning_state();
         let recap_progress = self.recap.progress();
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
             let receiver = self.active_thread_rx.take();
             let mut store = channel.store.lock().await;
             store.active = false;
             store.input_state = input_state;
+            if self.chat_widget.thread_id() == Some(active_id) {
+                // The store may already have a newer step waiting in the active receiver.
+                if reasoning_state.suppressed_turn_id.is_some()
+                    && reasoning_state.suppressed_turn_id == store.latest_turn_id
+                {
+                    store.reasoning_state.captured_step = None;
+                    store.reasoning_state.suppressed_turn_id = reasoning_state.suppressed_turn_id;
+                } else if store.reasoning_state.captured_step.is_none() {
+                    store.reasoning_state.captured_step = reasoning_state
+                        .captured_step
+                        .filter(|step| store.latest_turn_id.as_deref() == Some(&step.turn_id));
+                }
+            }
             store.merge_recap_progress(recap_progress);
             if let Some(receiver) = receiver {
                 channel.receiver = Some(receiver);
@@ -1046,6 +1060,16 @@ impl App {
         {
             return Ok(());
         }
+        if let ServerNotification::AdaptiveReasoningUpdated(mode) = &notification {
+            self.apply_adaptive_reasoning_to_cached_session(
+                thread_id,
+                mode.enabled,
+                mode.adaptive_reasoning_revision,
+                mode.error,
+                mode.failure_episode,
+            )
+            .await;
+        }
         let mut confirmed_profile = None;
         if let ServerNotification::ThreadSettingsUpdated(notification) = &notification {
             self.apply_thread_settings_to_cached_session(thread_id, &notification.thread_settings)
@@ -1126,6 +1150,7 @@ impl App {
                 && let Some(session) = inferred_session
             {
                 guard.session = Some(session);
+                guard.inferred_session = true;
             }
             let previous_pending_status = guard.side_parent_pending_status();
             let turn_stopped = match &notification {
@@ -1164,6 +1189,18 @@ impl App {
         }
 
         // Settings snapshots do not belong in the transcript queue: apply them in receive order.
+        if let Some(ServerNotification::AdaptiveReasoningUpdated(mode)) = notification.as_ref()
+            && self.active_thread_id == Some(thread_id)
+            && self.chat_widget.thread_id() == Some(thread_id)
+        {
+            self.chat_widget.set_adaptive_reasoning_state(
+                mode.enabled,
+                mode.adaptive_reasoning_revision,
+                mode.error,
+                mode.failure_episode,
+            );
+            notification = None;
+        }
         if let Some(ServerNotification::ThreadSettingsUpdated(settings)) = notification.as_ref()
             && self.active_thread_id == Some(thread_id)
             && self.chat_widget.thread_id() == Some(thread_id)
@@ -1273,6 +1310,10 @@ impl App {
         };
         let mut session = parent_session.or_else(|| self.primary_session_configured.clone())?;
         session.thread_id = thread_id;
+        session.adaptive_reasoning_enabled = false;
+        session.adaptive_reasoning_revision = 0;
+        session.adaptive_reasoning_error = None;
+        session.adaptive_reasoning_failure_episode = 0;
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),
@@ -1599,15 +1640,16 @@ impl App {
     ) -> bool {
         !is_replay_only
             && !self.side_threads.contains_key(&thread_id)
-            && snapshot.session.as_ref().is_none_or(|session| {
-                session.model.trim().is_empty()
-                    || session.rollout_path.is_none()
-                    || (self.primary_thread_id != Some(thread_id)
-                        && session
-                            .active_permission_profile
-                            .as_ref()
-                            .is_some_and(|profile| !profile.id.starts_with(':')))
-            })
+            && (snapshot.inferred_session
+                || snapshot.session.as_ref().is_none_or(|session| {
+                    session.model.trim().is_empty()
+                        || session.rollout_path.is_none()
+                        || (self.primary_thread_id != Some(thread_id)
+                            && session
+                                .active_permission_profile
+                                .as_ref()
+                                .is_some_and(|profile| !profile.id.starts_with(':')))
+                }))
     }
 
     pub(super) async fn apply_refreshed_snapshot_thread(
@@ -1626,8 +1668,14 @@ impl App {
             store.rebase_buffer_after_session_refresh();
             snapshot.active_reasoning_item = store.active_reasoning_item.clone();
             snapshot.output_tps = store.output_tps;
+            snapshot.reasoning_state = store.reasoning_state.clone();
+            snapshot.latest_turn_id = store.latest_turn_id.clone();
+        } else {
+            snapshot.reasoning_state = Default::default();
+            snapshot.latest_turn_id = turns.last().map(|turn| turn.id.clone());
         }
         snapshot.session = Some(session);
+        snapshot.inferred_session = false;
         snapshot.turns = turns;
         snapshot
             .events
@@ -1856,6 +1904,8 @@ impl App {
             retained_assistant_captions,
         );
         self.restore_voice_owner_after_replay();
+        self.chat_widget
+            .restore_reasoning_state(snapshot.reasoning_state, snapshot.latest_turn_id);
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ false);
         self.chat_widget

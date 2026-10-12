@@ -86,6 +86,112 @@ class ActivePermissionProfile(BaseModel):
     ]
 
 
+class CredentialsAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["credentials"], Field(title="CredentialsAdaptiveReasoningErrorType")]
+
+
+class InvalidRequestAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["invalidRequest"], Field(title="InvalidRequestAdaptiveReasoningErrorType")
+    ]
+
+
+class TransportAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["transport"], Field(title="TransportAdaptiveReasoningErrorType")]
+
+
+class TimeoutAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["timeout"], Field(title="TimeoutAdaptiveReasoningErrorType")]
+
+
+class HttpAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Annotated[int, Field(ge=0)]
+    type: Annotated[Literal["http"], Field(title="HttpAdaptiveReasoningErrorType")]
+
+
+class ResponseTooLargeAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["responseTooLarge"], Field(title="ResponseTooLargeAdaptiveReasoningErrorType")
+    ]
+
+
+class InvalidResponseAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[
+        Literal["invalidResponse"], Field(title="InvalidResponseAdaptiveReasoningErrorType")
+    ]
+
+
+class RejectedAdaptiveReasoningError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["rejected"], Field(title="RejectedAdaptiveReasoningErrorType")]
+
+
+class AdaptiveReasoningError(
+    RootModel[
+        CredentialsAdaptiveReasoningError
+        | InvalidRequestAdaptiveReasoningError
+        | TransportAdaptiveReasoningError
+        | TimeoutAdaptiveReasoningError
+        | HttpAdaptiveReasoningError
+        | ResponseTooLargeAdaptiveReasoningError
+        | InvalidResponseAdaptiveReasoningError
+        | RejectedAdaptiveReasoningError
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        CredentialsAdaptiveReasoningError
+        | InvalidRequestAdaptiveReasoningError
+        | TransportAdaptiveReasoningError
+        | TimeoutAdaptiveReasoningError
+        | HttpAdaptiveReasoningError
+        | ResponseTooLargeAdaptiveReasoningError
+        | InvalidResponseAdaptiveReasoningError
+        | RejectedAdaptiveReasoningError,
+        Field(
+            description="Describes a Decisions failure without exposing request or response content."
+        ),
+    ]
+
+
+class AdaptiveReasoningUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    adaptive_reasoning_revision: Annotated[
+        int | None, Field(alias="adaptiveReasoningRevision", ge=0)
+    ] = 0
+    enabled: bool
+    error: AdaptiveReasoningError | None = None
+    failure_episode: Annotated[int | None, Field(alias="failureEpisode", ge=0)] = 0
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class AddCreditsNudgeCreditType(Enum):
     credits = "credits"
     usage_limit = "usage_limit"
@@ -3755,6 +3861,21 @@ class ReasoningEffortOption(BaseModel):
     reasoning_effort: Annotated[ReasoningEffort, Field(alias="reasoningEffort")]
 
 
+class ReasoningEffortUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    adaptive: Annotated[
+        bool,
+        Field(
+            description="Automatic mode is active, including when a decision falls back to current effort."
+        ),
+    ]
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class ReasoningTextReasoningItemContent(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4424,6 +4545,42 @@ class ThreadEnvironmentDisconnectedServerNotification(BaseModel):
         Field(title="Thread/environment/disconnectedNotificationMethod"),
     ]
     params: EnvironmentConnectionNotification
+
+
+class TurnReasoningEffortUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["turn/reasoningEffortUpdated"],
+        Field(title="Turn/reasoningEffortUpdatedNotificationMethod"),
+    ]
+    params: ReasoningEffortUpdatedNotification
+
+
+class ThreadAdaptiveReasoningUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/adaptiveReasoningUpdated"],
+        Field(title="Thread/adaptiveReasoningUpdatedNotificationMethod"),
+    ]
+    params: AdaptiveReasoningUpdatedNotification
 
 
 class ItemAgentMessageDeltaServerNotification(BaseModel):
@@ -10427,6 +10584,27 @@ class ThreadSettings(BaseModel):
     active_permission_profile: Annotated[
         ActivePermissionProfile | None, Field(alias="activePermissionProfile")
     ] = None
+    adaptive_reasoning_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="adaptiveReasoningEnabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
+    adaptive_reasoning_revision: Annotated[
+        int | None,
+        Field(
+            alias="adaptiveReasoningRevision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     approval_policy: Annotated[AskForApproval, Field(alias="approvalPolicy")]
     approvals_reviewer: Annotated[ApprovalsReviewer, Field(alias="approvalsReviewer")]
     collaboration_mode: Annotated[CollaborationMode, Field(alias="collaborationMode")]
@@ -12421,6 +12599,27 @@ class ThreadForkResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    adaptive_reasoning_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="adaptiveReasoningEnabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
+    adaptive_reasoning_revision: Annotated[
+        int | None,
+        Field(
+            alias="adaptiveReasoningRevision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     approval_policy: Annotated[AskForApproval, Field(alias="approvalPolicy")]
     approvals_reviewer: Annotated[
         ApprovalsReviewer,
@@ -12496,6 +12695,27 @@ class ThreadResumeResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    adaptive_reasoning_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="adaptiveReasoningEnabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
+    adaptive_reasoning_revision: Annotated[
+        int | None,
+        Field(
+            alias="adaptiveReasoningRevision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     approval_policy: Annotated[AskForApproval, Field(alias="approvalPolicy")]
     approvals_reviewer: Annotated[
         ApprovalsReviewer,
@@ -12591,6 +12811,27 @@ class ThreadStartResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    adaptive_reasoning_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="adaptiveReasoningEnabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    adaptive_reasoning_error: Annotated[
+        AdaptiveReasoningError | None, Field(alias="adaptiveReasoningError")
+    ] = None
+    adaptive_reasoning_failure_episode: Annotated[
+        int | None, Field(alias="adaptiveReasoningFailureEpisode", ge=0)
+    ] = 0
+    adaptive_reasoning_revision: Annotated[
+        int | None,
+        Field(
+            alias="adaptiveReasoningRevision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     approval_policy: Annotated[AskForApproval, Field(alias="approvalPolicy")]
     approvals_reviewer: Annotated[
         ApprovalsReviewer,
@@ -13214,6 +13455,8 @@ class ServerNotification(
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
+        | TurnReasoningEffortUpdatedServerNotification
+        | ThreadAdaptiveReasoningUpdatedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
         | HookCompletedServerNotification
@@ -13305,6 +13548,8 @@ class ServerNotification(
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
+        | TurnReasoningEffortUpdatedServerNotification
+        | ThreadAdaptiveReasoningUpdatedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
         | HookCompletedServerNotification

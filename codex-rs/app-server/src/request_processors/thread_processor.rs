@@ -1634,6 +1634,10 @@ impl ThreadRequestProcessor {
         let thread_originator = config_snapshot.originator.clone();
 
         let response = ThreadStartResponse {
+            adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
+            adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: config_snapshot.adaptive_reasoning_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model,
@@ -4421,6 +4425,11 @@ impl ThreadRequestProcessor {
 
                 let thread_originator = config_snapshot.originator.clone();
                 let response = ThreadResumeResponse {
+                    adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+                    adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
+                    adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
+                    adaptive_reasoning_failure_episode: config_snapshot
+                        .adaptive_reasoning_failure_episode,
                     thread,
                     disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
                     model: session_configured.model,
@@ -5337,7 +5346,7 @@ impl ThreadRequestProcessor {
                 source_thread
                     .history
                     .take()
-                    .expect("temporary replay history")
+                    .ok_or_else(|| internal_error("temporary replay history is unavailable"))?
                     .items,
             )
         } else {
@@ -5764,6 +5773,10 @@ impl ThreadRequestProcessor {
             thread_response_active_permission_profile(config_snapshot.active_permission_profile);
         let thread_originator = config_snapshot.originator.clone();
         let response = ThreadForkResponse {
+            adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
+            adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: config_snapshot.adaptive_reasoning_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),

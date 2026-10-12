@@ -91,11 +91,11 @@ impl App {
                     .get(&thread_id)
                     .is_some_and(|state| state.owned_title.is_some()))
             && let Some(mut user) = retained_title_user_message(&item.turn_id, &item.item)
-            && !self
+            && self
                 .automatic_thread_titles
                 .get(&thread_id)
                 .and_then(|state| state.latest_user_message.as_ref())
-                .is_some_and(|previous| previous.item_id == user.item_id)
+                .is_none_or(|previous| previous.item_id != user.item_id)
         {
             if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                 let store = channel.store.lock().await;
@@ -210,9 +210,7 @@ impl App {
                     .find_map(|item| retained_title_user_message(turn_id, item))
             });
         if recurring {
-            if user_message.is_none() {
-                return None;
-            }
+            user_message.as_ref()?;
             let state = self.automatic_thread_titles.get_mut(&thread_id)?;
             if !state.completed_turns.insert(turn_id.to_string()) {
                 return None;

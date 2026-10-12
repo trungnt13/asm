@@ -610,6 +610,9 @@ pub struct ThreadSettingsOverrides {
     /// effort, or `None` to leave the existing value unchanged.
     pub effort: Option<Option<ReasoningEffortConfig>>,
 
+    /// Changes only this live session; it is never persisted as a thread default.
+    pub adaptive_reasoning_enabled: Option<bool>,
+
     /// Updated reasoning summary preference (honored only for reasoning-capable models).
     pub summary: Option<ReasoningSummaryConfig>,
 
@@ -1517,6 +1520,12 @@ pub enum EventMsg {
     #[serde(rename = "task_started", alias = "turn_started")]
     TurnStarted(TurnStartedEvent),
 
+    /// Captured effort used by the next main model step.
+    ReasoningEffortUpdated(ReasoningEffortUpdatedEvent),
+
+    /// Runtime automatic reasoning mode changed.
+    AdaptiveReasoningUpdated(AdaptiveReasoningUpdatedEvent),
+
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
     ThreadSettingsApplied(ThreadSettingsAppliedEvent),
@@ -2319,6 +2328,57 @@ pub struct TurnStartedEvent {
     pub model_context_window: Option<i64>,
     #[serde(default)]
     pub collaboration_mode_kind: ModeKind,
+}
+
+/// Describes a Decisions failure without exposing request or response content.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum AdaptiveReasoningError {
+    Credentials,
+    InvalidRequest,
+    Transport,
+    Timeout,
+    Http { status: u16 },
+    ResponseTooLarge,
+    InvalidResponse,
+    Rejected,
+}
+
+impl std::fmt::Display for AdaptiveReasoningError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Credentials => f.write_str("configured API key is missing; load the key in the backend environment and restart"),
+            Self::InvalidRequest => f.write_str("invalid Decisions request"),
+            Self::Transport => f.write_str("Decisions connection failed"),
+            Self::Timeout => f.write_str("Decisions request timed out"),
+            Self::Http { status } => write!(f, "Decisions HTTP {status}"),
+            Self::ResponseTooLarge => f.write_str("Decisions response exceeded the size limit"),
+            Self::InvalidResponse => f.write_str("invalid Decisions response"),
+            Self::Rejected => f.write_str("selected effort could not be applied"),
+        }
+    }
+}
+
+/// Reports the runtime mode without changing saved reasoning preferences.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct AdaptiveReasoningUpdatedEvent {
+    pub enabled: bool,
+    #[serde(default)]
+    pub error: Option<AdaptiveReasoningError>,
+    #[serde(default)]
+    pub failure_episode: u64,
+    #[serde(default)]
+    pub adaptive_reasoning_revision: u64,
+}
+
+/// Reports captured step effort without changing the thread's saved settings.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct ReasoningEffortUpdatedEvent {
+    pub turn_id: String,
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
+    /// Automatic mode is active, including when a decision falls back to current effort.
+    pub adaptive: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
@@ -4126,6 +4186,13 @@ pub struct SessionConfiguredEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortConfig>,
 
+    /// Automatic reasoning mode when the session starts.
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    pub adaptive_reasoning_revision: u64,
+    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub adaptive_reasoning_failure_episode: u64,
+
     /// Runtime proxy bind addresses, when the managed proxy was started for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4167,6 +4234,14 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: Option<ActivePermissionProfile>,
             cwd: AbsolutePathBuf,
             reasoning_effort: Option<ReasoningEffortConfig>,
+            #[serde(default)]
+            adaptive_reasoning_enabled: bool,
+            #[serde(default)]
+            adaptive_reasoning_revision: u64,
+            #[serde(default)]
+            adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+            #[serde(default)]
+            adaptive_reasoning_failure_episode: u64,
             network_proxy: Option<SessionNetworkProxyRuntime>,
             rollout_path: Option<PathBuf>,
         }
@@ -4199,6 +4274,10 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: wire.active_permission_profile,
             cwd: wire.cwd,
             reasoning_effort: wire.reasoning_effort,
+            adaptive_reasoning_enabled: wire.adaptive_reasoning_enabled,
+            adaptive_reasoning_revision: wire.adaptive_reasoning_revision,
+            adaptive_reasoning_error: wire.adaptive_reasoning_error,
+            adaptive_reasoning_failure_episode: wire.adaptive_reasoning_failure_episode,
             network_proxy: wire.network_proxy,
             rollout_path: wire.rollout_path,
         })
@@ -6398,6 +6477,10 @@ mod tests {
         let event = Event {
             id: "1234".to_string(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
+                adaptive_reasoning_enabled: false,
+                adaptive_reasoning_revision: 0,
+                adaptive_reasoning_error: None,
+                adaptive_reasoning_failure_episode: 0,
                 session_id,
                 thread_id,
                 forked_from_id: None,
@@ -6422,6 +6505,10 @@ mod tests {
             "id": "1234",
             "msg": {
                 "type": "session_configured",
+                "adaptive_reasoning_enabled": false,
+                "adaptive_reasoning_revision": 0,
+                "adaptive_reasoning_error": null,
+                "adaptive_reasoning_failure_episode": 0,
                 "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c7",
                 "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
                 "model": "codex-mini-latest",
