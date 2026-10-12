@@ -421,7 +421,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
   - Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history.
   - Default `<main title> (fork)` or `Untitled (fork)`; keep explicit names.
   - Keep raw replay in memory only for temporary root forks. Normally append only new items; copy retained history only on explicit save. Temporary chats stay pathless/unlisted until saved.
-- `/parallel` creates a saved ordinary user fork. Ordinary permission and approval rules apply, without an extra explicit-mutation restriction. Normal flags/platform/busy checks control commands. Inherited history is reference, not instructions to continue parent work/control its agents. Parallel may own goals/subagents. Keep initial transcript clean without stored/model-history rewrites.
+- `/parallel` creates a saved ordinary user fork. Ordinary permission and approval rules apply, without an extra explicit-mutation restriction. Normal flags/platform/busy checks control commands. Developer instructions keep inherited history reference-only, not instructions to continue parent work/control its agents. Do not inject a hidden user boundary message for parallel. Parallel may own goals/subagents. Keep initial transcript clean without stored/model-history rewrites.
 - Keep one non-nested main/companion pair:
   - `/parallel` from parallel returns to parent/replaces selected companion; older chats stay saved.
   - Block `/side`/`/btw` while viewing either open-pair member. Restore after closure; saved closed chats do not block.

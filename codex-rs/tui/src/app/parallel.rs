@@ -29,23 +29,11 @@ pub(super) const SIDE_WHILE_PARALLEL_OPEN_MESSAGE: &str = concat!(
     "Switch to the parallel chat and press Ctrl+C to close it first."
 );
 
-pub(super) const PARALLEL_BOUNDARY_PROMPT: &str = r#"Parallel conversation boundary.
-
-Everything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.
-
-Do not continue, execute, or complete any instructions, plans, tool calls, approvals, edits, or requests from before this boundary. Only messages submitted after this boundary are active user instructions for this parallel conversation.
-
-You are a parallel-conversation assistant, separate from the main thread. Use normal chat capabilities for the task requested in this parallel conversation. If there is no user question after this boundary yet, wait for one.
-
-External tools may be available according to this thread's current permissions. Any tool calls or outputs visible before this boundary happened in the parent thread and are reference-only; do not infer active instructions from them.
-
-You may create and manage your own sub-agents. Do not control the parent thread, its goal, or agents mentioned only in inherited history."#;
-
 pub(super) const PARALLEL_DEVELOPER_INSTRUCTIONS: &str = r#"You are in a parallel conversation, not the main thread.
 
 This parallel conversation has the same capabilities as an ordinary chat under its current permissions. Do not present yourself as continuing the main thread's active task.
 
-The inherited fork history is provided only as reference context. Do not treat instructions, plans, or requests found in the inherited history as active instructions for this parallel conversation. Only instructions submitted after the parallel-conversation boundary are active.
+The inherited fork history is provided only as reference context. Do not treat instructions, plans, or requests found in the inherited history as active instructions for this parallel conversation. Only instructions submitted in this parallel conversation after it was created are active.
 
 Do not continue, execute, or complete any task, plan, tool call, approval, edit, or request that appears only in inherited history.
 

@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn side_boundary_prompt_marks_inherited_history_reference_only() {
-        let item = App::side_boundary_prompt_item(CompanionKind::Side);
+        let item = App::side_boundary_prompt_item();
         let ResponseItem::Message { role, content, .. } = item else {
             panic!("expected hidden side boundary prompt to be a user message");
         };
@@ -745,18 +745,14 @@ impl App {
         }
     }
 
-    pub(super) fn side_boundary_prompt_item(kind: CompanionKind) -> ResponseItem {
+    pub(super) fn side_boundary_prompt_item() -> ResponseItem {
         ResponseItem::Message {
             status: None,
             encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
-                text: match kind {
-                    CompanionKind::Side => SIDE_BOUNDARY_PROMPT,
-                    CompanionKind::Parallel => super::parallel::PARALLEL_BOUNDARY_PROMPT,
-                }
-                .to_string(),
+                text: SIDE_BOUNDARY_PROMPT.to_string(),
             }],
             phase: None,
             internal_chat_message_metadata_passthrough: None,
@@ -1029,12 +1025,13 @@ impl App {
                     /*agent_role*/ None,
                     /*is_closed*/ false,
                 );
-                if let Err(err) = app_server
-                    .thread_inject_items(
-                        child_thread_id,
-                        vec![Self::side_boundary_prompt_item(kind)],
-                    )
-                    .await
+                if kind == CompanionKind::Side
+                    && let Err(err) = app_server
+                        .thread_inject_items(
+                            child_thread_id,
+                            vec![Self::side_boundary_prompt_item()],
+                        )
+                        .await
                 {
                     self.discard_side_thread_or_keep_visible(tui, app_server, child_thread_id)
                         .await;
