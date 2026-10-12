@@ -82,6 +82,10 @@ impl App {
         let view = &mut self.transcript_view;
         view.mouse_scroll_speed = self.local_settings.tui.mouse_scroll_speed.unwrap_or(1.0);
         view.primary_selection = self.right_click_paste_environment.primary;
+        view.click_to_quote = self.local_settings.tui.click_to_quote;
+        if !view.click_to_quote {
+            view.pending_quote = None;
+        }
         view.copy_on_select = self
             .local_settings
             .copy_on_select(&codex_terminal_detection::terminal_info());
@@ -398,6 +402,12 @@ impl App {
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release
+            && !(crate::text_selection::is_copy_key(*key) && self.transcript_view.has_selection_range()))
+            || matches!(event, TuiEvent::FocusLost | TuiEvent::Resume)
+        {
+            self.transcript_view.pending_quote = None;
+        }
         let has_modal = self.chat_widget.has_active_modal();
         let modal_transcript_mouse = has_modal
             && matches!(event, TuiEvent::Mouse(mouse)
@@ -427,6 +437,7 @@ impl App {
             self.chat_widget.end_composer_drag();
         }
         if !tui.is_owned_screen() || self.overlay.is_some() {
+            self.transcript_view.pending_quote = None;
             return Ok(false);
         }
         if matches!(event, TuiEvent::FocusLost) {
@@ -477,7 +488,11 @@ impl App {
             {
                 return Ok(true);
             }
-            if composer_ready && self.chat_widget.handle_composer_mouse(*mouse) {
+            if composer_ready
+                && self
+                    .chat_widget
+                    .handle_composer_mouse(*mouse, &mut self.transcript_view.pending_quote)
+            {
                 self.handle_composer_selection_release(tui, *mouse);
                 if !matches!(
                     mouse.kind,

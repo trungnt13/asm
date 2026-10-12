@@ -141,7 +141,25 @@ impl ChatComposer {
     }
 
     /// Dispatch after preparation and rendering have refreshed the viewport.
-    pub(crate) fn handle_mouse(&mut self, event: MouseEvent) -> bool {
+    pub(crate) fn handle_mouse(
+        &mut self,
+        event: MouseEvent,
+        pending_quote: &mut Option<PendingQuote>,
+    ) -> bool {
+        if event.kind == MouseEventKind::Down(MouseButton::Left)
+            && event.modifiers.is_empty()
+            && self.attachments.quote.is_some()
+            && self
+                .attachments
+                .quote_area
+                .get()
+                .contains(ratatui::layout::Position::new(event.column, event.row))
+        {
+            self.attachments.quote = None;
+            *pending_quote = None;
+            self.sync_popups();
+            return true;
+        }
         if self
             .draft
             .textarea
@@ -156,7 +174,14 @@ impl ChatComposer {
         if handled {
             self.draft.textarea_state.borrow_mut().follow_cursor();
             self.attachments.clear_remote_image_selection();
-            self.sync_popups();
+            if event.kind == MouseEventKind::Down(MouseButton::Left)
+                && event.modifiers.is_empty()
+                && let Some(quote) = pending_quote.take()
+            {
+                self.attach_quote(quote);
+            } else {
+                self.sync_popups();
+            }
         }
         handled
     }

@@ -916,6 +916,11 @@ pub struct Tui {
     #[serde(default)]
     pub collapse_tool_calls_max_lines: Option<std::num::NonZeroUsize>,
 
+    /// Attach a fresh transcript selection when clicking the fullscreen composer.
+    /// Defaults to `false`; native scrollback does not support this gesture.
+    #[serde(default)]
+    pub click_to_quote: bool,
+
     /// Copy selected transcript, footer, or composer text when the mouse button is released.
     /// Defaults to `auto`: enabled except in direct terminals known to forward their native
     /// copy shortcut (Ghostty 1.2+, Kitty on macOS, Windows Terminal, and VS Code on Windows).

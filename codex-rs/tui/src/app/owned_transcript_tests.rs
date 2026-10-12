@@ -1591,6 +1591,54 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
     // A fresh composer click takes ownership away from the transcript selection.
     app.handle_owned_transcript_event(&mut tui, &mut server, &mouse(Down(Left), x, y))?;
     assert!(!app.transcript_view.has_active_interaction());
+    app.local_settings.tui.click_to_quote = true;
+    app.render_owned_transcript(&mut tui, size)?;
+    let transcript_y = row_containing(&tui, "transcript text");
+    let rendered = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+        &tui.terminal,
+    ));
+    let row = rendered.lines().nth(usize::from(transcript_y)).unwrap();
+    let transcript_x = row[..row.find("transcript").unwrap()].chars().count() as u16;
+    for event in [
+        mouse(Down(Left), transcript_x, transcript_y),
+        mouse(Drag(Left), transcript_x + 10, transcript_y),
+        mouse(Up(Left), transcript_x + 10, transcript_y),
+    ] {
+        app.handle_owned_transcript_event(&mut tui, &mut server, &event)?;
+    }
+    assert_eq!(
+        app.transcript_view
+            .selected_text(&app.transcript_cells)
+            .as_deref(),
+        Some("transcript")
+    );
+    assert!(
+        matches!(&app.transcript_view.pending_quote, Some(crate::bottom_pane::PendingQuote::Text(text)) if text == "transcript")
+    );
+    app.render_owned_transcript(&mut tui, size)?;
+    let draft_y = row_containing(&tui, "hellox world");
+    app.handle_owned_transcript_event(
+        &mut tui,
+        &mut server,
+        &mouse(Down(Left), /*column*/ 2, draft_y),
+    )?;
+    assert!(app.transcript_view.pending_quote.is_none());
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "hellox world");
+    app.render_owned_transcript(&mut tui, size)?;
+    let quote_y = row_containing(&tui, "[×] Quote · transcript");
+    app.handle_owned_transcript_event(
+        &mut tui,
+        &mut server,
+        &mouse(Down(Left), /*column*/ 2, quote_y),
+    )?;
+    app.render_owned_transcript(&mut tui, size)?;
+    assert!(
+        !buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+            &tui.terminal
+        ))
+        .contains("[×] Quote")
+    );
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "hellox world");
     app.chat_widget.apply_external_edit("/".into());
     assert!(!app.chat_widget.no_modal_or_popup_active());
     assert!(app.handle_owned_transcript_event(&mut tui, &mut server, &mouse(Down(Left), x, y))?);

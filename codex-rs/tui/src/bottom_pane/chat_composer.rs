@@ -140,6 +140,9 @@
 //! - Treats a leading `!` revealed only by paste expansion as literal model input, not shell input.
 //! - Prunes local attached images so only placeholders that survive expansion are sent.
 //! - Preserves remote image URLs as separate attachments even when text is empty.
+//! - Prepends a frozen transcript quote as a Markdown blockquote and rebases draft elements.
+//!   Quote-plus-comment submissions are rejected above 10,000 UTF-8 bytes without losing the draft.
+//!   Attached quotes keep slash and shell comments literal; clicking their preview removes them.
 //!
 //! When these paths clear the visible textarea after a successful submit or slash-command
 //! dispatch, they intentionally preserve the textarea kill buffer. That lets users `Ctrl+K` part
@@ -391,6 +394,7 @@ mod mouse;
 pub(crate) use mouse::ClipboardPasteTarget;
 mod paste_input;
 mod popup_state;
+mod quote_attachment;
 mod reconnect;
 pub(crate) use reconnect::RestrictedInputMode;
 mod slash_input;
@@ -412,6 +416,7 @@ use self::history_search::HistorySearchSession;
 use self::popup_state::ActivePopup;
 use self::popup_state::DismissedToken;
 use self::popup_state::PopupState;
+pub(crate) use self::quote_attachment::PendingQuote;
 use self::slash_input::SlashInput;
 use self::slash_input::SlashValidation;
 use self::slash_input::SubmissionValidation;
@@ -677,6 +682,7 @@ struct MentionCompletionTarget {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ComposerDraft {
+    quote: Option<String>,
     pub(super) text: String,
     text_elements: Vec<TextElement>,
     local_image_paths: Vec<PathBuf>,
@@ -1131,7 +1137,7 @@ impl ChatComposer {
     }
 
     fn slash_commands_enabled(&self) -> bool {
-        self.config.slash_commands_enabled
+        self.config.slash_commands_enabled && self.attachments.quote.is_none()
     }
 
     fn image_paste_enabled(&self) -> bool {
@@ -1628,6 +1634,7 @@ impl ChatComposer {
 
     pub(super) fn snapshot_draft(&self) -> ComposerDraft {
         ComposerDraft {
+            quote: self.attachments.quote.clone(),
             text: self.current_text(),
             text_elements: self.current_text_elements(),
             local_image_paths: self.attachments.local_image_paths(),
@@ -1640,6 +1647,7 @@ impl ChatComposer {
 
     pub(super) fn restore_draft(&mut self, draft: ComposerDraft) {
         let ComposerDraft {
+            quote,
             text,
             text_elements,
             local_image_paths,
@@ -1648,6 +1656,7 @@ impl ChatComposer {
             pending_pastes,
             cursor,
         } = draft;
+        self.attachments.quote = quote;
         self.set_remote_image_urls(remote_image_urls);
         self.set_text_content_with_mention_bindings(
             text,
@@ -1698,6 +1707,7 @@ impl ChatComposer {
         text_elements: Vec<TextElement>,
     ) -> (String, Vec<TextElement>) {
         if self.config.shell_commands_enabled
+            && self.attachments.quote.is_none()
             && let Some(stripped) = text.strip_prefix('!')
         {
             self.draft.is_bash_mode = true;
@@ -1730,6 +1740,7 @@ impl ChatComposer {
         let mention_bindings = self.snapshot_mention_bindings();
         self.set_text_content(String::new(), Vec::new(), Vec::new());
         self.attachments.clear_remote_image_urls();
+        self.attachments.quote = None;
         self.history.reset_navigation();
         self.history.record_local_submission(HistoryEntry {
             text: previous.clone(),
@@ -1762,6 +1773,7 @@ impl ChatComposer {
             mention_bindings,
             pending_pastes,
         } = entry;
+        self.attachments.quote = None;
         self.set_remote_image_urls(remote_image_urls);
         self.set_text_content_with_mention_bindings(
             text,
@@ -3018,7 +3030,8 @@ impl ChatComposer {
             text_elements = Self::trim_text_elements(&expanded_input, &text, text_elements);
         }
 
-        if slash_validation == SlashValidation::Immediate
+        if self.attachments.quote.is_none()
+            && slash_validation == SlashValidation::Immediate
             && let SubmissionValidation::UnknownCommand(name) = self
                 .slash_input()
                 .validate_submission(&text, input_starts_with_space)
@@ -3039,6 +3052,24 @@ impl ChatComposer {
                 .pending_pastes
                 .clone_from(&original_pending_pastes);
             self.draft.textarea.set_cursor(original_input.len());
+            return None;
+        }
+
+        if !self.prepend_quote(&mut text, &mut text_elements) {
+            self.set_text_content_with_mention_bindings(
+                original_input.clone(),
+                original_text_elements,
+                original_local_image_paths,
+                original_mention_bindings,
+            );
+            self.draft
+                .pending_pastes
+                .clone_from(&original_pending_pastes);
+            self.draft.textarea.set_cursor(original_input.len());
+            self.show_footer_flash(
+                Line::from("Quote and comment too long; limit 10,000 UTF-8 bytes".red()),
+                Duration::from_secs(5),
+            );
             return None;
         }
 
@@ -3107,6 +3138,7 @@ impl ChatComposer {
             });
         }
         self.draft.pending_pastes.clear();
+        self.attachments.quote = None;
         Some((text, text_elements))
     }
 
@@ -3482,6 +3514,7 @@ impl ChatComposer {
             return self.handle_input_basic(key_event);
         }
         if self.config.shell_commands_enabled
+            && self.attachments.quote.is_none()
             && self.draft.textarea.is_vim_normal_mode()
             && self.is_empty()
             && matches!(
@@ -3591,7 +3624,9 @@ impl ChatComposer {
     }
 
     fn is_bang_shell_command(&self) -> bool {
-        self.config.shell_commands_enabled && self.current_text().trim_start().starts_with('!')
+        self.config.shell_commands_enabled
+            && self.attachments.quote.is_none()
+            && self.current_text().trim_start().starts_with('!')
     }
 
     fn shell_mode_footer_line(&self) -> Option<Line<'static>> {
@@ -3782,6 +3817,7 @@ impl ChatComposer {
 
     fn sync_bash_mode_from_text(&mut self) {
         if self.config.shell_commands_enabled
+            && self.attachments.quote.is_none()
             && !self.draft.is_bash_mode
             && self.draft.textarea.text().starts_with('!')
         {
@@ -4851,6 +4887,7 @@ impl ChatComposer {
         }
         let style = user_message_style();
         Block::default().style(style).render(composer_rect, buf);
+        let remote_images_rect = self.render_quote_attachment(remote_images_rect, buf);
         if !remote_images_rect.is_empty() {
             let first = self
                 .attachments
@@ -4974,7 +5011,9 @@ impl ChatComposer {
             && let Some(ignition) = &self.effort_ignition
             && !ignition.is_finished()
         {
-            let protected_top = if remote_images_rect.is_empty() {
+            let protected_top = if !self.attachments.quote_area.get().is_empty() {
+                self.attachments.quote_area.get().y
+            } else if remote_images_rect.is_empty() {
                 textarea_rect.y
             } else {
                 remote_images_rect.y
@@ -9338,6 +9377,7 @@ mod tests {
                     "https://example.com/two.png".to_string(),
                 ]);
                 composer.set_text_content("describe these".to_string(), Vec::new(), Vec::new());
+                composer.attach_quote(PendingQuote::Text("Selected transcript text".to_string()));
             },
         );
 
@@ -12684,6 +12724,77 @@ mod tests {
                 Some("[Image #2]".to_string())
             )]
         );
+        composer.set_text_content(
+            "[Image #2] comment".to_string(),
+            vec![TextElement::new(
+                (0..10).into(),
+                Some("[Image #2]".to_string()),
+            )],
+            vec![PathBuf::from("/tmp/local.png")],
+        );
+        composer.attach_quote(PendingQuote::Text("café\nselected".to_string()));
+        let (text, elements) = composer
+            .prepare_submission_text(/*record_history*/ true)
+            .unwrap();
+        assert_eq!(text, "> café\n> selected\n\n[Image #2] comment");
+        assert_eq!(
+            elements,
+            vec![TextElement::new(
+                (20..30).into(),
+                Some("[Image #2]".to_string())
+            )]
+        );
+        assert!(composer.attachments.quote.is_none());
+
+        composer.set_text_content("é".repeat(4998), Vec::new(), Vec::new());
+        composer.attach_quote(PendingQuote::Text("x".to_string()));
+        assert!(
+            composer
+                .prepare_submission_text(/*record_history*/ true)
+                .is_none()
+        );
+        assert_eq!(composer.current_text(), "é".repeat(4998));
+        assert_eq!(composer.attachments.quote.as_deref(), Some("x"));
+        composer.set_text_content(format!("{}a", "é".repeat(4997)), Vec::new(), Vec::new());
+        let (text, _) = composer
+            .prepare_submission_text(/*record_history*/ true)
+            .unwrap();
+        assert_eq!(text.len(), 10000);
+
+        composer.set_text_content(String::new(), Vec::new(), Vec::new());
+        composer.attach_quote(PendingQuote::Text("x".to_string()));
+        composer.handle_paste("é".repeat(4998));
+        let original_draft = composer.snapshot_draft();
+        assert!(
+            composer
+                .prepare_submission_text(/*record_history*/ true)
+                .is_none()
+        );
+        assert_eq!(composer.snapshot_draft(), original_draft);
+
+        for comment in ["/help", "!echo hello", ""] {
+            composer.set_text_content(comment.to_owned(), Vec::new(), Vec::new());
+            composer.attach_quote(PendingQuote::Text("selected".to_owned()));
+            let (input, _) = composer.handle_submission(/*should_queue*/ false);
+            let InputResult::Submitted {
+                text,
+                text_elements,
+            } = input
+            else {
+                panic!("quotes and comments must submit as ordinary input");
+            };
+            assert_eq!(
+                (text, text_elements),
+                (
+                    if comment.is_empty() {
+                        "> selected\n".to_owned()
+                    } else {
+                        format!("> selected\n\n{comment}")
+                    },
+                    Vec::new()
+                ),
+            );
+        }
     }
 
     #[test]

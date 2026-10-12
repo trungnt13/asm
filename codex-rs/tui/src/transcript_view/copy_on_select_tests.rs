@@ -27,6 +27,7 @@ fn copy_on_select_waits_for_release_and_confirmed_delivery() {
     let cells = vec![cell("selected text")];
     for (enabled, clear_selection) in [(false, false), (true, false), (true, true)] {
         let mut view = TranscriptView {
+            click_to_quote: true,
             copy_on_select: enabled,
             copy_on_select_clear_selection: clear_selection,
             ..Default::default()
@@ -49,6 +50,9 @@ fn copy_on_select_waits_for_release_and_confirmed_delivery() {
             Some(ViewAction::Changed) => None,
             _ => panic!("release must finish the selection"),
         };
+        assert!(
+            matches!(&view.pending_quote, Some(crate::bottom_pane::PendingQuote::Text(text)) if text == "selected")
+        );
         assert_eq!(copied.as_deref(), enabled.then_some("selected"));
         assert_eq!(view.selected_text(&cells).as_deref(), Some("selected"));
         assert!(view.handle_mouse(release, &cells).is_none());
@@ -115,6 +119,9 @@ fn copy_on_select_waits_for_release_and_confirmed_delivery() {
                     Some((result.map_err(|_| ()), copied.chars().count()))
                 );
             }
+            assert!(
+                matches!(&view.pending_quote, Some(crate::bottom_pane::PendingQuote::Text(text)) if text == "selected")
+            );
             if clear_selection {
                 let buffer = render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
                 let highlight = (0..20)
@@ -138,6 +145,18 @@ fn copy_on_select_waits_for_release_and_confirmed_delivery() {
                 );
             }
         }
+        if clear_selection {
+            view.handle_key(
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char('c'),
+                    KeyModifiers::CONTROL,
+                ),
+                &cells,
+            );
+            assert!(view.pending_quote.is_none());
+        }
+        view.end_selection(&cells);
+        assert!(view.pending_quote.is_none());
     }
 }
 
