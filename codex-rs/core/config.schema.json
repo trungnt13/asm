@@ -4533,6 +4533,13 @@
     "SkillConfig": {
       "additionalProperties": false,
       "properties": {
+        "allowed_agent_roles": {
+          "description": "Limits visibility to the named agent roles without changing filesystem access. Missing allows every role; an empty list allows none.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "enabled": {
           "type": "boolean"
         },

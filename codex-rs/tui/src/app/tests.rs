@@ -3254,7 +3254,50 @@ async fn refresh_agent_picker_thread_liveness_prunes_closed_metadata_only_thread
 #[tokio::test]
 async fn parallel_seeds_navigation_before_thread_started() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
-    let config = app.chat_widget.config_ref().clone();
+    let model_server = core_test_support::responses::start_mock_server().await;
+    let codex_home = app.config.codex_home.clone();
+    for name in ["review", "oracle", "scope-control"] {
+        let root = codex_home.join(format!("skills/{name}"));
+        std::fs::create_dir_all(&root)?;
+        std::fs::write(
+            root.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {name}-catalog-marker\n---\n\nSkill body.\n"),
+        )?;
+    }
+    std::fs::write(
+        codex_home.join("config.toml"),
+        format!(
+            r#"model = "gpt-5.5"
+model_provider = "scope-test"
+thread_unload_delay_secs = 1
+[skills]
+include_instructions = true
+[skills.bundled]
+enabled = false
+[[skills.config]]
+name = "review"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+[[skills.config]]
+name = "oracle"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+[model_providers.scope-test]
+name = "Scope test"
+base_url = "{}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+"#,
+            model_server.uri()
+        ),
+    )?;
+    let config = ConfigBuilder::default()
+        .codex_home(codex_home.to_path_buf())
+        .build()
+        .await?;
+    app.config = config.clone();
+    app.local_settings = crate::local_settings::LocalSettings::from(&config);
     let parent_thread_id = ThreadId::from_string(
         &app_test_support::create_fake_rollout(
             config.codex_home.as_path(),
@@ -3267,6 +3310,7 @@ async fn parallel_seeds_navigation_before_thread_started() -> Result<()> {
         .expect("create source rollout"),
     )?;
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+    Box::pin(app_server.bootstrap(&app.config)).await?;
     let started = app_server
         .resume_thread(
             &crate::local_settings::LocalSettings::from(&config),
@@ -3407,6 +3451,146 @@ async fn parallel_seeds_navigation_before_thread_started() -> Result<()> {
         ))
     );
 
+    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+        .await?;
+    for (kind, mode) in [
+        (
+            CompanionKind::Parallel,
+            crate::app_event::SideConversationMode::Side,
+        ),
+        (
+            CompanionKind::Side,
+            crate::app_event::SideConversationMode::Side,
+        ),
+        (
+            CompanionKind::Side,
+            crate::app_event::SideConversationMode::Chat,
+        ),
+    ] {
+        if kind == CompanionKind::Side {
+            Box::pin(app.start_companion_conversation(
+                &mut tui,
+                &mut app_server,
+                parent_thread_id,
+                kind,
+                mode,
+                /*user_message*/ None,
+            ))
+            .await?;
+        }
+        let companion_id = app.current_displayed_thread_id().expect("active companion");
+        assert_ne!(companion_id, parent_thread_id, "{kind:?}/{mode:?}");
+        let companion = app
+            .side_threads
+            .get(&companion_id)
+            .expect("started companion");
+        assert_eq!((companion.kind, companion.mode), (kind, mode));
+        let mut saved_config = app.config.clone();
+        saved_config.ephemeral = false;
+        let saved = app_server
+            .fork_thread(&app.local_settings, saved_config, companion_id)
+            .await?;
+        let saved_id = saved.session.thread_id;
+        // Reload from disk, not just the live session cache.
+        app_server.thread_unsubscribe(saved_id).await?;
+        time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
+            loop {
+                let event = app_server.next_event().await.expect("app-server remains open");
+                if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = event
+                    && matches!(notification.as_ref(), ServerNotification::ThreadClosed(event) if event.thread_id == saved_id.to_string())
+                {
+                    break;
+                }
+            }
+        })
+        .await?;
+        app_server
+            .resume_thread(
+                &app.local_settings,
+                app.config.clone(),
+                saved_id,
+                crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            )
+            .await?;
+        let mut checked_ids = vec![companion_id, saved_id];
+        if kind == CompanionKind::Parallel {
+            checked_ids.insert(/*index*/ 0, parent_thread_id);
+        }
+        for id in checked_ids {
+            let response = core_test_support::responses::mount_sse_once(
+                &model_server,
+                core_test_support::responses::sse(vec![
+                    core_test_support::responses::ev_response_created("scope-turn"),
+                    core_test_support::responses::ev_completed("scope-turn"),
+                ]),
+            )
+            .await;
+            let _: codex_app_server_protocol::TurnStartResponse = app_server
+                .request_handle()
+                .request_typed(codex_app_server_protocol::ClientRequest::TurnStart {
+                    request_id: codex_app_server_protocol::RequestId::String(format!("scope-{id}")),
+                    params: codex_app_server_protocol::TurnStartParams {
+                        thread_id: id.to_string(),
+                        input: vec![codex_app_server_protocol::UserInput::Text {
+                            text: "Continue".into(),
+                            text_elements: vec![],
+                        }],
+                        ..Default::default()
+                    },
+                })
+                .await?;
+            time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
+                while let Some(event) = app_server.next_event().await {
+                    if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = event
+                        && matches!(notification.as_ref(), ServerNotification::TurnCompleted(event) if event.thread_id == id.to_string())
+                    {
+                        break;
+                    }
+                }
+            })
+            .await?;
+            let request = response.single_request();
+            let context = request
+                .message_input_texts("developer")
+                .into_iter()
+                .chain(request.message_input_texts("user"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                context.contains("scope-control-catalog-marker"),
+                "{kind:?}/{mode:?}: catalog missing"
+            );
+            assert!(
+                !context.contains("review-catalog-marker"),
+                "{kind:?}/{mode:?}: review exposed"
+            );
+            assert!(
+                !context.contains("oracle-catalog-marker"),
+                "{kind:?}/{mode:?}: oracle exposed"
+            );
+        }
+        match kind {
+            CompanionKind::Parallel => assert!(
+                Box::pin(app.close_parallel_conversation(
+                    &mut tui,
+                    &mut app_server,
+                    parent_thread_id,
+                    companion_id,
+                ))
+                .await
+            ),
+            CompanionKind::Side => {
+                Box::pin(app.select_agent_thread_and_discard_side(
+                    &mut tui,
+                    &mut app_server,
+                    parent_thread_id,
+                ))
+                .await?;
+            }
+        }
+        assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
+        assert!(app.side_threads.is_empty());
+    }
     app_server.shutdown().await?;
     Ok(())
 }
