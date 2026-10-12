@@ -146,7 +146,10 @@ impl App {
                     return Ok(());
                 }
                 if let Err(error) = app_server
-                    .thread_inject_items(replacement_id, vec![Self::side_boundary_prompt_item()])
+                    .thread_inject_items(
+                        replacement_id,
+                        vec![Self::side_boundary_prompt_item(CompanionKind::Side)],
+                    )
                     .await
                 {
                     self.discard_side_thread(app_server, replacement_id).await;

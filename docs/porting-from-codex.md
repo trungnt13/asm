@@ -409,7 +409,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
 ### Saved forks, upstream sides, and parallel conversations
 
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
-- `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only instructions, no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
+- `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only developer instructions, the short hidden user marker "New conversation starts here. Earlier messages are inherited reference history.", no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
 - `/chat [message]` shares Side lifecycle/restrictions:
   - Top-level `chat_model`/`chat_reasoning` select initial settings; empty/omitted values inherit current parent selection.
   - Require model Fast tier/feature permission. Reject unavailable startup/submission, not downgrade. Reject automatic fallback without Fast.
@@ -421,7 +421,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
   - Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history.
   - Default `<main title> (fork)` or `Untitled (fork)`; keep explicit names.
   - Keep raw replay in memory only for temporary root forks. Normally append only new items; copy retained history only on explicit save. Temporary chats stay pathless/unlisted until saved.
-- `/parallel` creates a saved ordinary user fork. Ordinary permission and approval rules apply, without an extra explicit-mutation restriction. Normal flags/platform/busy checks control commands. Developer instructions keep inherited history reference-only, not instructions to continue parent work/control its agents. Do not inject a hidden user boundary message for parallel. Parallel may own goals/subagents. Keep initial transcript clean without stored/model-history rewrites.
+- `/parallel` creates a saved ordinary user fork. Ordinary permission and approval rules apply, without an extra explicit-mutation restriction. Normal flags/platform/busy checks control commands. Developer instructions keep inherited history reference-only, not instructions to continue parent work/control its agents. Inject only the short hidden user marker: "New conversation starts here. Earlier messages are inherited reference history." Parallel may own goals/subagents. Keep initial transcript clean without stored/model-history rewrites.
 - Keep one non-nested main/companion pair:
   - `/parallel` from parallel returns to parent/replaces selected companion; older chats stay saved.
   - Block `/side`/`/btw` while viewing either open-pair member. Restore after closure; saved closed chats do not block.
