@@ -233,6 +233,186 @@
       ],
       "type": "object"
     },
+    "AdaptiveReasoningError": {
+      "description": "Describes a Decisions failure without exposing request or response content.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "credentials"
+              ],
+              "title": "CredentialsAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CredentialsAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidRequest"
+              ],
+              "title": "InvalidRequestAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidRequestAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "transport"
+              ],
+              "title": "TransportAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TransportAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "timeout"
+              ],
+              "title": "TimeoutAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TimeoutAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "http"
+              ],
+              "title": "HttpAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "title": "HttpAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "responseTooLarge"
+              ],
+              "title": "ResponseTooLargeAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ResponseTooLargeAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidResponse"
+              ],
+              "title": "InvalidResponseAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidResponseAdaptiveReasoningError",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedAdaptiveReasoningErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "RejectedAdaptiveReasoningError",
+          "type": "object"
+        }
+      ]
+    },
+    "AdaptiveReasoningUpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
+      "properties": {
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdaptiveReasoningError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "threadId"
+      ],
+      "title": "AdaptiveReasoningUpdatedNotification",
+      "type": "object"
+    },
     "AddCreditsNudgeCreditType": {
       "enum": [
         "credits",
@@ -14389,6 +14569,39 @@
       ],
       "type": "object"
     },
+    "ReasoningEffortUpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Reports captured step effort without changing the thread's saved settings.",
+      "properties": {
+        "adaptive": {
+          "description": "Automatic mode is active, including when a decision falls back to current effort.",
+          "type": "boolean"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "adaptive",
+        "threadId",
+        "turnId"
+      ],
+      "title": "ReasoningEffortUpdatedNotification",
+      "type": "object"
+    },
     "ReasoningItemContent": {
       "oneOf": [
         {
@@ -16723,6 +16936,46 @@
             "params"
           ],
           "title": "Turn/startedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "turn/reasoningEffortUpdated"
+              ],
+              "title": "Turn/reasoningEffortUpdatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ReasoningEffortUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/reasoningEffortUpdatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "thread/adaptiveReasoningUpdated"
+              ],
+              "title": "Thread/adaptiveReasoningUpdatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/AdaptiveReasoningUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/adaptiveReasoningUpdatedNotification",
           "type": "object"
         },
         {
@@ -19472,6 +19725,35 @@
     "ThreadForkResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "adaptiveReasoningEnabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "adaptiveReasoningError": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdaptiveReasoningError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "adaptiveReasoningFailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
@@ -21992,6 +22274,35 @@
     "ThreadResumeResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "adaptiveReasoningEnabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "adaptiveReasoningError": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdaptiveReasoningError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "adaptiveReasoningFailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
@@ -22453,6 +22764,35 @@
             }
           ]
         },
+        "adaptiveReasoningEnabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "adaptiveReasoningError": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdaptiveReasoningError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "adaptiveReasoningFailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },
@@ -22734,6 +23074,35 @@
     "ThreadStartResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "adaptiveReasoningEnabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "adaptiveReasoningError": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AdaptiveReasoningError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "adaptiveReasoningFailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "adaptiveReasoningRevision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "approvalPolicy": {
           "$ref": "#/definitions/AskForApproval"
         },

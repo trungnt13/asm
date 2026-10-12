@@ -63,6 +63,7 @@ pub(super) fn prepare_update(
         turn_extension_init,
     } = overrides.into();
     let ThreadSettingsOverrides {
+        adaptive_reasoning_enabled: _,
         environments: environment_requests,
         runtime_workspace_roots,
         profile_workspace_roots,

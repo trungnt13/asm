@@ -11,10 +11,13 @@ use std::borrow::Cow;
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
     pub(super) session: Option<ThreadSessionState>,
+    pub(super) inferred_session: bool,
     pub(super) delegated_turns: Vec<String>,
     pub(super) turns: Vec<Turn>,
     pub(super) events: Vec<ThreadBufferedEvent>,
     pub(super) active_reasoning_item: Option<codex_app_server_protocol::ItemStartedNotification>,
+    pub(super) reasoning_state: crate::session_state::ThreadReasoningState,
+    pub(super) latest_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
     pub(super) output_tps: Option<(ThreadId, f64)>,
 }
@@ -63,12 +66,14 @@ pub(super) enum ThreadEventAttachment {
 #[derive(Debug)]
 pub(super) struct ThreadEventStore {
     pub(super) session: Option<ThreadSessionState>,
+    pub(super) inferred_session: bool,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
     pub(super) pending_interactive_replay: PendingInteractiveReplayState,
     pub(super) active_turn_id: Option<String>,
     // Retain the active item even if its start falls out of the bounded replay buffer.
     pub(super) active_reasoning_item: Option<codex_app_server_protocol::ItemStartedNotification>,
+    pub(super) reasoning_state: crate::session_state::ThreadReasoningState,
     // Lifecycle identity must survive bounded replay-buffer eviction.
     pub(super) latest_turn_id: Option<String>,
     pub(super) pending_interrupt_turn_id: Option<String>,
@@ -112,11 +117,13 @@ impl ThreadEventStore {
     pub(super) fn new(capacity: usize) -> Self {
         Self {
             session: None,
+            inferred_session: false,
             turns: Vec::new(),
             buffer: VecDeque::new(),
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
             latest_turn_id: None,
             pending_interrupt_turn_id: None,
             input_state: None,
@@ -148,7 +155,16 @@ impl ThreadEventStore {
         {
             self.output_tps = None;
         }
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|previous| previous.thread_id != session.thread_id)
+        {
+            self.reasoning_state = Default::default();
+            self.latest_turn_id = None;
+        }
         self.session = Some(session);
+        self.inferred_session = false;
         self.set_turns(turns);
     }
 
@@ -173,11 +189,26 @@ impl ThreadEventStore {
             .rev()
             .find(|turn| matches!(turn.status, TurnStatus::InProgress))
             .map(|turn| turn.id.clone());
-        self.latest_turn_id = turns.last().map(|turn| turn.id.clone());
+        self.latest_turn_id = turns
+            .last()
+            .map(|turn| turn.id.clone())
+            .or_else(|| self.latest_turn_id.clone());
+        if self
+            .reasoning_state
+            .captured_step
+            .as_ref()
+            .is_some_and(|step| self.latest_turn_id.as_deref() != Some(&step.turn_id))
+        {
+            self.reasoning_state.captured_step = None;
+        }
+        if self.reasoning_state.suppressed_turn_id != self.latest_turn_id {
+            self.reasoning_state.suppressed_turn_id = None;
+        }
         self.turns = turns;
     }
 
     pub(super) fn set_active_turn_id(&mut self, turn_id: String) {
+        self.reasoning_state = Default::default();
         self.latest_turn_id = Some(turn_id.clone());
         self.active_turn_id = Some(turn_id);
     }
@@ -257,7 +288,20 @@ impl ThreadEventStore {
             {
                 self.latest_turn_id = Some(n.turn_id.clone());
             }
+            ServerNotification::ReasoningEffortUpdated(step)
+                if self.latest_turn_id.as_deref() == Some(&step.turn_id)
+                    && self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.thread_id.to_string() == step.thread_id)
+                    && !(step.adaptive
+                        && self.reasoning_state.suppressed_turn_id.as_deref()
+                            == Some(&step.turn_id)) =>
+            {
+                self.reasoning_state.captured_step = Some(step.clone());
+            }
             ServerNotification::ThreadClosed(_) => {
+                self.reasoning_state = Default::default();
                 self.active_turn_id = None;
                 self.active_reasoning_item = None;
                 self.pending_interrupt_turn_id = None;
@@ -378,6 +422,7 @@ impl ThreadEventStore {
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         let mut snapshot = ThreadEventSnapshot {
             session: self.session.clone(),
+            inferred_session: self.inferred_session,
             delegated_turns: self.delegated_turns.iter().cloned().collect(),
             turns: self.turns.clone(),
             // Thread switches replay buffered events into a rebuilt ChatWidget. Only replay
@@ -396,6 +441,8 @@ impl ThreadEventStore {
                 .cloned()
                 .collect(),
             active_reasoning_item: self.active_reasoning_item.clone(),
+            reasoning_state: self.reasoning_state.clone(),
+            latest_turn_id: self.latest_turn_id.clone(),
             input_state: self.input_state.clone(),
             output_tps: self.output_tps,
         };
@@ -685,6 +732,10 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

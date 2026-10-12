@@ -240,6 +240,7 @@ mod model_defaults;
 mod new_session;
 mod turn_tips;
 pub(crate) use new_session::has_launch_setting;
+mod adaptive_reasoning;
 mod auto_rename;
 mod auto_rename_persistence;
 mod autorename_command;

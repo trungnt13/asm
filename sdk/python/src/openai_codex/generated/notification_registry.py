@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from .v2_all import AccountLoginCompletedNotification
 from .v2_all import AccountRateLimitsUpdatedNotification
 from .v2_all import AccountUpdatedNotification
+from .v2_all import AdaptiveReasoningUpdatedNotification
 from .v2_all import AgentMessageDeltaNotification
 from .v2_all import AppListUpdatedNotification
 from .v2_all import AuthRecoveryNotification
@@ -46,6 +47,7 @@ from .v2_all import PlanDeltaNotification
 from .v2_all import ProcessExitedNotification
 from .v2_all import ProcessOutputDeltaNotification
 from .v2_all import ProjectChangedNotification
+from .v2_all import ReasoningEffortUpdatedNotification
 from .v2_all import ReasoningSummaryPartAddedNotification
 from .v2_all import ReasoningSummaryTextDeltaNotification
 from .v2_all import ReasoningTextDeltaNotification
@@ -95,6 +97,7 @@ KnownNotificationPayload: TypeAlias = (
     AccountLoginCompletedNotification
     | AccountRateLimitsUpdatedNotification
     | AccountUpdatedNotification
+    | AdaptiveReasoningUpdatedNotification
     | AgentMessageDeltaNotification
     | AppListUpdatedNotification
     | AuthRecoveryNotification
@@ -131,6 +134,7 @@ KnownNotificationPayload: TypeAlias = (
     | ProcessExitedNotification
     | ProcessOutputDeltaNotification
     | ProjectChangedNotification
+    | ReasoningEffortUpdatedNotification
     | ReasoningSummaryPartAddedNotification
     | ReasoningSummaryTextDeltaNotification
     | ReasoningTextDeltaNotification
@@ -224,6 +228,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "remoteControl/status/changed": RemoteControlStatusChangedNotification,
     "serverRequest/resolved": ServerRequestResolvedNotification,
     "skills/changed": SkillsChangedNotification,
+    "thread/adaptiveReasoningUpdated": AdaptiveReasoningUpdatedNotification,
     "thread/archived": ThreadArchivedNotification,
     "thread/attachment/updated": ThreadAttachmentUpdatedNotification,
     "thread/closed": ThreadClosedNotification,
@@ -259,6 +264,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "turn/diff/updated": TurnDiffUpdatedNotification,
     "turn/moderationMetadata": TurnModerationMetadataNotification,
     "turn/plan/updated": TurnPlanUpdatedNotification,
+    "turn/reasoningEffortUpdated": ReasoningEffortUpdatedNotification,
     "turn/started": TurnStartedNotification,
     "warning": WarningNotification,
     "windows/worldWritableWarning": WindowsWorldWritableWarningNotification,
@@ -284,6 +290,7 @@ DIRECT_TURN_ID_NOTIFICATION_TYPES: tuple[type[BaseModel], ...] = (
     ModelSafetyBufferingUpdatedNotification,
     ModelVerificationNotification,
     PlanDeltaNotification,
+    ReasoningEffortUpdatedNotification,
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,

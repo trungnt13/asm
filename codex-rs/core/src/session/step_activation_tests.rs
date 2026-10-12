@@ -2,6 +2,7 @@ use super::*;
 use crate::agents_md_manager::AgentsMdManager;
 use crate::agents_md_manager::SessionInstructions;
 use crate::session::Submission;
+use crate::session::adaptive_reasoning_task::AdaptiveDecisionGuard;
 use crate::session::handlers::submission_loop;
 use crate::session::step_context::StepContext;
 use crate::session::step_settings::StepSettings;
@@ -55,6 +56,7 @@ use test_case::test_case;
 use tokio::sync::Notify;
 use tokio::sync::TryLockError;
 use tokio::sync::oneshot;
+use tokio::time::Instant;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
@@ -165,6 +167,107 @@ async fn instruction_refresh_serializes_reads_and_releases_on_cancellation() {
 #[tokio::test]
 async fn next_step_waits_for_environment_publication_before_capturing() {
     let ActivationFixture { session, turn, .. } = activation_fixture(activation_models()).await;
+    let original = turn.next_step_settings.load_full();
+    let done = {
+        let active = session.active_turn.lock().await;
+        Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
+    };
+    let guard = AdaptiveDecisionGuard {
+        freshness: CancellationToken::new(),
+        deadline: Instant::now() + Duration::from_secs(/*secs*/ 10),
+    };
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(
+                &turn,
+                &original,
+                &Arc::new(Notify::new()),
+                &guard,
+                ReasoningEffort::High,
+            )
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    for scenario in [
+        "expired",
+        "superseded",
+        "superseded during publication",
+        "busy",
+        "applied",
+    ] {
+        let freshness = CancellationToken::new();
+        let decision_guard = AdaptiveDecisionGuard {
+            freshness: freshness.clone(),
+            deadline: if scenario == "expired" {
+                Instant::now()
+            } else {
+                guard.deadline
+            },
+        };
+        if scenario == "superseded" {
+            freshness.cancel();
+        }
+        let permit = (scenario == "busy").then(|| {
+            session
+                .thread_settings_persistence
+                .try_acquire()
+                .expect("hold settings permit")
+        });
+        let apply = session.apply_adaptive_turn_settings(
+            &turn,
+            &original,
+            &done,
+            &decision_guard,
+            ReasoningEffort::High,
+        );
+        tokio::pin!(apply);
+        if scenario == "superseded during publication" {
+            let state = session.state.lock().await;
+            assert!(futures::poll!(apply.as_mut()).is_pending());
+            freshness.cancel();
+            drop(state);
+        }
+        let outcome = if scenario == "busy" {
+            let std::task::Poll::Ready(outcome) = futures::poll!(apply.as_mut()) else {
+                panic!("adaptive publication must not wait for a busy permit");
+            };
+            outcome
+        } else {
+            timeout(Duration::from_secs(/*secs*/ 10), apply)
+                .await
+                .expect("guarded publication completes")
+        };
+        assert_eq!(
+            outcome,
+            if scenario == "applied" {
+                TurnSettingsUpdateOutcome::Applied
+            } else {
+                TurnSettingsUpdateOutcome::TargetUnavailable
+            },
+            "{scenario}",
+        );
+        drop(permit);
+        assert_eq!(
+            turn.next_step_settings.load().reasoning_effort(),
+            if scenario == "applied" {
+                Some(&ReasoningEffort::High)
+            } else {
+                original.reasoning_effort()
+            },
+            "{scenario}",
+        );
+    }
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(&turn, &original, &done, &guard, ReasoningEffort::Low)
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    assert_eq!(
+        turn.next_step_settings.load().reasoning_effort(),
+        Some(&ReasoningEffort::High)
+    );
+    assert!(!session.adaptive_reasoning_paused());
     let next_cwd = turn.config.cwd.join("next-step-environment");
     std::fs::create_dir_all(&next_cwd).expect("create next workspace");
     let next_cwd = codex_utils_path_uri::PathUri::from_abs_path(&next_cwd);
@@ -198,6 +301,20 @@ async fn next_step_waits_for_environment_publication_before_capturing() {
         ),
         ("next-step-model", Some(&next_cwd)),
     );
+    // This synthetic session does not run normal adaptive startup initialization.
+    session.adaptive_reasoning_state(/*initial_enabled*/ true, /*initial_revision*/ 0);
+    session.stop_adaptive_reasoning().await;
+    assert!(session.adaptive_reasoning_paused());
+    let expected = turn.next_step_settings.load_full();
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(&turn, &expected, &done, &guard, ReasoningEffort::Low,)
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+        "shutdown rejects late publication without changing captured settings"
+    );
+    assert!(Arc::ptr_eq(&expected, &turn.next_step_settings.load_full()));
+    assert!(Arc::ptr_eq(&expected, &step.settings));
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
@@ -710,6 +827,27 @@ async fn submitted_sparse_updates_preserve_captured_steps_and_ordering() {
         let active = session.active_turn.lock().await;
         Arc::clone(&active.as_ref().unwrap().task.as_ref().unwrap().done)
     };
+    assert!(session.adaptive_reasoning_paused());
+    let guard = AdaptiveDecisionGuard {
+        freshness: CancellationToken::new(),
+        deadline: Instant::now() + Duration::from_secs(/*secs*/ 10),
+    };
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(
+                &turn,
+                &after.settings,
+                &done,
+                &guard,
+                ReasoningEffort::Low
+            )
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    assert!(Arc::ptr_eq(
+        &turn.next_step_settings.load_full(),
+        &after.settings
+    ));
     let completed = done.notified();
     finish.notify_one();
     timeout(Duration::from_secs(/*secs*/ 10), completed)
@@ -834,6 +972,27 @@ async fn delayed_activation_does_not_retarget_a_task(change: TaskChangeDuringLoo
         &expected_inputs,
     ));
     assert_eq!(desired_step_settings(&session).await, desired);
+    let started = Instant::now();
+    let guard = AdaptiveDecisionGuard {
+        freshness: CancellationToken::new(),
+        deadline: started + Duration::from_secs(/*secs*/ 10),
+    };
+    assert_eq!(
+        session
+            .apply_adaptive_turn_settings(
+                &expected_turn,
+                &expected_inputs,
+                &done,
+                &guard,
+                ReasoningEffort::High
+            )
+            .await,
+        TurnSettingsUpdateOutcome::TargetUnavailable,
+    );
+    assert!(Arc::ptr_eq(
+        &expected_turn.next_step_settings.load_full(),
+        &expected_inputs
+    ));
     session.abort_all_tasks(TurnAbortReason::Replaced).await;
 }
 

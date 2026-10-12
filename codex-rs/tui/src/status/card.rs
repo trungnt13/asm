@@ -213,6 +213,7 @@ pub(crate) fn new_status_output_with_rate_limits(
         model_name,
         collaboration_mode,
         reasoning_effort_override,
+        /*captured_reasoning_label*/ None,
         "<none>".to_string(),
         refreshing_rate_limits,
     )
@@ -237,6 +238,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
     model_name: &str,
     collaboration_mode: Option<&str>,
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
+    captured_reasoning_label: Option<String>,
     agents_summary: String,
     refreshing_rate_limits: bool,
 ) -> (CompositeHistoryCell, StatusHistoryHandle) {
@@ -258,6 +260,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
         model_name,
         collaboration_mode,
         reasoning_effort_override,
+        captured_reasoning_label,
         agents_summary,
         refreshing_rate_limits,
     ));
@@ -290,6 +293,7 @@ impl StatusHistoryCell {
         model_name: &str,
         collaboration_mode: Option<&str>,
         reasoning_effort_override: Option<Option<ReasoningEffort>>,
+        captured_reasoning_label: Option<String>,
         agents_summary: String,
         refreshing_rate_limits: bool,
     ) -> Self {
@@ -316,10 +320,12 @@ impl StatusHistoryCell {
             config_entries.insert(2, ("provider", provider_id.clone()));
         }
         if config.model_provider.wire_api == WireApi::Responses {
-            let effort_value = reasoning_effort_override
-                .unwrap_or_else(|| config.model_reasoning_effort.clone())
-                .map(|effort| effort.to_string())
-                .unwrap_or_else(|| "none".to_string());
+            let effort_value = captured_reasoning_label.unwrap_or_else(|| {
+                reasoning_effort_override
+                    .unwrap_or_else(|| config.model_reasoning_effort.clone())
+                    .map(|effort| effort.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            });
             config_entries.push(("reasoning effort", effort_value));
             if remote_connection.is_none() {
                 config_entries.push((

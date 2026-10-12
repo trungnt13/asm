@@ -80,6 +80,12 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ThreadQueueChanged(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::AdaptiveReasoningUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ReasoningEffortUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::ThreadSettingsUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
@@ -258,6 +264,10 @@ mod tests {
 
     fn test_thread_settings() -> ThreadSettings {
         ThreadSettings {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: codex_app_server_protocol::AskForApproval::Never,
@@ -367,6 +377,31 @@ mod tests {
         let target = server_notification_thread_target(&notification);
 
         assert_eq!(target, ServerNotificationThreadTarget::Thread(thread_id));
+        let mode = ServerNotification::AdaptiveReasoningUpdated(
+            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                enabled: true,
+                adaptive_reasoning_revision: 1,
+                error: None,
+                failure_episode: 0,
+            },
+        );
+        assert_eq!(
+            server_notification_thread_target(&mode),
+            ServerNotificationThreadTarget::Thread(thread_id)
+        );
+        let effort = ServerNotification::ReasoningEffortUpdated(
+            codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "captured-turn".to_string(),
+                reasoning_effort: None,
+                adaptive: true,
+            },
+        );
+        assert_eq!(
+            server_notification_thread_target(&effort),
+            ServerNotificationThreadTarget::Thread(thread_id)
+        );
     }
 
     #[test]

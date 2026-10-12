@@ -8,6 +8,8 @@ export type { AccountTokenUsageDailyBucket } from "./AccountTokenUsageDailyBucke
 export type { AccountTokenUsageSummary } from "./AccountTokenUsageSummary";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
 export type { ActivePermissionProfile } from "./ActivePermissionProfile";
+export type { AdaptiveReasoningError } from "./AdaptiveReasoningError";
+export type { AdaptiveReasoningUpdatedNotification } from "./AdaptiveReasoningUpdatedNotification";
 export type { AddCreditsNudgeCreditType } from "./AddCreditsNudgeCreditType";
 export type { AddCreditsNudgeEmailStatus } from "./AddCreditsNudgeEmailStatus";
 export type { AdditionalContextEntry } from "./AdditionalContextEntry";
@@ -421,6 +423,7 @@ export type { RateLimitWindow } from "./RateLimitWindow";
 export type { RawResponseCompletedNotification } from "./RawResponseCompletedNotification";
 export type { RawResponseItemCompletedNotification } from "./RawResponseItemCompletedNotification";
 export type { ReasoningEffortOption } from "./ReasoningEffortOption";
+export type { ReasoningEffortUpdatedNotification } from "./ReasoningEffortUpdatedNotification";
 export type { ReasoningSummaryPartAddedNotification } from "./ReasoningSummaryPartAddedNotification";
 export type { ReasoningSummaryTextDeltaNotification } from "./ReasoningSummaryTextDeltaNotification";
 export type { ReasoningTextDeltaNotification } from "./ReasoningTextDeltaNotification";

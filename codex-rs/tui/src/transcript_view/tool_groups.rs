@@ -262,10 +262,11 @@ pub(crate) fn summary_lines(
         crate::wrapping::word_wrap_lines([Line::from(text).dim()], width.max(/*other*/ 1) as usize);
     if lines.len() > max_lines {
         lines.truncate(max_lines);
-        let last = lines.last_mut().expect("positive summary line budget");
-        // Even the counts can exceed a very narrow budget; mark the clipped header.
-        last.spans.push("…".into());
-        *last = truncate_line_with_ellipsis_if_overflow(last.clone(), usize::from(width));
+        if let Some(last) = lines.last_mut() {
+            // Even the counts can exceed a very narrow budget; mark the clipped header.
+            last.spans.push("…".into());
+            *last = truncate_line_with_ellipsis_if_overflow(last.clone(), usize::from(width));
+        }
     }
     lines.into_iter().map(HyperlinkLine::from).collect()
 }

@@ -13,6 +13,7 @@ pub enum SlashCommand {
     // DO NOT ALPHA-SORT! Enum order is presentation order in the popup, so
     // more frequently used commands should be listed first.
     Model,
+    Adapt,
     Daybreak,
     Ide,
     Permissions,
@@ -143,6 +144,7 @@ impl SlashCommand {
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
+            SlashCommand::Adapt => "turn adaptive reasoning on or off for this session",
             SlashCommand::Daybreak => "turn Daybreak on or off",
             SlashCommand::Ide => {
                 "include current selection, open files, and other context from your IDE"
@@ -198,6 +200,7 @@ impl SlashCommand {
                 | SlashCommand::Mcp
                 | SlashCommand::Export
                 | SlashCommand::Raw
+                | SlashCommand::Adapt
                 | SlashCommand::Cd
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
@@ -293,6 +296,7 @@ impl SlashCommand {
             | SlashCommand::Archive
             | SlashCommand::Resume
             | SlashCommand::Model
+            | SlashCommand::Adapt
             | SlashCommand::Daybreak
             | SlashCommand::Permissions
             | SlashCommand::Copy
@@ -385,6 +389,8 @@ mod tests {
         assert!(SlashCommand::Title.available_during_task());
         assert!(SlashCommand::Statusline.available_during_task());
         assert!(SlashCommand::Raw.available_during_task());
+        assert!(SlashCommand::Adapt.available_during_task());
+        assert!(SlashCommand::Adapt.supports_inline_args());
         assert!(SlashCommand::Raw.supports_inline_args());
         assert!(SlashCommand::App.available_during_task());
     }

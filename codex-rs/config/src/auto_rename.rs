@@ -62,8 +62,7 @@ impl Default for AutoRenameConfig {
             first_trigger: AutoRenameFirstTrigger::default(),
             context: AutoRenameContext::default(),
             auto_update: false,
-            auto_update_interval_turns: NonZeroUsize::new(/*n*/ 5)
-                .expect("positive update interval"),
+            auto_update_interval_turns: NonZeroUsize::MIN.saturating_add(/*rhs*/ 4),
             max_context_bytes: None,
             recent_message_limit: None,
             max_title_chars: None,

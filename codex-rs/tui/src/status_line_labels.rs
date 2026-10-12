@@ -11,5 +11,12 @@ pub(crate) fn compact_model_name(name: &str) -> String {
 }
 
 pub(crate) fn compact_reasoning_label(label: &str) -> String {
-    label.to_lowercase().chars().take(3).collect()
+    let (effort, suffix) = label
+        .split_once('·')
+        .map_or((label, None), |(effort, suffix)| (effort, Some(suffix)));
+    let effort: String = effort.to_lowercase().chars().take(3).collect();
+    match suffix {
+        Some(suffix) => format!("{effort}·{suffix}"),
+        None => effort,
+    }
 }
