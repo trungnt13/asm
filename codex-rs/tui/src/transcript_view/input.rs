@@ -198,6 +198,9 @@ impl TranscriptView {
         if key.kind == KeyEventKind::Release {
             return None;
         }
+        if !(crate::text_selection::is_copy_key(key) && self.has_selection_range()) {
+            self.pending_quote = None;
+        }
         if let Some(action) = self.handle_copy_mode_key(key, cells) {
             return Some(action);
         }
@@ -371,6 +374,12 @@ impl TranscriptView {
                 }
                 self.end_drag();
                 let selected = self.selected_text(cells);
+                if self.click_to_quote && link.is_none() {
+                    self.pending_quote = selected
+                        .as_ref()
+                        .filter(|text| !text.is_empty())
+                        .map(|text| crate::bottom_pane::PendingQuote::from_selection(text));
+                }
                 if selected.is_none() {
                     self.end_selection(cells);
                 }
@@ -467,6 +476,7 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         mode: MouseMode,
     ) -> Option<ViewAction> {
+        self.pending_quote = None;
         if mode == MouseMode::Interactive
             && event.modifiers.is_empty()
             && self.toggle_disclosure_at(cells, event.column, event.row)
