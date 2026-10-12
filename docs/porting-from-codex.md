@@ -148,6 +148,8 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
 1. **Prepare.**
    - Require an explicit release request. Deliver the complete installable package before unrelated features. Use the existing workflow, not another pipeline.
    - Select the repo explicitly: `gh ... -R trungnt13/asm`.
+   - Resume an unfinished candidate first; follow **Recover**. Do not rebase or replace its pinned source during recovery.
+   - Before a new release, fetch upstream with tags and prune. Capture the latest `upstream/main` commit and rebase the fork onto that fixed target. Follow the sync, PR, validation, and push rules; push the intended `origin/main` before dispatch.
    - Before source pushes to `origin/main`, verify the V8 prerequisite below. Release the intended `origin/main` commit, not unpushed work.
    - Publication does not authorize installation or shared-server restart.
 2. **Check CI.**
