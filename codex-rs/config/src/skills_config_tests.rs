@@ -99,6 +99,7 @@ fn session_flags_can_reenable_user_disabled_path() {
             entries: vec![SkillConfigRule {
                 selector: SkillConfigRuleSelector::Path(PathUri::from_abs_path(&skill_path.abs())),
                 enabled: true,
+                allowed_agent_roles: None,
             }],
         }
     );
@@ -119,6 +120,7 @@ fn session_flags_can_disable_user_enabled_path() {
             entries: vec![SkillConfigRule {
                 selector: SkillConfigRuleSelector::Path(PathUri::from_abs_path(&skill_path.abs())),
                 enabled: false,
+                allowed_agent_roles: None,
             }],
         }
     );
@@ -142,6 +144,7 @@ enabled = false
             entries: vec![SkillConfigRule {
                 selector: SkillConfigRuleSelector::Name("github:yeet".to_string()),
                 enabled: false,
+                allowed_agent_roles: None,
             }],
         }
     );
@@ -169,10 +172,12 @@ enabled = true
                         &skill_path.abs()
                     )),
                     enabled: false,
+                    allowed_agent_roles: None,
                 },
                 SkillConfigRule {
                     selector: SkillConfigRuleSelector::Name("github:yeet".to_string()),
                     enabled: true,
+                    allowed_agent_roles: None,
                 },
             ],
         }
@@ -187,6 +192,7 @@ fn path_rule_disables_selected_path() {
         entries: vec![SkillConfigRule {
             selector: SkillConfigRuleSelector::Path(PathUri::from_abs_path(&path)),
             enabled: false,
+            allowed_agent_roles: None,
         }],
     };
 
@@ -205,10 +211,12 @@ fn later_name_rule_reenables_path_disabled_skill() {
             SkillConfigRule {
                 selector: SkillConfigRuleSelector::Path(PathUri::from_abs_path(&path)),
                 enabled: false,
+                allowed_agent_roles: None,
             },
             SkillConfigRule {
                 selector: SkillConfigRuleSelector::Name("demo".to_string()),
                 enabled: true,
+                allowed_agent_roles: None,
             },
         ],
     };
@@ -230,10 +238,12 @@ fn later_path_rule_reenables_one_skill_disabled_by_name() {
             SkillConfigRule {
                 selector: SkillConfigRuleSelector::Name("demo".to_string()),
                 enabled: false,
+                allowed_agent_roles: Some(vec!["reviewer".to_string()]),
             },
             SkillConfigRule {
                 selector: SkillConfigRuleSelector::Path(PathUri::from_abs_path(&first_path)),
                 enabled: true,
+                allowed_agent_roles: None,
             },
         ],
     };
@@ -244,5 +254,29 @@ fn later_path_rule_reenables_one_skill_disabled_by_name() {
             ("demo", &PathUri::from_abs_path(&second_path)),
         ]),
         [PathUri::from_abs_path(&second_path)].into_iter().collect()
+    );
+    for role in [None, Some("reviewer"), Some("other")] {
+        assert_eq!(
+            rules.for_agent_role(role).resolve_disabled_paths([
+                ("demo", &PathUri::from_abs_path(&first_path)),
+                ("demo", &PathUri::from_abs_path(&second_path)),
+            ]),
+            if role == Some("reviewer") {
+                [PathUri::from_abs_path(&second_path)].into_iter().collect()
+            } else {
+                [
+                    PathUri::from_abs_path(&first_path),
+                    PathUri::from_abs_path(&second_path),
+                ]
+                .into_iter()
+                .collect()
+            }
+        );
+    }
+    let mut disjoint_rules = rules;
+    disjoint_rules.entries[1].selector = SkillConfigRuleSelector::Name("other".to_string());
+    assert_eq!(
+        disjoint_rules.for_agent_role(/*agent_role*/ None),
+        disjoint_rules.for_agent_role(Some("reviewer")),
     );
 }
