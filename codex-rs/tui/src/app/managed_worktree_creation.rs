@@ -25,7 +25,7 @@ pub(super) fn background_terminals_blocker(
                             || source.message.contains("unknown method"))) =>
         {
             Some(
-                "The local Codex service cannot check background terminals. Run `codex app-server daemon update`, then restart ASM.",
+                "The local ASM service cannot check background terminals. Run `asm app-server daemon update`, then restart ASM.",
             )
         }
         _ => Some("Active background terminals block /cd."),
