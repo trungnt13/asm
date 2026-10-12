@@ -379,6 +379,29 @@ Do not fetch/display optional Daybreak setup reminders, including reconnect/acco
 - [`codex-rs/models-manager/models.json`](../codex-rs/models-manager/models.json) is upstream-owned. Accept upstream sync changes, not personal/fork edits; never freeze it.
 - Personal edits belong only in `/home/trungnt13/codes/tngo-workflow/configs/model-catalogs/models.json`. Never copy them into the built-in catalog.
 
+### Role-scoped skill visibility
+
+Optional `allowed_agent_roles` on a `[[skills.config]]` entry limits its normal catalog visibility and skill selection to the listed child roles:
+
+```toml
+[[skills.config]]
+name = "review"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+
+[[skills.config]]
+name = "oracle"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+```
+
+- Match the current child's explicit role, never an ancestor's role or the displayed TUI view. Omission keeps existing visibility; an empty list hides the matching skills from every role.
+- Root, ordinary Side/Chat/Parallel, saved user forks, and unnamed/nonmatching children do not match. Explicit reviewer children match with fresh or V2 full-history context; resume restores their own role. Preserve V1 full-history role restrictions.
+- Keep parent enablement and permission boundaries. Roles remain deny-only for skill overrides; a matching role cannot re-enable an otherwise disabled skill. Scope restrictions also survive enables using another matching selector.
+- Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Respect scope in both config-aware and cwd cache paths. Keep prompt lists stable and use existing append-only availability updates and context budgets.
+- This is visibility, not access isolation. Do not change filesystem, script execution, sandbox, network, or approval permissions. Inherited history can retain old lists or previously read skill content; never scrub history to conceal it.
+- Configure the two skills only after using a supporting binary. Keep reviewer role descriptions generic so root's role list does not disclose their skill inventory.
+
 ### Model catalog instruction visibility
 
 Top-level `include_model_catalog_in_spawn_agent_list`, default `true`:

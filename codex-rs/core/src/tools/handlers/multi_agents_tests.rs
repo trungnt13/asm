@@ -13,7 +13,9 @@ use crate::function_tool::FunctionCallError;
 use crate::init_state_db;
 use crate::local_agent_graph_store_from_state_db;
 use crate::session::step_context::StepContext;
+use crate::session::tests::install_reviewer_scoped_skills;
 use crate::session::tests::make_session_and_context;
+use crate::session::tests::reviewer_skill_enablement;
 use crate::session::tests::update_selected_settings_for_test;
 use crate::session::tests::update_turn_settings_for_test;
 use crate::session::turn_context::TurnContext;
@@ -158,7 +160,7 @@ fn thread_manager() -> ThreadManager {
 }
 
 async fn install_role_with_model_override(turn: &mut TurnContext) -> String {
-    let role_name = "fork-context-role".to_string();
+    let role_name = "reviewer".to_string();
     tokio::fs::create_dir_all(&turn.config.codex_home)
         .await
         .expect("codex home should be created");
@@ -178,6 +180,7 @@ model_reasoning_effort = "minimal"
     .expect("role config should be written");
 
     let mut config = (*turn.config).clone();
+    install_reviewer_scoped_skills(&mut config);
     config.agent_roles.insert(
         role_name.clone(),
         AgentRoleConfig {
@@ -462,40 +465,137 @@ async fn spawn_agent_fork_context_rejects_agent_type_override() {
     );
 }
 
+#[test_case::test_case("none"; "fresh")]
+#[test_case::test_case("all"; "full_history")]
 #[tokio::test]
-async fn multi_agent_v2_spawn_fork_turns_all_applies_agent_type_override() {
+async fn multi_agent_v2_spawn_fork_turns_all_applies_agent_type_override(fork_turns: &str) {
     let (mut session, mut turn) = make_session_and_context().await;
     let role_name = install_role_with_model_override(&mut turn).await;
-    let manager = thread_manager();
-    let root = manager
-        .start_thread(StartThreadOptions::new((*turn.config).clone()))
-        .await
-        .expect("root thread should start");
-    set_agent_control(&mut session, manager.agent_control());
-    session.thread_id = root.thread_id;
     let mut config = (*turn.config).clone();
+    config.multi_agent_v2.max_concurrent_threads_per_session = 5;
     config
         .features
         .enable(Feature::MultiAgentV2)
         .expect("test config should allow feature update");
-    let mut turn = turn;
     turn.config = Arc::new(config);
     turn.multi_agent_version = codex_protocol::protocol::MultiAgentVersion::V2;
-
-    SpawnAgentHandlerV2::default()
-        .handle(invocation(
-            Arc::new(session),
-            Arc::new(turn),
-            "spawn_agent",
-            function_payload(json!({
-                "message": "inspect this repo",
-                "task_name": "fork_context_v2",
-                "agent_type": role_name,
-                "fork_turns": "all"
-            })),
-        ))
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        turn.config.model_provider.clone(),
+        turn.config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let root = manager
+        .start_thread(StartThreadOptions::new((*turn.config).clone()))
         .await
-        .expect("fork_turns=all should apply agent_type overrides");
+        .expect("root thread should start");
+    root.thread
+        .inject_response_items(vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "parent-skill-scope-history".to_string(),
+            }],
+            status: None,
+            encrypted_content: None,
+            phase: None,
+            internal_chat_message_metadata_passthrough: None,
+        }])
+        .await
+        .expect("seed parent history");
+    let root_turn = root.thread.session.new_default_turn().await;
+    assert_eq!(reviewer_skill_enablement(&root_turn), [false; 2]);
+    for name in ["review", "oracle"] {
+        let snapshot = root_turn.skills_snapshot();
+        let skill = snapshot
+            .outcome()
+            .skills
+            .iter()
+            .find(|skill| skill.name == name)
+            .expect("root should discover scoped skill metadata");
+        assert!(
+            snapshot.read_skill_text(skill).await.is_ok(),
+            "visibility does not deny filesystem reads"
+        );
+    }
+    set_agent_control(&mut session, manager.agent_control());
+    session.thread_id = root.thread_id;
+    let session = Arc::new(session);
+    let turn = Arc::new(turn);
+
+    for (task_name, agent_type) in [
+        ("reviewer_child", Some(role_name.as_str())),
+        ("explorer_child", Some("explorer")),
+        ("unnamed_child", None),
+    ] {
+        let prior_ops = manager.captured_ops().len();
+        SpawnAgentHandlerV2::default()
+            .handle(invocation(
+                Arc::clone(&session),
+                Arc::clone(&turn),
+                "spawn_agent",
+                function_payload(json!({
+                    "message": "inspect this repo",
+                    "task_name": task_name,
+                    "agent_type": agent_type,
+                    "fork_turns": fork_turns
+                })),
+            ))
+            .await
+            .expect("V2 child should apply its requested role");
+        let child_id = manager
+            .captured_ops()
+            .into_iter()
+            .skip(prior_ops)
+            .map(|(thread_id, _)| thread_id)
+            .find(|thread_id| *thread_id != root.thread_id)
+            .expect("child should receive its initial input");
+        let child = manager
+            .get_thread(child_id)
+            .await
+            .expect("child thread should exist");
+        let child_turn = child.session.new_default_turn().await;
+        let child_history = child.session.clone_history().await;
+        assert_eq!(child_history.raw_items().any(|item| {
+            matches!(item, ResponseItem::Message { content, .. } if content.iter().any(|part| {
+                matches!(part, ContentItem::InputText { text } if text == "parent-skill-scope-history")
+            }))
+        }), fork_turns == "all");
+        assert_eq!(child_turn.config.permissions, root_turn.config.permissions);
+        assert_eq!(
+            reviewer_skill_enablement(&child_turn),
+            [agent_type == Some("reviewer"); 2]
+        );
+        if agent_type == Some("reviewer") {
+            let prior_ops = manager.captured_ops().len();
+            SpawnAgentHandlerV2::default()
+                .handle(invocation(
+                    Arc::clone(&child.session),
+                    Arc::clone(&child_turn),
+                    "spawn_agent",
+                    function_payload(json!({
+                        "message": "inspect independently",
+                        "task_name": "unnamed_descendant",
+                        "fork_turns": fork_turns
+                    })),
+                ))
+                .await
+                .expect("reviewer should spawn unnamed descendant");
+            let descendant_id = manager
+                .captured_ops()
+                .into_iter()
+                .skip(prior_ops)
+                .map(|(thread_id, _)| thread_id)
+                .find(|thread_id| *thread_id != child_id)
+                .expect("descendant should receive its initial input");
+            let descendant = manager
+                .get_thread(descendant_id)
+                .await
+                .expect("descendant thread should exist");
+            let descendant_turn = descendant.session.new_default_turn().await;
+            assert_eq!(reviewer_skill_enablement(&descendant_turn), [false; 2]);
+        }
+    }
 }
 
 fn service_tier_test_catalog() -> codex_protocol::openai_models::ModelsResponse {

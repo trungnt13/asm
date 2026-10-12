@@ -571,7 +571,15 @@ impl ConfigDocument {
 
             if enabled {
                 if let Some(index) = existing_index {
-                    overrides.remove(index);
+                    if let Some(table) = overrides
+                        .iter_mut()
+                        .nth(index)
+                        .filter(|table| table.contains_key("allowed_agent_roles"))
+                    {
+                        table["enabled"] = value(true);
+                    } else {
+                        overrides.remove(index);
+                    }
                     mutated = true;
                     if overrides.is_empty() {
                         skills_table.remove("config");
