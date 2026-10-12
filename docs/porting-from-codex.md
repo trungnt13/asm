@@ -107,7 +107,8 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 ### Push permissions
 
-- Task requests authorize branch commits, pushes, and PR creation, not merges or `main` changes. Do not commit directly to `main` or integrate without explicit approval. Force pushes, tag moves, discarding work, and releases also need explicit approval.
+- Implementation requests authorize task-branch commits, pushes, and PR creation, not merges or direct implementation on `main`. Do not commit directly to `main` or merge PRs without explicit approval.
+- An authorized rebase or history reconciliation may update `main` with `--force-with-lease` without separate force-push approval. Other force pushes, tag moves, discarding work, and releases need explicit approval.
 - An explicit release request authorizes the existing workflow's candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes still require PRs.
 - Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited workflow tags, require publication approval.
 - Before authorized force pushes, fetch and preserve remote-only work, including workflow release commits. Use a lease against the inspected tip. Never refresh a failed lease and retry blindly.
@@ -116,11 +117,11 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `9f3d25588b3f0bdf452d4eda919f2c2365a89bba`.
+- Last incorporated commit: `a9b0815167c27ab13719dd12d13b63e02b70d221`.
 - Date: 2026-10-11.
-- Subject: Keep agents navigation available after a thread is archived (#53201).
+- Subject: Support Windows clipboard text paste shortcuts in the TUI (#53224).
 
-- Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Published `main` rewrites need explicit approval. Use `git cherry-pick -x` for targeted ports.
+- Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
   - Merge: `git -c rerere.enabled=true -c rerere.autoupdate=false merge <upstream-target>`.
   - Rebase: `git -c rerere.enabled=true -c rerere.autoupdate=false rebase <upstream-target>`.
@@ -147,6 +148,8 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
 1. **Prepare.**
    - Require an explicit release request. Deliver the complete installable package before unrelated features. Use the existing workflow, not another pipeline.
    - Select the repo explicitly: `gh ... -R trungnt13/asm`.
+   - Resume an unfinished candidate first; follow **Recover**. Do not rebase or replace its pinned source during recovery.
+   - Before a new release, fetch upstream with tags and prune. Capture the latest `upstream/main` commit and rebase the fork onto that fixed target. Follow the sync, PR, validation, and push rules; push the intended `origin/main` before dispatch.
    - Before source pushes to `origin/main`, verify the V8 prerequisite below. Release the intended `origin/main` commit, not unpushed work.
    - Publication does not authorize installation or shared-server restart.
 2. **Check CI.**
@@ -277,6 +280,44 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 - Explicit history inspection/feedback export may read old logs without capture. Thread deletion removes historical diagnostic records through existing-only on-demand access; never create missing files. Preserve feedback submission/upload errors; never invent evidence.
 - Preserve direct errors/warnings, exit status, protocol events, saved conversation/tool history, subagent relationships, memory, and operational state. Detached-daemon startup/fatal stderr and Windows sandbox security-audit logs remain separate. Do not suppress them or weaken security. Keep product analytics/account usage unchanged.
 - Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Opt-in `runtime_metrics` uses a manual reader without timer/network exporter when none is configured. No unsolicited session-storage size telemetry scan. Check fork-disabled paths with existing focused tests, not broad upstream retesting.
+
+### Adaptive reasoning
+
+Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
+
+| Setting | Default | Validation |
+| --- | --- | --- |
+| `enabled` | `false` | Opt-in only |
+| `decision_model` | `"gpt-6-luna"` | Nonblank |
+| `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
+| `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
+| `decision_timeout_ms` | `200` | 1–5000 ms |
+| `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
+| `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
+| `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
+
+- Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
+- If fewer than two efforts remain, skip Decisions and warm-up; keep current effort.
+- Read credentials only from the named backend environment variable, default `DECISION_API_KEY`. Do not fall back to `OPENAI_API_KEY`; explicit variable-name overrides remain supported. Keep main-model authentication separate. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
+- If set, use `rubric_instructions` instead of the built-in rubric, without a suffix. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
+- Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, images, and encrypted reasoning. Scale scan limits with the byte budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. These scan limits and the byte budget can still omit older history; they do not promise a complete transcript.
+- **P0 manual review:** bound total evidence and rubric separately using the table limits. Split larger evidence into ordered Decisions input messages of at most 8192 UTF-8 bytes each, preferring line boundaries. Preserve text and the default single-message request. Rubric instructions remain at most 4096 bytes. Each item can exceed 1000 tokens, but its byte cap keeps it below the 10K-token item limit. Keep this evidence outside the main conversation.
+- At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
+- Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
+- Before each main step with an enabled trigger, collect current evidence and await Decisions and validation in the turn task, without a separate step job or completion channel. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit. Keep only warm-up and log writing in the background.
+- Publish a current result within its original deadline through live next-step settings. Keep captured requests unchanged. Later evidence invalidates pending decisions, not already applied settings.
+- For missing credentials, unsupported models, cancellation, refusals, invalid answers, request failure, or timeout, keep current effort. A Decisions failure must not stop the main step.
+- On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
+- Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
+- Turn adaptation off after a successful manual model or effort change. Log the transition. Ordinary turn-start and spawn settings do not turn it off. Use `/adapt` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
+- Report runtime mode and its revision at thread attachment and on each transition. Ignore older revisions so delayed notifications cannot restore old mode. Show `<effort>·auto` when adaptation is on without an outstanding error, including startup and the wait before a decision. Show `<effort>·err` after a Decisions error; keep adaptation on and retain current effort. When off, show only effort. Use the baseline before the first captured step. The marker reports runtime health, not a promised effort change. Unsupported steps keep their effort without a Decisions call. Before each eligible main request, report captured effort through `turn/reasoningEffortUpdated`, including fallback steps. Keep mode and captured effort separate; toggles do not change already-running steps.
+- A spawned subagent copies its parent’s runtime mode once at spawn. Later parent toggles do not change that child. Preserve the child’s own mode across live eviction and reload, not backend restarts. Do not apply this rule to internal workers. If the assigned task is encrypted and no readable task is available, log the fallback and keep current effort; never forward ciphertext or guess the task.
+- Retain captured effort and turn identity in live TUI thread snapshots, outside saved history. Restore them after switching threads without accepting stale history settings. Clear them for a new turn or manual settings change.
+- Deliver transient effort notifications directly to clients, without entering rollout persistence before the main request.
+- Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
+- Report errors through backend runtime state, independent of diagnostics. Include health at attachment and after live child reload. New children inherit mode, not parent errors. Deduplicate visible warnings by failure episode. Clear errors only after a current main-step decision passes acceptance guards, including unchanged effort. Warm-up errors count; warm-up success, cancellation, and supersession do not clear errors.
+- With `diagnostic_log_capture = true`, append sanitized attempt metadata to a separate per-session `decision.jsonl`. Include credential failures, API outcome, and acceptance outcome. Do not log evidence, rubric text, bodies, or authentication headers. With capture off, create no log file or writer. Bound buffering and storage; never wait for disk on the decision path. Report dropped records or writer failures separately. Crash-interrupted attempts can lack an end record.
+- Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance separately from mock checks before making claims.
 
 ### TUI automatic session names
 

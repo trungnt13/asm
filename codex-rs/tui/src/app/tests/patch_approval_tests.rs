@@ -300,6 +300,7 @@ async fn replayed_patch_approval_pager_recovers_stored_turn_changes() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(thread_id, cwd)),
             turns: vec![test_turn(
@@ -309,6 +310,8 @@ async fn replayed_patch_approval_pager_recovers_stored_turn_changes() {
             )],
             events: vec![ThreadBufferedEvent::Request(Box::new(request(thread_id)))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,

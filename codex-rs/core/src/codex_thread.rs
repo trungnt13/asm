@@ -88,6 +88,12 @@ static LIVE_THREADS: Gauge = Gauge::new("core.threads.live");
 
 #[derive(Clone, Debug)]
 pub struct ThreadConfigSnapshot {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    pub adaptive_reasoning_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    pub adaptive_reasoning_revision: u64,
+    pub adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    pub adaptive_reasoning_failure_episode: u64,
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,
@@ -896,13 +902,21 @@ impl CodexThread {
         let Some(history) = &self.session.ephemeral_rollout_items else {
             return Ok(None);
         };
-        let active_turn = self.session.active_turn.lock().await;
-        if active_turn.is_some() {
-            return Err(CodexErr::InvalidRequest(
-                "cannot save a temporary fork while a turn is running".to_string(),
-            ));
+        loop {
+            {
+                let active_turn = self.session.active_turn.lock().await;
+                if active_turn.is_some() {
+                    return Err(CodexErr::InvalidRequest(
+                        "cannot save a temporary fork while a turn is running".to_string(),
+                    ));
+                }
+                if let Ok(history) = history.try_lock() {
+                    return Ok(Some(history.clone()));
+                }
+            }
+            // Wait without the turn lock, then recheck idle state before copying.
+            drop(history.lock().await);
         }
-        Ok(Some(history.lock().await.clone()))
     }
 
     pub async fn load_history(

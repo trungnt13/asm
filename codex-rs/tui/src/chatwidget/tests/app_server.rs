@@ -14,6 +14,10 @@ fn thread_settings_for_test(
     codex_app_server_protocol::ThreadSettingsUpdatedNotification {
         thread_id: thread_id.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: AskForApproval::OnRequest,
@@ -45,6 +49,10 @@ fn thread_settings_for_test(
 
 fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -686,6 +694,54 @@ async fn thread_settings_updated_updates_visible_state_without_transcript() {
     );
 
     assert_eq!(chat.current_model(), "gpt-5.4");
+    chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    chat.set_adaptive_reasoning_state(
+        /*enabled*/ true, /*revision*/ 1, /*error*/ None, /*failure_episode*/ 0,
+    );
+    chat.handle_server_notification(
+        ServerNotification::ThreadSettingsUpdated(thread_settings_for_test("gpt-5.4", thread_id)),
+        Some(ReplayKind::ResumeInitialMessages),
+    );
+    assert!(chat.adaptive_reasoning_enabled());
+    let effort = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+        thread_id: thread_id.to_string(),
+        turn_id: "captured-turn".to_string(),
+        reasoning_effort: Some(ReasoningEffortConfig::Low),
+        adaptive: true,
+    };
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(effort.clone()),
+        /*replay_kind*/ None,
+    );
+    let mut permissions_only = thread_settings_for_test("gpt-5.4", thread_id);
+    permissions_only.thread_settings.adaptive_reasoning_enabled = true;
+    permissions_only.thread_settings.adaptive_reasoning_revision = 1;
+    permissions_only.thread_settings.approvals_reviewer =
+        codex_app_server_protocol::ApprovalsReviewer::User;
+    chat.handle_server_notification(
+        ServerNotification::ThreadSettingsUpdated(permissions_only),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Reasoning),
+        Some("low·auto".to_string())
+    );
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(effort),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::Reasoning),
+        Some("low·auto".to_string())
+    );
+    assert_eq!(
+        chat.current_reasoning_effort(),
+        Some(ReasoningEffortConfig::High)
+    );
+    assert_eq!(
+        chat.config_ref().approvals_reviewer,
+        ApprovalsReviewer::User
+    );
 }
 
 #[tokio::test]

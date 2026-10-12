@@ -236,6 +236,43 @@ impl ChatWidget {
                 .or_else(|| self.config.model_reasoning_effort.clone())
                 .or(model_default_reasoning_effort),
         );
+        let captured_reasoning_label =
+            self.status_state
+                .captured_step_reasoning
+                .as_ref()
+                .map(|step| {
+                    let effort = step
+                        .reasoning_effort
+                        .as_ref()
+                        .map_or("none", ReasoningEffortConfig::as_str);
+                    let baseline = reasoning_effort_override
+                        .as_ref()
+                        .and_then(Option::as_ref)
+                        .map_or("none", ReasoningEffortConfig::as_str);
+                    let source = if self.adaptive_reasoning_enabled() {
+                        "adaptive"
+                    } else {
+                        "step"
+                    };
+                    format!("{effort} ({source}; baseline {baseline})")
+                });
+        let captured_reasoning_label = captured_reasoning_label.or_else(|| {
+            self.adaptive_reasoning_enabled().then(|| {
+                let effort = reasoning_effort_override
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .map_or("none", ReasoningEffortConfig::as_str);
+                format!("{effort} (adaptive; baseline {effort})")
+            })
+        });
+        let captured_reasoning_label = captured_reasoning_label.map(|label| {
+            match self.status_state.adaptive_reasoning_error {
+                Some(error) if self.adaptive_reasoning_enabled() => {
+                    format!("{label}; adaptive error: {error}")
+                }
+                Some(_) | None => label,
+            }
+        });
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
             .rate_limit_snapshots_by_limit_id
             .values()
@@ -261,6 +298,7 @@ impl ChatWidget {
             self.model_display_name(),
             collaboration_mode,
             reasoning_effort_override,
+            captured_reasoning_label,
             agents_summary,
             refreshing_rate_limits,
         );
