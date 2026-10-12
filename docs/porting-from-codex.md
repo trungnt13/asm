@@ -410,7 +410,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
 
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
 - `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only developer instructions, the short hidden user marker "New conversation starts here. Earlier messages are inherited reference history.", no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
-- `/chat [message]` shares Side lifecycle/restrictions but has independently editable developer and boundary instructions (currently identical to Side):
+- `/chat [message]` shares Side lifecycle and has independently editable developer and boundary instructions. Chat omits Side's extra explicit-mutation/escalation restriction; other developer clauses and the short boundary marker remain identical:
   - Top-level `chat_model`/`chat_reasoning` select initial settings; empty/omitted values inherit current parent selection.
   - Require model Fast tier/feature permission. Reject unavailable startup/submission, not downgrade. Reject automatic fallback without Fast.
   - Keep explicit Fast across view switches/catalog refresh/sync. Block Fast-toggle shortcut. Preserve Side/Btw/Parallel settings.

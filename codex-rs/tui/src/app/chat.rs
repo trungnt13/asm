@@ -17,6 +17,4 @@ This thread is ephemeral and cannot retain worktree attachments. Do not call cre
 
 Sub-agents are off-limits in this side conversation. Do not interact with any existing or new sub-agents, even if sub-agents were used before this boundary.
 
-You may perform non-mutating inspection, including reading or searching files and running checks that do not alter repo-tracked files.
-
-Do not modify files, source, git state, permissions, configuration, or any other workspace state unless the user explicitly requests that mutation in this side conversation. Do not request escalated permissions or broader sandbox access unless the user explicitly requests a mutation that requires it. If the user explicitly requests a mutation, keep it minimal, local to the request, and avoid disrupting the main thread."#;
+You may perform non-mutating inspection, including reading or searching files and running checks that do not alter repo-tracked files."#;
