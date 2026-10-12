@@ -45,12 +45,21 @@ struct ConfigSkillsCacheEntry {
     snapshot: Arc<OnceCell<HostSkillsSnapshot>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CwdSkillsCacheKey {
+    cwd: AbsolutePathBuf,
+    skill_config_rules: SkillConfigRules,
+    bundled_skills_enabled: bool,
+    file_system: FileSystemIdentity,
+}
+
 #[derive(Debug, Clone)]
 pub struct HostSkillsLoadInput {
     cwd: AbsolutePathBuf,
     effective_skill_roots: Vec<PluginSkillRoot>,
     config_layer_stack: ConfigLayerStack,
     plugin_skill_snapshots: Option<SkillRootSnapshots<PluginSkillRoot>>,
+    agent_role: Option<String>,
 }
 
 impl HostSkillsLoadInput {
@@ -64,7 +73,14 @@ impl HostSkillsLoadInput {
             effective_skill_roots,
             config_layer_stack,
             plugin_skill_snapshots: None,
+            agent_role: None,
         }
+    }
+
+    /// Uses this conversation's own role, not an ancestor's role, for skill visibility.
+    pub fn with_agent_role(mut self, agent_role: Option<String>) -> Self {
+        self.agent_role = agent_role;
+        self
     }
 
     /// Attaches plugin skill snapshots parsed during plugin loading, when available.
@@ -84,7 +100,7 @@ pub struct HostSkillsService {
     codex_home: AbsolutePathBuf,
     restriction_product: Option<Product>,
     extra_roots: RwLock<Vec<AbsolutePathBuf>>,
-    cache_by_cwd: RwLock<HashMap<AbsolutePathBuf, HostSkillsSnapshot>>,
+    cache_by_cwd: RwLock<HashMap<CwdSkillsCacheKey, HostSkillsSnapshot>>,
     cache_by_config: RwLock<VecDeque<ConfigSkillsCacheEntry>>,
     // Shared across cwds so root scheduling cannot multiply per-root I/O fanout.
     root_scan_slots: Arc<Semaphore>,
@@ -180,7 +196,8 @@ impl HostSkillsService {
         fs: Option<Arc<dyn ExecutorFileSystem>>,
     ) -> HostSkillsSnapshot {
         let roots = self.skill_roots_for_config(input, fs).await;
-        let skill_config_rules = skill_config_rules_from_stack(&input.config_layer_stack);
+        let skill_config_rules = skill_config_rules_from_stack(&input.config_layer_stack)
+            .for_agent_role(input.agent_role.as_deref());
         let cache_key = config_skills_cache_key(
             &roots,
             &skill_config_rules,
@@ -249,10 +266,20 @@ impl HostSkillsService {
             self.ensure_system_skills_installed();
         }
         let use_cwd_cache = fs.is_some();
-        let cache_snapshot_by_cwd = use_cwd_cache && input.effective_skill_roots.is_empty();
-        if cache_snapshot_by_cwd
+        let skill_config_rules = skill_config_rules_from_stack(&input.config_layer_stack)
+            .for_agent_role(input.agent_role.as_deref());
+        let cwd_cache_key = fs
+            .as_ref()
+            .filter(|_| input.effective_skill_roots.is_empty())
+            .map(|fs| CwdSkillsCacheKey {
+                cwd: input.cwd.clone(),
+                skill_config_rules: skill_config_rules.clone(),
+                bundled_skills_enabled,
+                file_system: FileSystemIdentity(Arc::downgrade(fs)),
+            });
+        if let Some(cache_key) = &cwd_cache_key
             && !force_reload
-            && let Some(snapshot) = self.cached_snapshot_for_cwd(&input.cwd)
+            && let Some(snapshot) = self.cached_snapshot_for_cwd(cache_key)
         {
             return snapshot;
         }
@@ -268,7 +295,6 @@ impl HostSkillsService {
         if !bundled_skills_enabled {
             roots.retain(|root| root.scope != SkillScope::System);
         }
-        let skill_config_rules = skill_config_rules_from_stack(&input.config_layer_stack);
         let snapshot = if use_cwd_cache {
             let cache_key = config_skills_cache_key(
                 &roots,
@@ -290,12 +316,12 @@ impl HostSkillsService {
                     .await,
             ))
         };
-        if cache_snapshot_by_cwd {
+        if let Some(cache_key) = cwd_cache_key {
             let mut cache = self
                 .cache_by_cwd
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            cache.insert(input.cwd.clone(), snapshot.clone());
+            cache.insert(cache_key, snapshot.clone());
         }
         snapshot
     }
@@ -395,10 +421,10 @@ impl HostSkillsService {
         info!("skills cache cleared ({cleared} entries)");
     }
 
-    fn cached_snapshot_for_cwd(&self, cwd: &AbsolutePathBuf) -> Option<HostSkillsSnapshot> {
+    fn cached_snapshot_for_cwd(&self, cache_key: &CwdSkillsCacheKey) -> Option<HostSkillsSnapshot> {
         match self.cache_by_cwd.read() {
-            Ok(cache) => cache.get(cwd).cloned(),
-            Err(err) => err.into_inner().get(cwd).cloned(),
+            Ok(cache) => cache.get(cache_key).cloned(),
+            Err(err) => err.into_inner().get(cache_key).cloned(),
         }
     }
 

@@ -32,6 +32,8 @@ use crate::init_state_db;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::session::SessionSettingsUpdate;
 use crate::session::step_context::StepContext;
+use crate::session::tests::install_reviewer_scoped_skills;
+use crate::session::tests::reviewer_skill_enablement;
 use crate::thread_manager::ForkSnapshot;
 use crate::thread_manager::StartThreadOptions;
 use crate::tools::handlers::multi_agents_common::thread_spawn_source;
@@ -5063,7 +5065,16 @@ async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
 /// Resume restores the child's saved metadata and roots even after its parent deselects an environment.
 #[tokio::test]
 async fn resume_thread_subagent_restores_stored_metadata() {
-    let (home, config) = test_config().await;
+    let (home, mut config) = test_config().await;
+    install_reviewer_scoped_skills(&mut config);
+    config.agent_roles.insert(
+        "reviewer".to_string(),
+        AgentRoleConfig {
+            description: None,
+            config_file: None,
+            nickname_candidates: None,
+        },
+    );
     let thread_store = Arc::new(InMemoryThreadStore::default());
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
     let manager = ThreadManager::new(
@@ -5110,7 +5121,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         .expect("start parent with roots");
     let parent_thread_id = parent.thread_id;
     let parent_thread = parent.thread;
-    let agent_path = AgentPath::from_string("/root/explorer".to_string())
+    let agent_path = AgentPath::from_string("/root/reviewer".to_string())
         .expect("test agent path should be valid");
 
     let child_thread_id = harness
@@ -5123,7 +5134,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
                 depth: 1,
                 agent_path: Some(agent_path.clone()),
                 agent_nickname: None,
-                agent_role: Some("explorer".to_string()),
+                agent_role: Some("reviewer".to_string()),
             })),
         )
         .await
@@ -5164,6 +5175,14 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         child_thread.session.services.selected_capability_roots,
         roots
     );
+    let original_turn = child_thread.session.new_default_turn().await;
+    let root_turn = parent_thread.session.new_default_turn().await;
+    assert_eq!(
+        original_turn.config.permissions,
+        root_turn.config.permissions
+    );
+    assert_eq!(reviewer_skill_enablement(&original_turn), [true; 2]);
+    assert_eq!(reviewer_skill_enablement(&root_turn), [false; 2]);
     let original_snapshot = child_thread.config_snapshot().await;
     let original_nickname = original_snapshot
         .session_source
@@ -5179,7 +5198,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
                 })
                 .await
                 && stored_thread.agent_nickname.is_some()
-                && stored_thread.agent_role.as_deref() == Some("explorer")
+                && stored_thread.agent_role.as_deref() == Some("reviewer")
                 && stored_thread.agent_path.as_deref() == Some(agent_path.as_str())
             {
                 break;
@@ -5268,6 +5287,11 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         child_turn.initial_environments.selected_capability_roots(),
         roots
     );
+    assert_eq!(
+        child_turn.config.permissions,
+        original_turn.config.permissions
+    );
+    assert_eq!(reviewer_skill_enablement(&child_turn), [true; 2]);
     let resumed_snapshot = resumed_thread.config_snapshot().await;
     let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: resumed_parent_thread_id,
@@ -5284,7 +5308,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
     assert_eq!(resumed_depth, 1);
     assert_eq!(resumed_agent_path, Some(agent_path));
     assert_eq!(resumed_nickname, Some(original_nickname));
-    assert_eq!(resumed_role, Some("explorer".to_string()));
+    assert_eq!(resumed_role, Some("reviewer".to_string()));
 
     let _ = harness
         .control

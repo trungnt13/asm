@@ -26,6 +26,10 @@ pub struct SkillConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub enabled: bool,
+    /// Limits visibility to the named agent roles without changing filesystem access.
+    /// Missing allows every role; an empty list allows none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_agent_roles: Option<Vec<String>>,
 }
 
 /// Skills required from one environment or plugin before inference.
@@ -88,6 +92,7 @@ pub enum SkillConfigRuleSelector {
 pub struct SkillConfigRule {
     pub selector: SkillConfigRuleSelector,
     pub enabled: bool,
+    pub allowed_agent_roles: Option<Vec<String>>,
 }
 
 /// Ordered effective skill enablement rules from configuration layers.
@@ -97,6 +102,57 @@ pub struct SkillConfigRules {
 }
 
 impl SkillConfigRules {
+    /// Resolves visibility before caching so roles with the same rules share snapshots.
+    /// Role restrictions apply after ordinary enablement rules.
+    pub fn for_agent_role(&self, agent_role: Option<&str>) -> Self {
+        let mut entries = Vec::with_capacity(self.entries.len());
+        let mut role_denies = Vec::new();
+        for entry in &self.entries {
+            entries.push(SkillConfigRule {
+                selector: entry.selector.clone(),
+                enabled: entry.enabled,
+                allowed_agent_roles: None,
+            });
+            if let Some(roles) = &entry.allowed_agent_roles
+                && !agent_role.is_some_and(|role| roles.iter().any(|allowed| allowed == role))
+            {
+                role_denies.push(SkillConfigRule {
+                    selector: entry.selector.clone(),
+                    enabled: false,
+                    allowed_agent_roles: None,
+                });
+            }
+        }
+        for deny in role_denies {
+            let index = entries
+                .iter()
+                .position(|entry| entry.selector == deny.selector)
+                .expect("role scope has an ordinary rule");
+            let later_enable_can_overlap = entries[index + 1..].iter().any(|entry| {
+                entry.enabled
+                    && match (&entry.selector, &deny.selector) {
+                        (SkillConfigRuleSelector::Name(a), SkillConfigRuleSelector::Name(b)) => {
+                            a == b
+                        }
+                        (SkillConfigRuleSelector::Path(a), SkillConfigRuleSelector::Path(b)) => {
+                            a == b
+                        }
+                        (SkillConfigRuleSelector::Name(_), SkillConfigRuleSelector::Path(_))
+                        | (SkillConfigRuleSelector::Path(_), SkillConfigRuleSelector::Name(_)) => {
+                            true
+                        }
+                    }
+            });
+            if later_enable_can_overlap {
+                entries.remove(index);
+                entries.push(deny);
+            } else {
+                entries[index].enabled = false;
+            }
+        }
+        Self { entries }
+    }
+
     /// Applies rules in order; later rules override earlier rules for matching skills.
     ///
     /// Explicit path selectors remain effective even when no current skill matches.
@@ -187,6 +243,7 @@ pub fn skill_config_rules_from_stack(config_layer_stack: &ConfigLayerStack) -> S
             entries.push(SkillConfigRule {
                 selector,
                 enabled: entry.enabled,
+                allowed_agent_roles: entry.allowed_agent_roles,
             });
         }
     }
