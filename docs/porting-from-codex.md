@@ -408,6 +408,8 @@ For all three visibility/tool settings above, do not update setup-managed profil
 
 ### Saved forks, upstream sides, and parallel conversations
 
+Side, Chat, and Parallel developer instructions do not prohibit `create_worktree` or direct worktree requests back to main. This does not change temporary-thread lifecycle or attachment enforcement.
+
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
 - `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only developer instructions, the short hidden user marker "New conversation starts here. Earlier messages are inherited reference history.", no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
 - `/chat [message]` shares Side lifecycle and has independently editable developer and boundary instructions. Chat omits Side's lightweight-exploration purpose, non-mutating-inspection clause, and extra explicit-mutation/escalation restriction. Other developer clauses and the short boundary marker remain identical:
