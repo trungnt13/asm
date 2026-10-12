@@ -552,6 +552,10 @@ impl ConfigDocument {
                 }
             };
 
+            *config_item = match std::mem::take(config_item).into_array_of_tables() {
+                Ok(overrides) => TomlItem::ArrayOfTables(overrides),
+                Err(item) => item,
+            };
             if !matches!(config_item, TomlItem::ArrayOfTables(_)) {
                 if enabled {
                     return false;
