@@ -665,6 +665,7 @@ async fn warm_plugins_and_skills_for_session_init(
         effective_skill_roots,
         turn_environments,
     );
+    let skills_input = skills_input.with_agent_role(session_source.get_agent_role());
     skills_service
         .snapshot_for_config(&skills_input, fs)
         .await
