@@ -256,6 +256,10 @@ mod reasoning_effort;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
+mod adaptive_reasoning;
+mod adaptive_reasoning_evidence;
+mod adaptive_reasoning_task;
+mod decision_log;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -2119,9 +2123,18 @@ impl Session {
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         let state = self.state.lock().await;
-        state
+        let mut snapshot = state
             .session_configuration
-            .thread_config_snapshot(state.session_configuration.environments.clone())
+            .thread_config_snapshot(state.session_configuration.environments.clone());
+        let adaptive = self.adaptive_reasoning_state(
+            snapshot.adaptive_reasoning_enabled,
+            snapshot.adaptive_reasoning_revision,
+        );
+        snapshot.adaptive_reasoning_enabled = adaptive.enabled;
+        snapshot.adaptive_reasoning_revision = adaptive.revision;
+        snapshot.adaptive_reasoning_error = adaptive.error;
+        snapshot.adaptive_reasoning_failure_episode = adaptive.failure_episode;
+        snapshot
     }
 
     pub(crate) async fn configured_environment_selections(&self) -> Vec<TurnEnvironmentSelection> {
@@ -3737,6 +3750,17 @@ impl Session {
                             message_order.unwrap_or_else(|| state.history.reserve_input_order())
                         });
                 }
+            }
+            if items.iter().any(|envelope| {
+                matches!(&envelope.item,
+                ResponseItem::Message { role, .. } if role == "assistant")
+                    || matches!(
+                        &envelope.item,
+                        ResponseItem::FunctionCallOutput { .. }
+                            | ResponseItem::CustomToolCallOutput { .. }
+                    )
+            }) {
+                self.invalidate_adaptive_reasoning();
             }
             state
                 .history

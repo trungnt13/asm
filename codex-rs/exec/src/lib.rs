@@ -1148,6 +1148,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             response.active_permission_profile.map(Into::into),
             response.cwd,
             response.reasoning_effort,
+            response.adaptive_reasoning_enabled,
+            response.adaptive_reasoning_revision,
+            response.adaptive_reasoning_error,
+            response.adaptive_reasoning_failure_episode,
         )
         .map_err(anyhow::Error::msg)?;
         daybreak_enabled = daybreak_override
@@ -1578,6 +1582,10 @@ fn session_configured_from_thread_start_response(
         response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort.clone(),
+        response.adaptive_reasoning_enabled,
+        response.adaptive_reasoning_revision,
+        response.adaptive_reasoning_error,
+        response.adaptive_reasoning_failure_episode,
     )
 }
 
@@ -1602,6 +1610,10 @@ fn session_configured_from_thread_resume_response(
         response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort.clone(),
+        response.adaptive_reasoning_enabled,
+        response.adaptive_reasoning_revision,
+        response.adaptive_reasoning_error,
+        response.adaptive_reasoning_failure_episode,
     )
 }
 
@@ -1635,6 +1647,10 @@ fn session_configured_from_thread_response(
     active_permission_profile: Option<codex_protocol::models::ActivePermissionProfile>,
     cwd: AbsolutePathBuf,
     reasoning_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
+    adaptive_reasoning_enabled: bool,
+    adaptive_reasoning_revision: u64,
+    adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
+    adaptive_reasoning_failure_episode: u64,
 ) -> Result<SessionConfiguredEvent, String> {
     let session_id = SessionId::from_string(session_id)
         .map_err(|err| format!("session id `{session_id}` is invalid: {err}"))?;
@@ -1665,6 +1681,10 @@ fn session_configured_from_thread_response(
         active_permission_profile,
         cwd,
         reasoning_effort,
+        adaptive_reasoning_enabled,
+        adaptive_reasoning_revision,
+        adaptive_reasoning_error,
+        adaptive_reasoning_failure_episode,
         network_proxy: None,
         rollout_path,
     })

@@ -1493,6 +1493,7 @@ async fn replayed_turn_complete_submits_restored_queued_follow_up() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -1500,6 +1501,8 @@ async fn replayed_turn_complete_submits_restored_queued_follow_up() {
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -1559,6 +1562,7 @@ async fn replay_only_thread_keeps_restored_queue_visible() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -1566,6 +1570,8 @@ async fn replay_only_thread_keeps_restored_queue_visible() {
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ false,
@@ -1613,11 +1619,14 @@ async fn replay_thread_snapshot_keeps_queue_when_running_state_only_comes_from_s
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
             events: vec![],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -1637,7 +1646,10 @@ async fn replay_thread_snapshot_keeps_queue_when_running_state_only_comes_from_s
 async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() {
     let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
-    let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    let mut session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    session.adaptive_reasoning_enabled = true;
+    session.reasoning_effort = Some(ReasoningEffortConfig::High);
+    app.chat_widget.local_settings.tui.status_line = Some(vec!["reasoning".into()]);
     app.chat_widget.handle_thread_session(session.clone());
     app.chat_widget.handle_server_notification(
         turn_started_notification(thread_id, "turn-1"),
@@ -1647,33 +1659,55 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() 
         agent_message_delta_notification(thread_id, "turn-1", "agent-1", "streaming"),
         /*replay_kind*/ None,
     );
+    let captured = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+        thread_id: thread_id.to_string(),
+        turn_id: "turn-1".into(),
+        reasoning_effort: Some(ReasoningEffortConfig::Low),
+        adaptive: true,
+    };
+    app.chat_widget.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(captured.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
     app.chat_widget
         .apply_external_edit("queued follow-up".to_string());
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    let input_state = app
-        .chat_widget
-        .capture_thread_input_state()
-        .expect("expected queued follow-up state");
+    assert!(app.chat_widget.capture_thread_input_state().is_some());
+
+    app.active_thread_id = Some(thread_id);
+    {
+        let channel = app.ensure_thread_channel(thread_id);
+        let mut store = channel.store.lock().await;
+        store.set_session(
+            session.clone(),
+            vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+        );
+    }
+    app.store_active_thread_receiver().await;
+    let mut snapshot = {
+        let channel = app
+            .thread_event_channels
+            .get(&thread_id)
+            .expect("live thread channel");
+        let mut store = channel.store.lock().await;
+        // The runtime capture remains after its notification is no longer in the replay buffer.
+        store.rebase_buffer_after_session_refresh();
+        assert_eq!(store.reasoning_state.captured_step, Some(captured.clone()));
+        store.snapshot()
+    };
 
     let (chat_widget, _app_event_tx, _rx, mut new_op_rx) =
         make_chatwidget_manual_with_sender().await;
-    app.chat_widget = chat_widget;
+    app.replace_chat_widget(chat_widget);
+    app.chat_widget.local_settings.tui.status_line = Some(vec!["reasoning".into()]);
     app.chat_widget.handle_thread_session(session.clone());
     while new_op_rx.try_recv().is_ok() {}
 
-    app.replay_thread_snapshot(
-        ThreadEventSnapshot {
-            output_tps: None,
-            delegated_turns: Vec::new(),
-            session: None,
-            turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
-            events: Vec::new(),
-            active_reasoning_item: None,
-            input_state: Some(input_state),
-        },
-        /*resume_restored_queue*/ true,
-    );
+    // This widget is already attached; replay must not issue session startup requests again.
+    snapshot.session = None;
+    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
 
     assert_eq!(
         app.chat_widget.queued_user_message_texts(),
@@ -1683,31 +1717,111 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() 
         new_op_rx.try_recv().is_err(),
         "restored queue should stay queued while replayed turn is still running"
     );
+    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
+    let other = test_thread_session(ThreadId::new(), test_path_buf("/tmp/other"));
+    app.chat_widget.handle_thread_session(other);
+    assert!(!app.chat_widget.status_line_text().unwrap().contains("low"));
+    let channel = app
+        .thread_event_channels
+        .get(&thread_id)
+        .expect("live thread channel");
+    let mut store = channel.store.lock().await;
+    store.push_notification(ServerNotification::ReasoningEffortUpdated(captured.clone()));
+    store.push_notification(agent_message_delta_notification(
+        thread_id, "turn-1", "agent-1", "latest",
+    ));
+    store.set_turns(vec![test_turn(
+        "turn-1",
+        TurnStatus::InProgress,
+        Vec::new(),
+    )]);
+    store.rebase_buffer_after_session_refresh();
+    let snapshot = store.snapshot();
+    drop(store);
+    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
+
+    // A manual setting must survive another reconstruction without resurrecting the old capture.
+    app.chat_widget
+        .set_reasoning_effort(Some(ReasoningEffortConfig::High));
+    app.store_active_thread_receiver().await;
+    let channel = app
+        .thread_event_channels
+        .get(&thread_id)
+        .expect("live thread channel");
+    let mut store = channel.store.lock().await;
+    store.push_notification(ServerNotification::ReasoningEffortUpdated(captured));
+    assert!(store.reasoning_state.captured_step.is_none());
+    let snapshot = store.snapshot();
+    drop(store);
+    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+    assert_eq!(app.chat_widget.status_line_text(), Some("hig·auto".into()));
+    let channel = app
+        .thread_event_channels
+        .get(&thread_id)
+        .expect("live thread channel");
+    let mut store = channel.store.lock().await;
+    store.set_active_turn_id("turn-2".into());
+    assert!(store.reasoning_state.captured_step.is_none());
+    assert!(store.reasoning_state.suppressed_turn_id.is_none());
 }
 
 #[tokio::test]
 async fn replay_thread_snapshot_in_progress_turn_restores_running_state_without_input_state() {
     let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
-    let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    let mut session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    session.adaptive_reasoning_enabled = true;
+    session.reasoning_effort = Some(ReasoningEffortConfig::High);
     let (chat_widget, _app_event_tx, _rx, _new_op_rx) =
         boxed_future!(make_chatwidget_manual_with_sender()).await;
-    app.chat_widget = chat_widget;
-    app.chat_widget.handle_thread_session(session);
-
-    app.replay_thread_snapshot(
-        ThreadEventSnapshot {
-            output_tps: None,
-            delegated_turns: Vec::new(),
-            session: None,
-            turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
-            events: Vec::new(),
-            active_reasoning_item: None,
-            input_state: None,
-        },
-        /*resume_restored_queue*/ false,
+    app.replace_chat_widget(chat_widget);
+    app.chat_widget.local_settings.tui.status_line = Some(vec!["reasoning".into()]);
+    let mut store = ThreadEventStore::new_with_session(
+        /*capacity*/ 1,
+        session,
+        vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
     );
+    app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
+    assert!(app.chat_widget.is_task_running_for_test());
+    // The next snapshot retains older history but evicts the current turn-start event.
+    store.set_turns(vec![test_turn(
+        "old-turn",
+        TurnStatus::Completed,
+        Vec::new(),
+    )]);
+    store.push_notification(turn_started_notification(thread_id, "turn-1"));
+    store.push_notification(ServerNotification::ReasoningEffortUpdated(
+        codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-1".into(),
+            reasoning_effort: Some(ReasoningEffortConfig::Low),
+            adaptive: true,
+        },
+    ));
+    store.push_notification(agent_message_delta_notification(
+        thread_id,
+        "turn-1",
+        "agent-1",
+        "streaming",
+    ));
+    assert!(store.buffer.iter().all(|event| !matches!(event,
+    ThreadBufferedEvent::Notification(notification) if matches!(notification.as_ref(),
+        ServerNotification::TurnStarted(_) | ServerNotification::ReasoningEffortUpdated(_)
+    ))));
 
+    app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
+
+    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
+    assert_eq!(
+        app.chat_widget.capture_reasoning_state().captured_step,
+        store.reasoning_state.captured_step
+    );
+    app.chat_widget.handle_server_notification(
+        turn_started_notification(thread_id, "turn-2"),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(app.chat_widget.status_line_text(), Some("hig·auto".into()));
     assert!(app.chat_widget.is_task_running_for_test());
 }
 
@@ -1754,6 +1868,7 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -1783,6 +1898,8 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
                 ))),
             ],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -1913,11 +2030,14 @@ async fn replay_thread_snapshot_restores_collaboration_mode_for_draft_submit() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
             events: vec![],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -2001,11 +2121,14 @@ async fn replay_thread_snapshot_restores_collaboration_mode_without_input() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
             events: vec![],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -2062,6 +2185,7 @@ async fn replayed_interrupted_turn_restores_queued_input_to_composer() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -2069,6 +2193,8 @@ async fn replayed_interrupted_turn_restores_queued_input_to_composer() {
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Interrupted),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -3252,6 +3378,59 @@ async fn select_uncached_agent_thread_still_refreshes_liveness() -> Result<()> {
     assert_eq!(app.active_thread_id, None);
     assert_eq!(app.agent_navigation.get(&thread_id), None);
     app_server.shutdown().await?;
+    // A cached inferred child still requires an authoritative resume before selection.
+    let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
+    let (mut server, requests, proxy) =
+        session_lifecycle_requests::start_recording_app_server_with_history(
+            &app.config,
+            session_lifecycle_requests::HistoryCapabilities::ResumeFails,
+            /*blocked_thread_list*/ None,
+            /*failed_thread_name*/ None,
+            crate::app_server_session::ThreadParamsMode::Embedded,
+            LoaderOverrides::without_managed_config_for_tests(),
+        )
+        .await?;
+    let primary = server.start_thread(&app.config).await?;
+    let primary_id = primary.session.thread_id;
+    app.enqueue_primary_thread_session(primary.session, primary.turns)
+        .await?;
+    let child = server.start_thread(&app.config).await?;
+    let child_id = child.session.thread_id;
+    let channel =
+        ThreadEventChannel::new_with_session(/*capacity*/ 4, child.session, child.turns);
+    channel.store.lock().await.inferred_session = true;
+    app.thread_event_channels.insert(child_id, channel);
+    while events.try_recv().is_ok() {}
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, child_id)).await?;
+    assert_eq!(app.active_thread_id, Some(primary_id));
+    assert_eq!(app.chat_widget.thread_id(), Some(primary_id));
+    assert!(app.active_thread_rx.is_some());
+    let child_channel = app
+        .thread_event_channels
+        .get(&child_id)
+        .expect("child channel retained");
+    assert!(child_channel.receiver.is_some());
+    let child_store = child_channel.store.lock().await;
+    assert!(!child_store.active);
+    assert!(child_store.inferred_session);
+    drop(child_store);
+    let primary_store = app
+        .thread_event_channels
+        .get(&primary_id)
+        .expect("primary channel retained")
+        .store
+        .lock()
+        .await;
+    assert!(primary_store.active);
+    drop(primary_store);
+    assert_eq!(
+        session_lifecycle_requests::recorded_params(&requests, "thread/resume").len(),
+        1
+    );
+    let error = next_history_message(&mut events).replace(&child_id.to_string(), "CHILD");
+    assert_snapshot!(error, @"■ Failed to load settings for agent thread CHILD.");
+    server.shutdown().await?;
+    proxy.abort();
     Ok(())
 }
 
@@ -4211,6 +4390,7 @@ async fn replay_snapshot_with_pending_request_retains_warnings_without_covering_
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(thread_id, test_path_buf("/tmp/main"))),
             turns: Vec::new(),
@@ -4229,6 +4409,8 @@ async fn replay_snapshot_with_pending_request_retains_warnings_without_covering_
                 ))),
             ],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -4614,6 +4796,7 @@ async fn replayed_file_change_approval_recovers_snapshot_changes() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(thread_id, cwd.clone().into_path_buf())),
             turns: vec![test_turn(
@@ -4643,6 +4826,8 @@ async fn replayed_file_change_approval_recovers_snapshot_changes() {
                 },
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -4863,6 +5048,10 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_cwd = test_path_buf("/tmp/main").abs();
     let shared_root = test_path_buf("/tmp/shared").abs();
     let primary_session = ThreadSessionState {
+        adaptive_reasoning_enabled: true,
+        adaptive_reasoning_revision: 9,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         daybreak_enabled: false,
         windows_sandbox_host: WindowsSandboxHost::Local,
         approval_policy: AskForApproval::OnRequest,
@@ -4917,7 +5106,15 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
                 path: Some(rollout_path.clone()),
                 cwd: test_path_buf("/tmp/agent").abs(),
                 cli_version: "0.0.0".to_string(),
-                source: codex_app_server_protocol::SessionSource::Unknown,
+                source: codex_app_server_protocol::SessionSource::SubAgent(
+                    codex_protocol::protocol::SubAgentSource::ThreadSpawn {
+                        parent_thread_id: main_thread_id,
+                        depth: 1,
+                        agent_path: None,
+                        agent_nickname: Some("Robie".to_string()),
+                        agent_role: Some("explorer".to_string()),
+                    },
+                ),
                 can_accept_direct_input: None,
                 thread_source: None,
                 agent_nickname: Some("Robie".to_string()),
@@ -4938,7 +5135,61 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         .lock()
         .await;
     let session = store.session.clone().expect("inferred session");
+    let snapshot = store.snapshot();
     drop(store);
+    assert_eq!(
+        (
+            session.adaptive_reasoning_enabled,
+            session.adaptive_reasoning_revision
+        ),
+        (false, 0)
+    );
+    assert!(snapshot.inferred_session);
+    assert!(app.should_refresh_snapshot_session(
+        agent_thread_id,
+        /*is_replay_only*/ false,
+        &snapshot
+    ));
+    assert!(!app.should_refresh_snapshot_session(
+        agent_thread_id,
+        /*is_replay_only*/ true,
+        &snapshot
+    ));
+    let mut authoritative_snapshot = snapshot.clone();
+    authoritative_snapshot.inferred_session = false;
+    assert!(!app.should_refresh_snapshot_session(
+        agent_thread_id,
+        /*is_replay_only*/ false,
+        &authoritative_snapshot
+    ));
+    // Either spawn-time mode must come from the child's authoritative response, not its parent.
+    for enabled in [false, true] {
+        let authoritative = ThreadSessionState {
+            adaptive_reasoning_enabled: enabled,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
+            ..session.clone()
+        };
+        let mut store = app
+            .thread_event_channels
+            .get(&agent_thread_id)
+            .expect("agent thread channel")
+            .store
+            .lock()
+            .await;
+        store.set_session(authoritative, Vec::new());
+        let installed = store.snapshot();
+        assert!(!installed.inferred_session);
+        assert_eq!(
+            installed
+                .session
+                .as_ref()
+                .expect("authoritative session")
+                .adaptive_reasoning_enabled,
+            enabled
+        );
+    }
 
     assert_eq!(session.thread_id, agent_thread_id);
     assert!(session.daybreak_enabled);
@@ -5648,6 +5899,7 @@ async fn side_thread_snapshot_does_not_refresh_from_fork_history() {
 
     let snapshot = ThreadEventSnapshot {
         output_tps: None,
+        inferred_session: true,
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
             rollout_path: None,
@@ -5656,6 +5908,8 @@ async fn side_thread_snapshot_does_not_refresh_from_fork_history() {
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     };
 
@@ -5679,6 +5933,7 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
 
     let snapshot = ThreadEventSnapshot {
         output_tps: None,
+        inferred_session: false,
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
             daybreak_enabled: false,
@@ -5690,6 +5945,8 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     };
 
@@ -5865,6 +6122,7 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 side_thread_id,
@@ -5873,6 +6131,8 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
             turns: Vec::new(),
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -6234,6 +6494,10 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
     };
     let make_header = |is_first| -> Arc<dyn HistoryCell> {
         let session = ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -6863,6 +7127,10 @@ async fn replace_goal_confirmation_snapshot() {
 
 pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
+        adaptive_reasoning_enabled: false,
+        adaptive_reasoning_revision: 0,
+        adaptive_reasoning_error: None,
+        adaptive_reasoning_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -6998,6 +7266,7 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
         next_thread_id,
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 next_thread_id,
@@ -7017,6 +7286,8 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
             )],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -7969,6 +8240,10 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     let make_header = |is_first| {
         let session = ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -8043,6 +8318,10 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
     let base_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -9102,6 +9381,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 thread_id,
@@ -9159,6 +9439,8 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
             ],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -9225,6 +9507,7 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
             output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -9250,6 +9533,8 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
                 ),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -9303,11 +9588,14 @@ async fn refreshed_snapshot_session_persists_resumed_turns() {
     };
     let mut snapshot = ThreadEventSnapshot {
         output_tps: None,
+        inferred_session: false,
         delegated_turns: Vec::new(),
         session: Some(initial_session),
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     };
 
@@ -9353,6 +9641,10 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
 
         let thread_id = ThreadId::new();
         let event = crate::session_state::ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -10036,6 +10328,12 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
     let notification = ThreadSettingsUpdatedNotification {
         thread_id: inactive_thread_id.to_string(),
         thread_settings: ThreadSettings {
+            adaptive_reasoning_enabled: true,
+            adaptive_reasoning_revision: 1,
+            adaptive_reasoning_error: Some(
+                codex_protocol::protocol::AdaptiveReasoningError::Timeout,
+            ),
+            adaptive_reasoning_failure_episode: 1,
             disabled_plugin_ids: Vec::new(),
             cwd: test_absolute_path("/tmp/thread-settings"),
             approval_policy: AskForApproval::OnRequest,
@@ -10074,12 +10372,20 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
         .clone()
         .expect("inactive session should remain cached");
     assert_eq!(cached_session.model, "gpt-test");
+    assert!(cached_session.adaptive_reasoning_enabled);
+    assert_eq!(
+        cached_session.adaptive_reasoning_error,
+        Some(codex_protocol::protocol::AdaptiveReasoningError::Timeout)
+    );
+    assert_eq!(cached_session.adaptive_reasoning_failure_episode, 1);
+    assert!(!app.chat_widget.adaptive_reasoning_enabled());
     assert_eq!(
         cached_session.collaboration_mode.as_deref(),
         Some(&collaboration_mode)
     );
 
     app.chat_widget.handle_thread_session(cached_session);
+    assert!(app.chat_widget.adaptive_reasoning_enabled());
     assert_eq!(
         app.chat_widget.active_collaboration_mode_kind(),
         ModeKind::Plan
@@ -10101,6 +10407,10 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     let thread_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            adaptive_reasoning_enabled: false,
+            adaptive_reasoning_revision: 0,
+            adaptive_reasoning_error: None,
+            adaptive_reasoning_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
