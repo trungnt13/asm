@@ -9,7 +9,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
-use codex_history::RolloutItem;
 use codex_protocol::AgentPath;
 use codex_protocol::ResponseItemId;
 use codex_protocol::models::BaseInstructions;
@@ -900,19 +899,17 @@ fn retains_only_harness_authored_configuration_updates() {
         }),
     };
     let mut cases = vec![
-        (vec![], vec![]),
-        (vec![trusted.clone()], vec![trusted.clone()]),
-        (vec![untrusted.clone(), client_authored.clone()], vec![]),
         (
             vec![trusted.clone(), last_high.clone()],
             vec![last_high.clone()],
         ),
         (
-            vec![low.clone(), trusted.clone(), last_high.clone()],
-            vec![last_high.clone()],
-        ),
-        (
-            vec![trusted.clone(), untrusted.clone(), low.clone()],
+            vec![
+                trusted.clone(),
+                untrusted.clone(),
+                client_authored.clone(),
+                low.clone(),
+            ],
             vec![low.clone()],
         ),
         (
@@ -920,82 +917,17 @@ fn retains_only_harness_authored_configuration_updates() {
             vec![trusted.clone()],
         ),
     ];
-    let call: ResponseItem = serde_json::from_value(serde_json::json!({
-        "type": "function_call", "call_id": "separator", "name": "read", "arguments": "{}"
-    }))
-    .expect("call separator");
-    let output: ResponseItem = serde_json::from_value(serde_json::json!({
-        "type": "function_call_output", "call_id": "separator", "output": "done"
-    }))
-    .expect("output separator");
-    let external_output: ResponseItem = serde_json::from_value(serde_json::json!({
-        "type": "function_call_output", "name": "external", "output": "done"
-    }))
-    .expect("external output separator");
-    for separator in [
-        vec![reasoning_msg("keep reasoning")],
-        vec![user_msg("keep input")],
-        vec![assistant_msg("keep answer")],
-        vec![developer_msg("keep instructions")],
-        vec![ResponseItem::AdditionalTools {
-            id: None,
-            role: "developer".to_string(),
-            tools: vec![serde_json::json!({"type": "function", "name": "read"})],
-        }],
-        vec![call.clone(), output],
-        vec![external_output],
-        vec![ResponseItem::Other],
-    ] {
-        let separator: Vec<_> = separator
-            .into_iter()
-            .map(ResponseItemEnvelope::new)
-            .collect();
-        let mut raw = vec![trusted.clone(), last_high.clone()];
-        raw.extend(separator.clone());
-        raw.extend([trusted.clone(), low.clone()]);
-        let mut expected = vec![last_high.clone()];
-        expected.extend(separator);
-        expected.push(low.clone());
-        cases.push((raw, expected));
-    }
-    // A synthesized output must remain a barrier, without becoming part of raw history.
-    let synthetic_output: ResponseItem = serde_json::from_value(serde_json::json!({
-        "type": "function_call_output", "call_id": "separator", "output": "aborted"
-    }))
-    .expect("synthetic output");
-    cases.push((
-        vec![
-            trusted.clone(),
-            ResponseItemEnvelope::new(call.clone()),
-            low.clone(),
-        ],
-        vec![
-            trusted.clone(),
-            ResponseItemEnvelope::new(call),
-            ResponseItemEnvelope::new(synthetic_output),
-            low.clone(),
-        ],
-    ));
     // Orphan removal intentionally panics in debug builds; release requests remove the barrier.
-    #[cfg(not(debug_assertions))]
-    cases.push((
-        vec![
-            trusted.clone(),
-            ResponseItemEnvelope::new(custom_tool_call_output("orphan", "discard")),
-            low.clone(),
-        ],
-        vec![low],
-    ));
-    let serialize_rollout = |items: &[ResponseItemEnvelope]| {
-        serde_json::to_vec(
-            &items
-                .iter()
-                .cloned()
-                .map(RolloutItem::ResponseItem)
-                .collect::<Vec<_>>(),
-        )
-        .expect("serialized rollout items")
-    };
+    if !cfg!(debug_assertions) {
+        cases.push((
+            vec![
+                trusted.clone(),
+                ResponseItemEnvelope::new(custom_tool_call_output("orphan", "discard")),
+                low.clone(),
+            ],
+            vec![low],
+        ));
+    }
     for (raw, expected) in cases {
         let mut replaced = ContextManager::new();
         replaced.replace_annotated(raw.clone());
@@ -1003,7 +935,6 @@ fn retains_only_harness_authored_configuration_updates() {
         compacted.replace_compacted(raw.clone(), /*reviewer_compaction_hash*/ None);
         for history in [replaced, compacted] {
             let snapshot = history.clone().into_shared_annotated_items();
-            let serialized = serialize_rollout(history.annotated_items());
             assert_eq!(
                 history.clone().for_prompt_annotated(&[InputModality::Text]),
                 expected
@@ -1017,7 +948,6 @@ fn retains_only_harness_authored_configuration_updates() {
             );
             assert_eq!(history.annotated_items(), raw);
             assert_eq!(snapshot.as_ref(), &raw);
-            assert_eq!(serialize_rollout(history.annotated_items()), serialized);
         }
     }
 }

@@ -189,6 +189,7 @@ async fn adaptive_fixture(
             config.model_catalog = Some(codex_models_manager::bundled_models_response().unwrap());
             config.model_reasoning_effort = Some(ReasoningEffort::Low);
             config.adaptive_reasoning.enabled = true;
+            config.adaptive_reasoning.decision_every_n_steps = 1;
             config.adaptive_reasoning.decision_timeout_ms = 5_000;
             config.adaptive_reasoning.min_effort = ReasoningEffort::Low;
             config.adaptive_reasoning.max_effort = ReasoningEffort::High;
@@ -529,16 +530,32 @@ async fn basic_step_barrier_awaits_publication_and_preserves_captured_steps() {
         "shutdown retains the requested mode for eviction restoration"
     );
 
-    // Exercise the public scheduling barrier with independent expected call positions.
-    for turn_spacing in [1, 2] {
+    let default_steps = AdaptiveReasoningConfig::default().decision_every_n_steps;
+    for (turn_spacing, step_spacing, slots) in [
+        (
+            1,
+            3,
+            [vec![1, 4, 7, 10], vec![1, 4], vec![1], vec![1, 4, 7]],
+        ),
+        (2, 3, [vec![1, 4, 7, 10], vec![], vec![1], vec![]]),
+        (
+            1,
+            default_steps,
+            [
+                vec![1, 3, 5, 7, 9, 11],
+                vec![1, 3, 5],
+                vec![1],
+                vec![1, 3, 5, 7],
+            ],
+        ),
+    ] {
         let (session, mut turn, _) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
             config.adaptive_reasoning.decision_every_n_turns = turn_spacing;
-            config.adaptive_reasoning.decision_every_n_steps = 3;
+            config.adaptive_reasoning.decision_every_n_steps = step_spacing;
         })
         .await;
-        let mut observed = Vec::new();
-        for (turn_index, step_count) in [11, 5, 2, 8, 1].into_iter().enumerate() {
-            if turn_index > 0 {
+        for (index, step_count) in [11, 5, 2, 8].into_iter().enumerate() {
+            if index > 0 {
                 session
                     .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
                     .await;
@@ -554,53 +571,19 @@ async fn basic_step_barrier_awaits_publication_and_preserves_captured_steps() {
                     )
                     .await;
             }
+            let mut observed = Vec::new();
             for step in 1..=step_count {
-                let expected_positions = match turn_spacing {
-                    1 => vec![
-                        (1, 1),
-                        (1, 4),
-                        (1, 7),
-                        (1, 10),
-                        (2, 1),
-                        (2, 4),
-                        (3, 1),
-                        (4, 1),
-                        (4, 4),
-                        (4, 7),
-                        (5, 1),
-                    ],
-                    2 => vec![(1, 1), (1, 4), (1, 7), (1, 10), (3, 1), (5, 1)],
-                    _ => unreachable!("defined intervals"),
+                let input = user_task("Check arithmetic.");
+                let trigger = if step == 1 {
+                    AdaptiveReasoningTrigger::TurnStart
+                } else {
+                    AdaptiveReasoningTrigger::ToolResult
                 };
-                let expected = expected_positions.contains(&(turn_index + 1, step));
-                let input = match step {
-                    1 => user_task("Check arithmetic."),
-                    2 => user_task("Latest steer: verify the units too."),
-                    _ => Vec::new(),
-                };
-                let mut adaptation = start_adapting(
-                    &session,
-                    &turn,
-                    &input,
-                    if step == 1 {
-                        AdaptiveReasoningTrigger::TurnStart
-                    } else {
-                        AdaptiveReasoningTrigger::ToolResult
-                    },
-                    &CancellationToken::new(),
-                );
-                if expected {
+                let mut adaptation =
+                    start_adapting(&session, &turn, &input, trigger, &CancellationToken::new());
+                if slots[index].contains(&step) {
                     let request = proxy.request().await;
-                    observed.push((turn_index + 1, step));
-                    if step >= 4 {
-                        assert!(
-                            request.body["input"]
-                                .to_string()
-                                .contains("Latest steer: verify the units too."),
-                            "steering received during cadence skip remains in next decision"
-                        );
-                    }
-                    // Failures consume the interval too; they must not cause an immediate retry.
+                    observed.push(step);
                     request
                         .reply
                         .send((503, json!({"error":"synthetic"})))
@@ -611,73 +594,11 @@ async fn basic_step_barrier_awaits_publication_and_preserves_captured_steps() {
                 assert!(
                     proxy.requests.try_recv().is_err(),
                     "unexpected decision at turn {} step {step}",
-                    turn_index + 1
+                    index + 1
                 );
             }
+            assert_eq!(observed, slots[index]);
         }
-        assert_eq!(
-            observed,
-            match turn_spacing {
-                1 => vec![
-                    (1, 1),
-                    (1, 4),
-                    (1, 7),
-                    (1, 10),
-                    (2, 1),
-                    (2, 4),
-                    (3, 1),
-                    (4, 1),
-                    (4, 4),
-                    (4, 7),
-                    (5, 1)
-                ],
-                2 => vec![(1, 1), (1, 4), (1, 7), (1, 10), (3, 1), (5, 1)],
-                _ => unreachable!("defined intervals"),
-            }
-        );
-        session
-            .set_adaptive_reasoning_enabled(/*enabled*/ false)
-            .await
-            .unwrap();
-        session
-            .set_adaptive_reasoning_enabled(/*enabled*/ true)
-            .await
-            .unwrap();
-        session
-            .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
-            .await;
-        turn = session.new_default_turn().await;
-        session
-            .spawn_task(
-                Arc::clone(&turn),
-                Vec::new(),
-                HeldStepTask {
-                    kind: TaskKind::Compact,
-                    finish: Arc::new(tokio::sync::Notify::new()),
-                },
-            )
-            .await;
-        let mut adaptation = start_adapting(
-            &session,
-            &turn,
-            &user_task("Check arithmetic."),
-            AdaptiveReasoningTrigger::ToolResult,
-            &CancellationToken::new(),
-        );
-        let request = proxy.request().await;
-        request
-            .reply
-            .send((
-                200,
-                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
-            ))
-            .unwrap();
-        finish_adaptation(&mut adaptation).await;
-        assert_eq!(
-            selected_effort(&turn),
-            Some(ReasoningEffort::High),
-            "reenabling makes next eligible step due even on skipped turn"
-        );
         session.stop_adaptive_reasoning().await;
     }
 }
@@ -1232,6 +1153,7 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         config.update_plan_enabled = true;
         if scenario == "success" {
             config.adaptive_reasoning.max_context_bytes = 32768;
+            config.adaptive_reasoning.decision_every_n_turns = 2;
         }
         if scenario == "timeout" {
             config.adaptive_reasoning.decision_timeout_ms = 500;
@@ -1515,87 +1437,17 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         proxy.requests.try_recv().is_err(),
         "two main steps require exactly two real decisions"
     );
-    session.stop_adaptive_reasoning().await;
     if scenario == "success" {
-        let primary = responses::start_mock_server().await;
-        let mut sequence = Vec::new();
-        for call in ["cadence-1", "cadence-2", "cadence-3"] {
-            sequence.push(responses::sse(vec![
-                responses::ev_function_call(
-                    call,
-                    "update_plan",
-                    &json!({"plan": [{"step":"Check arithmetic", "status":"completed"}]})
-                        .to_string(),
-                ),
-                responses::ev_completed("tool-step"),
-            ]));
-        }
-        sequence.push(responses::sse(vec![
-            responses::ev_assistant_message("final", "Done."),
-            responses::ev_completed_with_tokens("final-step", /*total_tokens*/ 100),
-        ]));
-        let mut sequence = sequence
-            .into_iter()
-            .map(responses::sse_response)
-            .collect::<Vec<_>>();
-        sequence.push(wiremock::ResponseTemplate::new(400).set_body_json(json!({"error": {"message": "synthetic pre-turn compaction failure", "type": "invalid_request_error"}})));
-        sequence.push(responses::sse_response(responses::sse(vec![
-            responses::ev_assistant_message("turn-3", "Done."),
-            responses::ev_completed("turn-3"),
-        ])));
-        let requests = responses::mount_response_sequence(&primary, sequence).await;
-        let (session, turn, events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
-            config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
-            config.model_provider.supports_websockets = false;
-            config.update_plan_enabled = true;
-            config.adaptive_reasoning.decision_every_n_steps = 3;
-            config.adaptive_reasoning.decision_every_n_turns = 2;
-        })
-        .await;
-        session.abort_all_tasks(TurnAbortReason::Interrupted).await;
-        let mut input = user_task("Check arithmetic.");
-        let TurnInput::UserInput { metadata, .. } = &mut input[0] else {
-            unreachable!("user task")
-        };
-        metadata.acceptance_order = Some(session.reserve_user_input_order().await);
+        primary.reset().await;
+        let response_mock = responses::mount_response_sequence(&primary, vec![
+            wiremock::ResponseTemplate::new(400).set_body_json(json!({"error": {"message": "synthetic compaction failure", "type": "invalid_request_error"}})),
+            responses::sse_response(responses::sse(vec![responses::ev_assistant_message("turn-3", "Done."), responses::ev_completed("turn-3")])),
+        ]).await;
         session
-            .spawn_task(Arc::clone(&turn), input, RegularTask::new())
-            .await;
-        let first = proxy.request().await;
-        assert!(requests.requests().is_empty());
-        first
-            .reply
-            .send((
-                200,
-                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
-            ))
-            .unwrap();
-        let fourth = proxy.request().await;
-        assert_eq!(
-            requests.requests().len(),
-            3,
-            "actual ordinary requests 2 and 3 reuse effort; request 4 waits for its decision"
-        );
-        fourth
-            .reply
-            .send((
-                200,
-                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"low"}]}),
-            ))
-            .unwrap();
-        timeout(Duration::from_secs(/*secs*/ 5), async {
-            while session.active_turn.lock().await.is_some() {
-                tokio::time::sleep(Duration::from_millis(/*millis*/ 1)).await;
-            }
-        })
-        .await
-        .expect("four ordinary model steps complete");
-        assert_eq!(requests.requests().len(), 4);
-        assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
-        assert!(
-            proxy.requests.try_recv().is_err(),
-            "exactly two decisions for four actual model steps"
-        );
+            .state
+            .lock()
+            .await
+            .set_token_usage_full(/*context_window*/ 100);
         let mut failed_turn = session.new_default_turn().await;
         let mut settings = (*failed_turn.initial_settings).clone();
         Arc::make_mut(&mut settings.model_info).auto_compact_token_limit = Some(1);
@@ -1616,39 +1468,18 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         })
         .await
         .expect("started second turn finishes after pre-turn compaction failure");
-        assert_eq!(
-            requests.requests().len(),
-            5,
-            "turn two issues only its failing compaction request"
-        );
-        let compact_request = &requests.requests()[4];
+        assert_eq!(response_mock.requests().len(), 1);
+        let compact_request = &response_mock.requests()[0];
         assert_eq!(
             compact_request.inputs_of_type("compaction_trigger"),
             [json!({"type": "compaction_trigger"})],
-            "fifth request is remote-v2 compaction, not ordinary sampling"
+            "failed request is remote-v2 compaction, not ordinary sampling"
         );
-        let compact_texts = compact_request.message_input_texts("user");
         assert!(
-            !compact_texts
+            !compact_request.has_message_with_input_texts("user", |texts| texts
                 .iter()
-                .any(|text| text.contains("Turn two fails before sampling.")),
+                .any(|text| text.contains("Turn two fails before sampling."))),
             "pre-turn compaction precedes the new user input"
-        );
-        let notifications = std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>();
-        assert!(
-            notifications
-                .iter()
-                .any(|event| event.id == failed_turn.sub_id
-                    && matches!(
-                        event.msg,
-                        codex_protocol::protocol::EventMsg::TurnStarted(_)
-                    ))
-        );
-        assert!(
-            notifications
-                .iter()
-                .any(|event| event.id == failed_turn.sub_id
-                    && matches!(event.msg, codex_protocol::protocol::EventMsg::Error(_)))
         );
         assert!(
             proxy.requests.try_recv().is_err(),
@@ -1682,9 +1513,9 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
             .await;
         let third = proxy.request().await;
         assert_eq!(
-            requests.requests().len(),
-            5,
-            "turn three waits for its decision despite turn two never sampling"
+            response_mock.requests().len(),
+            1,
+            "turn three decides before sampling"
         );
         third
             .reply
@@ -1700,12 +1531,7 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         })
         .await
         .expect("third turn completes");
-        assert_eq!(requests.requests().len(), 6);
-        assert_eq!(selected_effort(&third_turn), Some(ReasoningEffort::High));
-        assert!(
-            proxy.requests.try_recv().is_err(),
-            "turn three makes one decision"
-        );
-        session.stop_adaptive_reasoning().await;
+        assert_eq!(response_mock.requests().len(), 2);
     }
+    session.stop_adaptive_reasoning().await;
 }

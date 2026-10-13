@@ -293,7 +293,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
 | `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
 | `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
-| `decision_every_n_steps` | `1` | Positive integer; decide at steps 1, 1 + N, 1 + 2N, ... in selected turns |
+| `decision_every_n_steps` | `2` | Positive integer; decide at steps 1, 1 + N, 1 + 2N, ... in selected turns |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
 - Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
@@ -324,7 +324,8 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 
 A turn is one request and its resulting work. A step is one ordinary model request
 within that turn, not an individual tool call. Use both settings to choose when to
-reassess effort; omission keeps the existing every-turn, every-step behavior.
+reassess effort. By default, adapt every turn before steps 1, 3, 5, ... . Set
+`decision_every_n_steps = 1` to decide before every eligible step.
 
 ```toml
 [adaptive_reasoning]
