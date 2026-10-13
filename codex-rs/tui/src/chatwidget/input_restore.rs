@@ -40,10 +40,18 @@ impl ChatWidget {
             remote_image_urls: draft.remote_image_urls,
             mention_bindings: draft.mention_bindings,
         };
-        let startup_has_content = !startup_message.text.is_empty()
+        let startup_has_content = draft.quote.is_some()
+            || !startup_message.text.is_empty()
             || !startup_message.local_images.is_empty()
             || !startup_message.remote_image_urls.is_empty()
             || !draft.pending_pastes.is_empty();
+
+        let quote = match (existing_draft.quote, draft.quote) {
+            (Some(existing), Some(startup)) => Some(format!("{existing}\n\n{startup}")),
+            (Some(existing), None) => Some(existing),
+            (None, Some(startup)) => Some(startup),
+            (None, None) => None,
+        };
 
         let cursor = if existing_has_content && startup_has_content {
             let mut used_paste_placeholders = HashSet::new();
@@ -72,20 +80,23 @@ impl ChatWidget {
                     .saturating_sub(original_end)
             });
             pending_pastes.extend(startup_pending_pastes);
-            self.restore_composer_state(Self::composer_state_from_user_message(
-                merge_user_messages(vec![existing_message, startup_message]),
-                pending_pastes,
-            ));
+            self.restore_composer_state(ThreadComposerState {
+                quote,
+                ..Self::composer_state_from_user_message(
+                    merge_user_messages(vec![existing_message, startup_message]),
+                    pending_pastes,
+                )
+            });
             startup_offset
                 .saturating_add(draft.cursor)
                 .saturating_add(cursor_adjustment)
         } else if existing_has_content || !startup_has_content {
             existing_cursor
         } else {
-            self.restore_composer_state(Self::composer_state_from_user_message(
-                startup_message,
-                draft.pending_pastes,
-            ));
+            self.restore_composer_state(ThreadComposerState {
+                quote,
+                ..Self::composer_state_from_user_message(startup_message, draft.pending_pastes)
+            });
             draft.cursor
         };
         self.bottom_pane.set_composer_cursor(cursor);
@@ -485,10 +496,10 @@ impl ChatWidget {
             pending_pastes.extend(composer_pending_pastes);
         }
 
-        Some(Self::composer_state_from_user_message(
-            merge_user_messages(to_merge),
-            pending_pastes,
-        ))
+        Some(ThreadComposerState {
+            quote: composer.quote,
+            ..Self::composer_state_from_user_message(merge_user_messages(to_merge), pending_pastes)
+        })
     }
 
     pub(crate) fn restore_user_message_to_composer(&mut self, user_message: UserMessage) {
@@ -508,14 +519,15 @@ impl ChatWidget {
         {
             messages.push(draft_message);
         }
-        self.restore_composer_state(Self::composer_state_from_user_message(
-            merge_user_messages(messages),
-            pending_pastes,
-        ));
+        self.restore_composer_state(ThreadComposerState {
+            quote: draft.quote,
+            ..Self::composer_state_from_user_message(merge_user_messages(messages), pending_pastes)
+        });
     }
 
     pub(super) fn restore_composer_state(&mut self, composer: ThreadComposerState) {
         let ThreadComposerState {
+            quote,
             text,
             local_images,
             remote_image_urls,
@@ -524,6 +536,7 @@ impl ChatWidget {
             pending_pastes,
         } = composer;
         let local_image_paths = local_images.into_iter().map(|img| img.path).collect();
+        self.bottom_pane.set_composer_quote(quote);
         self.set_remote_image_urls(remote_image_urls);
         self.bottom_pane.set_composer_text_with_mention_bindings(
             text,
@@ -546,6 +559,7 @@ impl ChatWidget {
             mention_bindings,
         } = user_message;
         ThreadComposerState {
+            quote: None,
             text,
             local_images,
             remote_image_urls,
@@ -559,6 +573,7 @@ impl ChatWidget {
         self.cancel_image_submission();
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
+            quote: draft.quote,
             text: draft.text,
             text_elements: draft.text_elements,
             local_images: draft.local_images,

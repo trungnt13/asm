@@ -77,6 +77,7 @@
 //!
 //! Plain-text history recall strips images and their placeholders.
 //! When recalling a persistent entry, encoded task links restore atomic elements and bindings.
+//! Blockquote lines stay literal and never receive restored mention bindings.
 //! Recall moves the cursor to the end. Question editors copy primary history on recall/search;
 //! draft capture cancels previews, and restoration resets traversal.
 //! Ctrl+R searches history in the footer and previews matches in the composer.
@@ -143,6 +144,7 @@
 //! - Prepends a frozen transcript quote as a Markdown blockquote and rebases draft elements.
 //!   Quote-plus-comment submissions are rejected above 10,000 UTF-8 bytes without losing the draft.
 //!   Attached quotes keep slash and shell comments literal; clicking their preview removes them.
+//!   Whole-draft restores install their quote before importing text; text-only edits keep the quote.
 //!
 //! When these paths clear the visible textarea after a successful submit or slash-command
 //! dispatch, they intentionally preserve the textarea kill buffer. That lets users `Ctrl+K` part
@@ -694,6 +696,7 @@ pub(super) struct ComposerDraft {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ComposerDraftSnapshot {
+    pub(crate) quote: Option<String>,
     pub(crate) text: String,
     pub(crate) cursor: usize,
     pub(crate) text_elements: Vec<TextElement>,
@@ -2935,7 +2938,11 @@ impl ChatComposer {
                     .textarea
                     .text_element_snapshots()
                     .into_iter()
-                    .find(|element| element.range.start >= scan_from && element.text == token)
+                    .find(|element| {
+                        element.range.start >= scan_from
+                            && element.text == token
+                            && !crate::mention_codec::is_quoted_line(&text, element.range.start)
+                    })
                     .map(|element| element.range)
             } else {
                 find_next_mention_token_range(text.as_str(), token.as_str(), scan_from)
@@ -3601,7 +3608,8 @@ impl ChatComposer {
             )
         };
         if history_up_pressed || history_down_pressed {
-            if self.draft.textarea.mouse_selection_range().is_none()
+            if self.attachments.quote.is_none()
+                && self.draft.textarea.mouse_selection_range().is_none()
                 && self.history.should_handle_navigation(
                     &self.current_text(),
                     self.history_navigation_cursor(),
@@ -4508,7 +4516,10 @@ fn find_next_mention_token_range(text: &str, token: &str, from: usize) -> Option
             ends_plaintext_at_dollar_mention(bytes, end)
         };
 
-        if starts_plaintext_mention && ends_plaintext_mention {
+        if starts_plaintext_mention
+            && ends_plaintext_mention
+            && !crate::mention_codec::is_quoted_line(text, index)
+        {
             return Some(index..end);
         }
 
@@ -8379,8 +8390,10 @@ mod tests {
                 path: "app://figma".to_string(),
             },
         ];
+        let quote = "> @figma $figma\n  >> $figma @figma\n\n";
+        let text = format!("{quote}@figma then $figma");
         composer.set_text_content_with_mention_bindings(
-            "@figma then $figma".to_string(),
+            text.clone(),
             Vec::new(),
             Vec::new(),
             mention_bindings.clone(),
@@ -8396,6 +8409,21 @@ mod tests {
             vec![('@', "figma".to_string()), ('$', "figma".to_string())]
         );
         assert_eq!(composer.mention_bindings(), mention_bindings);
+        assert_eq!(
+            composer
+                .draft
+                .textarea
+                .text_element_snapshots()
+                .into_iter()
+                .map(|snapshot| snapshot.range)
+                .collect::<Vec<_>>(),
+            vec![quote.len()..quote.len() + 6, text.len() - 6..text.len()]
+        );
+        composer
+            .draft
+            .textarea
+            .replace_range(quote.len()..text.len(), "");
+        assert!(composer.mention_bindings().is_empty());
     }
 
     #[test]
@@ -11098,7 +11126,7 @@ mod tests {
 
     #[test]
     fn history_navigation_restores_remote_and_local_image_attachments() {
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
         let mut composer = ChatComposer::new(
             /*has_input_focus*/ true,
@@ -11128,6 +11156,36 @@ mod tests {
         assert_eq!(text_elements[0].placeholder(&text), Some("[Image #2]"));
         assert_eq!(composer.local_image_paths(), vec![path]);
         assert_eq!(composer.remote_image_urls(), vec![remote_image_url]);
+        composer.set_remote_image_urls(Vec::new());
+        composer.set_text_content(String::new(), Vec::new(), Vec::new());
+        composer.attach_quote(PendingQuote::Text("quote-only draft".to_string()));
+        let quoted_draft = composer.draft_snapshot();
+        for code in [KeyCode::Up, KeyCode::Down] {
+            composer.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+            assert_eq!(composer.draft_snapshot(), quoted_draft);
+        }
+        composer.set_quote(/*quote*/ None);
+        composer.history = ChatComposerHistory::new();
+        composer.set_history_metadata(ThreadId::new(), /*log_id*/ 42, /*entry_count*/ 1);
+        composer.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert!(
+            std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
+                event,
+                AppEvent::LookupMessageHistoryEntry {
+                    log_id: 42,
+                    offset: 0,
+                    ..
+                }
+            ))
+        );
+        composer.attach_quote(PendingQuote::Text("quote after pending lookup".to_string()));
+        let quoted_draft = composer.draft_snapshot();
+        assert!(!composer.on_history_entry_response(
+            /*log_id*/ 42,
+            /*offset*/ 0,
+            Some("older draft".to_string())
+        ));
+        assert_eq!(composer.draft_snapshot(), quoted_draft);
     }
 
     #[test]

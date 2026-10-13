@@ -9,6 +9,7 @@ use pretty_assertions::assert_eq;
 
 fn snapshot(text: &str) -> ComposerDraftSnapshot {
     ComposerDraftSnapshot {
+        quote: None,
         text: text.to_string(),
         cursor: text.len(),
         text_elements: Vec::new(),
@@ -28,7 +29,8 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
         scope(async {
             let (mut chat, _sender, _rx, _op_rx) =
                 crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
-            let draft = snapshot("startup draft");
+            let mut draft = snapshot("startup draft");
+            draft.quote = Some("startup quote".to_string());
             remember(draft.clone());
             chat.handle_paste(destination.trim_end().to_string());
             let mut pending = Some(draft);
@@ -41,7 +43,9 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
             // This is the exact expanded text printed if startup fails before session readiness.
             assert_eq!(
                 take_unsent_text(),
-                Some(format!("{destination}startup draf{pasted}")),
+                Some(format!(
+                    "> startup quote\n\n{destination}startup draf{pasted}"
+                )),
             );
         })
         .await;
@@ -79,7 +83,11 @@ async fn recovery_refresh_stops_after_submission_or_startup_completion() {
     scope(async {
         remember(snapshot("before handoff"));
         refresh_after_handoff(|| panic!("protected input must not replace the startup draft"));
-        handed_off(|| snapshot("confirmed submission"));
+        handed_off(|| {
+            let mut draft = snapshot("confirmed submission");
+            draft.quote = Some("quote already expanded into submission".to_string());
+            draft
+        });
         bind_submission("confirmed submission", "initial-prompt");
         acknowledged("initial-prompt");
         submitted(&InputResult::Submitted {

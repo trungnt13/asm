@@ -1409,6 +1409,20 @@ async fn replay_thread_snapshot_restores_the_matching_safety_buffer_prompt() {
     };
     app.chat_widget
         .submit_user_message_with_mode("buffered prompt A".to_string(), default_mode.clone());
+    app.chat_widget
+        .restore_startup_draft(crate::bottom_pane::ComposerDraftSnapshot {
+            quote: Some("thread quote".to_string()),
+            text: String::new(),
+            cursor: 0,
+            text_elements: Vec::new(),
+            local_images: Vec::new(),
+            remote_image_urls: Vec::new(),
+            mention_bindings: Vec::new(),
+            pending_pastes: Vec::new(),
+            startup_local_history: Vec::new(),
+            last_composer_activity_at: None,
+            sparkle_draft: Default::default(),
+        });
     let expected_input_state = app
         .chat_widget
         .capture_thread_input_state()
