@@ -82,6 +82,7 @@ impl LocalSettings {
                 auto_recap: config.tui_auto_recap,
                 disable_paste_burst: Some(config.disable_paste_burst),
                 vim_mode_default: config.tui_vim_mode_default,
+                multiline_enter: config.tui_multiline_enter,
                 question_esc_back: config.tui_question_esc_back,
                 raw_output_mode: config.tui_raw_output_mode,
                 fullscreen_transcript: config.tui_fullscreen_transcript,
