@@ -840,6 +840,11 @@ pub struct Tui {
     #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
 
+    /// Plain Enter inserts a newline in multiline drafts when also bound to editor newline.
+    /// Single-line drafts and modified submit bindings still send. Defaults to `false`.
+    #[serde(default)]
+    pub multiline_enter: bool,
+
     /// Enable animations (welcome screen, shimmer effects, spinners).
     /// Defaults to `true`.
     #[serde(default = "default_true")]

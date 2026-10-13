@@ -5125,6 +5125,11 @@
           "format": "double",
           "type": "number"
         },
+        "multiline_enter": {
+          "default": false,
+          "description": "Plain Enter inserts a newline in multiline drafts when also bound to editor newline. Single-line drafts and modified submit bindings still send. Defaults to `false`.",
+          "type": "boolean"
+        },
         "notification_condition": {
           "allOf": [
             {

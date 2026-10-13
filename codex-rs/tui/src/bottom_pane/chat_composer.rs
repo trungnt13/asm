@@ -121,7 +121,11 @@
 //! # Submission and Prompt Expansion
 //!
 //! Multiline pastes continue blockquote prefixes.
-//! `Enter` submits immediately. `Tab` requests queuing while a task is running; if no task is
+//! `Enter` submits immediately by default. Opt-in `tui.multiline_enter` inserts a newline
+//! for multiline drafts (including expanded pending pastes), only when plain Enter is bound
+//! to both submit and editor newline. Active paste Enter handling runs first. Modified submit
+//! keys flush buffered pastes and send regardless of line count; popup actions stay unchanged.
+//! `Enter` otherwise submits immediately. `Tab` requests queuing while a task is running; if no task is
 //! running, `Tab` submits just like Enter so input is never dropped.
 //! Vim Replace shares Insert's composer actions; only textarea editing differs.
 //! Literal completion/paste edits discard stale Replace recovery; subsequent typing records anew.
@@ -563,6 +567,8 @@ enum PendingPasteHandling {
 pub(crate) struct ChatComposerConfig {
     /// Whether command/file/skill popups are allowed to appear.
     pub(crate) popups_enabled: bool,
+    /// Plain Enter edits multiline drafts; modified submit keys remain unconditional.
+    pub(crate) multiline_enter: bool,
     /// Whether `/...` input is parsed and dispatched as slash commands.
     pub(crate) slash_commands_enabled: bool,
     /// Whether a leading `!` switches the editor into shell mode.
@@ -580,6 +586,7 @@ impl Default for ChatComposerConfig {
     fn default() -> Self {
         Self {
             popups_enabled: true,
+            multiline_enter: false,
             slash_commands_enabled: true,
             shell_commands_enabled: true,
             image_paste_enabled: true,
@@ -595,6 +602,7 @@ impl ChatComposerConfig {
     pub(crate) const fn plain_text() -> Self {
         Self {
             popups_enabled: false,
+            multiline_enter: false,
             slash_commands_enabled: false,
             shell_commands_enabled: false,
             image_paste_enabled: false,
@@ -3509,6 +3517,26 @@ impl ChatComposer {
         }
 
         if self.submit_keys.is_pressed(key_event) {
+            if self.config.multiline_enter {
+                if key_event.code == KeyCode::Enter
+                    && key_event.modifiers == KeyModifiers::NONE
+                    && self.editor_keymap.insert_newline.is_pressed(key_event)
+                {
+                    let now = tokio::time::Instant::now().into_std();
+                    self.handle_paste_burst_flush(now);
+                    if self.handle_paste_enter(now) {
+                        return (InputResult::None, true);
+                    }
+                    if self.current_text_with_pending().contains('\n') {
+                        return self.handle_input_basic(key_event);
+                    }
+                } else if !key_event.modifiers.is_empty() {
+                    if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
+                        self.apply_paste(pasted);
+                    }
+                    self.draft.paste_burst.clear_after_explicit_paste();
+                }
+            }
             return self.handle_submission(self.queue_submissions);
         }
 
@@ -9044,6 +9072,33 @@ mod tests {
             _ => panic!("expected Submitted"),
         }
         assert!(composer.draft.pending_pastes.is_empty());
+
+        composer.config.multiline_enter = true;
+        let mut keymap = crate::keymap::RuntimeKeymap::defaults();
+        keymap
+            .composer
+            .submit
+            .push(crate::key_hint::ctrl(KeyCode::Enter));
+        composer.set_keymap_bindings(&keymap);
+        let multiline = format!("{large}\nsecond line");
+        composer.handle_paste(multiline.clone());
+        assert!(!composer.draft.textarea.text().contains('\n'));
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(InputResult::None, result);
+        assert_eq!(
+            format!("{multiline}\n"),
+            composer.current_text_with_pending()
+        );
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            InputResult::Submitted {
+                text: multiline,
+                text_elements: Vec::new()
+            },
+            result
+        );
     }
 
     #[test]
@@ -9713,6 +9768,105 @@ mod tests {
 
         assert_eq!(InputResult::None, result);
         assert_eq!("explain the change\n", composer.draft.textarea.text());
+
+        composer.config.multiline_enter = true;
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(InputResult::None, result);
+        assert_eq!("explain the change\n\n", composer.draft.textarea.text());
+
+        keymap.composer.submit = vec![
+            key_hint::plain(KeyCode::Enter),
+            key_hint::ctrl(KeyCode::Enter),
+        ];
+        composer.set_keymap_bindings(&keymap);
+        for (enabled, text, key, expected) in [
+            (
+                false,
+                "first\nsecond",
+                KeyModifiers::NONE,
+                Some("first\nsecond"),
+            ),
+            (true, "single line", KeyModifiers::NONE, Some("single line")),
+            (true, "first\nsecond", KeyModifiers::NONE, None),
+            (
+                true,
+                "first\nsecond",
+                KeyModifiers::CONTROL,
+                Some("first\nsecond"),
+            ),
+        ] {
+            composer.config.multiline_enter = enabled;
+            composer.draft.textarea.set_text_clearing_elements(text);
+            composer.draft.textarea.set_cursor(text.len());
+            let (result, _) = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, key));
+            assert_eq!(
+                expected.map_or(InputResult::None, |text| InputResult::Submitted {
+                    text: text.to_string(),
+                    text_elements: Vec::new(),
+                }),
+                result
+            );
+            if expected.is_none() {
+                assert_eq!(format!("{text}\n"), composer.draft.textarea.text());
+            }
+        }
+
+        // Explicit modified submit flushes an active non-bracketed paste burst.
+        composer
+            .draft
+            .textarea
+            .set_text_clearing_elements("first\nsecond");
+        composer.draft.textarea.set_cursor("first\nsecond".len());
+        composer
+            .draft
+            .paste_burst
+            .begin_with_retro_grabbed(" buffered".to_string(), Instant::now());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            InputResult::Submitted {
+                text: "first\nsecond buffered".to_string(),
+                text_elements: Vec::new()
+            },
+            result
+        );
+
+        // Plain Enter still belongs to an active burst, before multiline classification.
+        composer
+            .draft
+            .paste_burst
+            .begin_with_retro_grabbed("pasted".to_string(), Instant::now());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(InputResult::None, result);
+        assert_eq!("", composer.draft.textarea.text());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            InputResult::Submitted {
+                text: "pasted".to_string(),
+                text_elements: Vec::new()
+            },
+            result
+        );
+
+        // Removing editor Enter must not silently swallow the submit key.
+        Arc::make_mut(&mut keymap.editor).insert_newline = vec![key_hint::shift(KeyCode::Enter)];
+        composer.set_keymap_bindings(&keymap);
+        composer
+            .draft
+            .textarea
+            .set_text_clearing_elements("first\nsecond");
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            InputResult::Submitted {
+                text: "first\nsecond".to_string(),
+                text_elements: Vec::new()
+            },
+            result
+        );
     }
 
     #[test]
