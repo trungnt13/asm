@@ -349,6 +349,7 @@ A selected turn does not carry leftover spacing from the previous turn:
 - A failed attempt consumes its interval just like a successful attempt. Keep the effort and wait for the next due step; do not retry immediately.
 - Collect fresh bounded evidence when a decision is due, not when the interval begins.
 - Each agent owns its counters. Children inherit cadence configuration, not their parent's counter position. Re-enabling `/adapt` makes the next eligible step due, even when re-enabled while idle before a normally skipped turn. Regular fixed slots resume afterward.
+- Count an ordinary turn when it starts, before setup. It still counts if setup fails or the turn is cancelled before its first model request. Continuing the same turn does not count again; standalone compaction and warm-up do not count as turns.
 - Counters exist only in the running backend session. Resume, backend restart, or session eviction starts turn numbering again at 1. Conversation history is not rewritten.
 - Warm-up requests, transport retries, and compaction do not count as ordinary steps. Counter state is runtime scheduling state, not rewritten conversation history.
 - Larger intervals reduce decision frequency, not necessarily total runtime. They can retain unsuitable effort for intervening steps; do not claim a speedup without measurement.
