@@ -12891,52 +12891,6 @@ mod tests {
     }
 
     #[test]
-    fn remote_images_do_not_modify_textarea_text_or_elements() {
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            /*has_input_focus*/ true,
-            sender,
-            /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
-            /*disable_paste_burst*/ false,
-        );
-
-        composer.set_remote_image_urls(vec![
-            "https://example.com/one.png".to_string(),
-            "https://example.com/two.png".to_string(),
-        ]);
-
-        assert_eq!(composer.current_text(), "");
-        assert_eq!(composer.text_elements(), Vec::<TextElement>::new());
-    }
-
-    #[test]
-    fn attach_image_after_remote_prefix_uses_offset_label() {
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            /*has_input_focus*/ true,
-            sender,
-            /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
-            /*disable_paste_burst*/ false,
-        );
-
-        composer.set_remote_image_urls(vec![
-            "https://example.com/one.png".to_string(),
-            "https://example.com/two.png".to_string(),
-        ]);
-        composer.attach_image(PathBuf::from("/tmp/local.png"));
-
-        assert_eq!(
-            composer.attachments.local_images[0].placeholder,
-            "[Image #3]"
-        );
-        assert_eq!(composer.current_text(), "[Image #3]");
-    }
-
-    #[test]
     fn prepare_submission_keeps_remote_offset_local_placeholder_numbering() {
         let (tx, _rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
@@ -12949,6 +12903,11 @@ mod tests {
         );
 
         composer.set_remote_image_urls(vec!["https://example.com/one.png".to_string()]);
+        let (submitted_text, submitted_elements) = composer
+            .prepare_submission_text(/*record_history*/ true)
+            .expect("remote-only submission should be generated");
+        assert_eq!(submitted_text, "");
+        assert!(submitted_elements.is_empty());
         let base_text = "[Image #2] hello".to_string();
         let base_elements = vec![TextElement::new(
             (0.."[Image #2]".len()).into(),
@@ -13084,26 +13043,6 @@ mod tests {
     }
 
     #[test]
-    fn prepare_submission_with_only_remote_images_returns_empty_text() {
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            /*has_input_focus*/ true,
-            sender,
-            /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
-            /*disable_paste_burst*/ false,
-        );
-
-        composer.set_remote_image_urls(vec!["https://example.com/one.png".to_string()]);
-        let (submitted_text, submitted_elements) = composer
-            .prepare_submission_text(/*record_history*/ true)
-            .expect("remote-only submission should be generated");
-        assert_eq!(submitted_text, "");
-        assert!(submitted_elements.is_empty());
-    }
-
-    #[test]
     fn delete_selected_remote_image_relabels_local_placeholders() {
         let (tx, _rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
@@ -13119,7 +13058,14 @@ mod tests {
             "https://example.com/one.png".to_string(),
             "https://example.com/two.png".to_string(),
         ]);
+        assert_eq!(composer.current_text(), "");
+        assert_eq!(composer.text_elements(), Vec::<TextElement>::new());
         composer.attach_image(PathBuf::from("/tmp/local.png"));
+        assert_eq!(
+            composer.attachments.local_images[0].placeholder,
+            "[Image #3]"
+        );
+        assert_eq!(composer.current_text(), "[Image #3]");
         composer.draft.textarea.set_cursor(/*pos*/ 0);
 
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
