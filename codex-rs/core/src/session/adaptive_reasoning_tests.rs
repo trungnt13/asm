@@ -189,6 +189,7 @@ async fn adaptive_fixture(
             config.model_catalog = Some(codex_models_manager::bundled_models_response().unwrap());
             config.model_reasoning_effort = Some(ReasoningEffort::Low);
             config.adaptive_reasoning.enabled = true;
+            config.adaptive_reasoning.decision_every_n_steps = 1;
             config.adaptive_reasoning.decision_timeout_ms = 5_000;
             config.adaptive_reasoning.min_effort = ReasoningEffort::Low;
             config.adaptive_reasoning.max_effort = ReasoningEffort::High;
@@ -528,6 +529,78 @@ async fn basic_step_barrier_awaits_publication_and_preserves_captured_steps() {
             .adaptive_reasoning_enabled,
         "shutdown retains the requested mode for eviction restoration"
     );
+
+    let default_steps = AdaptiveReasoningConfig::default().decision_every_n_steps;
+    for (turn_spacing, step_spacing, slots) in [
+        (
+            1,
+            3,
+            [vec![1, 4, 7, 10], vec![1, 4], vec![1], vec![1, 4, 7]],
+        ),
+        (2, 3, [vec![1, 4, 7, 10], vec![], vec![1], vec![]]),
+        (
+            1,
+            default_steps,
+            [
+                vec![1, 3, 5, 7, 9, 11],
+                vec![1, 3, 5],
+                vec![1],
+                vec![1, 3, 5, 7],
+            ],
+        ),
+    ] {
+        let (session, mut turn, _) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+            config.adaptive_reasoning.decision_every_n_turns = turn_spacing;
+            config.adaptive_reasoning.decision_every_n_steps = step_spacing;
+        })
+        .await;
+        for (index, step_count) in [11, 5, 2, 8].into_iter().enumerate() {
+            if index > 0 {
+                session
+                    .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
+                    .await;
+                turn = session.new_default_turn().await;
+                session
+                    .spawn_task(
+                        Arc::clone(&turn),
+                        Vec::new(),
+                        HeldStepTask {
+                            kind: TaskKind::Compact,
+                            finish: Arc::new(tokio::sync::Notify::new()),
+                        },
+                    )
+                    .await;
+            }
+            let mut observed = Vec::new();
+            for step in 1..=step_count {
+                let input = user_task("Check arithmetic.");
+                let trigger = if step == 1 {
+                    AdaptiveReasoningTrigger::TurnStart
+                } else {
+                    AdaptiveReasoningTrigger::ToolResult
+                };
+                let mut adaptation =
+                    start_adapting(&session, &turn, &input, trigger, &CancellationToken::new());
+                if slots[index].contains(&step) {
+                    let request = proxy.request().await;
+                    observed.push(step);
+                    request
+                        .reply
+                        .send((503, json!({"error":"synthetic"})))
+                        .unwrap();
+                }
+                finish_adaptation(&mut adaptation).await;
+                session.record_adaptive_model_step(&turn);
+                assert!(
+                    proxy.requests.try_recv().is_err(),
+                    "unexpected decision at turn {} step {step}",
+                    index + 1
+                );
+            }
+            assert_eq!(observed, slots[index]);
+        }
+        session.stop_adaptive_reasoning().await;
+    }
 }
 
 #[tokio::test]
@@ -1080,6 +1153,7 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         config.update_plan_enabled = true;
         if scenario == "success" {
             config.adaptive_reasoning.max_context_bytes = 32768;
+            config.adaptive_reasoning.decision_every_n_turns = 2;
         }
         if scenario == "timeout" {
             config.adaptive_reasoning.decision_timeout_ms = 500;
@@ -1363,5 +1437,101 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         proxy.requests.try_recv().is_err(),
         "two main steps require exactly two real decisions"
     );
+    if scenario == "success" {
+        primary.reset().await;
+        let response_mock = responses::mount_response_sequence(&primary, vec![
+            wiremock::ResponseTemplate::new(400).set_body_json(json!({"error": {"message": "synthetic compaction failure", "type": "invalid_request_error"}})),
+            responses::sse_response(responses::sse(vec![responses::ev_assistant_message("turn-3", "Done."), responses::ev_completed("turn-3")])),
+        ]).await;
+        session
+            .state
+            .lock()
+            .await
+            .set_token_usage_full(/*context_window*/ 100);
+        let mut failed_turn = session.new_default_turn().await;
+        let mut settings = (*failed_turn.initial_settings).clone();
+        Arc::make_mut(&mut settings.model_info).auto_compact_token_limit = Some(1);
+        let settings = Arc::new(settings);
+        Arc::get_mut(&mut failed_turn).unwrap().initial_settings = Arc::clone(&settings);
+        failed_turn.next_step_settings.store(settings);
+        session
+            .spawn_task(
+                Arc::clone(&failed_turn),
+                user_task("Turn two fails before sampling."),
+                RegularTask::new(),
+            )
+            .await;
+        timeout(Duration::from_secs(/*secs*/ 5), async {
+            while session.active_turn.lock().await.is_some() {
+                tokio::time::sleep(Duration::from_millis(/*millis*/ 1)).await;
+            }
+        })
+        .await
+        .expect("started second turn finishes after pre-turn compaction failure");
+        assert_eq!(response_mock.requests().len(), 1);
+        let compact_request = &response_mock.requests()[0];
+        assert_eq!(
+            compact_request.inputs_of_type("compaction_trigger"),
+            [json!({"type": "compaction_trigger"})],
+            "failed request is remote-v2 compaction, not ordinary sampling"
+        );
+        assert!(
+            !compact_request.has_message_with_input_texts("user", |texts| texts
+                .iter()
+                .any(|text| text.contains("Turn two fails before sampling."))),
+            "pre-turn compaction precedes the new user input"
+        );
+        assert!(
+            proxy.requests.try_recv().is_err(),
+            "failed pre-turn compaction does not call Decisions"
+        );
+        // A cancelled setup on the same context must not count the turn twice.
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let cancelled_run = crate::tasks::SessionTask::run(
+            Arc::new(RegularTask::new()),
+            Arc::clone(&session),
+            failed_turn,
+            Vec::new(),
+            cancelled,
+        )
+        .await;
+        match cancelled_run {
+            Ok(message) => assert_eq!(message, None),
+            Err(error) => assert!(matches!(
+                error.details(),
+                codex_protocol::error::CodexErrorDetails::TurnAborted
+            )),
+        }
+        let third_turn = session.new_default_turn().await;
+        session
+            .spawn_task(
+                Arc::clone(&third_turn),
+                user_task("Turn three adapts."),
+                RegularTask::new(),
+            )
+            .await;
+        let third = proxy.request().await;
+        assert_eq!(
+            response_mock.requests().len(),
+            1,
+            "turn three decides before sampling"
+        );
+        third
+            .reply
+            .send((
+                200,
+                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
+            ))
+            .unwrap();
+        timeout(Duration::from_secs(/*secs*/ 5), async {
+            while session.active_turn.lock().await.is_some() {
+                tokio::time::sleep(Duration::from_millis(/*millis*/ 1)).await;
+            }
+        })
+        .await
+        .expect("third turn completes");
+        assert_eq!(response_mock.requests().len(), 2);
+    }
     session.stop_adaptive_reasoning().await;
 }
