@@ -205,7 +205,7 @@ async fn adaptive_fixture(
         .thread_extension_data
         .get_or_init(AdaptiveSession::default)
         .client
-        .set(Ok(client))
+        .set(client)
         .ok()
         .expect("seed synthetic Decisions client");
     session
