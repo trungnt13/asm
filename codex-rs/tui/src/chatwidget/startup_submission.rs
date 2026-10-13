@@ -70,7 +70,7 @@ impl ChatWidget {
         };
         self.bottom_pane.set_footer_hint_override(/*items*/ None);
         let current = self.bottom_pane.composer_draft_snapshot();
-        if current.quote != confirmed.quote
+        if current.quotes != confirmed.quotes
             || current.text != confirmed.text
             || current.text_elements != confirmed.text_elements
             || current.local_images != confirmed.local_images

@@ -1132,9 +1132,9 @@ impl BottomPane {
         }
     }
 
-    pub(crate) fn set_composer_quote(&mut self, quote: Option<String>) {
+    pub(crate) fn set_composer_quotes(&mut self, quotes: Vec<String>) {
         self.composer
-            .edit_stored_draft(|composer| composer.set_quote(quote));
+            .edit_stored_draft(|composer| composer.set_quotes(quotes));
         self.request_redraw();
     }
 
