@@ -169,6 +169,7 @@ impl ChatComposer {
                     if event.column < area.x.saturating_add(/*rhs*/ 3)
                         && index < self.attachments.quotes.len()
                     {
+                        self.remove_quote_comment(index);
                         self.attachments.quotes.remove(index);
                         *pending_quote = None;
                         self.sync_popups();

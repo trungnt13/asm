@@ -1415,6 +1415,7 @@ async fn replay_thread_snapshot_restores_the_matching_safety_buffer_prompt() {
                 "thread quote".to_string(),
                 "second thread quote".to_string(),
             ],
+            quote_comments: Vec::new(),
             text: String::new(),
             cursor: 0,
             text_elements: Vec::new(),
