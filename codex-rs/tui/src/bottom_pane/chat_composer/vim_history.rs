@@ -26,7 +26,8 @@ pub(super) struct VimHistory {
 
 impl ComposerDraft {
     fn vim_history_bytes(&self) -> usize {
-        let mut bytes = self.quotes.iter().map(String::len).sum::<usize>()
+        let mut bytes = self.quote_comments.len() * std::mem::size_of::<super::QuoteComment>()
+            + self.quotes.iter().map(String::len).sum::<usize>()
             + self.text.len()
             + self.text_elements.len()
                 * std::mem::size_of::<codex_protocol::user_input::TextElement>();
