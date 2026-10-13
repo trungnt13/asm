@@ -534,3 +534,26 @@ Optional top-level `subagent_model_context_windows = { "gpt-6-astra" = 272000, "
 - `-fast` only for matched Fast or inherited Fast; matched `default` suppresses inheritance. Do not guess settings/remove thread-ID descriptions/change navigation.
 - Append known positive configured capacity: `sol61-hig-fast-272k` / `sol61-max-272k`. Exact map applies only to canonical-path V2 spawned children, never main/V1. Otherwise use configured scalar, including main. Omit unknown/nonpositive values, not catalog guesses.
 - Labels show config, not confirmed routing/runtime capacity/usage/remaining context. Capacity precedes model clamping/headroom. Keep TUI-only with other metadata/navigation unchanged; no new APIs/request tracking.
+
+### Multiline-aware Enter
+
+Opt-in `[tui] multiline_enter = true` keeps plain Enter sending single-line drafts and
+inserting a newline into multiline drafts, including collapsed pending paste content.
+Require plain Enter in both submit and editor newline bindings; preserve custom keymaps
+and popup actions. Modified submit bindings always send, flushing pending paste bursts.
+The default is unchanged. Example explicit newline/send bindings:
+
+```toml
+[tui]
+multiline_enter = true
+
+[tui.keymap.composer]
+submit = ["enter", "ctrl-enter"]
+
+[tui.keymap.editor]
+insert_newline = ["enter", "shift-enter"]
+```
+
+Use Shift+Enter to start a multiline draft, Ctrl+Enter to send it. Terminals must support
+the configured modified keys. Queue bindings retain their existing behavior.
+Vim Insert/Replace use the editor newline binding; Vim Normal retains its editing semantics.
