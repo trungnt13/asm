@@ -36,7 +36,9 @@ For runtime/UI edits, inspect affected paths, including streaming and completed 
   just build-dev
   ```
 
-- Prioritize this pair. Serialize Cargo jobs sharing a target directory. Keep executable siblings in its resolved `dev-small` directory. Verify their producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
+- Prioritize this pair. Serialize Cargo jobs sharing a target directory. Verify their producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
+- Before another build can use that cache, copy `codex` and `codex-code-mode-host` into one task-owned directory under the working checkout, such as `.agents/test-bin/<build-id>/`. Keep them executable siblings. Use real copies, not symlinks or hard links. Record source commit, build inputs, absolute paths, and SHA-256 hashes; verify both copies before releasing shared-cache build ownership.
+- Test and hand off the copied pair, not shared target executables that another build can overwrite. Keep each tested pair unchanged with its evidence.
 
 The local Cargo wrapper:
 
@@ -52,15 +54,11 @@ The local Cargo wrapper:
 - Blocks reusable-checkout release/switching during active wrapper commands. Direct Cargo bypasses protection and must finish before checkout release.
 - Keeps interactive I/O for `cargo run` without holding the cache lock for the live app. CI and Windows stay unchanged.
 
-For ordinary runtime/UI checks, from `codex-rs` run:
-
-```bash
-"$(python3 ../scripts/local-cargo.py --print-target-dir)/dev-small/codex" --no-daemon
-```
+For ordinary runtime/UI checks, run the copied task-owned CLI by its verified absolute path with `--no-daemon`.
 
 Follow [real-session isolation](#real-session-checks). This uses the current embedded backend and sibling `codex-code-mode-host`, without changing/stopping the shared daemon. Check daemon/remote behavior separately when needed; `codex agents` and `--remote` cannot use `--no-daemon`.
 
-Before handoff, verify both binaries exist, CLI `--version`, and both `--help` commands. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. Shared executables belong to the last build: verify their checkout. Rebuild both after runtime edits; never hand off old binaries as current. Get permission before replacing installed `codex`.
+Before handoff, verify both binaries exist, CLI `--version`, and both `--help` commands. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. Verify the copied pair's source identity. Rebuild and copy both after runtime edits; never hand off old binaries as current. Get permission before replacing installed `codex`.
 
 Local profile rules:
 
