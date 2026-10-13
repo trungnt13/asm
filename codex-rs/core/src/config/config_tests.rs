@@ -1472,6 +1472,7 @@ fn config_toml_deserializes_model_availability_nux() {
             auto_recap: true,
             disable_paste_burst: None,
             vim_mode_default: false,
+            multiline_enter: false,
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
@@ -1591,6 +1592,7 @@ async fn runtime_config_uses_tui_raw_output_mode() {
     let toml = r#"
         [tui]
         raw_output_mode = true
+        multiline_enter = true
     "#;
     let cfg_toml: ConfigToml = toml::from_str(toml).expect("deserialize raw_output_mode=true");
     let cfg = Config::load_from_base_config_with_overrides(
@@ -1602,6 +1604,7 @@ async fn runtime_config_uses_tui_raw_output_mode() {
     .expect("load config");
 
     assert!(cfg.tui_raw_output_mode);
+    assert!(cfg.tui_multiline_enter);
 }
 
 #[tokio::test]
@@ -4705,6 +4708,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             auto_recap: true,
             disable_paste_burst: None,
             vim_mode_default: false,
+            multiline_enter: false,
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,

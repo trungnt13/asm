@@ -1600,10 +1600,10 @@ async fn vim_mode_default_disabled_starts_composer_in_insert_mode() {
 
 #[tokio::test]
 async fn vim_mode_default_enabled_starts_composer_in_insert_mode() {
-    let chat = make_startup_chat_with_cli_overrides(vec![(
-        "tui.vim_mode_default".to_string(),
-        TomlValue::Boolean(true),
-    )])
+    let chat = make_startup_chat_with_cli_overrides(vec![
+        ("tui.vim_mode_default".to_string(), TomlValue::Boolean(true)),
+        ("tui.multiline_enter".to_string(), TomlValue::Boolean(true)),
+    ])
     .await;
 
     assert!(chat.bottom_pane.composer_is_vim_enabled());
@@ -1616,6 +1616,11 @@ async fn vim_mode_default_enabled_starts_composer_in_insert_mode() {
     chat.handle_key_event(KeyCode::Esc.into());
     chat.handle_key_event(KeyCode::Char('.').into());
     assert_eq!(chat.bottom_pane.composer_text(), "xx");
+
+    chat.handle_key_event(KeyCode::Char('i').into());
+    chat.apply_external_edit("first\nsecond".to_string());
+    chat.handle_key_event(KeyCode::Enter.into());
+    assert_eq!(chat.bottom_pane.composer_text(), "first\nsecond\n");
 }
 
 async fn make_startup_chat_with_cli_overrides(

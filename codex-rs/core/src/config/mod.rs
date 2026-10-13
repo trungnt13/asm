@@ -834,6 +834,8 @@ pub struct Config {
 
     /// Start the composer in Vim mode (`Normal`) by default.
     pub tui_vim_mode_default: bool,
+    /// Plain Enter edits multiline drafts; explicit modified submit keys still send.
+    pub tui_multiline_enter: bool,
     pub tui_question_esc_back: bool,
 
     /// Start the TUI in raw scrollback mode for copy-friendly transcript output.
@@ -4750,6 +4752,7 @@ impl Config {
                 .map(|t| t.model_availability_nux.clone())
                 .unwrap_or_default(),
             tui_question_esc_back: cfg.tui.as_ref().map(|t| t.question_esc_back).unwrap_or(true),
+            tui_multiline_enter: cfg.tui.as_ref().is_some_and(|tui| tui.multiline_enter),
             tui_vim_mode_default: cfg
                 .tui
                 .as_ref()
