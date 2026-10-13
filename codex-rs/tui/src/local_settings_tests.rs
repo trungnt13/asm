@@ -142,6 +142,7 @@ copy_on_select = "never"
 copy_on_select_clear_selection = true
 right_click_paste = "off"
 vim_mode_default = true
+multiline_enter = true
 terminal_resize_reflow_max_rows = 0
 session_picker_view = "comfortable"
 [tui.effects]
