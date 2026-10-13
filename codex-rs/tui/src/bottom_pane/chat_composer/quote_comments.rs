@@ -154,17 +154,44 @@ impl ChatComposer {
         }
     }
 
-    pub(super) fn active_empty_quote_comment(&self) -> bool {
+    pub(super) fn active_empty_quote_comment(&self) -> Option<Range<usize>> {
         let comments = self.quote_comments();
-        comments.iter().enumerate().any(|(index, comment)| {
-            comment.range.end == self.draft.textarea.cursor()
+        let text = self.draft.textarea.text();
+        let cursor = self.draft.textarea.cursor();
+        comments.iter().enumerate().find_map(|(index, comment)| {
+            let line_end = comment.range.end
+                + text[comment.range.end..]
+                    .find('\n')
+                    .unwrap_or(text.len() - comment.range.end);
+            (cursor >= comment.range.end
+                && cursor <= line_end
                 && comment
-                    .empty_line(
-                        self.draft.textarea.text(),
-                        comments.get(index + 1).map(|next| next.range.start),
-                    )
-                    .is_some()
+                    .empty_line(text, comments.get(index + 1).map(|next| next.range.start))
+                    .is_some())
+            .then_some(comment.range.start..line_end)
         })
+    }
+
+    pub(super) fn leave_empty_quote_comment(&mut self) -> bool {
+        let Some(range) = self.active_empty_quote_comment() else {
+            return false;
+        };
+        let started_vim_edit = self.begin_direct_vim_edit();
+        if let Some(element) = self
+            .draft
+            .textarea
+            .text_element_snapshots()
+            .into_iter()
+            .find(|element| element.range.start == range.start)
+        {
+            self.draft.quote_comments.remove(&element.id);
+        }
+        self.draft.textarea.replace_range(range.clone(), "");
+        self.draft.textarea.set_cursor(range.start);
+        if started_vim_edit {
+            self.finish_vim_edit();
+        }
+        true
     }
 
     pub(crate) fn prepare_quote_comments(
