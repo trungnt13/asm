@@ -67,11 +67,22 @@ struct AdaptiveSession {
     mode: OnceLock<StdMutex<AdaptiveReasoningState>>,
     ever_enabled: AtomicBool,
     generation: AtomicU64,
+    turns_started: AtomicU64,
+    decision_due_after_enable: AtomicBool,
     warmup_started: AtomicBool,
     client: OnceLock<Result<Arc<DecisionsClient>, DecisionsError>>,
     shutdown: CancellationToken,
     evidence: StdMutex<CancellationToken>,
     warmup: StdMutex<Option<AbortOnDropHandle<()>>>,
+}
+
+pub(super) struct AdaptiveModelStepStarted;
+
+// Turn-local counters never follow a parent's counters or survive into another turn.
+struct AdaptiveCadence {
+    turn_index: u64,
+    step_index: u64,
+    last_attempt_step: Option<u64>,
 }
 
 impl Default for AdaptiveSession {
@@ -81,6 +92,8 @@ impl Default for AdaptiveSession {
             mode: OnceLock::new(),
             ever_enabled: AtomicBool::new(/*v*/ false),
             generation: AtomicU64::new(/*v*/ 0),
+            turns_started: AtomicU64::new(/*v*/ 0),
+            decision_due_after_enable: AtomicBool::new(/*v*/ false),
             warmup_started: AtomicBool::new(/*v*/ false),
             client: OnceLock::new(),
             evidence: StdMutex::new(shutdown.child_token()),
@@ -300,6 +313,33 @@ impl Session {
         }
     }
 
+    // Register a started regular turn even if setup fails before its first model step.
+    // Turn-local storage also makes same-turn task reentry idempotent.
+    pub(crate) fn start_adaptive_turn(&self, turn: &TurnContext) {
+        let session = self
+            .services
+            .thread_extension_data
+            .get_or_init(AdaptiveSession::default);
+        turn.extension_data.get_or_init(|| {
+            StdMutex::new(AdaptiveCadence {
+                turn_index: session.turns_started.fetch_add(/*val*/ 1, Ordering::AcqRel),
+                step_index: 1,
+                last_attempt_step: None,
+            })
+        });
+    }
+
+    // Advance once per ordinary main-model request, outside transport retries.
+    pub(super) fn record_adaptive_model_step(&self, turn: &TurnContext) {
+        turn.extension_data.insert(AdaptiveModelStepStarted);
+        if let Some(cadence) = turn.extension_data.get::<StdMutex<AdaptiveCadence>>() {
+            let mut cadence = cadence
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            cadence.step_index = cadence.step_index.saturating_add(/*rhs*/ 1);
+        }
+    }
+
     #[tracing::instrument(skip_all)]
     pub(super) async fn adapt_reasoning(
         self: &Arc<Self>,
@@ -309,7 +349,26 @@ impl Session {
         cancellation: &CancellationToken,
     ) {
         let config = &turn.config.adaptive_reasoning;
-        if !self.adaptive_reasoning_enabled(config.enabled) {
+        let session = self
+            .services
+            .thread_extension_data
+            .get_or_init(AdaptiveSession::default);
+        let mode = self.adaptive_reasoning_state(config.enabled, /*initial_revision*/ 0);
+        self.start_adaptive_turn(turn);
+        let cadence = turn
+            .extension_data
+            .get::<StdMutex<AdaptiveCadence>>()
+            .expect("adaptive turn registered");
+        let cadence_due = {
+            let cadence_state = cadence
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            session.decision_due_after_enable.load(Ordering::Acquire)
+                || (cadence_state.last_attempt_step != Some(cadence_state.step_index)
+                    && cadence_state.turn_index % config.decision_every_n_turns == 0
+                    && (cadence_state.step_index - 1) % config.decision_every_n_steps == 0)
+        };
+        if !mode.enabled {
             return;
         }
         let started = Instant::now();
@@ -372,6 +431,10 @@ impl Session {
                 config.max_context_bytes,
             );
             self.invalidate_adaptive_reasoning();
+            if !cadence_due {
+                tracing::debug!(thread.id = %self.thread_id(), reason = "cadence", "adaptive reasoning skipped");
+                return;
+            }
             if !config.update_on.contains(&trigger)
                 || cancellation.is_cancelled()
                 || self.adaptive_reasoning_paused()
@@ -390,6 +453,15 @@ impl Session {
                 .services
                 .thread_extension_data
                 .get_or_init(AdaptiveSession::default);
+            {
+                let mut cadence = cadence
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                cadence.last_attempt_step = Some(cadence.step_index);
+                session
+                    .decision_due_after_enable
+                    .store(/*val*/ false, Ordering::Release);
+            }
             let guard = AdaptiveDecisionGuard {
                 freshness: session
                     .evidence
