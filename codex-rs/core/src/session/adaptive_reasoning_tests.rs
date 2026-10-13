@@ -528,6 +528,158 @@ async fn basic_step_barrier_awaits_publication_and_preserves_captured_steps() {
             .adaptive_reasoning_enabled,
         "shutdown retains the requested mode for eviction restoration"
     );
+
+    // Exercise the public scheduling barrier with independent expected call positions.
+    for turn_spacing in [1, 2] {
+        let (session, mut turn, _) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+            config.adaptive_reasoning.decision_every_n_turns = turn_spacing;
+            config.adaptive_reasoning.decision_every_n_steps = 3;
+        })
+        .await;
+        let mut observed = Vec::new();
+        for (turn_index, step_count) in [11, 5, 2, 8, 1].into_iter().enumerate() {
+            if turn_index > 0 {
+                session
+                    .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
+                    .await;
+                turn = session.new_default_turn().await;
+                session
+                    .spawn_task(
+                        Arc::clone(&turn),
+                        Vec::new(),
+                        HeldStepTask {
+                            kind: TaskKind::Compact,
+                            finish: Arc::new(tokio::sync::Notify::new()),
+                        },
+                    )
+                    .await;
+            }
+            for step in 1..=step_count {
+                let expected_positions = match turn_spacing {
+                    1 => vec![
+                        (1, 1),
+                        (1, 4),
+                        (1, 7),
+                        (1, 10),
+                        (2, 1),
+                        (2, 4),
+                        (3, 1),
+                        (4, 1),
+                        (4, 4),
+                        (4, 7),
+                        (5, 1),
+                    ],
+                    2 => vec![(1, 1), (1, 4), (1, 7), (1, 10), (3, 1), (5, 1)],
+                    _ => unreachable!("defined intervals"),
+                };
+                let expected = expected_positions.contains(&(turn_index + 1, step));
+                let input = match step {
+                    1 => user_task("Check arithmetic."),
+                    2 => user_task("Latest steer: verify the units too."),
+                    _ => Vec::new(),
+                };
+                let mut adaptation = start_adapting(
+                    &session,
+                    &turn,
+                    &input,
+                    if step == 1 {
+                        AdaptiveReasoningTrigger::TurnStart
+                    } else {
+                        AdaptiveReasoningTrigger::ToolResult
+                    },
+                    &CancellationToken::new(),
+                );
+                if expected {
+                    let request = proxy.request().await;
+                    observed.push((turn_index + 1, step));
+                    if step >= 4 {
+                        assert!(
+                            request.body["input"]
+                                .to_string()
+                                .contains("Latest steer: verify the units too."),
+                            "steering received during cadence skip remains in next decision"
+                        );
+                    }
+                    // Failures consume the interval too; they must not cause an immediate retry.
+                    request
+                        .reply
+                        .send((503, json!({"error":"synthetic"})))
+                        .unwrap();
+                }
+                finish_adaptation(&mut adaptation).await;
+                session.record_adaptive_model_step(&turn);
+                assert!(
+                    proxy.requests.try_recv().is_err(),
+                    "unexpected decision at turn {} step {step}",
+                    turn_index + 1
+                );
+            }
+        }
+        assert_eq!(
+            observed,
+            match turn_spacing {
+                1 => vec![
+                    (1, 1),
+                    (1, 4),
+                    (1, 7),
+                    (1, 10),
+                    (2, 1),
+                    (2, 4),
+                    (3, 1),
+                    (4, 1),
+                    (4, 4),
+                    (4, 7),
+                    (5, 1)
+                ],
+                2 => vec![(1, 1), (1, 4), (1, 7), (1, 10), (3, 1), (5, 1)],
+                _ => unreachable!("defined intervals"),
+            }
+        );
+        session
+            .set_adaptive_reasoning_enabled(/*enabled*/ false)
+            .await
+            .unwrap();
+        session
+            .set_adaptive_reasoning_enabled(/*enabled*/ true)
+            .await
+            .unwrap();
+        session
+            .abort_all_tasks(codex_protocol::protocol::TurnAbortReason::Interrupted)
+            .await;
+        turn = session.new_default_turn().await;
+        session
+            .spawn_task(
+                Arc::clone(&turn),
+                Vec::new(),
+                HeldStepTask {
+                    kind: TaskKind::Compact,
+                    finish: Arc::new(tokio::sync::Notify::new()),
+                },
+            )
+            .await;
+        let mut adaptation = start_adapting(
+            &session,
+            &turn,
+            &user_task("Check arithmetic."),
+            AdaptiveReasoningTrigger::ToolResult,
+            &CancellationToken::new(),
+        );
+        let request = proxy.request().await;
+        request
+            .reply
+            .send((
+                200,
+                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
+            ))
+            .unwrap();
+        finish_adaptation(&mut adaptation).await;
+        assert_eq!(
+            selected_effort(&turn),
+            Some(ReasoningEffort::High),
+            "reenabling makes next eligible step due even on skipped turn"
+        );
+        session.stop_adaptive_reasoning().await;
+    }
 }
 
 #[tokio::test]
@@ -1364,4 +1516,76 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         "two main steps require exactly two real decisions"
     );
     session.stop_adaptive_reasoning().await;
+    if scenario == "success" {
+        let primary = responses::start_mock_server().await;
+        let mut sequence = Vec::new();
+        for call in ["cadence-1", "cadence-2", "cadence-3"] {
+            sequence.push(responses::sse(vec![
+                responses::ev_function_call(
+                    call,
+                    "update_plan",
+                    &json!({"plan": [{"step":"Check arithmetic", "status":"completed"}]})
+                        .to_string(),
+                ),
+                responses::ev_completed("tool-step"),
+            ]));
+        }
+        sequence.push(responses::sse(vec![
+            responses::ev_assistant_message("final", "Done."),
+            responses::ev_completed("final-step"),
+        ]));
+        let requests = responses::mount_sse_sequence(&primary, sequence).await;
+        let (session, turn, _) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+            config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
+            config.model_provider.supports_websockets = false;
+            config.update_plan_enabled = true;
+            config.adaptive_reasoning.decision_every_n_steps = 3;
+        })
+        .await;
+        session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+        let mut input = user_task("Check arithmetic.");
+        let TurnInput::UserInput { metadata, .. } = &mut input[0] else {
+            unreachable!("user task")
+        };
+        metadata.acceptance_order = Some(session.reserve_user_input_order().await);
+        session
+            .spawn_task(Arc::clone(&turn), input, RegularTask::new())
+            .await;
+        let first = proxy.request().await;
+        assert!(requests.requests().is_empty());
+        first
+            .reply
+            .send((
+                200,
+                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"high"}]}),
+            ))
+            .unwrap();
+        let fourth = proxy.request().await;
+        assert_eq!(
+            requests.requests().len(),
+            3,
+            "actual ordinary requests 2 and 3 reuse effort; request 4 waits for its decision"
+        );
+        fourth
+            .reply
+            .send((
+                200,
+                json!({"answers": [{"type":"choice", "name":"reasoning_effort", "choice":"low"}]}),
+            ))
+            .unwrap();
+        timeout(Duration::from_secs(/*secs*/ 5), async {
+            while session.active_turn.lock().await.is_some() {
+                tokio::time::sleep(Duration::from_millis(/*millis*/ 1)).await;
+            }
+        })
+        .await
+        .expect("four ordinary model steps complete");
+        assert_eq!(requests.requests().len(), 4);
+        assert_eq!(selected_effort(&turn), Some(ReasoningEffort::Low));
+        assert!(
+            proxy.requests.try_recv().is_err(),
+            "exactly two decisions for four actual model steps"
+        );
+        session.stop_adaptive_reasoning().await;
+    }
 }

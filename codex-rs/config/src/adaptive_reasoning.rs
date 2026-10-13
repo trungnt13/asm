@@ -16,6 +16,13 @@ pub enum AdaptiveReasoningTrigger {
 #[serde(default, deny_unknown_fields)]
 pub struct AdaptiveReasoningConfig {
     pub enabled: bool,
+    /// Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.
+    #[schemars(range(min = 1))]
+    pub decision_every_n_turns: u64,
+    /// Decide before steps 1, 1 + N, 1 + 2N, ... in selected turns.
+    /// Step numbering restarts at each new turn.
+    #[schemars(range(min = 1))]
+    pub decision_every_n_steps: u64,
     pub decision_model: String,
     pub decision_model_api_env: String,
     pub min_effort: ReasoningEffort,
@@ -32,6 +39,8 @@ impl Default for AdaptiveReasoningConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            decision_every_n_turns: 1,
+            decision_every_n_steps: 1,
             decision_model: "gpt-6-luna".to_string(),
             decision_model_api_env: "DECISION_API_KEY".to_string(),
             min_effort: ReasoningEffort::Low,
@@ -49,6 +58,9 @@ impl Default for AdaptiveReasoningConfig {
 
 impl AdaptiveReasoningConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self.decision_every_n_turns == 0 || self.decision_every_n_steps == 0 {
+            return Err("adaptive_reasoning decision_every_n_turns and decision_every_n_steps must be positive integers".to_string());
+        }
         let ordinary_efforts = [
             ReasoningEffort::None,
             ReasoningEffort::Minimal,
