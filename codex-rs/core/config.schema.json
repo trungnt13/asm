@@ -9,6 +9,20 @@
     "AdaptiveReasoningConfig": {
       "additionalProperties": false,
       "properties": {
+        "decision_every_n_steps": {
+          "default": 2,
+          "description": "Decide before steps 1, 1 + N, 1 + 2N, ... in selected turns. Step numbering restarts at each new turn.",
+          "format": "uint64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "decision_every_n_turns": {
+          "default": 1,
+          "description": "Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.",
+          "format": "uint64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "decision_model": {
           "default": "gpt-6-luna",
           "type": "string"
