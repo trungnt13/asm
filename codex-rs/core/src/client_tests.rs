@@ -957,6 +957,104 @@ fn websocket_incremental_reuse_tracks_raw_result_metadata() -> anyhow::Result<()
             "{scenario}",
         );
     }
+    Arc::get_mut(&mut client.state)
+        .unwrap()
+        .reasoning_effort_override_enabled = true;
+    let mut model_info = test_model_info();
+    model_info.supports_reasoning_effort_updates = true;
+    for effort in [ReasoningEffort::Medium, ReasoningEffort::High] {
+        let updates = [ReasoningEffort::Medium, effort.clone()].map(|effort| {
+            codex_history::ResponseItemEnvelope {
+                item: ResponseItem::ConfigurationUpdate {
+                    reasoning: codex_protocol::models::ConfigurationReasoning { effort },
+                },
+                metadata: Some(codex_history::CodexHarnessMetadata {
+                    harness_authored_configuration: true,
+                    ..Default::default()
+                }),
+            }
+        });
+        let mut history = crate::context_manager::ContextManager::new();
+        history.replace_annotated(vec![updates[0].clone()]);
+        let previous = client.build_responses_request(
+            &Prompt {
+                input: history
+                    .clone()
+                    .for_prompt(&[codex_protocol::openai_models::InputModality::Text]),
+                base_instructions: BaseInstructions {
+                    text: String::new(),
+                    provenance: None,
+                },
+                ..Default::default()
+            },
+            &model_info,
+            Some(ReasoningEffort::Medium),
+            codex_protocol::config_types::ReasoningSummary::None,
+            /*service_tier*/ None,
+            &responses_metadata,
+            /*include_internal*/ false,
+        )?;
+        let follow_up = ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: None,
+            name: Some("notifications".to_string()),
+            namespace: None,
+            output: FunctionCallOutputPayload::from_text("continue".to_string()),
+            internal_chat_message_metadata_passthrough: None,
+        };
+        history.replace_annotated(vec![
+            updates[0].clone(),
+            updates[1].clone(),
+            follow_up.clone().into(),
+        ]);
+        let current = client.build_responses_request(
+            &Prompt {
+                input: history
+                    .clone()
+                    .for_prompt(&[codex_protocol::openai_models::InputModality::Text]),
+                base_instructions: BaseInstructions {
+                    text: String::new(),
+                    provenance: None,
+                },
+                ..Default::default()
+            },
+            &model_info,
+            Some(ReasoningEffort::Medium),
+            codex_protocol::config_types::ReasoningSummary::None,
+            /*service_tier*/ None,
+            &responses_metadata,
+            /*include_internal*/ false,
+        )?;
+        assert_eq!(
+            current.input,
+            vec![updates[1].item.clone(), follow_up.clone()]
+        );
+        assert_eq!(history.annotated_items().len(), 3);
+        let mut session = client.new_session();
+        session.websocket_session.last_request = Some(previous);
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        sender
+            .send(super::LastResponse {
+                response_id: "previous-response".to_string(),
+                items_added: Vec::new(),
+            })
+            .unwrap();
+        session.websocket_session.last_response_rx = Some(receiver);
+        // Normalize the complete history before comparing prefixes; never reset the connection.
+        assert_eq!(
+            session
+                .prepare_websocket_request(&current)
+                .map(|continuation| continuation.items),
+            if effort == ReasoningEffort::Medium {
+                Ok(vec![follow_up])
+            } else {
+                Err(NonIncrementalReason::InputMismatch {
+                    previous: "configuration_update",
+                    current: "configuration_update",
+                })
+            },
+        );
+    }
     Ok(())
 }
 

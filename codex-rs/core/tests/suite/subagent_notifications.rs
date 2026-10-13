@@ -6,6 +6,9 @@ use codex_core::TurnStartOptions;
 use codex_core::config::AgentRoleConfig;
 use codex_core::config::CurrentTimeReminderConfig;
 use codex_features::Feature;
+use codex_history::CodexHarnessMetadata;
+use codex_history::InitialHistory;
+use codex_history::ResponseItemEnvelope;
 use codex_history::RolloutItem;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::ThreadId;
@@ -1458,6 +1461,7 @@ enum FullHistoryV2ModelSelection {
     CurrentTimeReminders,
     MultiAgentModeInstructions,
     MultiAgentModeTransitions,
+    ReasoningEffortUpdates,
 }
 
 #[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with omitted fork_turns")]
@@ -1468,6 +1472,7 @@ enum FullHistoryV2ModelSelection {
 #[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork drops inherited current-time reminders")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork drops inherited multi-agent mode instructions")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeTransitions; "full fork restores explicit policy after proactive transition")]
+#[test_case(FullHistoryV2ModelSelection::ReasoningEffortUpdates; "filtered parent steps coalesce effort updates")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_context(
     selection: FullHistoryV2ModelSelection,
@@ -1490,7 +1495,8 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         | FullHistoryV2ModelSelection::WorldStateIdentity
         | FullHistoryV2ModelSelection::CurrentTimeReminders
         | FullHistoryV2ModelSelection::MultiAgentModeInstructions
-        | FullHistoryV2ModelSelection::MultiAgentModeTransitions => (
+        | FullHistoryV2ModelSelection::MultiAgentModeTransitions
+        | FullHistoryV2ModelSelection::ReasoningEffortUpdates => (
             json!({
                 "message": CHILD_PROMPT,
                 "task_name": "worker",
@@ -1586,6 +1592,16 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             .features
             .enable(Feature::MultiAgentV2)
             .expect("test config should allow feature update");
+        if matches!(
+            selection,
+            FullHistoryV2ModelSelection::ReasoningEffortUpdates
+        ) {
+            config
+                .features
+                .enable(Feature::ReasoningEffortOverride)
+                .unwrap();
+            config.model_provider.supports_websockets = false;
+        }
         let model_catalog = config.model_catalog.get_or_insert_with(|| {
             bundled_models_response().expect("bundled models.json should parse")
         });
@@ -1595,6 +1611,12 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
                 .iter_mut()
                 .find(|model_info| model_info.slug == model)
                 .unwrap_or_else(|| panic!("{model} should exist in bundled models.json"));
+            if matches!(
+                selection,
+                FullHistoryV2ModelSelection::ReasoningEffortUpdates
+            ) {
+                model_info.supports_reasoning_effort_updates = true;
+            }
             if model == INHERITED_MODEL {
                 model_info.comp_hash = None;
             }
@@ -1698,7 +1720,39 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         builder =
             builder.with_external_time_provider(std::sync::Arc::new(FailFirstClockRead::default()));
     }
-    let test = builder.build_with_auto_env(&server).await?;
+    let mut test = builder.build_with_auto_env(&server).await?;
+    if matches!(
+        selection,
+        FullHistoryV2ModelSelection::ReasoningEffortUpdates
+    ) {
+        // Real saved parent steps become adjacent updates only when spawning filters tools/reasoning.
+        let mut options = test.start_thread_options().await;
+        options.initial_history = InitialHistory::Forked(
+            [
+                json!({"type": "configuration_update", "reasoning": {"effort": "high"}}),
+                json!({"type": "function_call", "call_id": "old-call", "name": "old_tool", "arguments": "{}"}),
+                json!({"type": "function_call_output", "call_id": "old-call", "output": "old result"}),
+                json!({"type": "reasoning", "summary": []}),
+                json!({"type": "configuration_update", "reasoning": {"effort": "low"}}),
+            ]
+            .into_iter()
+            .map(|item| {
+                let item = serde_json::from_value(item).expect("parent step fixture");
+                RolloutItem::ResponseItem(ResponseItemEnvelope {
+                    item,
+                    metadata: Some(CodexHarnessMetadata {
+                        harness_authored_configuration: true,
+                        ..Default::default()
+                    }),
+                })
+            })
+            .collect(),
+        );
+        test.codex.shutdown_and_wait().await?;
+        let parent = test.thread_manager.start_thread(options).await?;
+        test.codex = parent.thread;
+        test.session_configured = parent.session_configured;
+    }
     if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
         test.codex.submit(Op::Compact).await?;
         wait_for_event(&test.codex, |event| {
@@ -1707,8 +1761,20 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         .await;
     }
 
-    test.submit_turn(TURN_0_FORK_PROMPT).await?;
-    let _ = seed_turn.single_request();
+    if matches!(
+        selection,
+        FullHistoryV2ModelSelection::ReasoningEffortUpdates
+    ) {
+        // The settings-neutral helper preserves the fixture's configured XHigh selection.
+        test.submit_text_turn(TURN_0_FORK_PROMPT).await?;
+        assert_eq!(
+            seed_turn.single_request().body_json()["reasoning"]["effort"],
+            "xhigh"
+        );
+    } else {
+        test.submit_turn(TURN_0_FORK_PROMPT).await?;
+        let _ = seed_turn.single_request();
+    }
     if let Some((proactive_turn, explicit_turn)) = mode_transition_turns {
         for (prompt, effort, approval_policy) in [
             (
@@ -1756,7 +1822,14 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             "restored parent policy should require an explicit delegation request"
         );
     }
-    test.submit_turn(TURN_1_PROMPT).await?;
+    if matches!(
+        selection,
+        FullHistoryV2ModelSelection::ReasoningEffortUpdates
+    ) {
+        test.submit_text_turn(TURN_1_PROMPT).await?;
+    } else {
+        test.submit_turn(TURN_1_PROMPT).await?;
+    }
     let parent_request = spawn_turn.single_request();
 
     let child_request = wait_for_request_with_model(&child_request_log, expected_model).await?;
@@ -1871,6 +1944,49 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         assert_eq!(notice_count(&child_request, "<current_time_reminder>"), 1);
     }
     let child_body = child_request.body_json();
+    if matches!(
+        selection,
+        FullHistoryV2ModelSelection::ReasoningEffortUpdates
+    ) {
+        let input = child_request.input();
+        assert!(!input.windows(2).any(|pair| {
+            pair.iter()
+                .all(|item| item["type"] == "configuration_update")
+        }));
+        let updates = input
+            .iter()
+            .filter(|item| item["type"] == "configuration_update")
+            .map(|item| item["reasoning"]["effort"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(updates, [json!("low"), json!("xhigh"), json!("high")]);
+        assert!(!input.iter().any(|item| item["call_id"] == "old-call"));
+        let child_thread_id = ThreadId::from_string(
+            child_body["client_metadata"]["thread_id"]
+                .as_str()
+                .expect("child thread id"),
+        )?;
+        let child = test.thread_manager.get_thread(child_thread_id).await?;
+        let raw_updates = child
+            .conversation_history_snapshot()
+            .await
+            .items()
+            .filter_map(|item| match item {
+                codex_protocol::models::ResponseItem::ConfigurationUpdate { reasoning } => {
+                    Some(reasoning.effort.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            raw_updates,
+            [
+                ReasoningEffort::High,
+                ReasoningEffort::Low,
+                ReasoningEffort::XHigh,
+                ReasoningEffort::High
+            ]
+        );
+    }
     if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
         let child_thread_id = ThreadId::from_string(
             child_body["client_metadata"]["thread_id"]
