@@ -6904,21 +6904,6 @@ mod tests {
             .expect("expected connector mention to be selected");
         assert_eq!(mention.insert_text, "$notion".to_string());
         assert_eq!(mention.path, Some("app://connector_1".to_string()));
-        composer.set_text_content("use $notion later".to_owned(), Vec::new(), Vec::new());
-        composer.set_current_cursor("use $not".len());
-        composer.sync_popups();
-        assert!(matches!(composer.popups.active, ActivePopup::Skill(_)));
-        composer.attach_quote(PendingQuote::Text("reference".to_owned()));
-        assert!(matches!(composer.popups.active, ActivePopup::None));
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(result, InputResult::None);
-        assert_eq!(composer.current_text(), "use $notion later\n");
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(
-            matches!(result, InputResult::Submitted { text, .. } if text == "> 1. reference\n\nuse $notion later")
-        );
     }
 
     #[test]
@@ -8446,10 +8431,8 @@ mod tests {
                 path: "app://figma".to_string(),
             },
         ];
-        let quote = "> @figma $figma\n  >> $figma @figma\n\n";
-        let text = format!("{quote}@figma then $figma");
         composer.set_text_content_with_mention_bindings(
-            text.clone(),
+            "@figma then $figma".to_string(),
             Vec::new(),
             Vec::new(),
             mention_bindings.clone(),
@@ -8465,21 +8448,6 @@ mod tests {
             vec![('@', "figma".to_string()), ('$', "figma".to_string())]
         );
         assert_eq!(composer.mention_bindings(), mention_bindings);
-        assert_eq!(
-            composer
-                .draft
-                .textarea
-                .text_element_snapshots()
-                .into_iter()
-                .map(|snapshot| snapshot.range)
-                .collect::<Vec<_>>(),
-            vec![quote.len()..quote.len() + 6, text.len() - 6..text.len()]
-        );
-        composer
-            .draft
-            .textarea
-            .replace_range(quote.len()..text.len(), "");
-        assert!(composer.mention_bindings().is_empty());
     }
 
     #[test]
@@ -9460,27 +9428,7 @@ mod tests {
                     "https://example.com/one.png".to_string(),
                     "https://example.com/two.png".to_string(),
                 ]);
-                composer.set_placeholder_text(crate::chatwidget::PLACEHOLDER.to_string());
-                composer.attach_quote(PendingQuote::Text("Selected transcript text".to_string()));
-                composer.attach_quote(PendingQuote::Text("Another reference".to_string()));
-                let rendered = |composer: &ChatComposer| {
-                    let area = Rect::new(
-                        /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 12,
-                    );
-                    let mut buffer = Buffer::empty(area);
-                    composer.render(area, &mut buffer);
-                    buffer
-                        .content
-                        .iter()
-                        .map(|cell| cell.symbol())
-                        .collect::<String>()
-                };
-                composer.set_placeholder_text("Custom prompt".to_string());
-                assert!(!rendered(composer).contains("Add an optional comment…"));
-                composer.set_placeholder_text(crate::chatwidget::PLACEHOLDER.to_string());
-                composer.blocks_direct_input = true;
-                assert!(!rendered(composer).contains("Add an optional comment…"));
-                composer.blocks_direct_input = false;
+                composer.set_text_content("describe these".to_string(), Vec::new(), Vec::new());
             },
         );
 
@@ -10010,175 +9958,6 @@ mod tests {
             },
             result
         );
-
-        composer.set_keymap_bindings(&RuntimeKeymap::defaults());
-        composer.set_disable_paste_burst(/*disabled*/ true);
-        for draft in ["", "hello", "hello\n", "héllo\n"] {
-            for separator in ["\n", " ", "\u{2003}"] {
-                composer.set_text_content(draft.to_owned(), Vec::new(), Vec::new());
-                composer.attach_quote(PendingQuote::Text("first".to_owned()));
-                composer.insert_str("x");
-                composer.attach_quote(PendingQuote::Text("second".to_owned()));
-                let first_end = composer.quote_comments()[0].range.end;
-                composer
-                    .draft
-                    .textarea
-                    .replace_range(first_end..first_end + 2, separator);
-                let saved = composer.snapshot_draft();
-                let prefix = if draft.is_empty() {
-                    String::new()
-                } else {
-                    format!("{draft}\n")
-                };
-                let mut text = composer.current_text();
-                let mut elements = composer.current_text_elements();
-                ChatComposer::prepare_quote_comments(
-                    &mut text,
-                    &mut elements,
-                    &composer.quote_comments(),
-                );
-                assert_eq!(
-                    text,
-                    if separator == "\n" {
-                        draft.to_owned()
-                    } else {
-                        format!("{prefix}2\\. ")
-                    }
-                );
-                assert!(elements.is_empty());
-                composer.attach_quote(PendingQuote::Text("third".to_owned()));
-                assert_eq!(
-                    composer.current_text(),
-                    if separator == "\n" {
-                        format!("{prefix}3. ")
-                    } else {
-                        format!("{prefix}2. \n3. ")
-                    }
-                );
-                assert_eq!(composer.quote_comments().last().unwrap().quote_index, 2);
-                composer.restore_draft(saved);
-                composer.insert_str("second comment");
-                composer.remove_quote_comment(0);
-                composer.attachments.quotes.remove(0);
-                assert_eq!(
-                    composer.current_text(),
-                    format!("{prefix}1. second comment")
-                );
-                assert_eq!(composer.quote_comments()[0].quote_index, 0);
-                composer.set_quotes(Vec::new());
-            }
-        }
-        for multiline in [false, true] {
-            composer.config.multiline_enter = multiline;
-            for draft in ["This is my message ...", "  1. ordinary list\n", "text  "] {
-                composer.set_text_content(draft.to_owned(), Vec::new(), Vec::new());
-                composer.attach_quote(PendingQuote::Text("reference".to_owned()));
-                assert_eq!(composer.current_text(), format!("{draft}\n1. "));
-                assert_eq!(composer.current_cursor(), composer.current_text().len());
-                let (result, _) =
-                    composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-                assert_eq!(result, InputResult::None);
-                assert_eq!(composer.current_text(), format!("{draft}\n"));
-                assert!(composer.quote_comments().is_empty());
-                composer.set_quotes(Vec::new());
-                assert_eq!(composer.current_text(), format!("{draft}\n"));
-                composer.set_text_content(draft.to_owned(), Vec::new(), Vec::new());
-                composer.attach_quote(PendingQuote::Text("reference".to_owned()));
-                composer.set_quotes(Vec::new());
-                assert_eq!(composer.current_text(), draft);
-            }
-            composer.set_text_content(String::new(), Vec::new(), Vec::new());
-            composer.attach_quote(PendingQuote::Text("first".to_owned()));
-            composer.insert_str("first comment");
-            composer.attach_quote(PendingQuote::Text("second".to_owned()));
-            composer.insert_str("  ");
-            let saved = composer.snapshot_draft();
-            composer.restore_draft(saved.clone());
-            assert_eq!(composer.snapshot_draft(), saved);
-            let (result, _) =
-                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            assert_eq!(result, InputResult::None);
-            assert_eq!(composer.current_text(), "1. first comment\n");
-            assert_eq!(composer.current_cursor(), "1. first comment\n".len());
-            assert_eq!(composer.quote_comments().len(), 1);
-            assert_eq!(composer.attachments.quotes, vec!["first", "second"]);
-            composer.insert_str("general comment");
-            assert_eq!(composer.current_text(), "1. first comment\ngeneral comment");
-            composer.set_quotes(Vec::new());
-
-            for manual in ["1. ", "1. typed"] {
-                composer.set_text_content(manual.to_owned(), Vec::new(), Vec::new());
-                let (result, _) =
-                    composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-                assert_eq!(
-                    result,
-                    InputResult::Submitted {
-                        text: manual.trim().to_owned(),
-                        text_elements: Vec::new()
-                    }
-                );
-            }
-            composer.attach_quote(PendingQuote::Text("typed".to_owned()));
-            composer.insert_str("not empty");
-            let (result, _) =
-                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            assert_eq!(
-                result,
-                InputResult::Submitted {
-                    text: "> 1. typed\n\n1\\. not empty".to_owned(),
-                    text_elements: Vec::new()
-                }
-            );
-        }
-        let mut keymap = RuntimeKeymap::defaults();
-        keymap.composer.submit.push(key_hint::ctrl(KeyCode::Enter));
-        composer.set_keymap_bindings(&keymap);
-        composer.attach_quote(PendingQuote::Text("modified".to_owned()));
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
-        assert_eq!(
-            result,
-            InputResult::Submitted {
-                text: "> 1. modified\n".to_owned(),
-                text_elements: Vec::new()
-            }
-        );
-
-        keymap.composer.submit = vec![key_hint::ctrl(KeyCode::Char('j'))];
-        composer.set_keymap_bindings(&keymap);
-        composer.attach_quote(PendingQuote::Text("newline binding".to_owned()));
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(result, InputResult::None);
-        assert_eq!(composer.current_text(), "");
-        composer.set_quotes(Vec::new());
-        Arc::make_mut(&mut keymap.editor).insert_newline = vec![key_hint::shift(KeyCode::Enter)];
-        composer.set_keymap_bindings(&keymap);
-        composer.attach_quote(PendingQuote::Text("unmapped".to_owned()));
-        let saved = composer.snapshot_draft();
-        composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(composer.snapshot_draft(), saved);
-        composer.set_quotes(Vec::new());
-        composer.set_keymap_bindings(&RuntimeKeymap::defaults());
-        composer.attach_quote(PendingQuote::Text("restricted".to_owned()));
-        composer.blocks_direct_input = true;
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(result, InputResult::ParentOwnedInputBlocked);
-        assert_eq!(composer.current_text(), "1. ");
-        composer.blocks_direct_input = false;
-        composer.set_quotes(Vec::new());
-        composer.attach_quote(PendingQuote::Text("paste".to_owned()));
-        composer.set_disable_paste_burst(/*disabled*/ false);
-        composer
-            .draft
-            .paste_burst
-            .begin_with_retro_grabbed("buffered".to_owned(), Instant::now());
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(result, InputResult::None);
-        assert_eq!(composer.quote_comments().len(), 1);
-        assert_eq!(composer.attachments.quotes, vec!["paste"]);
     }
 
     #[test]
@@ -11370,7 +11149,7 @@ mod tests {
 
     #[test]
     fn history_navigation_restores_remote_and_local_image_attachments() {
-        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
         let mut composer = ChatComposer::new(
             /*has_input_focus*/ true,
@@ -11400,37 +11179,6 @@ mod tests {
         assert_eq!(text_elements[0].placeholder(&text), Some("[Image #2]"));
         assert_eq!(composer.local_image_paths(), vec![path]);
         assert_eq!(composer.remote_image_urls(), vec![remote_image_url]);
-        composer.set_remote_image_urls(Vec::new());
-        composer.set_text_content(String::new(), Vec::new(), Vec::new());
-        composer.attach_quote(PendingQuote::Text("quote-only draft".to_string()));
-        let mut quoted_draft = composer.draft_snapshot();
-        for (code, cursor) in [(KeyCode::Up, 0), (KeyCode::Down, 3)] {
-            composer.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
-            quoted_draft.cursor = cursor;
-            assert_eq!(composer.draft_snapshot(), quoted_draft);
-        }
-        composer.set_quotes(Vec::new());
-        composer.history = ChatComposerHistory::new();
-        composer.set_history_metadata(ThreadId::new(), /*log_id*/ 42, /*entry_count*/ 1);
-        composer.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert!(
-            std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(
-                event,
-                AppEvent::LookupMessageHistoryEntry {
-                    log_id: 42,
-                    offset: 0,
-                    ..
-                }
-            ))
-        );
-        composer.attach_quote(PendingQuote::Text("quote after pending lookup".to_string()));
-        let quoted_draft = composer.draft_snapshot();
-        assert!(!composer.on_history_entry_response(
-            /*log_id*/ 42,
-            /*offset*/ 0,
-            Some("older draft".to_string())
-        ));
-        assert_eq!(composer.draft_snapshot(), quoted_draft);
     }
 
     #[test]
@@ -12947,6 +12695,52 @@ mod tests {
     }
 
     #[test]
+    fn remote_images_do_not_modify_textarea_text_or_elements() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            /*has_input_focus*/ true,
+            sender,
+            /*enhanced_keys_supported*/ false,
+            "Ask Codex to do anything".to_string(),
+            /*disable_paste_burst*/ false,
+        );
+
+        composer.set_remote_image_urls(vec![
+            "https://example.com/one.png".to_string(),
+            "https://example.com/two.png".to_string(),
+        ]);
+
+        assert_eq!(composer.current_text(), "");
+        assert_eq!(composer.text_elements(), Vec::<TextElement>::new());
+    }
+
+    #[test]
+    fn attach_image_after_remote_prefix_uses_offset_label() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            /*has_input_focus*/ true,
+            sender,
+            /*enhanced_keys_supported*/ false,
+            "Ask Codex to do anything".to_string(),
+            /*disable_paste_burst*/ false,
+        );
+
+        composer.set_remote_image_urls(vec![
+            "https://example.com/one.png".to_string(),
+            "https://example.com/two.png".to_string(),
+        ]);
+        composer.attach_image(PathBuf::from("/tmp/local.png"));
+
+        assert_eq!(
+            composer.attachments.local_images[0].placeholder,
+            "[Image #3]"
+        );
+        assert_eq!(composer.current_text(), "[Image #3]");
+    }
+
+    #[test]
     fn prepare_submission_keeps_remote_offset_local_placeholder_numbering() {
         let (tx, _rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
@@ -12959,11 +12753,6 @@ mod tests {
         );
 
         composer.set_remote_image_urls(vec!["https://example.com/one.png".to_string()]);
-        let (submitted_text, submitted_elements) = composer
-            .prepare_submission_text(/*record_history*/ true)
-            .expect("remote-only submission should be generated");
-        assert_eq!(submitted_text, "");
-        assert!(submitted_elements.is_empty());
         let base_text = "[Image #2] hello".to_string();
         let base_elements = vec![TextElement::new(
             (0.."[Image #2]".len()).into(),
@@ -12986,123 +12775,26 @@ mod tests {
                 Some("[Image #2]".to_string())
             )]
         );
-        composer.set_text_content(
-            "[Image #2] comment".to_string(),
-            vec![TextElement::new(
-                (0..10).into(),
-                Some("[Image #2]".to_string()),
-            )],
-            vec![PathBuf::from("/tmp/local.png")],
-        );
-        composer.attach_quote(PendingQuote::Text("café\nselected".to_string()));
-        composer.insert_str("first comment");
-        composer.attach_quote(PendingQuote::Text("second".to_string()));
-        composer.attach_quote(PendingQuote::Text("third".to_string()));
-        composer.insert_str("\nthird comment\ncontinued");
-        let saved = composer.snapshot_draft();
-        composer.apply_external_edit(composer.current_text());
-        assert_eq!(composer.quote_comments(), saved.quote_comments);
-        composer.remove_quote_comment(/*index*/ 0);
-        composer.attachments.quotes.remove(0);
-        assert_eq!(
-            composer.current_text(),
-            "[Image #2] comment\nfirst comment\n2. \nthird comment\ncontinued"
-        );
-        composer.restore_draft(saved);
-        let (result, _) =
-            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(
-            result,
-            InputResult::Submitted {
-                text: "> 1. café\n> selected\n\n> 2. second\n\n> 3. third\n\n[Image #2] comment\n1\\. first comment\n3\\. \nthird comment\ncontinued".to_string(),
-                text_elements: vec![TextElement::new(
-                    (48..58).into(),
-                    Some("[Image #2]".to_string())
-                )]
-            }
-        );
-        assert!(composer.attachments.quotes.is_empty());
+    }
 
-        for (paste, count) in [(false, 4994), (false, 4998), (true, 4998)] {
-            let comment = "é".repeat(count);
-            if paste {
-                composer.handle_paste(comment);
-                composer.attach_quote(PendingQuote::Text("x".to_owned()));
-            } else {
-                composer.attach_quote(PendingQuote::Text("x".to_owned()));
-                composer.insert_str(&comment);
-            }
-            composer.set_current_cursor(/*cursor*/ 5);
-            let original = composer.snapshot_draft();
-            let (result, _) =
-                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            if count == 4994 {
-                let InputResult::Submitted { text, .. } = result else {
-                    panic!("the 10,000-byte boundary must submit");
-                };
-                assert_eq!(text.len(), 10_000);
-            } else {
-                assert_eq!(result, InputResult::None);
-                assert_eq!(composer.snapshot_draft(), original);
-            }
-            composer.set_quotes(Vec::new());
-            composer.set_text_content(String::new(), Vec::new(), Vec::new());
-        }
+    #[test]
+    fn prepare_submission_with_only_remote_images_returns_empty_text() {
+        let (tx, _rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            /*has_input_focus*/ true,
+            sender,
+            /*enhanced_keys_supported*/ false,
+            "Ask Codex to do anything".to_string(),
+            /*disable_paste_burst*/ false,
+        );
 
-        composer.set_quotes(vec!["x".to_string(); 10]);
-        composer.set_text_content("é".repeat(4959) + "a", Vec::new(), Vec::new());
-        let (numbered, _) = composer
+        composer.set_remote_image_urls(vec!["https://example.com/one.png".to_string()]);
+        let (submitted_text, submitted_elements) = composer
             .prepare_submission_text(/*record_history*/ true)
-            .unwrap();
-        assert!(numbered.contains("\n> 9. x\n\n> 10. x\n\n"));
-        assert_eq!(numbered.len(), 10000);
-        composer.attach_quote(PendingQuote::Text("editor quote".to_owned()));
-        for paste in [None, Some("p".repeat(LARGE_PASTE_CHAR_THRESHOLD + 1))] {
-            if let Some(paste) = paste {
-                composer.handle_paste(paste);
-            }
-            let saved = composer.snapshot_draft();
-            composer
-                .apply_external_edit(composer.current_text_with_pending().trim_end().to_owned());
-            assert_eq!(composer.snapshot_draft(), saved);
-        }
-        composer.attach_quote(PendingQuote::Text("next editor quote".to_owned()));
-        assert_eq!(composer.quote_comments().len(), 2);
-        composer.set_quotes(Vec::new());
-        composer.set_text_content(String::new(), Vec::new(), Vec::new());
-        composer.set_quotes(vec!["a".repeat(4997)]);
-        composer.attach_quote(PendingQuote::Text("b".repeat(4997)));
-        assert_eq!(composer.attachments.quotes, vec!["a".repeat(4997)]);
-        for comment in ["/help", "!echo hello", ""] {
-            composer.set_quotes(Vec::new());
-            composer.set_text_content(comment.to_owned(), Vec::new(), Vec::new());
-            composer.attach_quote(PendingQuote::Text("selected".to_owned()));
-            let (result, _) =
-                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            assert_eq!(result, InputResult::None);
-            assert_eq!(
-                composer.current_text(),
-                if comment.is_empty() {
-                    String::new()
-                } else {
-                    format!("{comment}\n")
-                }
-            );
-            assert_eq!(composer.attachments.quotes, vec!["selected"]);
-            let (input, _) =
-                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-            assert_eq!(
-                input,
-                InputResult::Submitted {
-                    text: if comment.is_empty() {
-                        "> 1. selected\n".to_owned()
-                    } else {
-                        format!("> 1. selected\n\n{comment}")
-                    },
-                    text_elements: Vec::new()
-                },
-            );
-        }
+            .expect("remote-only submission should be generated");
+        assert_eq!(submitted_text, "");
+        assert!(submitted_elements.is_empty());
     }
 
     #[test]
@@ -13121,14 +12813,7 @@ mod tests {
             "https://example.com/one.png".to_string(),
             "https://example.com/two.png".to_string(),
         ]);
-        assert_eq!(composer.current_text(), "");
-        assert_eq!(composer.text_elements(), Vec::<TextElement>::new());
         composer.attach_image(PathBuf::from("/tmp/local.png"));
-        assert_eq!(
-            composer.attachments.local_images[0].placeholder,
-            "[Image #3]"
-        );
-        assert_eq!(composer.current_text(), "[Image #3]");
         composer.draft.textarea.set_cursor(/*pos*/ 0);
 
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
