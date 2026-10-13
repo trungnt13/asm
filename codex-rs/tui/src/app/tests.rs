@@ -946,7 +946,6 @@ async fn reset_thread_event_state_aborts_listener_tasks() {
         .await
         .expect("timed out waiting for listener task abort")
         .expect("listener task drop notification should succeed");
-    app_server.shutdown().await.expect("app server shutdown");
 }
 
 #[tokio::test]
