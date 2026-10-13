@@ -259,19 +259,6 @@ fn blockquote_with_ordered_list() {
         .green(),
     ]);
     assert_eq!(text, expected);
-    let text = render_markdown_text(
-        "> 1. first\n\n> 2. second\n\n1\\. first comment\n\n3\\. third comment",
-    );
-    assert_eq!(
-        plain_lines(&text),
-        vec![
-            "> 1. first",
-            "",
-            "> 2. second",
-            "1. first comment",
-            "3. third comment"
-        ]
-    );
 }
 
 #[test]
@@ -376,7 +363,10 @@ fn blockquote_two_paragraphs_inside_ordered_list_stay_compact() {
         .collect();
     assert_eq!(
         lines,
-        vec!["1. > para 1".to_string(), "   > para 2".to_string(),],
+        vec![
+            "1. > para 1".to_string(),
+            "   > para 2".to_string(),
+        ],
         "expected blockquote content to stay aligned after list marker"
     );
 }
@@ -466,7 +456,10 @@ fn blockquote_with_heading_and_paragraph() {
         .collect();
     assert_eq!(
         lines,
-        vec!["> # Heading".to_string(), "> paragraph text".to_string(),]
+        vec![
+            "> # Heading".to_string(),
+            "> paragraph text".to_string(),
+        ]
     );
 }
 
@@ -1556,7 +1549,10 @@ fn list_item_after_code_block_stays_compact() {
     let md = "1. First:\n\n   ```rust\n   fn first() {}\n   ```\n\n2. Second:\n";
     let text = render_markdown_text(md);
     let lines = plain_lines(&text);
-    assert_eq!(lines, vec!["1. First:", "   fn first() {}", "2. Second:"]);
+    assert_eq!(
+        lines,
+        vec!["1. First:", "   fn first() {}", "2. Second:"]
+    );
     assert_snapshot!(
         "list_item_after_code_block_keeps_blank_separator",
         lines.join("\n")

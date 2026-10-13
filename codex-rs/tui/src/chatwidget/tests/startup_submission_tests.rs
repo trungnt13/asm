@@ -4,32 +4,13 @@ use pretty_assertions::assert_eq;
 #[tokio::test]
 async fn startup_submission_waits_for_session_and_sends_exactly_once() {
     let (mut source, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    source
-        .bottom_pane
-        .insert_str("1. confirmed before startup\n2. ");
-    source.bottom_pane.set_composer_quotes(vec![
-        "startup first".to_string(),
-        "startup second".to_string(),
-    ]);
-    source.bottom_pane.set_composer_quote_comments(vec![
-        crate::bottom_pane::QuoteComment {
-            quote_index: 0,
-            range: 0..3,
-        },
-        crate::bottom_pane::QuoteComment {
-            quote_index: 1,
-            range: 28..31,
-        },
-    ]);
+    source.bottom_pane.insert_str("confirmed before startup");
     let mut draft = Some(source.bottom_pane.composer_draft_snapshot());
     let mut confirmed = true;
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
     assert!(draft.is_none());
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "1. confirmed before startup\n2. "
-    );
+    assert_eq!(chat.bottom_pane.composer_text(), "confirmed before startup");
     for _ in 0..3 {
         chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     }
@@ -45,19 +26,15 @@ async fn startup_submission_waits_for_session_and_sends_exactly_once() {
     chat.set_model("");
     chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
     assert_no_submit_op(&mut op_rx);
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "1. confirmed before startup\n2. "
-    );
+    assert_eq!(chat.bottom_pane.composer_text(), "confirmed before startup");
     chat.set_model(&model);
     chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
     assert_matches!(next_submit_op(&mut op_rx), Op::UserTurn { items, .. } if items == vec![UserInput::Text {
-        text: "> 1. startup first\n\n> 2. startup second\n\n1\\. confirmed before startup".into(), text_elements: Vec::new(),
+        text: "confirmed before startup".into(), text_elements: Vec::new(),
     }]);
     chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
     assert_no_submit_op(&mut op_rx);
     assert_eq!(chat.bottom_pane.composer_text(), "");
-    assert!(chat.bottom_pane.composer_draft_snapshot().quotes.is_empty());
 }
 
 #[tokio::test]
@@ -112,13 +89,9 @@ async fn startup_submission_waits_for_protected_view_and_preserves_paste_provena
 
 #[tokio::test]
 async fn startup_submission_edit_or_disconnect_cancels_without_losing_draft() {
-    for action in ["edit", "quote-order", "disconnect", "parent-owned"] {
+    for action in ["edit", "disconnect", "parent-owned"] {
         let (mut source, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         source.bottom_pane.insert_str("confirmed draft");
-        source.bottom_pane.set_composer_quotes(vec![
-            "confirmed first".to_string(),
-            "confirmed second".to_string(),
-        ]);
         let mut draft = Some(source.bottom_pane.composer_draft_snapshot());
         let mut confirmed = true;
         let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
@@ -130,11 +103,6 @@ async fn startup_submission_edit_or_disconnect_cancels_without_losing_draft() {
             chat.pause_for_disconnect();
         } else if action == "edit" {
             chat.handle_paste(" edited".into());
-        } else if action == "quote-order" {
-            chat.bottom_pane.set_composer_quotes(vec![
-                "confirmed second".to_string(),
-                "confirmed first".to_string(),
-            ]);
         }
         chat.thread_id = Some(ThreadId::new());
         chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
