@@ -411,7 +411,11 @@ async fn collect_compaction_output(
                         incomplete,
                     )
                     .await;
-                    sess.send_token_count_event(turn_context).await;
+                    sess.send_token_count_event(
+                        turn_context,
+                        /*output_tokens_per_second*/ None,
+                    )
+                    .await;
                 }
             }
         }
