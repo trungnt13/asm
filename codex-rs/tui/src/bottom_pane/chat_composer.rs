@@ -122,6 +122,7 @@
 //! # Submission and Prompt Expansion
 //!
 //! Multiline pastes continue blockquote prefixes.
+//! Plain Enter on an empty generated quote-comment line removes its prefix without submitting.
 //! `Enter` submits immediately by default. Opt-in `tui.multiline_enter` inserts a newline
 //! for multiline drafts (including expanded pending pastes), only when plain Enter is bound
 //! to both submit and editor newline. Active paste Enter handling runs first. Modified submit
@@ -3586,6 +3587,25 @@ impl ChatComposer {
             return self.handle_submission(self.is_task_running || self.queue_submissions);
         }
 
+        if key_event.code == KeyCode::Enter
+            && key_event.modifiers.is_empty()
+            && (self.submit_keys.is_pressed(key_event)
+                || self.editor_keymap.insert_newline.is_pressed(key_event))
+            && !self.blocks_direct_input
+            && !self.draft.textarea.is_vim_normal_mode()
+            && matches!(self.popups.active, ActivePopup::None)
+            && self.active_empty_quote_comment().is_some()
+        {
+            let now = tokio::time::Instant::now().into_std();
+            self.handle_paste_burst_flush(now);
+            if self.handle_paste_enter(now) {
+                return (InputResult::None, true);
+            }
+            if self.leave_empty_quote_comment() {
+                return (InputResult::None, true);
+            }
+        }
+
         if self.submit_keys.is_pressed(key_event) {
             if self.config.multiline_enter {
                 if key_event.code == KeyCode::Enter
@@ -5002,7 +5022,7 @@ impl ChatComposer {
             && self.placeholder_text == crate::chatwidget::PLACEHOLDER
             && mask_char.is_none()
             && matches!(self.popups.active, ActivePopup::None)
-            && self.active_empty_quote_comment()
+            && self.active_empty_quote_comment().is_some()
             && let Some((x, y)) = self
                 .draft
                 .textarea
@@ -10014,6 +10034,121 @@ mod tests {
             },
             result
         );
+
+        composer.set_keymap_bindings(&RuntimeKeymap::defaults());
+        composer.set_disable_paste_burst(/*disabled*/ true);
+        for multiline in [false, true] {
+            composer.config.multiline_enter = multiline;
+            composer.set_text_content(String::new(), Vec::new(), Vec::new());
+            composer.attach_quote(PendingQuote::Text("first".to_owned()));
+            composer.insert_str("first comment");
+            composer.attach_quote(PendingQuote::Text("second".to_owned()));
+            composer.insert_str("  ");
+            let saved = composer.snapshot_draft();
+            composer.restore_draft(saved.clone());
+            assert_eq!(composer.snapshot_draft(), saved);
+            let (result, _) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(result, InputResult::None);
+            assert_eq!(composer.current_text(), "1. first comment\n");
+            assert_eq!(composer.current_cursor(), "1. first comment\n".len());
+            assert_eq!(composer.quote_comments().len(), 1);
+            assert_eq!(composer.attachments.quotes, vec!["first", "second"]);
+            composer.insert_str("general comment");
+            assert_eq!(composer.current_text(), "1. first comment\ngeneral comment");
+            composer.set_quotes(Vec::new());
+
+            composer.set_text_content(String::new(), Vec::new(), Vec::new());
+            composer.attach_quote(PendingQuote::Text("only".to_owned()));
+            let (result, _) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(result, InputResult::None);
+            assert_eq!(composer.current_text(), "");
+            assert!(composer.quote_comments().is_empty());
+            assert_eq!(composer.attachments.quotes, vec!["only"]);
+            let (result, _) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(
+                result,
+                InputResult::Submitted {
+                    text: "> 1. only\n".to_owned(),
+                    text_elements: Vec::new()
+                }
+            );
+
+            for manual in ["1. ", "1. typed"] {
+                composer.set_text_content(manual.to_owned(), Vec::new(), Vec::new());
+                let (result, _) =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                assert_eq!(
+                    result,
+                    InputResult::Submitted {
+                        text: manual.trim().to_owned(),
+                        text_elements: Vec::new()
+                    }
+                );
+            }
+            composer.attach_quote(PendingQuote::Text("typed".to_owned()));
+            composer.insert_str("not empty");
+            let (result, _) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(
+                result,
+                InputResult::Submitted {
+                    text: "> 1. typed\n\n1\\. not empty".to_owned(),
+                    text_elements: Vec::new()
+                }
+            );
+        }
+        let mut keymap = RuntimeKeymap::defaults();
+        keymap.composer.submit.push(key_hint::ctrl(KeyCode::Enter));
+        composer.set_keymap_bindings(&keymap);
+        composer.attach_quote(PendingQuote::Text("modified".to_owned()));
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            result,
+            InputResult::Submitted {
+                text: "> 1. modified\n".to_owned(),
+                text_elements: Vec::new()
+            }
+        );
+
+        keymap.composer.submit = vec![key_hint::ctrl(KeyCode::Char('j'))];
+        composer.set_keymap_bindings(&keymap);
+        composer.attach_quote(PendingQuote::Text("newline binding".to_owned()));
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.current_text(), "");
+        composer.set_quotes(Vec::new());
+        Arc::make_mut(&mut keymap.editor).insert_newline = vec![key_hint::shift(KeyCode::Enter)];
+        composer.set_keymap_bindings(&keymap);
+        composer.attach_quote(PendingQuote::Text("unmapped".to_owned()));
+        let saved = composer.snapshot_draft();
+        composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(composer.snapshot_draft(), saved);
+        composer.set_quotes(Vec::new());
+        composer.set_keymap_bindings(&RuntimeKeymap::defaults());
+        composer.attach_quote(PendingQuote::Text("restricted".to_owned()));
+        composer.blocks_direct_input = true;
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(result, InputResult::ParentOwnedInputBlocked);
+        assert_eq!(composer.current_text(), "1. ");
+        composer.blocks_direct_input = false;
+        composer.set_quotes(Vec::new());
+        composer.attach_quote(PendingQuote::Text("paste".to_owned()));
+        composer.set_disable_paste_burst(/*disabled*/ false);
+        composer
+            .draft
+            .paste_burst
+            .begin_with_retro_grabbed("buffered".to_owned(), Instant::now());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.quote_comments().len(), 1);
+        assert_eq!(composer.attachments.quotes, vec!["paste"]);
     }
 
     #[test]
@@ -13000,6 +13135,13 @@ mod tests {
             composer.set_quotes(Vec::new());
             composer.set_text_content(comment.to_owned(), Vec::new(), Vec::new());
             composer.attach_quote(PendingQuote::Text("selected".to_owned()));
+            if comment.is_empty() {
+                let (result, _) =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                assert_eq!(result, InputResult::None);
+                assert_eq!(composer.current_text(), "");
+                assert_eq!(composer.attachments.quotes, vec!["selected"]);
+            }
             let (input, _) = composer.handle_submission(/*should_queue*/ false);
             let InputResult::Submitted {
                 text,
