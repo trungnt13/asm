@@ -554,37 +554,51 @@ mod tests {
 
     #[test]
     fn encode_history_mentions_links_dollar_mentions_after_punctuation() {
-        let encoded = encode_history_mentions(
-            "($figma)",
-            &[LinkedMention {
-                sigil: '$',
-                mention: "figma".to_string(),
-                path: "app://figma".to_string(),
-            }],
-        );
-        assert_eq!(encoded, "([$figma](app://figma))");
-    }
-
-    #[test]
-    fn encode_history_mentions_links_dollar_mentions_with_path_like_suffixes() {
-        let mention = LinkedMention {
-            sigil: '$',
-            mention: "figma".to_string(),
-            path: "app://figma".to_string(),
-        };
-
-        assert_eq!(
-            encode_history_mentions("$figma/docs", std::slice::from_ref(&mention)),
-            "[$figma](app://figma)/docs"
-        );
-        assert_eq!(
-            encode_history_mentions("$figma.suffix", std::slice::from_ref(&mention)),
-            "[$figma](app://figma).suffix"
-        );
-        assert_eq!(
-            encode_history_mentions("$figma\\docs", &[mention]),
-            "[$figma](app://figma)\\docs"
-        );
+        for (text, sigil, path, expected) in [
+            ("($figma)", '$', "app://figma", "([$figma](app://figma))"),
+            (
+                "$figma/docs",
+                '$',
+                "app://figma",
+                "[$figma](app://figma)/docs",
+            ),
+            (
+                "$figma.suffix",
+                '$',
+                "app://figma",
+                "[$figma](app://figma).suffix",
+            ),
+            (
+                "$figma\\docs",
+                '$',
+                "app://figma",
+                "[$figma](app://figma)\\docs",
+            ),
+            (
+                "Please ask @figma.",
+                '@',
+                "/tmp/figma/SKILL.md",
+                "Please ask [@figma](/tmp/figma/SKILL.md).",
+            ),
+            (
+                "Please ask (@figma)",
+                '@',
+                "plugin://figma@test",
+                "Please ask ([@figma](plugin://figma@test))",
+            ),
+        ] {
+            assert_eq!(
+                encode_history_mentions(
+                    text,
+                    &[LinkedMention {
+                        sigil,
+                        mention: "figma".to_string(),
+                        path: path.to_string(),
+                    }]
+                ),
+                expected
+            );
+        }
     }
 
     #[test]
@@ -662,34 +676,6 @@ mod tests {
             }],
         );
         assert_eq!(encoded, "foo　[@sample](plugin://sample@test)");
-    }
-
-    #[test]
-    fn encode_history_mentions_links_sentence_ending_at_mentions() {
-        let text = "Please ask @figma.";
-        let encoded = encode_history_mentions(
-            text,
-            &[LinkedMention {
-                sigil: '@',
-                mention: "figma".to_string(),
-                path: "/tmp/figma/SKILL.md".to_string(),
-            }],
-        );
-        assert_eq!(encoded, "Please ask [@figma](/tmp/figma/SKILL.md).");
-    }
-
-    #[test]
-    fn encode_history_mentions_links_parenthesized_at_mentions() {
-        let text = "Please ask (@figma)";
-        let encoded = encode_history_mentions(
-            text,
-            &[LinkedMention {
-                sigil: '@',
-                mention: "figma".to_string(),
-                path: "plugin://figma@test".to_string(),
-            }],
-        );
-        assert_eq!(encoded, "Please ask ([@figma](plugin://figma@test))");
     }
 
     #[test]

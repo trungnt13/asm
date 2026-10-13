@@ -1231,22 +1231,6 @@ async fn blocked_image_restore_with_remote_images_keeps_local_placeholder_mappin
 }
 
 #[tokio::test]
-async fn startup_draft_handoff_preserves_cursor_and_large_paste() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let paste = "x".repeat(/*n*/ 1_001);
-    chat.bottom_pane.handle_paste(paste);
-    chat.bottom_pane.insert_str(" tail");
-    chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
-    let startup_draft = chat.bottom_pane.composer_draft_snapshot();
-    chat.bottom_pane
-        .set_composer_text(String::new(), Vec::new(), Vec::new());
-
-    chat.restore_startup_draft(startup_draft.clone());
-
-    assert_eq!(chat.bottom_pane.composer_draft_snapshot(), startup_draft);
-}
-
-#[tokio::test]
 async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() {
     let (mut startup_chat, _startup_rx, _startup_op_rx) =
         make_chatwidget_manual(/*model_override*/ None).await;
@@ -1254,6 +1238,12 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     startup_chat.bottom_pane.handle_paste(startup_paste.clone());
     startup_chat.bottom_pane.insert_str(" startup draft");
     startup_chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
+    let original = startup_chat.bottom_pane.composer_draft_snapshot();
+    startup_chat
+        .bottom_pane
+        .set_composer_text(String::new(), Vec::new(), Vec::new());
+    startup_chat.restore_startup_draft(original.clone());
+    assert_eq!(startup_chat.bottom_pane.composer_draft_snapshot(), original);
     startup_chat.bottom_pane.set_composer_quotes(vec![
         "startup first".to_string(),
         "startup second".to_string(),
@@ -2506,76 +2496,46 @@ async fn committed_user_message_with_hidden_prompt_context_renders_local_images(
 }
 
 #[tokio::test]
-async fn interrupt_restores_queued_messages_into_composer() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    // Simulate a running task to enable queuing of user inputs.
-    chat.bottom_pane.set_task_running(/*running*/ true);
-
-    // Queue two user messages while the task is running.
-    chat.input_queue
-        .queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()).into());
-    chat.input_queue
-        .queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()).into());
-    chat.refresh_pending_input_preview();
-
-    // Deliver an interrupted turn notification as if Esc was pressed.
-    handle_turn_interrupted(&mut chat, "turn-1");
-
-    // Composer should now contain the queued messages joined by newlines, in order.
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued"
-    );
-
-    // Queue should be cleared and no new user input should have been auto-submitted.
-    assert!(chat.input_queue.queued_user_messages.is_empty());
-    assert!(
-        op_rx.try_recv().is_err(),
-        "unexpected outbound op after interrupt"
-    );
-
-    // Drain rx to avoid unused warnings.
-    let _ = drain_insert_history(&mut rx);
-}
-
-#[tokio::test]
 async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    for (draft, expected) in [
+        ("", "first queued\nsecond queued"),
+        (
+            "current draft",
+            "first queued\nsecond queued\ncurrent draft",
+        ),
+    ] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.bottom_pane.set_task_running(/*running*/ true);
-    chat.bottom_pane
-        .set_composer_text("current draft".to_string(), Vec::new(), Vec::new());
+        chat.bottom_pane.set_task_running(/*running*/ true);
+        chat.bottom_pane
+            .set_composer_text(draft.to_string(), Vec::new(), Vec::new());
 
-    chat.input_queue
-        .queued_user_messages
-        .push_back(UserMessage::from("first queued".to_string()).into());
-    chat.input_queue
-        .queued_user_messages
-        .push_back(UserMessage::from("second queued".to_string()).into());
-    chat.bottom_pane
-        .set_composer_quotes(vec!["draft quote".to_string()]);
-    chat.refresh_pending_input_preview();
+        chat.input_queue
+            .queued_user_messages
+            .push_back(UserMessage::from("first queued".to_string()).into());
+        chat.input_queue
+            .queued_user_messages
+            .push_back(UserMessage::from("second queued".to_string()).into());
+        let quotes = if draft.is_empty() {
+            Vec::new()
+        } else {
+            vec!["draft quote".to_string()]
+        };
+        chat.bottom_pane.set_composer_quotes(quotes.clone());
+        chat.refresh_pending_input_preview();
 
-    handle_turn_interrupted(&mut chat, "turn-1");
+        handle_turn_interrupted(&mut chat, "turn-1");
 
-    assert_eq!(
-        chat.bottom_pane.composer_text(),
-        "first queued\nsecond queued\ncurrent draft"
-    );
-    assert!(chat.input_queue.queued_user_messages.is_empty());
-    assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quotes,
-        vec!["draft quote".to_string()]
-    );
-    assert!(
-        op_rx.try_recv().is_err(),
-        "unexpected outbound op after interrupt"
-    );
+        assert_eq!(chat.bottom_pane.composer_text(), expected);
+        assert!(chat.input_queue.queued_user_messages.is_empty());
+        assert_eq!(chat.bottom_pane.composer_draft_snapshot().quotes, quotes);
+        assert!(
+            op_rx.try_recv().is_err(),
+            "unexpected outbound op after interrupt"
+        );
 
-    let _ = drain_insert_history(&mut rx);
+        let _ = drain_insert_history(&mut rx);
+    }
 }
 
 #[tokio::test]
