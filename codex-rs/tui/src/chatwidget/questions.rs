@@ -161,6 +161,7 @@ impl ChatWidget {
                 } else if self.bottom_pane.composer_draft_snapshot() != main {
                     let cursor = main.cursor;
                     self.restore_composer_state(ThreadComposerState {
+                        quote: main.quote,
                         text: main.text,
                         text_elements: main.text_elements,
                         local_images: main.local_images,

@@ -120,6 +120,7 @@ pub(super) enum QueueDrain {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct ThreadComposerState {
+    pub(super) quote: Option<String>,
     pub(super) text: String,
     pub(super) local_images: Vec<LocalImageAttachment>,
     pub(super) remote_image_urls: Vec<String>,
@@ -130,7 +131,8 @@ pub(super) struct ThreadComposerState {
 
 impl ThreadComposerState {
     pub(super) fn has_content(&self) -> bool {
-        !self.text.is_empty()
+        self.quote.is_some()
+            || !self.text.is_empty()
             || !self.local_images.is_empty()
             || !self.remote_image_urls.is_empty()
             || !self.text_elements.is_empty()
@@ -587,6 +589,9 @@ pub(crate) fn mention_bindings_from_user_inputs(
     let mention_start = |sigil: char, mention: &str| {
         let token = format!("{sigil}{mention}");
         message.match_indices(&token).find_map(|(start, _)| {
+            if crate::mention_codec::is_quoted_line(message, start) {
+                return None;
+            }
             let end = start + token.len();
             message
                 .as_bytes()
@@ -645,8 +650,9 @@ pub(crate) fn mention_bindings_from_user_inputs(
             continue;
         };
         for element in text_elements {
-            if let Some((mention, path, end)) =
-                crate::task_mentions::parse_task_link(text, element.byte_range.start)
+            if !crate::mention_codec::is_quoted_line(text, element.byte_range.start)
+                && let Some((mention, path, end)) =
+                    crate::task_mentions::parse_task_link(text, element.byte_range.start)
                 && end == element.byte_range.end
                 && element
                     .placeholder()
@@ -681,8 +687,9 @@ pub(crate) fn mention_bindings_from_user_inputs(
                 let offset = text_offset;
                 text_offset += text.len();
                 text_elements.iter().find_map(|element| {
-                    (text.get(element.byte_range.start..element.byte_range.end)
-                        == Some(token.as_str()))
+                    (!crate::mention_codec::is_quoted_line(text, element.byte_range.start)
+                        && text.get(element.byte_range.start..element.byte_range.end)
+                            == Some(token.as_str()))
                     .then_some(offset + element.byte_range.start)
                 })
             })

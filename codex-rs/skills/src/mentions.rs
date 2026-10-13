@@ -93,6 +93,17 @@ pub fn extract_tool_mentions_with_sigil(text: &str, sigil: char) -> ToolMentions
 
     let mut index = 0;
     while index < text_bytes.len() {
+        // Match TUI mention parsing without adding a dependency solely for this line rule.
+        if index == 0 || text_bytes[index - 1] == b'\n' {
+            let line = text[index..]
+                .split_inclusive('\n')
+                .next()
+                .unwrap_or_default();
+            if line.trim_start().starts_with('>') {
+                index += line.len();
+                continue;
+            }
+        }
         let byte = text_bytes[index];
         if byte == b'['
             && let Some((name, path, end_index)) =
