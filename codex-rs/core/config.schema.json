@@ -10,7 +10,7 @@
       "additionalProperties": false,
       "properties": {
         "decision_every_n_steps": {
-          "default": 1,
+          "default": 2,
           "description": "Decide before steps 1, 1 + N, 1 + 2N, ... in selected turns. Step numbering restarts at each new turn.",
           "format": "uint64",
           "minimum": 1.0,
