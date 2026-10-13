@@ -48,7 +48,7 @@ The local Cargo wrapper:
   - Hold each profile's native Cargo lock during deletion.
   - Use descriptor-relative traversal. Reject symlink directories and artifacts outside the physical cache.
   - Log removal counts and skip reasons. Skip other hosts or uncertain activity.
-  - Keep the three-day rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not prove checkout inactivity. Removal can force even active checkouts to rebuild.
+  - Keep the two-day rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not prove checkout inactivity. Removal can force even active checkouts to rebuild.
 - Blocks reusable-checkout release/switching during active wrapper commands. Direct Cargo bypasses protection and must finish before checkout release.
 - Keeps interactive I/O for `cargo run` without holding the cache lock for the live app. CI and Windows stay unchanged.
 
