@@ -120,7 +120,7 @@ pub(super) enum QueueDrain {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct ThreadComposerState {
-    pub(super) quote: Option<String>,
+    pub(super) quotes: Vec<String>,
     pub(super) text: String,
     pub(super) local_images: Vec<LocalImageAttachment>,
     pub(super) remote_image_urls: Vec<String>,
@@ -131,7 +131,7 @@ pub(super) struct ThreadComposerState {
 
 impl ThreadComposerState {
     pub(super) fn has_content(&self) -> bool {
-        self.quote.is_some()
+        !self.quotes.is_empty()
             || !self.text.is_empty()
             || !self.local_images.is_empty()
             || !self.remote_image_urls.is_empty()

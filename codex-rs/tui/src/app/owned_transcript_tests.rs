@@ -1625,6 +1625,37 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
     assert!(app.transcript_view.pending_quote.is_none());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "hellox world");
     app.render_owned_transcript(&mut tui, size)?;
+    let transcript_y = row_containing(&tui, "transcript text");
+    for event in [
+        mouse(Down(Left), transcript_x, transcript_y),
+        mouse(Drag(Left), transcript_x + 10, transcript_y),
+        mouse(Up(Left), transcript_x + 10, transcript_y),
+    ] {
+        app.handle_owned_transcript_event(&mut tui, &mut server, &event)?;
+    }
+    app.render_owned_transcript(&mut tui, size)?;
+    let draft_y = row_containing(&tui, "hellox world");
+    app.handle_owned_transcript_event(
+        &mut tui,
+        &mut server,
+        &mouse(Down(Left), /*column*/ 2, draft_y),
+    )?;
+    app.render_owned_transcript(&mut tui, size)?;
+    assert_eq!(
+        buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+            &tui.terminal
+        ))
+        .matches("[×] Quote")
+        .count(),
+        2
+    );
+    let quote_y = row_containing(&tui, "[×] Quote · transcript");
+    app.handle_owned_transcript_event(
+        &mut tui,
+        &mut server,
+        &mouse(Down(Left), /*column*/ 2, quote_y),
+    )?;
+    app.render_owned_transcript(&mut tui, size)?;
     let quote_y = row_containing(&tui, "[×] Quote · transcript");
     app.handle_owned_transcript_event(
         &mut tui,
