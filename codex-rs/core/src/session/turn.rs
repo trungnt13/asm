@@ -255,13 +255,17 @@ pub(crate) async fn run_turn(
     required_servers.sort_unstable();
     required_servers.dedup();
 
-    sess.adapt_reasoning(
-        &turn_context,
-        &input,
-        codex_config::AdaptiveReasoningTrigger::TurnStart,
-        &cancellation_token,
-    )
-    .await;
+    // A same-turn reentry may have queued steering but no direct input. Decide after
+    // that input is drained below, rather than consuming this step's slot on old evidence.
+    if !input.is_empty() {
+        sess.adapt_reasoning(
+            &turn_context,
+            &input,
+            codex_config::AdaptiveReasoningTrigger::TurnStart,
+            &cancellation_token,
+        )
+        .await;
+    }
 
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = match sess
@@ -428,7 +432,11 @@ pub(crate) async fn run_turn(
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
     // 2. After auto-compact, while a model/tool continuation is pending.
 
-    let mut next_step_context = Some(first_step_context);
+    let mut next_step_context = if input.is_empty() {
+        None
+    } else {
+        Some(first_step_context)
+    };
     let mut guardian_budget_compacted = false;
     loop {
         // Note that pending_input would be something like a message the user
@@ -469,7 +477,16 @@ pub(crate) async fn run_turn(
             sess.adapt_reasoning(
                 &turn_context,
                 &pending_input,
-                codex_config::AdaptiveReasoningTrigger::ToolResult,
+                if input.is_empty()
+                    && turn_context
+                        .extension_data
+                        .get::<super::adaptive_reasoning::AdaptiveModelStepStarted>()
+                        .is_none()
+                {
+                    codex_config::AdaptiveReasoningTrigger::TurnStart
+                } else {
+                    codex_config::AdaptiveReasoningTrigger::ToolResult
+                },
                 &cancellation_token,
             )
             .await;
@@ -548,6 +565,7 @@ pub(crate) async fn run_turn(
             .await;
 
             sess.report_reasoning_effort(step_context.as_ref()).await;
+            sess.record_adaptive_model_step(&turn_context);
 
             run_sampling_request(
                 Arc::clone(&sess),
