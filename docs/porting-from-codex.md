@@ -292,6 +292,8 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | `decision_timeout_ms` | `200` | 1–5000 ms |
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
 | `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
+| `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
+| `decision_every_n_steps` | `1` | Positive integer; decide at steps 1, 1 + N, 1 + 2N, ... in selected turns |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
 - Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
@@ -302,7 +304,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 - **P0 manual review:** bound total evidence and rubric separately using the table limits. Split larger evidence into ordered Decisions input messages of at most 8192 UTF-8 bytes each, preferring line boundaries. Preserve text and the default single-message request. Rubric instructions remain at most 4096 bytes. Each item can exceed 1000 tokens, but its byte cap keeps it below the 10K-token item limit. Keep this evidence outside the main conversation.
 - At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
 - Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
-- Before each main step with an enabled trigger, collect current evidence and await Decisions and validation in the turn task, without a separate step job or completion channel. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit. Keep only warm-up and log writing in the background.
+- Before each cadence-selected main step with an enabled trigger, collect current evidence and await Decisions and validation in the turn task, without a separate step job or completion channel. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit. Keep only warm-up and log writing in the background.
 - Publish a current result within its original deadline through live next-step settings. Keep captured requests unchanged. Later evidence invalidates pending decisions, not already applied settings.
 - For missing credentials, unsupported models, cancellation, refusals, invalid answers, request failure, or timeout, keep current effort. A Decisions failure must not stop the main step.
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
@@ -316,6 +318,39 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 - Report errors through backend runtime state, independent of diagnostics. Include health at attachment and after live child reload. New children inherit mode, not parent errors. Deduplicate visible warnings by failure episode. Clear errors only after a current main-step decision passes acceptance guards, including unchanged effort. Warm-up errors count; warm-up success, cancellation, and supersession do not clear errors.
 - With `diagnostic_log_capture = true`, append sanitized attempt metadata to a separate per-session `decision.jsonl`. Include credential failures, API outcome, and acceptance outcome. Do not log evidence, rubric text, bodies, or authentication headers. With capture off, create no log file or writer. Bound buffering and storage; never wait for disk on the decision path. Report dropped records or writer failures separately. Crash-interrupted attempts can lack an end record.
 - Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance separately from mock checks before making claims.
+
+#### Space decision calls by turn and step
+
+A turn is one request and its resulting work. A step is one ordinary model request
+within that turn, not an individual tool call. Use both settings to choose when to
+reassess effort; omission keeps the existing every-turn, every-step behavior.
+
+```toml
+[adaptive_reasoning]
+enabled = true
+decision_every_n_turns = 2
+decision_every_n_steps = 3
+```
+
+The turn interval selects turns 1, 3, 5, ... . The step counter resets at **every
+new turn**. In selected turns, decisions run before steps 1, 4, 7, 10, ... .
+A selected turn does not carry leftover spacing from the previous turn:
+
+| Turn | Steps in this example | With every 1 turn / 3 steps | With every 2 turns / 3 steps |
+| --- | --- | --- | --- |
+| 1 | 11 | Decide before steps 1, 4, 7, 10 | Decide before steps 1, 4, 7, 10 |
+| 2 | 5 | Decide before steps 1, 4 | No decisions |
+| 3 | 2 | Decide before step 1 | Decide before step 1 |
+| 4 | 8 | Decide before steps 1, 4, 7 | No decisions |
+
+- Between decisions, keep the current effective effort. Skipped turns use normal effective settings; skipping does not force a new effort.
+- Cadence uses fixed slots, not a sliding delay. It does not bypass `update_on` or eligibility checks: an ineligible slot is skipped, not moved to the next step. With every 3 steps, an ineligible step 1 leaves step 4 as the next slot.
+- A failed attempt consumes its interval just like a successful attempt. Keep the effort and wait for the next due step; do not retry immediately.
+- Collect fresh bounded evidence when a decision is due, not when the interval begins.
+- Each agent owns its counters. Children inherit cadence configuration, not their parent's counter position. Re-enabling `/adapt` makes the next eligible step due, even when re-enabled while idle before a normally skipped turn. Regular fixed slots resume afterward.
+- Counters exist only in the running backend session. Resume, backend restart, or session eviction starts turn numbering again at 1. Conversation history is not rewritten.
+- Warm-up requests, transport retries, and compaction do not count as ordinary steps. Counter state is runtime scheduling state, not rewritten conversation history.
+- Larger intervals reduce decision frequency, not necessarily total runtime. They can retain unsuitable effort for intervening steps; do not claim a speedup without measurement.
 
 ### TUI automatic session names
 
