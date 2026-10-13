@@ -3061,7 +3061,7 @@ impl ChatComposer {
             text_elements = Self::trim_text_elements(&expanded_input, &text, text_elements);
         }
 
-        if self.attachments.quotes.is_empty()
+        let rejection = if self.attachments.quotes.is_empty()
             && slash_validation == SlashValidation::Immediate
             && let SubmissionValidation::UnknownCommand(name) = self
                 .slash_input()
@@ -3070,68 +3070,53 @@ impl ChatComposer {
             let message = format!(
                 r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
             );
-            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_info_event(message, /*hint*/ None),
-            )));
-            self.set_text_content_with_mention_bindings(
-                original_input.clone(),
-                original_text_elements,
-                original_local_image_paths,
-                original_mention_bindings,
-            );
-            self.draft
-                .pending_pastes
-                .clone_from(&original_pending_pastes);
-            self.set_quote_comments(original_quote_comments);
-            self.set_current_cursor(original_cursor);
-            return None;
-        }
-
-        if !self.prepend_quote(&mut text, &mut text_elements) {
-            self.set_text_content_with_mention_bindings(
-                original_input.clone(),
-                original_text_elements,
-                original_local_image_paths,
-                original_mention_bindings,
-            );
-            self.draft
-                .pending_pastes
-                .clone_from(&original_pending_pastes);
-            self.set_quote_comments(original_quote_comments);
-            self.set_current_cursor(original_cursor);
-            self.show_footer_flash(
-                Line::from("Quote and comment too long; limit 10,000 UTF-8 bytes".red()),
-                Duration::from_secs(5),
-            );
-            return None;
-        }
-
-        let actual_chars = text.chars().count();
-        if actual_chars > MAX_USER_INPUT_TEXT_CHARS {
-            let message = user_input_too_large_message(actual_chars);
-            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_error_event(message),
-            )));
-            self.set_text_content_with_mention_bindings(
-                original_input.clone(),
-                original_text_elements,
-                original_local_image_paths,
-                original_mention_bindings,
-            );
-            self.draft
-                .pending_pastes
-                .clone_from(&original_pending_pastes);
-            self.set_quote_comments(original_quote_comments);
-            self.set_current_cursor(original_cursor);
-            // Embedded composers may cover the transcript that receives the full error.
-            if self.footer.hint_override.is_some() {
-                self.show_footer_flash(
+            Some((
+                Some(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::new_info_event(message, /*hint*/ None),
+                ))),
+                None,
+            ))
+        } else if !self.prepend_quote(&mut text, &mut text_elements) {
+            Some((
+                None,
+                Some(Line::from(
+                    "Quote and comment too long; limit 10,000 UTF-8 bytes".red(),
+                )),
+            ))
+        } else {
+            let actual_chars = text.chars().count();
+            (actual_chars > MAX_USER_INPUT_TEXT_CHARS).then(|| {
+                let message = user_input_too_large_message(actual_chars);
+                // Embedded composers may cover the transcript that receives the full error.
+                let footer = self.footer.hint_override.is_some().then(|| {
                     Line::from(
                         format!("Message too long; limit {MAX_USER_INPUT_TEXT_CHARS} characters")
                             .red(),
-                    ),
-                    Duration::from_secs(5),
-                );
+                    )
+                });
+                (
+                    Some(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_error_event(message),
+                    ))),
+                    footer,
+                )
+            })
+        };
+        if let Some((event, footer)) = rejection {
+            self.set_text_content_with_mention_bindings(
+                original_input,
+                original_text_elements,
+                original_local_image_paths,
+                original_mention_bindings,
+            );
+            self.draft.pending_pastes = original_pending_pastes;
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
+            if let Some(event) = event {
+                self.app_event_tx.send(event);
+            }
+            if let Some(footer) = footer {
+                self.show_footer_flash(footer, Duration::from_secs(5));
             }
             return None;
         }
@@ -5018,11 +5003,12 @@ impl ChatComposer {
                 }
             }
         }
-        if self.draft.input_enabled
+        let show_quote_hint = self.draft.input_enabled
             && !self.blocks_direct_input
             && self.placeholder_text == crate::chatwidget::PLACEHOLDER
             && mask_char.is_none()
-            && matches!(self.popups.active, ActivePopup::None)
+            && matches!(self.popups.active, ActivePopup::None);
+        if show_quote_hint
             && self.active_empty_quote_comment().is_some()
             && let Some((x, y)) = self
                 .draft
@@ -5038,12 +5024,7 @@ impl ChatComposer {
         }
         if !self.draft.input_enabled || textarea_is_empty {
             let text = if self.draft.input_enabled {
-                if !self.attachments.quotes.is_empty()
-                    && self.placeholder_text == crate::chatwidget::PLACEHOLDER
-                    && !self.blocks_direct_input
-                    && mask_char.is_none()
-                    && matches!(self.popups.active, ActivePopup::None)
-                {
+                if show_quote_hint && !self.attachments.quotes.is_empty() {
                     "Add an optional comment…".to_string()
                 } else {
                     self.placeholder_text.clone()
@@ -5084,9 +5065,7 @@ impl ChatComposer {
             && let Some(ignition) = &self.effort_ignition
             && !ignition.is_finished()
         {
-            let protected_top = if !self.attachments.attachment_area.get().is_empty() {
-                self.attachments.attachment_area.get().y
-            } else if remote_images_rect.is_empty() {
+            let protected_top = if remote_images_rect.is_empty() {
                 textarea_rect.y
             } else {
                 remote_images_rect.y
@@ -10034,6 +10013,61 @@ mod tests {
 
         composer.set_keymap_bindings(&RuntimeKeymap::defaults());
         composer.set_disable_paste_burst(/*disabled*/ true);
+        for draft in ["", "hello", "hello\n", "héllo\n"] {
+            for separator in ["\n", " ", "\u{2003}"] {
+                composer.set_text_content(draft.to_owned(), Vec::new(), Vec::new());
+                composer.attach_quote(PendingQuote::Text("first".to_owned()));
+                composer.insert_str("x");
+                composer.attach_quote(PendingQuote::Text("second".to_owned()));
+                let first_end = composer.quote_comments()[0].range.end;
+                composer
+                    .draft
+                    .textarea
+                    .replace_range(first_end..first_end + 2, separator);
+                let saved = composer.snapshot_draft();
+                let prefix = if draft.is_empty() {
+                    String::new()
+                } else {
+                    format!("{draft}\n")
+                };
+                let mut text = composer.current_text();
+                let mut elements = composer.current_text_elements();
+                ChatComposer::prepare_quote_comments(
+                    &mut text,
+                    &mut elements,
+                    &composer.quote_comments(),
+                );
+                assert_eq!(
+                    text,
+                    if separator == "\n" {
+                        draft.to_owned()
+                    } else {
+                        format!("{prefix}2\\. ")
+                    }
+                );
+                assert!(elements.is_empty());
+                composer.attach_quote(PendingQuote::Text("third".to_owned()));
+                assert_eq!(
+                    composer.current_text(),
+                    if separator == "\n" {
+                        format!("{prefix}3. ")
+                    } else {
+                        format!("{prefix}2. \n3. ")
+                    }
+                );
+                assert_eq!(composer.quote_comments().last().unwrap().quote_index, 2);
+                composer.restore_draft(saved);
+                composer.insert_str("second comment");
+                composer.remove_quote_comment(0);
+                composer.attachments.quotes.remove(0);
+                assert_eq!(
+                    composer.current_text(),
+                    format!("{prefix}1. second comment")
+                );
+                assert_eq!(composer.quote_comments()[0].quote_index, 0);
+                composer.set_quotes(Vec::new());
+            }
+        }
         for multiline in [false, true] {
             composer.config.multiline_enter = multiline;
             for draft in ["This is my message ...", "  1. ordinary list\n", "text  "] {
