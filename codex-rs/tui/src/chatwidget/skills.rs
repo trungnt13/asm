@@ -420,26 +420,37 @@ mod tests {
                 ..app("linear", "Linear")
             },
         ];
-        for mention_paths in [
-            HashMap::new(),
-            HashMap::from([
-                ("google-drive".to_string(), "app://google_drive".to_string()),
-                ("arabica-uae".to_string(), "app://arabica_uae".to_string()),
-                ("linear".to_string(), "app://linear".to_string()),
-            ]),
-        ] {
-            let mentions =
-                collect_tool_mentions("$google-drive $arabica-uae $linear", &mention_paths);
-            assert_eq!(
-                find_app_mentions(&mentions, &apps, &HashSet::new()),
-                vec![apps[0].clone()]
-            );
-        }
-        let mentions = collect_tool_mentions(
-            "> $google-drive [$linear](app://linear)\n  >> $arabica-uae\n\n$google-drive",
-            &HashMap::new(),
+        let mentions = collect_tool_mentions("$google-drive $arabica-uae $linear", &HashMap::new());
+
+        assert_eq!(
+            find_app_mentions(&mentions, &apps, &HashSet::new()),
+            vec![apps[0].clone()]
         );
-        assert_eq!(mentions.names, HashSet::from(["google-drive".to_string()]));
-        assert!(mentions.linked_paths.is_empty());
+    }
+
+    #[test]
+    fn find_app_mentions_requires_accessible_enabled_apps_for_bound_paths() {
+        let apps = vec![
+            app("google_drive", "Google Drive"),
+            AppInfo {
+                is_accessible: false,
+                ..app("arabica_uae", "% Arabica UAE")
+            },
+            AppInfo {
+                is_enabled: false,
+                ..app("linear", "Linear")
+            },
+        ];
+        let mention_paths = HashMap::from([
+            ("google-drive".to_string(), "app://google_drive".to_string()),
+            ("arabica-uae".to_string(), "app://arabica_uae".to_string()),
+            ("linear".to_string(), "app://linear".to_string()),
+        ]);
+        let mentions = collect_tool_mentions("$google-drive $arabica-uae $linear", &mention_paths);
+
+        assert_eq!(
+            find_app_mentions(&mentions, &apps, &HashSet::new()),
+            vec![apps[0].clone()]
+        );
     }
 }

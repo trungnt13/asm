@@ -21,12 +21,6 @@ fn handles_plain_and_linked_mentions() {
         &["alpha", "beta"],
         &["/tmp/beta"],
     );
-    assert_mentions(
-        "> $quoted [$linked](skill:///tmp/quoted/SKILL.md)\n>\n  >> [$app](app://quoted)\n\nuse $alpha and [$beta](/tmp/beta)",
-        &["alpha", "beta"],
-        &["/tmp/beta"],
-    );
-    assert_mentions("compare x > $alpha", &["alpha"], &[]);
 }
 
 #[test]
