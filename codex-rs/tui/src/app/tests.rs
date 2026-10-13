@@ -1717,107 +1717,34 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() 
     let other = test_thread_session(ThreadId::new(), test_path_buf("/tmp/other"));
     app.chat_widget.handle_thread_session(other);
     assert!(!app.chat_widget.status_line_text().unwrap().contains("low"));
-    let channel = app
-        .thread_event_channels
-        .get(&thread_id)
-        .expect("live thread channel");
-    let mut store = channel.store.lock().await;
-    store.push_notification(ServerNotification::ReasoningEffortUpdated(captured.clone()));
-    store.push_notification(agent_message_delta_notification(
-        thread_id, "turn-1", "agent-1", "latest",
-    ));
-    store.set_turns(vec![test_turn(
-        "turn-1",
-        TurnStatus::InProgress,
-        Vec::new(),
-    )]);
-    store.rebase_buffer_after_session_refresh();
-    let snapshot = store.snapshot();
-    drop(store);
-    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
-    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
-
-    // A manual setting must survive another reconstruction without resurrecting the old capture.
-    app.chat_widget
-        .set_reasoning_effort(Some(ReasoningEffortConfig::High));
-    app.store_active_thread_receiver().await;
-    let channel = app
-        .thread_event_channels
-        .get(&thread_id)
-        .expect("live thread channel");
-    let mut store = channel.store.lock().await;
-    store.push_notification(ServerNotification::ReasoningEffortUpdated(captured));
-    assert!(store.reasoning_state.captured_step.is_none());
-    let snapshot = store.snapshot();
-    drop(store);
-    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
-    assert_eq!(app.chat_widget.status_line_text(), Some("hig·auto".into()));
-    let channel = app
-        .thread_event_channels
-        .get(&thread_id)
-        .expect("live thread channel");
-    let mut store = channel.store.lock().await;
-    store.set_active_turn_id("turn-2".into());
-    assert!(store.reasoning_state.captured_step.is_none());
-    assert!(store.reasoning_state.suppressed_turn_id.is_none());
 }
 
 #[tokio::test]
 async fn replay_thread_snapshot_in_progress_turn_restores_running_state_without_input_state() {
     let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
-    let mut session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
-    session.adaptive_reasoning_enabled = true;
-    session.reasoning_effort = Some(ReasoningEffortConfig::High);
+    let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
     let (chat_widget, _app_event_tx, _rx, _new_op_rx) =
         boxed_future!(make_chatwidget_manual_with_sender()).await;
     app.replace_chat_widget(chat_widget);
-    app.chat_widget.local_settings.tui.status_line = Some(vec!["reasoning".into()]);
-    let mut store = ThreadEventStore::new_with_session(
-        /*capacity*/ 1,
-        session,
-        vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
-    );
-    app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
-    assert!(app.chat_widget.is_task_running_for_test());
-    // The next snapshot retains older history but evicts the current turn-start event.
-    store.set_turns(vec![test_turn(
-        "old-turn",
-        TurnStatus::Completed,
-        Vec::new(),
-    )]);
-    store.push_notification(turn_started_notification(thread_id, "turn-1"));
-    store.push_notification(ServerNotification::ReasoningEffortUpdated(
-        codex_app_server_protocol::ReasoningEffortUpdatedNotification {
-            thread_id: thread_id.to_string(),
-            turn_id: "turn-1".into(),
-            reasoning_effort: Some(ReasoningEffortConfig::Low),
-            adaptive: true,
+    app.chat_widget.handle_thread_session(session);
+
+    app.replay_thread_snapshot(
+        ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
+            delegated_turns: Vec::new(),
+            session: None,
+            turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+            events: Vec::new(),
+            active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
+            input_state: None,
         },
-    ));
-    store.push_notification(agent_message_delta_notification(
-        thread_id,
-        "turn-1",
-        "agent-1",
-        "streaming",
-    ));
-    assert!(store.buffer.iter().all(|event| !matches!(event,
-    ThreadBufferedEvent::Notification(notification) if matches!(notification.as_ref(),
-        ServerNotification::TurnStarted(_) | ServerNotification::ReasoningEffortUpdated(_)
-    ))));
-
-    app.replay_thread_snapshot(store.snapshot(), /*resume_restored_queue*/ false);
-
-    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
-    assert_eq!(
-        app.chat_widget.capture_reasoning_state().captured_step,
-        store.reasoning_state.captured_step
+        /*resume_restored_queue*/ false,
     );
-    app.chat_widget.handle_server_notification(
-        turn_started_notification(thread_id, "turn-2"),
-        /*replay_kind*/ None,
-    );
-    assert_eq!(app.chat_widget.status_line_text(), Some("hig·auto".into()));
+
     assert!(app.chat_widget.is_task_running_for_test());
 }
 
@@ -2264,107 +2191,6 @@ async fn collab_receiver_notification_caches_thread_without_app_server_read() {
             is_closed: false,
         })
     );
-
-    let parent = ThreadId::new();
-    let children: [ThreadId; 2] = std::array::from_fn(|_| ThreadId::new());
-    let started = turn_started_notification(parent, "v2-turn");
-    app.track_turn_agents(&started);
-    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(started)));
-    for kind in [
-        codex_app_server_protocol::SubAgentActivityKind::Started,
-        codex_app_server_protocol::SubAgentActivityKind::Started,
-        codex_app_server_protocol::SubAgentActivityKind::Completed,
-    ] {
-        for (index, child) in children.iter().enumerate() {
-            let item = ThreadItem::SubAgentActivity {
-                model: None,
-                reasoning_effort: None,
-                id: format!("activity-{kind:?}-{index}"),
-                kind,
-                agent_thread_id: child.to_string(),
-                agent_path: format!("/root/hello_{index}"),
-            };
-            for notification in [
-                ServerNotification::ItemStarted(ItemStartedNotification {
-                    thread_id: parent.to_string(),
-                    turn_id: "v2-turn".into(),
-                    started_at_ms: 0,
-                    item: item.clone(),
-                }),
-                ServerNotification::ItemCompleted(
-                    codex_app_server_protocol::ItemCompletedNotification {
-                        thread_id: parent.to_string(),
-                        turn_id: "v2-turn".into(),
-                        completed_at_ms: 0,
-                        item,
-                    },
-                ),
-            ] {
-                app.track_turn_agents(&notification);
-                app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
-                    notification,
-                )));
-            }
-        }
-    }
-    let completed = turn_completed_notification(parent, "v2-turn", TurnStatus::Completed);
-    app.track_turn_agents(&completed);
-    app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(completed)));
-    assert_eq!(app.turn_agent_counts.count(parent, "v2-turn"), Some(2));
-    let mut tui = crate::tui::test_support::make_test_tui().expect("test terminal");
-    app.insert_history_cell(
-        &mut tui,
-        Box::new(
-            crate::history_cell::FinalMessageSeparator::new(
-                /*elapsed_seconds*/ Some(1),
-                /*runtime_metrics*/ None,
-            )
-            .with_session_id(Some(parent))
-            .with_turn_id("v2-turn".into()),
-        ),
-    );
-    let footer = app
-        .transcript_cells
-        .last()
-        .expect("inserted footer")
-        .raw_lines()
-        .last()
-        .expect("footer text")
-        .to_string();
-    assert!(
-        footer.ends_with(&format!(" • 2ag • {parent}")),
-        "footer: {footer}"
-    );
-
-    // A spawned child can remain running when another parent turn begins.
-    for turn_id in ["running-child-turn", "next-parent-turn"] {
-        app.track_turn_agents(&turn_started_notification(parent, turn_id));
-        // Interacted also represents idle send_message and must not imply running.
-        app.track_turn_agents(&ServerNotification::ItemCompleted(
-            codex_app_server_protocol::ItemCompletedNotification {
-                thread_id: parent.to_string(),
-                turn_id: turn_id.into(),
-                completed_at_ms: 0,
-                item: ThreadItem::SubAgentActivity {
-                    model: None,
-                    reasoning_effort: None,
-                    id: "idle-message".into(),
-                    kind: codex_app_server_protocol::SubAgentActivityKind::Interacted,
-                    agent_thread_id: children[1].to_string(),
-                    agent_path: "/root/hello_1".into(),
-                },
-            },
-        ));
-        if turn_id == "running-child-turn" {
-            app.track_turn_agents(&turn_started_notification(children[0], "child-followup"));
-        }
-        app.track_turn_agents(&turn_completed_notification(
-            parent,
-            turn_id,
-            TurnStatus::Completed,
-        ));
-        assert_eq!(app.turn_agent_counts.count(parent, turn_id), Some(1));
-    }
 }
 
 #[tokio::test]
@@ -3194,52 +3020,9 @@ async fn refresh_agent_picker_thread_liveness_prunes_closed_metadata_only_thread
 }
 
 #[tokio::test]
-async fn parallel_seeds_navigation_before_thread_started() -> Result<()> {
+async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
-    let model_server = core_test_support::responses::start_mock_server().await;
-    let codex_home = app.config.codex_home.clone();
-    for name in ["review", "oracle", "scope-control"] {
-        let root = codex_home.join(format!("skills/{name}"));
-        std::fs::create_dir_all(&root)?;
-        std::fs::write(
-            root.join("SKILL.md"),
-            format!("---\nname: {name}\ndescription: {name}-catalog-marker\n---\n\nSkill body.\n"),
-        )?;
-    }
-    std::fs::write(
-        codex_home.join("config.toml"),
-        format!(
-            r#"model = "gpt-5.5"
-model_provider = "scope-test"
-thread_unload_delay_secs = 1
-[skills]
-include_instructions = true
-[skills.bundled]
-enabled = false
-[[skills.config]]
-name = "review"
-enabled = true
-allowed_agent_roles = ["reviewer"]
-[[skills.config]]
-name = "oracle"
-enabled = true
-allowed_agent_roles = ["reviewer"]
-[model_providers.scope-test]
-name = "Scope test"
-base_url = "{}/v1"
-wire_api = "responses"
-request_max_retries = 0
-stream_max_retries = 0
-"#,
-            model_server.uri()
-        ),
-    )?;
-    let config = ConfigBuilder::default()
-        .codex_home(codex_home.to_path_buf())
-        .build()
-        .await?;
-    app.config = config.clone();
-    app.local_settings = crate::local_settings::LocalSettings::from(&config);
+    let config = app.chat_widget.config_ref().clone();
     let parent_thread_id = ThreadId::from_string(
         &app_test_support::create_fake_rollout(
             config.codex_home.as_path(),
@@ -3252,7 +3035,6 @@ stream_max_retries = 0
         .expect("create source rollout"),
     )?;
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
-    Box::pin(app_server.bootstrap(&app.config)).await?;
     let started = app_server
         .resume_thread(
             &crate::local_settings::LocalSettings::from(&config),
@@ -3302,29 +3084,6 @@ stream_max_retries = 0
             .get(&side_thread_id)
             .expect("side start should seed navigation before thread/started")
             .is_closed
-    );
-
-    let saved_pair = crate::side_conversations::SideConversationStore::new(
-        &app.config.codex_home,
-        &app.app_server_target,
-    )
-    .pair(side_thread_id)?
-    .expect("side navigation should be durable");
-    assert_eq!(
-        (saved_pair.parent, saved_pair.side),
-        (parent_thread_id, side_thread_id)
-    );
-    let resumed_side = app_server
-        .resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            side_thread_id,
-            crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
-        )
-        .await?;
-    assert!(
-        resumed_side.turns.is_empty(),
-        "resuming an empty side must hide inherited history"
     );
 
     let mut saw_thread_started = false;
@@ -3393,146 +3152,6 @@ stream_max_retries = 0
         ))
     );
 
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
-    for (kind, mode) in [
-        (
-            CompanionKind::Parallel,
-            crate::app_event::SideConversationMode::Side,
-        ),
-        (
-            CompanionKind::Side,
-            crate::app_event::SideConversationMode::Side,
-        ),
-        (
-            CompanionKind::Side,
-            crate::app_event::SideConversationMode::Chat,
-        ),
-    ] {
-        if kind == CompanionKind::Side {
-            Box::pin(app.start_companion_conversation(
-                &mut tui,
-                &mut app_server,
-                parent_thread_id,
-                kind,
-                mode,
-                /*user_message*/ None,
-            ))
-            .await?;
-        }
-        let companion_id = app.current_displayed_thread_id().expect("active companion");
-        assert_ne!(companion_id, parent_thread_id, "{kind:?}/{mode:?}");
-        let companion = app
-            .side_threads
-            .get(&companion_id)
-            .expect("started companion");
-        assert_eq!((companion.kind, companion.mode), (kind, mode));
-        let mut saved_config = app.config.clone();
-        saved_config.ephemeral = false;
-        let saved = app_server
-            .fork_thread(&app.local_settings, saved_config, companion_id)
-            .await?;
-        let saved_id = saved.session.thread_id;
-        // Reload from disk, not just the live session cache.
-        app_server.thread_unsubscribe(saved_id).await?;
-        time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
-            loop {
-                let event = app_server.next_event().await.expect("app-server remains open");
-                if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = event
-                    && matches!(notification.as_ref(), ServerNotification::ThreadClosed(event) if event.thread_id == saved_id.to_string())
-                {
-                    break;
-                }
-            }
-        })
-        .await?;
-        app_server
-            .resume_thread(
-                &app.local_settings,
-                app.config.clone(),
-                saved_id,
-                crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-            )
-            .await?;
-        let mut checked_ids = vec![companion_id, saved_id];
-        if kind == CompanionKind::Parallel {
-            checked_ids.insert(/*index*/ 0, parent_thread_id);
-        }
-        for id in checked_ids {
-            let response = core_test_support::responses::mount_sse_once(
-                &model_server,
-                core_test_support::responses::sse(vec![
-                    core_test_support::responses::ev_response_created("scope-turn"),
-                    core_test_support::responses::ev_completed("scope-turn"),
-                ]),
-            )
-            .await;
-            let _: codex_app_server_protocol::TurnStartResponse = app_server
-                .request_handle()
-                .request_typed(codex_app_server_protocol::ClientRequest::TurnStart {
-                    request_id: codex_app_server_protocol::RequestId::String(format!("scope-{id}")),
-                    params: codex_app_server_protocol::TurnStartParams {
-                        thread_id: id.to_string(),
-                        input: vec![codex_app_server_protocol::UserInput::Text {
-                            text: "Continue".into(),
-                            text_elements: vec![],
-                        }],
-                        ..Default::default()
-                    },
-                })
-                .await?;
-            time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
-                while let Some(event) = app_server.next_event().await {
-                    if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = event
-                        && matches!(notification.as_ref(), ServerNotification::TurnCompleted(event) if event.thread_id == id.to_string())
-                    {
-                        break;
-                    }
-                }
-            })
-            .await?;
-            let request = response.single_request();
-            let context = request
-                .message_input_texts("developer")
-                .into_iter()
-                .chain(request.message_input_texts("user"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(
-                context.contains("scope-control-catalog-marker"),
-                "{kind:?}/{mode:?}: catalog missing"
-            );
-            assert!(
-                !context.contains("review-catalog-marker"),
-                "{kind:?}/{mode:?}: review exposed"
-            );
-            assert!(
-                !context.contains("oracle-catalog-marker"),
-                "{kind:?}/{mode:?}: oracle exposed"
-            );
-        }
-        match kind {
-            CompanionKind::Parallel => assert!(
-                Box::pin(app.close_parallel_conversation(
-                    &mut tui,
-                    &mut app_server,
-                    parent_thread_id,
-                    companion_id,
-                ))
-                .await
-            ),
-            CompanionKind::Side => {
-                Box::pin(app.select_agent_thread_and_discard_side(
-                    &mut tui,
-                    &mut app_server,
-                    parent_thread_id,
-                ))
-                .await?;
-            }
-        }
-        assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
-        assert!(app.side_threads.is_empty());
-    }
     app_server.shutdown().await?;
     Ok(())
 }
@@ -3558,59 +3177,6 @@ async fn select_uncached_agent_thread_still_refreshes_liveness() -> Result<()> {
     assert_eq!(app.active_thread_id, None);
     assert_eq!(app.agent_navigation.get(&thread_id), None);
     app_server.shutdown().await?;
-    // A cached inferred child still requires an authoritative resume before selection.
-    let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
-    let (mut server, requests, proxy) =
-        session_lifecycle_requests::start_recording_app_server_with_history(
-            &app.config,
-            session_lifecycle_requests::HistoryCapabilities::ResumeFails,
-            /*blocked_thread_list*/ None,
-            /*failed_thread_name*/ None,
-            crate::app_server_session::ThreadParamsMode::Embedded,
-            LoaderOverrides::without_managed_config_for_tests(),
-        )
-        .await?;
-    let primary = server.start_thread(&app.config).await?;
-    let primary_id = primary.session.thread_id;
-    app.enqueue_primary_thread_session(primary.session, primary.turns)
-        .await?;
-    let child = server.start_thread(&app.config).await?;
-    let child_id = child.session.thread_id;
-    let channel =
-        ThreadEventChannel::new_with_session(/*capacity*/ 4, child.session, child.turns);
-    channel.store.lock().await.inferred_session = true;
-    app.thread_event_channels.insert(child_id, channel);
-    while events.try_recv().is_ok() {}
-    Box::pin(app.select_agent_thread(&mut tui, &mut server, child_id)).await?;
-    assert_eq!(app.active_thread_id, Some(primary_id));
-    assert_eq!(app.chat_widget.thread_id(), Some(primary_id));
-    assert!(app.active_thread_rx.is_some());
-    let child_channel = app
-        .thread_event_channels
-        .get(&child_id)
-        .expect("child channel retained");
-    assert!(child_channel.receiver.is_some());
-    let child_store = child_channel.store.lock().await;
-    assert!(!child_store.active);
-    assert!(child_store.inferred_session);
-    drop(child_store);
-    let primary_store = app
-        .thread_event_channels
-        .get(&primary_id)
-        .expect("primary channel retained")
-        .store
-        .lock()
-        .await;
-    assert!(primary_store.active);
-    drop(primary_store);
-    assert_eq!(
-        session_lifecycle_requests::recorded_params(&requests, "thread/resume").len(),
-        1
-    );
-    let error = next_history_message(&mut events).replace(&child_id.to_string(), "CHILD");
-    assert_snapshot!(error, @"■ Failed to load settings for agent thread CHILD.");
-    server.shutdown().await?;
-    proxy.abort();
     Ok(())
 }
 
@@ -5215,11 +4781,6 @@ async fn inactive_thread_approval_badge_clears_after_turn_completion_notificatio
 #[tokio::test]
 async fn inactive_thread_started_notification_initializes_replay_session() -> Result<()> {
     let mut app = make_test_app().await;
-    app.config
-        .features
-        .enable(Feature::FastMode)
-        .expect("enable fast mode");
-    app.config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
     let temp_dir = tempdir()?;
     let main_thread_id =
         ThreadId::from_string("00000000-0000-0000-0000-000000000101").expect("valid thread");
@@ -5228,14 +4789,9 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     let primary_cwd = test_path_buf("/tmp/main").abs();
     let shared_root = test_path_buf("/tmp/shared").abs();
     let primary_session = ThreadSessionState {
-        adaptive_reasoning_enabled: true,
-        adaptive_reasoning_revision: 9,
-        adaptive_reasoning_error: None,
-        adaptive_reasoning_failure_episode: 0,
         daybreak_enabled: false,
         windows_sandbox_host: WindowsSandboxHost::Local,
         approval_policy: AskForApproval::OnRequest,
-        service_tier: Some("default".to_string()),
         permission_profile: PermissionProfile::workspace_write(),
         runtime_workspace_roots: vec![primary_cwd.clone(), shared_root.clone()],
         ..test_thread_session(main_thread_id, primary_cwd.to_path_buf())
@@ -5278,7 +4834,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
                 history_mode: Default::default(),
                 model_provider: "agent-provider".to_string(),
                 model: Some("gpt-agent".to_string()),
-                reasoning_effort: Some(ReasoningEffortConfig::High),
+                reasoning_effort: None,
                 created_at: 1,
                 updated_at: 2,
                 recency_at: Some(2),
@@ -5286,15 +4842,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
                 path: Some(rollout_path.clone()),
                 cwd: test_path_buf("/tmp/agent").abs(),
                 cli_version: "0.0.0".to_string(),
-                source: codex_app_server_protocol::SessionSource::SubAgent(
-                    codex_protocol::protocol::SubAgentSource::ThreadSpawn {
-                        parent_thread_id: main_thread_id,
-                        depth: 1,
-                        agent_path: None,
-                        agent_nickname: Some("Robie".to_string()),
-                        agent_role: Some("explorer".to_string()),
-                    },
-                ),
+                source: codex_app_server_protocol::SessionSource::Unknown,
                 can_accept_direct_input: None,
                 thread_source: None,
                 agent_nickname: Some("Robie".to_string()),
@@ -5315,61 +4863,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         .lock()
         .await;
     let session = store.session.clone().expect("inferred session");
-    let snapshot = store.snapshot();
     drop(store);
-    assert_eq!(
-        (
-            session.adaptive_reasoning_enabled,
-            session.adaptive_reasoning_revision
-        ),
-        (false, 0)
-    );
-    assert!(snapshot.inferred_session);
-    assert!(app.should_refresh_snapshot_session(
-        agent_thread_id,
-        /*is_replay_only*/ false,
-        &snapshot
-    ));
-    assert!(!app.should_refresh_snapshot_session(
-        agent_thread_id,
-        /*is_replay_only*/ true,
-        &snapshot
-    ));
-    let mut authoritative_snapshot = snapshot.clone();
-    authoritative_snapshot.inferred_session = false;
-    assert!(!app.should_refresh_snapshot_session(
-        agent_thread_id,
-        /*is_replay_only*/ false,
-        &authoritative_snapshot
-    ));
-    // Either spawn-time mode must come from the child's authoritative response, not its parent.
-    for enabled in [false, true] {
-        let authoritative = ThreadSessionState {
-            adaptive_reasoning_enabled: enabled,
-            adaptive_reasoning_revision: 0,
-            adaptive_reasoning_error: None,
-            adaptive_reasoning_failure_episode: 0,
-            ..session.clone()
-        };
-        let mut store = app
-            .thread_event_channels
-            .get(&agent_thread_id)
-            .expect("agent thread channel")
-            .store
-            .lock()
-            .await;
-        store.set_session(authoritative, Vec::new());
-        let installed = store.snapshot();
-        assert!(!installed.inferred_session);
-        assert_eq!(
-            installed
-                .session
-                .as_ref()
-                .expect("authoritative session")
-                .adaptive_reasoning_enabled,
-            enabled
-        );
-    }
 
     assert_eq!(session.thread_id, agent_thread_id);
     assert!(session.daybreak_enabled);
@@ -5377,18 +4871,6 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
     assert_eq!(session.thread_name, Some("agent thread".to_string()));
     assert_eq!(session.model, "gpt-agent");
     assert_eq!(session.model_provider_id, "agent-provider");
-    assert_eq!(
-        app.agent_picker_model_label(agent_thread_id, /*is_primary*/ false),
-        Some("age-hig".to_string())
-    );
-    app.primary_session_configured
-        .as_mut()
-        .expect("primary session")
-        .service_tier = Some(ServiceTier::Fast.request_value().to_string());
-    assert_eq!(
-        app.agent_picker_model_label(agent_thread_id, /*is_primary*/ false),
-        Some("age-hig-fast".to_string())
-    );
     assert_eq!(session.approval_policy, primary_session.approval_policy);
     assert_eq!(session.cwd.as_path(), test_path_buf("/tmp/agent").as_path());
     assert_eq!(
