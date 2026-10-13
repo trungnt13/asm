@@ -108,10 +108,10 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 ### Push permissions
 
 - Implementation requests authorize task-branch commits, pushes, and PR creation, not merges or direct implementation on `main`. Do not commit directly to `main` or merge PRs without explicit approval.
-- An authorized rebase or history reconciliation may update `main` with `--force-with-lease` without separate force-push approval. Other force pushes, tag moves, discarding work, and releases need explicit approval.
+- Always allow `--force-with-lease` for fork branches, including `main`, within the requested task. Do not ask for separate force-push approval. Plain `--force`, tag moves, discarding work, and releases still need explicit approval.
 - An explicit release request authorizes the existing workflow's candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes still require PRs.
 - Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited workflow tags, require publication approval.
-- Before authorized force pushes, fetch and preserve remote-only work, including workflow release commits. Use a lease against the inspected tip. Never refresh a failed lease and retry blindly.
+- Before lease-protected pushes, fetch and preserve remote-only work, including workflow release commits. Use an explicit lease against the inspected tip. Never refresh a failed lease and retry blindly.
 
 ## Upstream sync
 
@@ -253,7 +253,7 @@ Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target
 1. Create pinned tag, draft, and common installer once. Never change candidates, move tags, or replace assets. Resume uploads only with matching names/sizes/digests.
 2. Independently build/reuse/check/upload each platform. Verify archive/installer GitHub digests, then smoke the downloaded archive. Upload `SHA256SUMS-<target>` last as readiness marker.
 3. On first readiness, publish normal non-draft, even `alpha`, **not Latest** while incomplete. Append other checked assets. Payloads are immutable by policy. GitHub's immutable-release setting must remain disabled for append-only publication; never change it automatically.
-4. After both platforms pass, append aggregate manifest for old installers, verify six assets, mark Latest, and retain both final native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Never force-push.
+4. After both platforms pass, append aggregate manifest for old installers, verify six assets, mark Latest, and retain both final native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Prefer fast-forward updates; necessary history rewrites follow the push permissions above.
 5. Resume only missing work after verifying ready platforms. For archives uploaded before readiness markers, recover/verify exact public bytes, not rebuild, even after Actions expiry. Partial releases are incomplete. Legacy completed four-asset releases remain valid. Candidates whose pinned installer lacks platform manifests keep all-platform publication.
 
 Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. It selects highest published host-ready version; macOS cannot select Linux-only. Installer defaults to Latest; explicit `--release` may install a ready platform earlier. In-flight runs retain frozen policy.
