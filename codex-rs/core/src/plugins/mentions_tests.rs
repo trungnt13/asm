@@ -34,6 +34,13 @@ fn collect_explicit_app_ids_from_linked_text_mentions() {
     let app_ids = collect_explicit_app_ids(&input);
 
     assert_eq!(app_ids, HashSet::from(["calendar".to_string()]));
+    let input = [text_input(
+        "> [$quoted](app://quoted)\n  >> [$nested](app://nested)\n\nuse [$calendar](app://calendar)",
+    )];
+    assert_eq!(
+        collect_explicit_app_ids(&input),
+        HashSet::from(["calendar".to_string()])
+    );
 }
 
 #[test]
@@ -49,6 +56,13 @@ fn collect_explicit_app_ids_dedupes_structured_and_linked_mentions() {
     let app_ids = collect_explicit_app_ids(&input);
 
     assert_eq!(app_ids, HashSet::from(["calendar".to_string()]));
+    assert_eq!(
+        collect_explicit_app_ids(&[
+            text_input("> [$calendar](app://calendar)"),
+            input[1].clone(),
+        ]),
+        HashSet::from(["calendar".to_string()])
+    );
 }
 
 #[test]
@@ -110,6 +124,13 @@ fn collect_explicit_plugin_mentions_from_linked_text_mentions() {
         &plugins,
     );
 
+    assert_eq!(mentioned, vec![expected.clone()]);
+    let mentioned = collect_explicit_plugin_mentions(
+        &[text_input(
+            "> [@alias](plugin://other@test)\n>> [@sample](plugin://sample@other-marketplace)\n\nuse [@alias](plugin://sample@test)",
+        )],
+        &plugins,
+    );
     assert_eq!(mentioned, vec![expected]);
 }
 
@@ -132,6 +153,19 @@ fn collect_explicit_plugin_mentions_dedupes_structured_and_linked_mentions() {
     );
 
     assert_eq!(mentioned, vec![plugin("sample@test", "sample")]);
+    assert_eq!(
+        collect_explicit_plugin_mentions(
+            &[
+                text_input("> [@sample](plugin://sample@test)\n> [@other](plugin://other@test)"),
+                UserInput::Mention {
+                    name: "sample".to_string(),
+                    path: "plugin://sample@test".to_string(),
+                },
+            ],
+            &plugins,
+        ),
+        vec![plugin("sample@test", "sample")]
+    );
 }
 
 #[test]

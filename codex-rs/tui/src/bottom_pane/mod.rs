@@ -1132,6 +1132,12 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_composer_quote(&mut self, quote: Option<String>) {
+        self.composer
+            .edit_stored_draft(|composer| composer.set_quote(quote));
+        self.request_redraw();
+    }
+
     /// Replace the composer text with `text`.
     ///
     /// This is intended for fresh input where mention linkage does not need to
