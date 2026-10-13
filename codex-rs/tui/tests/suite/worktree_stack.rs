@@ -59,6 +59,18 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
 
     let codex_home = tempfile::tempdir_in("/tmp")?;
     write_test_config(codex_home.path(), &root)?;
+    let mut catalog = codex_models_manager::bundled_models_response()?;
+    catalog.models.retain(|model| model.slug == "gpt-5.6-terra");
+    ensure!(catalog.models.len() == 1, "mock model metadata");
+    catalog.models[0].service_tiers = vec![codex_protocol::openai_models::ModelServiceTier {
+        id: codex_protocol::config_types::ServiceTier::Fast
+            .request_value()
+            .to_string(),
+        name: "Fast".to_string(),
+        description: "Mock Fast tier".to_string(),
+    }];
+    let catalog_path = codex_home.path().join("models.json");
+    fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
     let server = responses::start_mock_server().await;
     let config_path = codex_home.path().join("config.toml");
     let config = fs::read_to_string(&config_path)?
@@ -66,7 +78,8 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
     fs::write(
         &config_path,
         format!(
-            "{config}\n[model_providers.test]\nname = \"Mock\"\nbase_url = \"{}/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n",
+            "model_catalog_json = {}\nfeatures.fast_mode = true\n{config}\n[model_providers.test]\nname = \"Mock\"\nbase_url = \"{}/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n",
+            toml::Value::String(catalog_path.display().to_string()),
             server.uri()
         ),
     )?;
@@ -109,31 +122,40 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
     )?;
     terminal.wait_for_startup()?;
     terminal.wait_for_screen("STACK_SAVED_HISTORY")?;
-    terminal.wait_for_screen("Ask Codex to do anything")?;
+    terminal.wait_for_screen("Ask ASM to do anything")?;
 
     // Starting and closing a side conversation both rebuild the displayed chat widget.
     // Repeat through the real event loop, whose dev-build frames share the production stack.
-    for attempt in 1..=3 {
-        submit(&mut terminal, "/side")?;
-        terminal.wait_for_screen("Side from main thread")?;
+    for (attempt, (command, title)) in [
+        ("/chat", "Chat"),
+        ("/side", "Side"),
+        ("/side", "Side"),
+        ("/side", "Side"),
+        ("/parallel", "Parallel"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        submit(&mut terminal, command)?;
+        terminal.wait_for_screen(&format!("{title} from main thread"))?;
         terminal.ensure_running()?;
         terminal.write_input(b"\x03")?;
         terminal.wait_for_screen("STACK_SAVED_HISTORY")?;
-        terminal.wait_for_screen("Ask Codex to do anything")?;
+        terminal.wait_for_screen("Ask ASM to do anything")?;
         terminal.ensure_running()?;
 
         let draft = format!("SIDE_STACK_DRAFT_{attempt}");
         terminal.write_input(draft.as_bytes())?;
         terminal.wait_for_screen(&draft)?;
         terminal.write_input(b"\x15")?;
-        terminal.wait_for_screen("Ask Codex to do anything")?;
+        terminal.wait_for_screen("Ask ASM to do anything")?;
     }
 
     submit(&mut terminal, "/resume")?;
     terminal.wait_for_screen("Resume a previous session")?;
     terminal.ensure_running()?;
     terminal.write_input(b"\x1b")?;
-    terminal.wait_for_screen("Ask Codex to do anything")?;
+    terminal.wait_for_screen("Ask ASM to do anything")?;
 
     submit(&mut terminal, "/worktree")?;
     terminal.wait_for_screen("Continue current conversation")?;
