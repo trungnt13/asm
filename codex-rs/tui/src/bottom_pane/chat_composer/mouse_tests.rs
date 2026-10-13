@@ -104,7 +104,16 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
             attachment_area.y,
         );
     }
-    composer.render(area, &mut Buffer::empty(area));
+    let mut buffer = Buffer::empty(area);
+    composer.render(area, &mut buffer);
+    assert!(
+        buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+            .contains("[×] • 14. quote 11")
+    );
     assert!(
         reached.iter().all(|visible| *visible),
         "every reference must be reachable"
@@ -112,6 +121,9 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
     let last_row = attachment_area.bottom() - 1;
     mouse(&mut composer, area, Down(Left), attachment_area.x, last_row);
     assert_eq!(composer.attachments.quotes.last().unwrap(), "quote 10");
+    let prefix = ChatComposer::quote_prefix(&composer.attachments.quotes, "");
+    assert!(prefix.starts_with("> 1. selected text\n\n> 2. last\n"));
+    assert!(prefix.ends_with("> 13. quote 10\n"));
     assert_eq!(composer.current_text(), "!echo hello");
     assert_eq!(composer.current_cursor(), original_cursor);
 }
