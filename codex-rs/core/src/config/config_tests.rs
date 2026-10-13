@@ -473,6 +473,8 @@ consolidation_reasoning_effort = "high"
         serde_json::to_value(&config.adaptive_reasoning).expect("serialize adaptive defaults"),
         serde_json::json!({
             "enabled": false,
+            "decision_every_n_turns": 1,
+            "decision_every_n_steps": 2,
             "decision_model": "gpt-6-luna",
             "decision_model_api_env": "DECISION_API_KEY",
             "min_effort": "low",
@@ -510,6 +512,8 @@ consolidation_reasoning_effort = "high"
         ("decision_model = ' '", "must not be blank"),
         ("decision_model_api_env = '9KEY'", "ASCII environment"),
         ("decision_model_api_env = 'KEY-SECRET'", "ASCII environment"),
+        ("decision_every_n_turns = 0", "positive integers"),
+        ("decision_every_n_steps = 0", "positive integers"),
         ("decision_timeout_ms = 0", "between 1 and 5000"),
         ("decision_timeout_ms = 5001", "between 1 and 5000"),
         ("max_context_bytes = 127", "between 128 and 32768"),
