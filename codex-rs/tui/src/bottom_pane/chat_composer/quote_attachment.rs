@@ -30,7 +30,9 @@ impl ChatComposer {
                     return;
                 }
                 self.history.reset_navigation();
+                self.flush_pending_paste_burst();
                 self.set_quotes(quotes);
+                self.append_quote_comment();
             }
             PendingQuote::TooLarge => {
                 self.show_footer_flash(
@@ -42,6 +44,12 @@ impl ChatComposer {
     }
 
     pub(in crate::bottom_pane) fn set_quotes(&mut self, quotes: Vec<String>) {
+        if quotes.is_empty() {
+            for index in (0..self.attachments.quotes.len()).rev() {
+                self.remove_quote_comment(index);
+            }
+            self.draft.quote_comments.clear();
+        }
         self.attachments.quotes = quotes;
         if !self.attachments.quotes.is_empty() && self.draft.is_bash_mode {
             let cursor = self.draft.textarea.cursor();

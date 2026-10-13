@@ -17,6 +17,7 @@ pub(super) struct DraftState {
     pub(super) input_disabled_placeholder: Option<String>,
     pub(super) paste_burst: PasteBurst,
     pub(super) disable_paste_burst: bool,
+    pub(super) quote_comments: HashMap<u64, usize>,
     pub(super) mention_bindings: HashMap<u64, ComposerMentionBinding>,
     pub(super) recent_submission_mention_bindings: Vec<MentionBinding>,
 }
@@ -33,6 +34,7 @@ impl DraftState {
             paste_burst: PasteBurst::default(),
             disable_paste_burst: false,
             mention_bindings: HashMap::new(),
+            quote_comments: HashMap::new(),
             recent_submission_mention_bindings: Vec::new(),
         }
     }

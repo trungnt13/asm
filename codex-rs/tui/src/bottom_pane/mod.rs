@@ -264,6 +264,7 @@ pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
 pub(crate) use chat_composer::PendingQuote;
 pub(crate) use chat_composer::QueuedInputAction;
+pub(crate) use chat_composer::QuoteComment;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer_history::HistoryEntry;
 pub(crate) use textarea::KillBufferSnapshot;
@@ -1136,6 +1137,12 @@ impl BottomPane {
     pub(crate) fn set_composer_quotes(&mut self, quotes: Vec<String>) {
         self.composer
             .edit_stored_draft(|composer| composer.set_quotes(quotes));
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_quote_comments(&mut self, comments: Vec<QuoteComment>) {
+        self.composer
+            .edit_stored_draft(|composer| composer.set_quote_comments(comments));
         self.request_redraw();
     }
 

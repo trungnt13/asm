@@ -141,9 +141,12 @@
 //! - Treats a leading `!` revealed only by paste expansion as literal model input, not shell input.
 //! - Prunes local attached images so only placeholders that survive expansion are sent.
 //! - Preserves remote image URLs as separate attachments even when text is empty.
-//! - Prepends a frozen transcript quote as a Markdown blockquote and rebases draft elements.
+//! - Prepends numbered frozen transcript quotes and rebases draft elements.
+//!   Generated comment prefixes retain quote identity through edits and draft restoration.
+//!   Submission drops empty generated comments and escapes numbered prefixes to keep their labels.
 //!   Quote-plus-comment submissions are rejected above 10,000 UTF-8 bytes without losing the draft.
-//!   Attached quotes keep slash and shell comments literal; each [×] removes only its quote.
+//!   Attached quotes keep slash and shell comments literal.
+//!   Each [×] removes its quote and generated prefix, preserving entered comment text.
 //!   Whole-draft restores install their quote before importing text; text-only edits keep the quote.
 //!
 //! When these paths clear the visible textarea after a successful submit or slash-command
@@ -397,6 +400,7 @@ pub(crate) use mouse::ClipboardPasteTarget;
 mod paste_input;
 mod popup_state;
 mod quote_attachment;
+mod quote_comments;
 mod reconnect;
 pub(crate) use reconnect::RestrictedInputMode;
 mod slash_input;
@@ -419,6 +423,7 @@ use self::popup_state::ActivePopup;
 use self::popup_state::DismissedToken;
 use self::popup_state::PopupState;
 pub(crate) use self::quote_attachment::PendingQuote;
+pub(crate) use self::quote_comments::QuoteComment;
 use self::slash_input::SlashInput;
 use self::slash_input::SlashValidation;
 use self::slash_input::SubmissionValidation;
@@ -684,6 +689,7 @@ struct MentionCompletionTarget {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ComposerDraft {
+    quote_comments: Vec<QuoteComment>,
     quotes: Vec<String>,
     pub(super) text: String,
     text_elements: Vec<TextElement>,
@@ -696,6 +702,7 @@ pub(super) struct ComposerDraft {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ComposerDraftSnapshot {
+    pub(crate) quote_comments: Vec<QuoteComment>,
     pub(crate) quotes: Vec<String>,
     pub(crate) text: String,
     pub(crate) cursor: usize,
@@ -1274,6 +1281,14 @@ impl ChatComposer {
     /// are renumbered to `[Image #M+1]..[Image #N]` (where `M` is the number of
     /// remote images). Cursor is placed at the end after rebuilding elements.
     pub(crate) fn apply_external_edit(&mut self, text: String) {
+        if !self.quote_comments().is_empty()
+            && (text == self.current_text() || text == self.current_text_with_pending().trim_end())
+        {
+            self.draft.textarea_state.get_mut().follow_cursor();
+            self.move_cursor_to_end();
+            return;
+        }
+        self.draft.quote_comments.clear();
         self.note_sparkle_replaced_text(&text);
         self.vim_history = VimHistory::default();
         self.draft.pending_pastes.clear();
@@ -1569,6 +1584,7 @@ impl ChatComposer {
         self.draft.is_bash_mode = false;
         self.draft.pending_pastes.clear();
         self.draft.mention_bindings.clear();
+        self.draft.quote_comments.clear();
 
         let (text, text_elements) = self.imported_text_for_textarea(text, text_elements);
         self.draft
@@ -1637,6 +1653,7 @@ impl ChatComposer {
 
     pub(super) fn snapshot_draft(&self) -> ComposerDraft {
         ComposerDraft {
+            quote_comments: self.quote_comments(),
             quotes: self.attachments.quotes.clone(),
             text: self.current_text(),
             text_elements: self.current_text_elements(),
@@ -1650,6 +1667,7 @@ impl ChatComposer {
 
     pub(super) fn restore_draft(&mut self, draft: ComposerDraft) {
         let ComposerDraft {
+            quote_comments,
             quotes,
             text,
             text_elements,
@@ -1668,6 +1686,7 @@ impl ChatComposer {
             mention_bindings,
         );
         self.set_pending_pastes(pending_pastes);
+        self.set_quote_comments(quote_comments);
         self.set_current_cursor(cursor);
         self.sync_popups();
     }
@@ -3011,11 +3030,14 @@ impl ChatComposer {
     ) -> Option<(String, Vec<TextElement>)> {
         let mut text = self.current_text();
         let original_input = text.clone();
+        let original_cursor = self.current_cursor();
+        let original_quote_comments = self.quote_comments();
         let original_text_elements = self.current_text_elements();
         let original_mention_bindings = self.snapshot_mention_bindings();
         let original_local_image_paths = self.attachments.local_image_paths();
         let original_pending_pastes = self.draft.pending_pastes.clone();
         let mut text_elements = original_text_elements.clone();
+        Self::prepare_quote_comments(&mut text, &mut text_elements, &original_quote_comments);
         let input_starts_with_space = original_input.starts_with(' ');
         self.draft.recent_submission_mention_bindings.clear();
         self.draft.textarea.set_text_clearing_elements("");
@@ -3058,7 +3080,8 @@ impl ChatComposer {
             self.draft
                 .pending_pastes
                 .clone_from(&original_pending_pastes);
-            self.draft.textarea.set_cursor(original_input.len());
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
             return None;
         }
 
@@ -3072,7 +3095,8 @@ impl ChatComposer {
             self.draft
                 .pending_pastes
                 .clone_from(&original_pending_pastes);
-            self.draft.textarea.set_cursor(original_input.len());
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
             self.show_footer_flash(
                 Line::from("Quote and comment too long; limit 10,000 UTF-8 bytes".red()),
                 Duration::from_secs(5),
@@ -3095,7 +3119,8 @@ impl ChatComposer {
             self.draft
                 .pending_pastes
                 .clone_from(&original_pending_pastes);
-            self.draft.textarea.set_cursor(original_input.len());
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
             // Embedded composers may cover the transcript that receives the full error.
             if self.footer.hint_override.is_some() {
                 self.show_footer_flash(
@@ -3145,6 +3170,7 @@ impl ChatComposer {
             });
         }
         self.draft.pending_pastes.clear();
+        self.draft.quote_comments.clear();
         self.attachments.quotes.clear();
         Some((text, text_elements))
     }
@@ -3266,6 +3292,8 @@ impl ChatComposer {
         }
 
         let original_input = self.current_text();
+        let original_cursor = self.current_cursor();
+        let original_quote_comments = self.quote_comments();
         let original_text_elements = self.current_text_elements();
         let original_mention_bindings = self.snapshot_mention_bindings();
         let original_local_image_paths = self.attachments.local_image_paths();
@@ -3314,6 +3342,8 @@ impl ChatComposer {
                 original_mention_bindings,
             );
             self.draft.pending_pastes = original_pending_pastes;
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
             self.footer.flash = flash;
             (InputResult::None, true)
         }
@@ -4966,6 +4996,24 @@ impl ChatComposer {
                     );
                 }
             }
+        }
+        if self.draft.input_enabled
+            && !self.blocks_direct_input
+            && self.placeholder_text == crate::chatwidget::PLACEHOLDER
+            && mask_char.is_none()
+            && matches!(self.popups.active, ActivePopup::None)
+            && self.active_empty_quote_comment()
+            && let Some((x, y)) = self
+                .draft
+                .textarea
+                .cursor_pos_with_state(textarea_rect, *state)
+        {
+            buf.set_span(
+                x,
+                y,
+                &"Add an optional comment…".dim(),
+                textarea_rect.right().saturating_sub(x),
+            );
         }
         if !self.draft.input_enabled || textarea_is_empty {
             let text = if self.draft.input_enabled {
@@ -6856,6 +6904,17 @@ mod tests {
             .expect("expected connector mention to be selected");
         assert_eq!(mention.insert_text, "$notion".to_string());
         assert_eq!(mention.path, Some("app://connector_1".to_string()));
+        composer.set_text_content("use $notion later".to_owned(), Vec::new(), Vec::new());
+        composer.set_current_cursor("use $not".len());
+        composer.sync_popups();
+        assert!(matches!(composer.popups.active, ActivePopup::Skill(_)));
+        composer.attach_quote(PendingQuote::Text("reference".to_owned()));
+        assert!(matches!(composer.popups.active, ActivePopup::None));
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(
+            matches!(result, InputResult::Submitted { text, .. } if text == "> 1. reference\n\n1\\. use $notion later")
+        );
     }
 
     #[test]
@@ -9421,10 +9480,10 @@ mod tests {
                 composer.restore_draft(saved);
                 assert!(rendered(composer).contains("Add an optional comment…"));
                 composer.set_placeholder_text("Custom prompt".to_string());
-                assert!(rendered(composer).contains("Custom prompt"));
+                assert!(!rendered(composer).contains("Add an optional comment…"));
                 composer.set_placeholder_text(crate::chatwidget::PLACEHOLDER.to_string());
                 composer.blocks_direct_input = true;
-                assert!(rendered(composer).contains(crate::chatwidget::PLACEHOLDER));
+                assert!(!rendered(composer).contains("Add an optional comment…"));
                 composer.blocks_direct_input = false;
             },
         );
@@ -11179,9 +11238,10 @@ mod tests {
         composer.set_remote_image_urls(Vec::new());
         composer.set_text_content(String::new(), Vec::new(), Vec::new());
         composer.attach_quote(PendingQuote::Text("quote-only draft".to_string()));
-        let quoted_draft = composer.draft_snapshot();
-        for code in [KeyCode::Up, KeyCode::Down] {
+        let mut quoted_draft = composer.draft_snapshot();
+        for (code, cursor) in [(KeyCode::Up, 0), (KeyCode::Down, 3)] {
             composer.handle_key_event(KeyEvent::new(code, KeyModifiers::NONE));
+            quoted_draft.cursor = cursor;
             assert_eq!(composer.draft_snapshot(), quoted_draft);
         }
         composer.set_quotes(Vec::new());
@@ -12817,12 +12877,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             text,
-            "> 1. café\n> selected\n\n> 2. second\n\n[Image #2] comment"
+            "> 1. café\n> selected\n\n> 2. second\n\n1\\. [Image #2] comment"
         );
         assert_eq!(
             elements,
             vec![TextElement::new(
-                (36..46).into(),
+                (40..50).into(),
                 Some("[Image #2]".to_string())
             )]
         );
@@ -12830,12 +12890,16 @@ mod tests {
 
         composer.set_text_content("é".repeat(4998), Vec::new(), Vec::new());
         composer.attach_quote(PendingQuote::Text("x".to_string()));
-        assert!(
-            composer
-                .prepare_submission_text(/*record_history*/ true)
-                .is_none()
+        composer.set_current_cursor(/*cursor*/ 5);
+        let original = composer.snapshot_draft();
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(result, InputResult::None));
+        assert_eq!(composer.snapshot_draft(), original);
+        assert_eq!(
+            composer.current_text(),
+            "1. ".to_owned() + &"é".repeat(4998)
         );
-        assert_eq!(composer.current_text(), "é".repeat(4998));
         assert_eq!(composer.attachments.quotes, vec!["x"]);
         composer.set_text_content("é".repeat(4996), Vec::new(), Vec::new());
         let (text, _) = composer
@@ -12861,6 +12925,74 @@ mod tests {
             .unwrap();
         assert!(numbered.contains("\n> 9. x\n\n> 10. x\n\n"));
         assert_eq!(numbered.len(), 10000);
+        composer.set_text_content("before".to_owned(), Vec::new(), Vec::new());
+        composer.attach_quote(PendingQuote::Text("first".to_owned()));
+        assert_eq!(composer.current_text(), "1. before");
+        composer.attach_quote(PendingQuote::Text("second".to_owned()));
+        composer.attach_quote(PendingQuote::Text("third".to_owned()));
+        assert_eq!(composer.current_text(), "1. before\n3. ");
+        composer.insert_str("third comment\ncontinued");
+        let saved = composer.snapshot_draft();
+        composer.apply_external_edit(composer.current_text());
+        assert_eq!(composer.quote_comments(), saved.quote_comments);
+        composer.remove_quote_comment(/*index*/ 0);
+        composer.attachments.quotes.remove(0);
+        assert_eq!(
+            composer.current_text(),
+            "before\n2. third comment\ncontinued"
+        );
+        composer.restore_draft(saved);
+        let (submitted, elements) = composer
+            .prepare_submission_text(/*record_history*/ false)
+            .unwrap();
+        assert_eq!(
+            submitted,
+            "> 1. first\n\n> 2. second\n\n> 3. third\n\n1\\. before\n3\\. third comment\ncontinued"
+        );
+        assert!(elements.is_empty());
+        for label in ["first", "second", "third"] {
+            composer.attach_quote(PendingQuote::Text(label.to_owned()));
+        }
+        composer.insert_str("only third");
+        let (submitted, _) = composer
+            .prepare_submission_text(/*record_history*/ false)
+            .unwrap();
+        assert_eq!(
+            submitted,
+            "> 1. first\n\n> 2. second\n\n> 3. third\n\n3\\. only third"
+        );
+        composer.attach_quote(PendingQuote::Text("editor quote".to_owned()));
+        let saved = composer.snapshot_draft();
+        composer.apply_external_edit(composer.current_text_with_pending().trim_end().to_owned());
+        assert_eq!(composer.snapshot_draft(), saved);
+        composer.handle_paste("p".repeat(LARGE_PASTE_CHAR_THRESHOLD + 1));
+        let saved = composer.snapshot_draft();
+        composer.apply_external_edit(composer.current_text_with_pending().trim_end().to_owned());
+        assert_eq!(composer.snapshot_draft(), saved);
+        composer.attach_quote(PendingQuote::Text("next editor quote".to_owned()));
+        assert_eq!(composer.quote_comments().len(), 2);
+        composer.set_quotes(Vec::new());
+        composer.set_text_content(String::new(), Vec::new(), Vec::new());
+        composer.attach_quote(PendingQuote::Text("multiline".to_owned()));
+        composer.insert_str("\nbody after blank first line");
+        composer.attach_quote(PendingQuote::Text("next".to_owned()));
+        assert_eq!(
+            composer.current_text(),
+            "1. \nbody after blank first line\n2. "
+        );
+        let (submitted, _) = composer
+            .prepare_submission_text(/*record_history*/ false)
+            .unwrap();
+        assert_eq!(
+            submitted,
+            "> 1. multiline\n\n> 2. next\n\n1\\. \nbody after blank first line"
+        );
+        composer.attach_quote(PendingQuote::Text("x".to_owned()));
+        composer.insert_str(&"é".repeat(4994));
+        let (at_limit, _) = composer
+            .prepare_submission_text(/*record_history*/ false)
+            .unwrap();
+        assert_eq!(at_limit.len(), 10_000);
         composer.set_quotes(vec!["a".repeat(4997)]);
         composer.attach_quote(PendingQuote::Text("b".repeat(4997)));
         assert_eq!(composer.attachments.quotes, vec!["a".repeat(4997)]);
@@ -12882,7 +13014,7 @@ mod tests {
                     if comment.is_empty() {
                         "> 1. selected\n".to_owned()
                     } else {
-                        format!("> 1. selected\n\n{comment}")
+                        format!("> 1. selected\n\n1\\. {comment}")
                     },
                     Vec::new()
                 ),

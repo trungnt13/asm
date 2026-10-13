@@ -267,6 +267,13 @@ fn blockquote_with_ordered_list() {
         .collect::<Vec<_>>();
     assert!(plain.iter().any(|line| line.contains("1. first")));
     assert!(plain.iter().any(|line| line.contains("2. second")));
+    let text = render_markdown_text("1\\. first comment\n\n3\\. third comment");
+    let plain = text
+        .lines
+        .iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(plain, vec!["1. first comment", "3. third comment"]);
 }
 
 #[test]
