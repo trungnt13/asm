@@ -6,6 +6,28 @@ use std::collections::VecDeque;
 use codex_utils_plugins::mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
 use codex_utils_plugins::mention_syntax::TOOL_MENTION_SIGIL;
 
+// Text references in blockquotes are literal, including when history is restored.
+pub(crate) fn quoted_line_end(text: &str, index: usize) -> Option<usize> {
+    if index != 0 && text.as_bytes().get(index - 1) != Some(&b'\n') {
+        return None;
+    }
+    let line = text.get(index..)?.split_inclusive('\n').next()?;
+    line.trim_start()
+        .starts_with('>')
+        .then_some(index + line.len())
+}
+
+pub(crate) fn is_quoted_line(text: &str, index: usize) -> bool {
+    text.get(..index)
+        .and_then(|prefix| {
+            quoted_line_end(
+                text,
+                prefix.rfind('\n').map_or(/*default*/ 0, |end| end + 1),
+            )
+        })
+        .is_some()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LinkedMention {
     pub(crate) sigil: char,
@@ -53,6 +75,11 @@ pub(crate) fn encode_history_mentions_at_elements(
     let mut index = 0usize;
 
     while index < bytes.len() {
+        if let Some(end) = quoted_line_end(text, index) {
+            out.push_str(&text[index..end]);
+            index = end;
+            continue;
+        }
         if matches!(
             bytes[index],
             byte if byte == TOOL_MENTION_SIGIL as u8 || byte == PLUGIN_TEXT_MENTION_SIGIL as u8
@@ -133,6 +160,11 @@ pub(crate) fn decode_history_mentions_with_at_mentions(
     let mut index = 0usize;
 
     while index < bytes.len() {
+        if let Some(end) = quoted_line_end(text, index) {
+            out.push_str(&text[index..end]);
+            index = end;
+            continue;
+        }
         if at_mentions_enabled
             && let Some((name, path, end_index)) =
                 crate::task_mentions::parse_task_link(text, index)
@@ -378,11 +410,17 @@ mod tests {
 
     #[test]
     fn decode_history_mentions_restores_visible_tokens() {
+        let quote = "> [$figma](app://quoted), [@sample](plugin://quoted@test)\n  >> [$figma](skill:///tmp/quoted/SKILL.md)\n\n";
         let decoded = decode_history_mentions_with_at_mentions(
-            "Use [$figma](app://figma-1), [$sample](plugin://sample@test), and [$figma](/tmp/figma/SKILL.md).",
+            &format!(
+                "{quote}Use [$figma](app://figma-1), [$sample](plugin://sample@test), and [$figma](/tmp/figma/SKILL.md)."
+            ),
             /*at_mentions_enabled*/ true,
         );
-        assert_eq!(decoded.text, "Use $figma, $sample, and $figma.");
+        assert_eq!(
+            decoded.text,
+            format!("{quote}Use $figma, $sample, and $figma.")
+        );
         assert_eq!(
             decoded.mentions,
             vec![
@@ -484,9 +522,10 @@ mod tests {
 
     #[test]
     fn encode_history_mentions_links_bound_mentions_in_order() {
-        let text = "$figma then $sample then $figma then $other";
+        let quote = "> $figma $sample\n  >> $figma\n\n";
+        let text = format!("{quote}$figma then $sample then $figma then $other");
         let encoded = encode_history_mentions(
-            text,
+            &text,
             &[
                 LinkedMention {
                     sigil: '$',
@@ -507,7 +546,9 @@ mod tests {
         );
         assert_eq!(
             encoded,
-            "[$figma](app://figma-app) then [$sample](plugin://sample@test) then [$figma](/tmp/figma/SKILL.md) then $other"
+            format!(
+                "{quote}[$figma](app://figma-app) then [$sample](plugin://sample@test) then [$figma](/tmp/figma/SKILL.md) then $other"
+            )
         );
     }
 

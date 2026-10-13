@@ -23,14 +23,8 @@ impl ChatComposer {
     pub(crate) fn attach_quote(&mut self, quote: PendingQuote) {
         match quote {
             PendingQuote::Text(text) => {
-                self.attachments.quote = Some(text);
-                if self.draft.is_bash_mode {
-                    let cursor = self.draft.textarea.cursor();
-                    self.draft.textarea.insert_str_at(/*pos*/ 0, "!");
-                    self.draft.textarea.set_cursor(cursor + 1);
-                    self.draft.is_bash_mode = false;
-                }
-                self.sync_popups();
+                self.history.reset_navigation();
+                self.set_quote(Some(text));
             }
             PendingQuote::TooLarge => {
                 self.show_footer_flash(
@@ -39,6 +33,17 @@ impl ChatComposer {
                 );
             }
         }
+    }
+
+    pub(in crate::bottom_pane) fn set_quote(&mut self, quote: Option<String>) {
+        self.attachments.quote = quote;
+        if self.attachments.quote.is_some() && self.draft.is_bash_mode {
+            let cursor = self.draft.textarea.cursor();
+            self.draft.textarea.insert_str_at(/*pos*/ 0, "!");
+            self.draft.textarea.set_cursor(cursor + 1);
+            self.draft.is_bash_mode = false;
+        }
+        self.sync_popups();
     }
 
     pub(super) fn render_quote_attachment(&self, area: Rect, buf: &mut Buffer) -> Rect {
@@ -69,6 +74,19 @@ impl ChatComposer {
         }
     }
 
+    pub(crate) fn quote_prefix(quote: &str, comment: &str) -> String {
+        let mut quoted = String::new();
+        for line in quote.split('\n') {
+            quoted.push_str("> ");
+            quoted.push_str(line);
+            quoted.push('\n');
+        }
+        if !comment.is_empty() {
+            quoted.push('\n');
+        }
+        quoted
+    }
+
     pub(super) fn prepend_quote(
         &mut self,
         text: &mut String,
@@ -77,15 +95,7 @@ impl ChatComposer {
         let Some(quote) = &self.attachments.quote else {
             return true;
         };
-        let mut quoted = String::new();
-        for line in quote.split('\n') {
-            quoted.push_str("> ");
-            quoted.push_str(line);
-            quoted.push('\n');
-        }
-        if !text.is_empty() {
-            quoted.push('\n');
-        }
+        let mut quoted = Self::quote_prefix(quote, text);
         if quoted.len().saturating_add(text.len()) > MAX_QUOTED_INPUT_BYTES {
             return false;
         }

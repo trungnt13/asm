@@ -110,10 +110,13 @@ async fn user_turn_includes_skill_instructions() -> Result<()> {
     let mut builder = test_codex()
         .with_extensions(Arc::new(extensions.build()))
         .with_workspace_setup(move |cwd, fs| async move {
-            write_repo_skill(cwd, fs, "demo", "demo skill", skill_body).await
+            write_repo_skill(cwd.clone(), fs.clone(), "demo", "demo skill", skill_body).await?;
+            write_repo_skill(cwd, fs, "quoted", "quoted skill", "quoted skill body").await
         });
     let test = builder.build_with_auto_env(&server).await?;
 
+    let quoted_skill_path = test.config.cwd.join(".agents/skills/quoted/SKILL.md");
+    let quoted_skill_path = quoted_skill_path.as_path().display();
     let skill_path = test
         .config
         .cwd
@@ -139,7 +142,9 @@ async fn user_turn_includes_skill_instructions() -> Result<()> {
         .start_or_steer_turn(
             TurnInputRequest::user_input(vec![
                 UserInput::Text {
-                    text: "please use $demo".to_string(),
+                    text: format!(
+                        "> $quoted\n>> [$quoted]({quoted_skill_path})\n\nplease use $demo"
+                    ),
                     text_elements: Vec::new(),
                 },
                 UserInput::Skill {
@@ -183,6 +188,12 @@ async fn user_turn_includes_skill_instructions() -> Result<()> {
         "expected skill instructions in user input, got {user_texts:?}"
     );
     assert!(request.has_content_kinds(&["skills.selected_skill_instructions"]));
+    assert!(
+        user_texts
+            .iter()
+            .all(|text| !text.contains("quoted skill body")),
+        "quoted references must not inject skill instructions: {user_texts:?}"
+    );
     assert_eq!(
         *recorder
             .0
