@@ -2085,7 +2085,7 @@ impl Drop for ChatWidget {
     }
 }
 
-const PLACEHOLDER: &str = "Ask ASM to do anything";
+pub(crate) const PLACEHOLDER: &str = "Ask ASM to do anything";
 const SIDE_PLACEHOLDER: &str = "Ask a follow-up question";
 
 // Extract the first bold (Markdown) element in the form **...** from `s`.
