@@ -3,11 +3,11 @@ source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
 "                                                                                                    "
-"  [×] • 1. Selected transcript text                                                                 "
-"  [×] • 2. Another reference                                                                        "
 "  [Image #1]                                                                                        "
 "  [Image #2]                                                                                        "
 "                                                                                                    "
-"› 2. Add an optional comment…                                                                       "
+"› describe these                                                                                    "
+"                                                                                                    "
+"                                                                                                    "
 "                                                                                                    "
 "                                                                                 100% context left  "

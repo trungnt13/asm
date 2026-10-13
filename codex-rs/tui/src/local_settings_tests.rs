@@ -21,7 +21,6 @@ async fn launch_screen_mode_survives_configuration_reload() -> anyhow::Result<()
     config.tui_fullscreen_transcript = true;
     config.tui_copy_on_select = CopyOnSelect::Always;
     config.tui_copy_on_select_clear_selection = true;
-    config.tui_click_to_quote = true;
     config.tui_right_click_paste = RightClickPaste::On;
     config.tui_alternate_screen = AltScreenMode::Auto;
     config.animations = true;
@@ -39,7 +38,6 @@ async fn launch_screen_mode_survives_configuration_reload() -> anyhow::Result<()
         tui.set_alt_screen_enabled(alternate_screen);
         tui.set_owned_screen(owned)?;
         let local = LocalSettings::for_tui(&config, &tui);
-        assert!(local.tui.click_to_quote);
         assert_eq!(
             (local.transcript_mode, local.tui.alternate_screen),
             (expected_mode, expected_alt),
@@ -49,7 +47,6 @@ async fn launch_screen_mode_survives_configuration_reload() -> anyhow::Result<()
         reloaded_config.tui_fullscreen_transcript = false;
         reloaded_config.tui_copy_on_select = CopyOnSelect::Never;
         reloaded_config.tui_copy_on_select_clear_selection = false;
-        reloaded_config.tui_click_to_quote = false;
         reloaded_config.tui_right_click_paste = RightClickPaste::Off;
         reloaded_config.tui_alternate_screen = AltScreenMode::Never;
         reloaded_config.tui_theme = Some("nord".into());

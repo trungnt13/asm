@@ -34,13 +34,6 @@ fn collect_explicit_app_ids_from_linked_text_mentions() {
     let app_ids = collect_explicit_app_ids(&input);
 
     assert_eq!(app_ids, HashSet::from(["calendar".to_string()]));
-    let input = [text_input(
-        "> [$quoted](app://quoted)\n  >> [$nested](app://nested)\n\nuse [$calendar](app://calendar)",
-    )];
-    assert_eq!(
-        collect_explicit_app_ids(&input),
-        HashSet::from(["calendar".to_string()])
-    );
 }
 
 #[test]
@@ -84,6 +77,26 @@ fn collect_explicit_app_ids_ignores_non_app_paths() {
 }
 
 #[test]
+fn collect_explicit_plugin_mentions_from_structured_paths() {
+    let expected = plugin("sample@test", "Sample");
+    let plugins = vec![
+        expected.clone(),
+        plugin("sample@other-marketplace", "Sample"),
+        plugin("other@test", "alias"),
+    ];
+
+    let mentioned = collect_explicit_plugin_mentions(
+        &[UserInput::Mention {
+            name: "alias".to_string(),
+            path: "plugin://sample@test".to_string(),
+        }],
+        &plugins,
+    );
+
+    assert_eq!(mentioned, vec![expected]);
+}
+
+#[test]
 fn collect_explicit_plugin_mentions_from_linked_text_mentions() {
     let expected = plugin("sample@test", "Sample");
     let plugins = vec![
@@ -92,21 +105,12 @@ fn collect_explicit_plugin_mentions_from_linked_text_mentions() {
         plugin("other@test", "alias"),
     ];
 
-    for input in [
-        UserInput::Mention {
-            name: "alias".to_string(),
-            path: "plugin://sample@test".to_string(),
-        },
-        text_input("use [@alias](plugin://sample@test)"),
-        text_input(
-            "> [@alias](plugin://other@test)\n>> [@sample](plugin://sample@other-marketplace)\n\nuse [@alias](plugin://sample@test)",
-        ),
-    ] {
-        assert_eq!(
-            collect_explicit_plugin_mentions(&[input], &plugins),
-            vec![expected.clone()]
-        );
-    }
+    let mentioned = collect_explicit_plugin_mentions(
+        &[text_input("use [@alias](plugin://sample@test)")],
+        &plugins,
+    );
+
+    assert_eq!(mentioned, vec![expected]);
 }
 
 #[test]

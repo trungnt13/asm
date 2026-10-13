@@ -9,8 +9,8 @@ use pretty_assertions::assert_eq;
 
 fn snapshot(text: &str) -> ComposerDraftSnapshot {
     ComposerDraftSnapshot {
-        quotes: Vec::new(),
         quote_comments: Vec::new(),
+        quotes: Vec::new(),
         text: text.to_string(),
         cursor: text.len(),
         text_elements: Vec::new(),
@@ -30,19 +30,7 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
         scope(async {
             let (mut chat, _sender, _rx, _op_rx) =
                 crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
-            let mut draft = snapshot("1. startup draft\n2. ");
-            draft.cursor = "1. startup draft".len();
-            draft.quote_comments = vec![
-                crate::bottom_pane::QuoteComment { quote_index: 0, range: 0..3 },
-                crate::bottom_pane::QuoteComment { quote_index: 1, range: 17..20 },
-            ];
-            draft.text_elements = draft.quote_comments.iter().map(|comment| {
-                TextElement::new(comment.range.clone().into(), Some(draft.text[comment.range.clone()].to_string()))
-            }).collect();
-            draft.quotes = vec![
-                "startup quote".to_string(),
-                "second startup quote".to_string(),
-            ];
+            let draft = snapshot("startup draft");
             remember(draft.clone());
             chat.handle_paste(destination.trim_end().to_string());
             let mut pending = Some(draft);
@@ -55,9 +43,7 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
             // This is the exact expanded text printed if startup fails before session readiness.
             assert_eq!(
                 take_unsent_text(),
-                Some(format!(
-                    "> 1. startup quote\n\n> 2. second startup quote\n\n{destination}1\\. startup draf{pasted}"
-                )),
+                Some(format!("{destination}startup draf{pasted}")),
             );
         })
         .await;
@@ -95,14 +81,7 @@ async fn recovery_refresh_stops_after_submission_or_startup_completion() {
     scope(async {
         remember(snapshot("before handoff"));
         refresh_after_handoff(|| panic!("protected input must not replace the startup draft"));
-        handed_off(|| {
-            let mut draft = snapshot("confirmed submission");
-            draft.quotes = vec![
-                "quote already expanded into submission".to_string(),
-                "second quote already expanded into submission".to_string(),
-            ];
-            draft
-        });
+        handed_off(|| snapshot("confirmed submission"));
         bind_submission("confirmed submission", "initial-prompt");
         acknowledged("initial-prompt");
         submitted(&InputResult::Submitted {

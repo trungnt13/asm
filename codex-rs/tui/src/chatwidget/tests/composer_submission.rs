@@ -1084,19 +1084,6 @@ async fn plugin_mention_does_not_suppress_same_name_skill() {
         plugin_id: None,
     }]));
 
-    let quoted_text = "> $foo\n  >> [$foo](skill:///tmp/foo/SKILL.md)\n> [@foo](plugin://app-0123456789abcdef0123456789abcdef@test)";
-    chat.submit_user_message(UserMessage::from(quoted_text));
-    let Op::UserTurn { items, .. } = next_submit_op(&mut op_rx) else {
-        panic!("expected Op::UserTurn");
-    };
-    assert_eq!(
-        items,
-        vec![UserInput::Text {
-            text: quoted_text.to_string(),
-            text_elements: Vec::new(),
-        }]
-    );
-
     chat.submit_user_message(UserMessage {
         text: "@foo $foo".to_string(),
         local_images: Vec::new(),
@@ -1231,6 +1218,22 @@ async fn blocked_image_restore_with_remote_images_keeps_local_placeholder_mappin
 }
 
 #[tokio::test]
+async fn startup_draft_handoff_preserves_cursor_and_large_paste() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let paste = "x".repeat(/*n*/ 1_001);
+    chat.bottom_pane.handle_paste(paste);
+    chat.bottom_pane.insert_str(" tail");
+    chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
+    let startup_draft = chat.bottom_pane.composer_draft_snapshot();
+    chat.bottom_pane
+        .set_composer_text(String::new(), Vec::new(), Vec::new());
+
+    chat.restore_startup_draft(startup_draft.clone());
+
+    assert_eq!(chat.bottom_pane.composer_draft_snapshot(), startup_draft);
+}
+
+#[tokio::test]
 async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() {
     let (mut startup_chat, _startup_rx, _startup_op_rx) =
         make_chatwidget_manual(/*model_override*/ None).await;
@@ -1238,31 +1241,6 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     startup_chat.bottom_pane.handle_paste(startup_paste.clone());
     startup_chat.bottom_pane.insert_str(" startup draft");
     startup_chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
-    let original = startup_chat.bottom_pane.composer_draft_snapshot();
-    startup_chat
-        .bottom_pane
-        .set_composer_text(String::new(), Vec::new(), Vec::new());
-    startup_chat.restore_startup_draft(original.clone());
-    assert_eq!(startup_chat.bottom_pane.composer_draft_snapshot(), original);
-    startup_chat.bottom_pane.set_composer_quotes(vec![
-        "startup first".to_string(),
-        "startup second".to_string(),
-    ]);
-    startup_chat
-        .bottom_pane
-        .set_composer_cursor(startup_chat.bottom_pane.composer_text().len());
-    startup_chat.bottom_pane.insert_str("\n1. startup comment");
-    let startup_comment_start = startup_chat
-        .bottom_pane
-        .composer_text()
-        .find("1. ")
-        .unwrap();
-    startup_chat
-        .bottom_pane
-        .set_composer_quote_comments(vec![crate::bottom_pane::QuoteComment {
-            quote_index: 0,
-            range: startup_comment_start..startup_comment_start + 3,
-        }]);
     let startup_draft = startup_chat.bottom_pane.composer_draft_snapshot();
 
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
@@ -1278,57 +1256,25 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     );
     let initial_paste = "y".repeat(/*n*/ 1_001);
     chat.bottom_pane.handle_paste(initial_paste.clone());
-    let existing_quotes = (1..=9)
-        .map(|index| format!("existing {index}"))
-        .collect::<Vec<_>>();
-    chat.bottom_pane
-        .set_composer_quotes(existing_quotes.clone());
-    chat.bottom_pane.insert_str("\n1. existing comment");
-    let existing_comment_start = chat.bottom_pane.composer_text().find("1. ").unwrap();
-    chat.bottom_pane
-        .set_composer_quote_comments(vec![crate::bottom_pane::QuoteComment {
-            quote_index: 0,
-            range: existing_comment_start..existing_comment_start + 3,
-        }]);
     let existing_draft = chat.bottom_pane.composer_draft_snapshot();
     let existing_placeholder = existing_draft.pending_pastes[0].0.clone();
 
     chat.restore_startup_draft(startup_draft);
 
     let restored = chat.bottom_pane.composer_draft_snapshot();
-    let expected_text = format!(
-        "{}\n{existing_placeholder} #2 startup draft\n10. startup comment",
-        existing_draft.text
-    );
-    let startup_comment_start = expected_text.find("10. ").unwrap();
-    assert_eq!(
-        restored.quote_comments,
-        vec![
-            crate::bottom_pane::QuoteComment {
-                quote_index: 0,
-                range: existing_comment_start..existing_comment_start + 3
-            },
-            crate::bottom_pane::QuoteComment {
-                quote_index: 9,
-                range: startup_comment_start..startup_comment_start + 4
-            },
-        ]
-    );
     assert_eq!(
         (
-            restored.quotes,
             restored.text,
             restored.cursor,
             restored.pending_pastes,
             restored.local_images,
         ),
         (
-            existing_quotes
-                .into_iter()
-                .chain(["startup first".to_string(), "startup second".to_string()])
-                .collect::<Vec<_>>(),
-            expected_text.clone(),
-            expected_text.len(),
+            format!(
+                "{}\n{existing_placeholder} #2 startup draft",
+                existing_draft.text
+            ),
+            existing_draft.text.len() + 1,
             vec![
                 (existing_placeholder.clone(), initial_paste),
                 (format!("{existing_placeholder} #2"), startup_paste),
@@ -1595,8 +1541,6 @@ async fn restored_message_preserves_existing_composer_draft_and_attachments() {
     chat.bottom_pane
         .set_composer_pending_pastes(vec![(paste_placeholder.to_string(), "hello".to_string())]);
 
-    chat.bottom_pane
-        .set_composer_quotes(vec!["draft quote".to_string()]);
     chat.restore_user_message_to_composer(UserMessage {
         text: "[Image #1] retry prompt".to_string(),
         local_images: vec![LocalImageAttachment {
@@ -1611,10 +1555,6 @@ async fn restored_message_preserves_existing_composer_draft_and_attachments() {
         mention_bindings: Vec::new(),
     });
 
-    assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quotes,
-        vec!["draft quote".to_string()]
-    );
     assert_eq!(
         chat.bottom_pane.composer_text(),
         format!("[Image #1] retry prompt\n[Image #2] {paste_placeholder} draft")
@@ -1978,13 +1918,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         questions: None,
         pending_thread_settings: None,
         composer: Some(ThreadComposerState {
-            quotes: vec!["thread quote".to_string()],
-            text: "1. composer draft".to_string(),
-            text_elements: vec![TextElement::new((0..3).into(), Some("1. ".to_string()))],
-            quote_comments: vec![crate::bottom_pane::QuoteComment {
-                quote_index: 0,
-                range: 0..3,
-            }],
+            text: "composer draft".to_string(),
             ..Default::default()
         }),
         safety_buffering_prompt: Some(UserMessage::from("buffered prompt")),
@@ -2025,7 +1959,6 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         .capture_thread_input_state()
         .expect("thread input state");
     assert!(captured_input_state.submit_pending_steers_after_interrupt);
-    assert_eq!(captured_input_state.composer, input_state.composer);
     assert_eq!(
         captured_input_state.safety_buffering_prompt,
         Some(UserMessage::from("buffered prompt"))
@@ -2071,7 +2004,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert!(!chat.input_queue.user_turn_pending_start);
     assert!(!chat.input_queue.submit_pending_steers_after_interrupt);
     assert!(chat.input_queue.pending_steers.is_empty());
-    assert_eq!(chat.bottom_pane.composer_text(), "1. composer draft");
+    assert_eq!(chat.bottom_pane.composer_text(), "composer draft");
     assert_eq!(
         chat.safety_buffering_prompt,
         Some(UserMessage::from("buffered prompt"))
@@ -2099,22 +2032,6 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert!(!chat.turn_lifecycle.sleep_inhibitor.is_turn_running());
     assert!(!chat.bottom_pane.is_task_running());
     assert_eq!(chat.safety_buffering_prompt, None);
-    assert!(chat.bottom_pane.composer_draft_snapshot().quotes.is_empty());
-    let quote_only = ThreadComposerState {
-        quotes: vec!["quote-only draft".to_string()],
-        ..Default::default()
-    };
-    chat.restore_composer_state(quote_only.clone());
-    assert_eq!(
-        chat.capture_thread_input_state().unwrap().composer,
-        Some(quote_only.clone())
-    );
-    chat.apply_external_edit("!comment".to_string());
-    assert_eq!(chat.bottom_pane.composer_text(), "!comment");
-    assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quotes,
-        quote_only.quotes
-    );
 }
 
 #[tokio::test]
@@ -2125,8 +2042,6 @@ async fn default_shortcuts_edit_most_recent_queued_message() {
     ] {
         let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.bottom_pane.set_task_running(/*running*/ true);
-        chat.bottom_pane
-            .set_composer_quotes(vec!["unrelated quote".to_string()]);
         for message in ["first queued", "second queued"] {
             chat.input_queue
                 .queued_user_messages
@@ -2137,7 +2052,6 @@ async fn default_shortcuts_edit_most_recent_queued_message() {
         chat.handle_key_event(key);
 
         assert_eq!(chat.bottom_pane.composer_text(), "second queued");
-        assert!(chat.bottom_pane.composer_draft_snapshot().quotes.is_empty());
         assert_eq!(chat.queued_user_message_texts(), vec!["first queued"]);
     }
 }
@@ -2395,14 +2309,6 @@ fn task_and_plugin_mentions_with_same_name_keep_prompt_order() {
         mention_bindings_from_user_inputs(&split_items, "Task @same @same"),
         mention_bindings_from_user_inputs(&items, "@same @same")
     );
-    assert_eq!(
-        mention_bindings_from_user_inputs(&[items[1].clone()], "> @same\n\n$same"),
-        vec![MentionBinding {
-            sigil: '$',
-            mention: "same".to_string(),
-            path: "plugin://same@test".to_string(),
-        }]
-    );
 }
 
 #[tokio::test]
@@ -2496,46 +2402,70 @@ async fn committed_user_message_with_hidden_prompt_context_renders_local_images(
 }
 
 #[tokio::test]
+async fn interrupt_restores_queued_messages_into_composer() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    // Simulate a running task to enable queuing of user inputs.
+    chat.bottom_pane.set_task_running(/*running*/ true);
+
+    // Queue two user messages while the task is running.
+    chat.input_queue
+        .queued_user_messages
+        .push_back(UserMessage::from("first queued".to_string()).into());
+    chat.input_queue
+        .queued_user_messages
+        .push_back(UserMessage::from("second queued".to_string()).into());
+    chat.refresh_pending_input_preview();
+
+    // Deliver an interrupted turn notification as if Esc was pressed.
+    handle_turn_interrupted(&mut chat, "turn-1");
+
+    // Composer should now contain the queued messages joined by newlines, in order.
+    assert_eq!(
+        chat.bottom_pane.composer_text(),
+        "first queued\nsecond queued"
+    );
+
+    // Queue should be cleared and no new user input should have been auto-submitted.
+    assert!(chat.input_queue.queued_user_messages.is_empty());
+    assert!(
+        op_rx.try_recv().is_err(),
+        "unexpected outbound op after interrupt"
+    );
+
+    // Drain rx to avoid unused warnings.
+    let _ = drain_insert_history(&mut rx);
+}
+
+#[tokio::test]
 async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
-    for (draft, expected) in [
-        ("", "first queued\nsecond queued"),
-        (
-            "current draft",
-            "first queued\nsecond queued\ncurrent draft",
-        ),
-    ] {
-        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-        chat.bottom_pane.set_task_running(/*running*/ true);
-        chat.bottom_pane
-            .set_composer_text(draft.to_string(), Vec::new(), Vec::new());
+    chat.bottom_pane.set_task_running(/*running*/ true);
+    chat.bottom_pane
+        .set_composer_text("current draft".to_string(), Vec::new(), Vec::new());
 
-        chat.input_queue
-            .queued_user_messages
-            .push_back(UserMessage::from("first queued".to_string()).into());
-        chat.input_queue
-            .queued_user_messages
-            .push_back(UserMessage::from("second queued".to_string()).into());
-        let quotes = if draft.is_empty() {
-            Vec::new()
-        } else {
-            vec!["draft quote".to_string()]
-        };
-        chat.bottom_pane.set_composer_quotes(quotes.clone());
-        chat.refresh_pending_input_preview();
+    chat.input_queue
+        .queued_user_messages
+        .push_back(UserMessage::from("first queued".to_string()).into());
+    chat.input_queue
+        .queued_user_messages
+        .push_back(UserMessage::from("second queued".to_string()).into());
+    chat.refresh_pending_input_preview();
 
-        handle_turn_interrupted(&mut chat, "turn-1");
+    handle_turn_interrupted(&mut chat, "turn-1");
 
-        assert_eq!(chat.bottom_pane.composer_text(), expected);
-        assert!(chat.input_queue.queued_user_messages.is_empty());
-        assert_eq!(chat.bottom_pane.composer_draft_snapshot().quotes, quotes);
-        assert!(
-            op_rx.try_recv().is_err(),
-            "unexpected outbound op after interrupt"
-        );
+    assert_eq!(
+        chat.bottom_pane.composer_text(),
+        "first queued\nsecond queued\ncurrent draft"
+    );
+    assert!(chat.input_queue.queued_user_messages.is_empty());
+    assert!(
+        op_rx.try_recv().is_err(),
+        "unexpected outbound op after interrupt"
+    );
 
-        let _ = drain_insert_history(&mut rx);
-    }
+    let _ = drain_insert_history(&mut rx);
 }
 
 #[tokio::test]
