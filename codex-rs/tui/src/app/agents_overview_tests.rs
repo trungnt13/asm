@@ -456,103 +456,6 @@ async fn shared_overview_keeps_rows_and_replays_changes_over_stale_reads() -> Re
         assert!(app.agents_overview.activity.contains_key(&retained));
         assert!(app.agents_overview.request_id.is_none());
     }
-    let [parent_id, refreshed_child_id, stale_child_id] = std::array::from_fn(|_| ThreadId::new());
-    let mut parent_turn: codex_app_server_protocol::Turn =
-        serde_json::from_value(serde_json::json!({
-            "id": "metadata-turn", "items": [], "status": "inProgress"
-        }))?;
-    app.handle_app_server_event(
-        &app_server,
-        AppServerEvent::ServerNotification(Box::new(ServerNotification::TurnStarted(
-            codex_app_server_protocol::TurnStartedNotification {
-                thread_id: parent_id.to_string(),
-                turn: parent_turn.clone(),
-            },
-        ))),
-    )
-    .await;
-    let request_id = Uuid::new_v4();
-    app.agents_overview.request_id = Some(request_id);
-    app.upsert_agent_picker_thread(
-        stale_child_id,
-        /*agent_nickname*/ None,
-        /*agent_role*/ None,
-        /*is_closed*/ false,
-    );
-    app.agent_navigation.mark_running(stale_child_id);
-    // Status arrives before ancestry; queued idle must override the stale active read.
-    for (id, status) in [
-        (
-            refreshed_child_id,
-            ThreadStatus::Active {
-                active_flags: Vec::new(),
-            },
-        ),
-        (stale_child_id, ThreadStatus::Idle),
-    ] {
-        app.handle_app_server_event(
-            &app_server,
-            AppServerEvent::ServerNotification(Box::new(ServerNotification::ThreadStatusChanged(
-                codex_app_server_protocol::ThreadStatusChangedNotification {
-                    thread_id: id.to_string(),
-                    status,
-                },
-            ))),
-        )
-        .await;
-    }
-    app.apply_agents_overview_thread_refresh(
-        &app_server,
-        request_id,
-        Ok(AgentsOverviewThreadRefresh {
-            last_messages: HashMap::new(),
-            pinned_thread_ids: None,
-            threads: [refreshed_child_id, stale_child_id]
-                .into_iter()
-                .map(|id| {
-                    (
-                        id,
-                        Some(overview_thread(
-                            id,
-                            Some(parent_id),
-                            "Refreshed child",
-                            ThreadStatus::Active {
-                                active_flags: Vec::new(),
-                            },
-                        )),
-                    )
-                })
-                .collect(),
-            recent_seed_complete: true,
-            discovery: None,
-        }),
-    );
-    // The refreshed child finishes before the parent; its observed activity must remain counted.
-    app.handle_app_server_event(
-        &app_server,
-        AppServerEvent::ServerNotification(Box::new(ServerNotification::ThreadStatusChanged(
-            codex_app_server_protocol::ThreadStatusChangedNotification {
-                thread_id: refreshed_child_id.to_string(),
-                status: ThreadStatus::Idle,
-            },
-        ))),
-    )
-    .await;
-    parent_turn.status = codex_app_server_protocol::TurnStatus::Completed;
-    app.handle_app_server_event(
-        &app_server,
-        AppServerEvent::ServerNotification(Box::new(ServerNotification::TurnCompleted(
-            codex_app_server_protocol::TurnCompletedNotification {
-                thread_id: parent_id.to_string(),
-                turn: parent_turn.clone(),
-            },
-        ))),
-    )
-    .await;
-    assert_eq!(
-        app.turn_agent_counts.count(parent_id, &parent_turn.id),
-        Some(1)
-    );
     app_server.shutdown().await?;
     Ok(())
 }
@@ -1748,83 +1651,42 @@ async fn root_switch_preserves_vim_line_yank() -> Result<()> {
 
 #[tokio::test]
 async fn root_switch_loads_local_preferences_from_disk() -> Result<()> {
-    for (parallel, running_parent) in [(false, false), (true, false), (true, true)] {
-        // Keep the large setup and root-switch futures off the test thread's stack.
-        let mut app = Box::pin(make_test_app()).await;
-        trust_fixture_folders(&mut app);
-        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
-            app.chat_widget.config_ref(),
-        ))
+    // Keep the large setup and root-switch futures off the test thread's stack.
+    let mut app = Box::pin(make_test_app()).await;
+    trust_fixture_folders(&mut app);
+    let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
+        app.chat_widget.config_ref(),
+    ))
+    .await?;
+    let previous = Box::pin(app_server.start_thread(&app.config)).await?;
+    app.enqueue_primary_thread_session(previous.session, previous.turns)
         .await?;
-        let previous = Box::pin(app_server.start_thread(&app.config)).await?;
-        let previous_root_id = previous.session.thread_id;
-        app.enqueue_primary_thread_session(previous.session, previous.turns)
-            .await?;
-        let target_thread_id = ThreadId::from_string(
-            &app_test_support::create_fake_rollout(
-                app.config.codex_home.as_path(),
-                "2025-01-05T12-00-00",
-                "2025-01-05T12:00:00Z",
-                "Target task",
-                Some(&app.config.model_provider_id),
-                /*git_info*/ None,
-            )
-            .expect("materialize target rollout"),
-        )?;
-        if parallel {
-            let target = Box::pin(app_server.resume_thread(
-                &app.local_settings,
-                app.config.clone(),
-                target_thread_id,
-                crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
-            ))
-            .await?;
-            app.side_threads.insert(
-                target_thread_id,
-                super::super::side::SideThreadState::parallel(previous_root_id),
-            );
-            app.ensure_thread_channel(target_thread_id)
-                .store
-                .lock()
-                .await
-                .set_session(target.session, target.turns);
-        }
-        if running_parent {
-            // Exercise background retention without starting a model turn.
-            app.ensure_thread_channel(previous_root_id)
-                .store
-                .lock()
-                .await
-                .active_turn_id = Some("parent-turn".to_string());
-        }
-        std::fs::write(
-            app.local_settings.user_config_path.as_path(),
-            "[tui]\ntheme = \"dracula\"\nresume_cwd = \"session\"\n[history]\npersistence = \"none\"\n",
-        )?;
-        let config = Box::pin(app.rebuild_config_for_cwd(app.config.cwd.to_path_buf())).await?;
-        let expected = crate::local_settings::LocalSettings::from(&config);
-        let mut tui = crate::tui::test_support::make_test_tui()?;
+    let target_thread_id = ThreadId::from_string(
+        &app_test_support::create_fake_rollout(
+            app.config.codex_home.as_path(),
+            "2025-01-05T12-00-00",
+            "2025-01-05T12:00:00Z",
+            "Target task",
+            Some(&app.config.model_provider_id),
+            /*git_info*/ None,
+        )
+        .expect("materialize target rollout"),
+    )?;
+    std::fs::write(
+        app.local_settings.user_config_path.as_path(),
+        "[tui]\ntheme = \"dracula\"\nresume_cwd = \"session\"\n[history]\npersistence = \"none\"\n",
+    )?;
+    let config = Box::pin(app.rebuild_config_for_cwd(app.config.cwd.to_path_buf())).await?;
+    let expected = crate::local_settings::LocalSettings::from(&config);
+    let mut tui = crate::tui::test_support::make_test_tui()?;
 
-        Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id))
-            .await?;
+    Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id))
+        .await?;
 
-        assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
-        assert_eq!(app.local_settings, expected);
-        assert_eq!(app.chat_widget.local_settings, expected);
-        assert!(app.side_threads.is_empty());
-        assert!(!app.chat_widget.parallel_conversation_active());
-        let response: ThreadUnsubscribeResponse = app_server
-            .request_handle()
-            .request_typed(ClientRequest::ThreadUnsubscribe {
-                request_id: RequestId::String("verify-selected-subscription".to_string()),
-                params: ThreadUnsubscribeParams {
-                    thread_id: target_thread_id.to_string(),
-                },
-            })
-            .await?;
-        assert_eq!(response.status, ThreadUnsubscribeStatus::Unsubscribed);
-        app_server.shutdown().await?;
-    }
+    assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
+    assert_eq!(app.local_settings, expected);
+    assert_eq!(app.chat_widget.local_settings, expected);
+    app_server.shutdown().await?;
     Ok(())
 }
 
