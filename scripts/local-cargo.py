@@ -13,7 +13,7 @@ from contextlib import ExitStack
 from datetime import date
 from pathlib import Path
 
-STALE_ARTIFACT_DAYS = 3
+STALE_ARTIFACT_DAYS = 2
 
 
 def common_root() -> Path:
