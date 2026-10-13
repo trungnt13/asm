@@ -25,8 +25,9 @@ pub(super) struct AttachedImage {
 
 #[derive(Debug, Default)]
 pub(super) struct AttachmentState {
-    pub(super) quote: Option<String>,
-    pub(super) quote_area: std::cell::Cell<ratatui::layout::Rect>,
+    pub(super) quotes: Vec<String>,
+    pub(super) attachment_scroll: std::cell::Cell<usize>,
+    pub(super) attachment_area: std::cell::Cell<ratatui::layout::Rect>,
     pub(super) local_images: Vec<AttachedImage>,
     pub(super) remote_image_urls: Vec<String>,
     pub(super) selected_remote_image_index: Option<usize>,
@@ -34,7 +35,7 @@ pub(super) struct AttachmentState {
 
 impl AttachmentState {
     pub(super) fn is_empty(&self) -> bool {
-        self.quote.is_none() && self.local_images.is_empty() && self.remote_image_urls.is_empty()
+        self.quotes.is_empty() && self.local_images.is_empty() && self.remote_image_urls.is_empty()
     }
 
     pub(super) fn local_image_paths(&self) -> Vec<PathBuf> {

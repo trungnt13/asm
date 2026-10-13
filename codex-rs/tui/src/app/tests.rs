@@ -1411,7 +1411,10 @@ async fn replay_thread_snapshot_restores_the_matching_safety_buffer_prompt() {
         .submit_user_message_with_mode("buffered prompt A".to_string(), default_mode.clone());
     app.chat_widget
         .restore_startup_draft(crate::bottom_pane::ComposerDraftSnapshot {
-            quote: Some("thread quote".to_string()),
+            quotes: vec![
+                "thread quote".to_string(),
+                "second thread quote".to_string(),
+            ],
             text: String::new(),
             cursor: 0,
             text_elements: Vec::new(),
