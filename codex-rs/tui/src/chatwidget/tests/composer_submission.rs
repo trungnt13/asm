@@ -1269,6 +1269,21 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
         "startup first".to_string(),
         "startup second".to_string(),
     ]);
+    startup_chat
+        .bottom_pane
+        .set_composer_cursor(startup_chat.bottom_pane.composer_text().len());
+    startup_chat.bottom_pane.insert_str("\n1. startup comment");
+    let startup_comment_start = startup_chat
+        .bottom_pane
+        .composer_text()
+        .find("1. ")
+        .unwrap();
+    startup_chat
+        .bottom_pane
+        .set_composer_quote_comments(vec![crate::bottom_pane::QuoteComment {
+            quote_index: 0,
+            range: startup_comment_start..startup_comment_start + 3,
+        }]);
     let startup_draft = startup_chat.bottom_pane.composer_draft_snapshot();
 
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
@@ -1284,16 +1299,42 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     );
     let initial_paste = "y".repeat(/*n*/ 1_001);
     chat.bottom_pane.handle_paste(initial_paste.clone());
-    chat.bottom_pane.set_composer_quotes(vec![
-        "existing first".to_string(),
-        "existing second".to_string(),
-    ]);
+    let existing_quotes = (1..=9)
+        .map(|index| format!("existing {index}"))
+        .collect::<Vec<_>>();
+    chat.bottom_pane
+        .set_composer_quotes(existing_quotes.clone());
+    chat.bottom_pane.insert_str("\n1. existing comment");
+    let existing_comment_start = chat.bottom_pane.composer_text().find("1. ").unwrap();
+    chat.bottom_pane
+        .set_composer_quote_comments(vec![crate::bottom_pane::QuoteComment {
+            quote_index: 0,
+            range: existing_comment_start..existing_comment_start + 3,
+        }]);
     let existing_draft = chat.bottom_pane.composer_draft_snapshot();
     let existing_placeholder = existing_draft.pending_pastes[0].0.clone();
 
     chat.restore_startup_draft(startup_draft);
 
     let restored = chat.bottom_pane.composer_draft_snapshot();
+    let expected_text = format!(
+        "{}\n{existing_placeholder} #2 startup draft\n10. startup comment",
+        existing_draft.text
+    );
+    let startup_comment_start = expected_text.find("10. ").unwrap();
+    assert_eq!(
+        restored.quote_comments,
+        vec![
+            crate::bottom_pane::QuoteComment {
+                quote_index: 0,
+                range: existing_comment_start..existing_comment_start + 3
+            },
+            crate::bottom_pane::QuoteComment {
+                quote_index: 9,
+                range: startup_comment_start..startup_comment_start + 4
+            },
+        ]
+    );
     assert_eq!(
         (
             restored.quotes,
@@ -1303,17 +1344,12 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
             restored.local_images,
         ),
         (
-            vec![
-                "existing first".to_string(),
-                "existing second".to_string(),
-                "startup first".to_string(),
-                "startup second".to_string(),
-            ],
-            format!(
-                "{}\n{existing_placeholder} #2 startup draft",
-                existing_draft.text
-            ),
-            existing_draft.text.len() + 1,
+            existing_quotes
+                .into_iter()
+                .chain(["startup first".to_string(), "startup second".to_string()])
+                .collect::<Vec<_>>(),
+            expected_text.clone(),
+            expected_text.len(),
             vec![
                 (existing_placeholder.clone(), initial_paste),
                 (format!("{existing_placeholder} #2"), startup_paste),
@@ -1969,7 +2005,12 @@ async fn restore_thread_input_state_applies_running_state_policy() {
                 "thread quote".to_string(),
                 "second thread quote".to_string(),
             ],
-            text: "composer draft".to_string(),
+            text: "1. composer draft".to_string(),
+            text_elements: vec![TextElement::new((0..3).into(), Some("1. ".to_string()))],
+            quote_comments: vec![crate::bottom_pane::QuoteComment {
+                quote_index: 0,
+                range: 0..3,
+            }],
             ..Default::default()
         }),
         safety_buffering_prompt: Some(UserMessage::from("buffered prompt")),
@@ -2056,7 +2097,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert!(!chat.input_queue.user_turn_pending_start);
     assert!(!chat.input_queue.submit_pending_steers_after_interrupt);
     assert!(chat.input_queue.pending_steers.is_empty());
-    assert_eq!(chat.bottom_pane.composer_text(), "composer draft");
+    assert_eq!(chat.bottom_pane.composer_text(), "1. composer draft");
     assert_eq!(
         chat.safety_buffering_prompt,
         Some(UserMessage::from("buffered prompt"))

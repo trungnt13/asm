@@ -55,10 +55,9 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
         assert!(composer.draft.pending_pastes.is_empty());
     }
     composer.set_text_content("!echo hello".into(), Vec::new(), Vec::new());
-    let original_cursor = composer.current_cursor();
     composer.attach_quote(PendingQuote::Text("selected text".into()));
-    assert_eq!(composer.current_text(), "!echo hello");
-    assert_eq!(composer.current_cursor(), original_cursor);
+    assert_eq!(composer.current_text(), "1. !echo hello");
+    assert_eq!(composer.current_cursor(), "1. !echo hello".len());
     assert!(!composer.is_bang_shell_command());
     composer.attach_quote(PendingQuote::Text("middle".into()));
     composer.attach_quote(PendingQuote::Text("last".into()));
@@ -124,8 +123,8 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
     let prefix = ChatComposer::quote_prefix(&composer.attachments.quotes, "");
     assert!(prefix.starts_with("> 1. selected text\n\n> 2. last\n"));
     assert!(prefix.ends_with("> 13. quote 10\n"));
-    assert_eq!(composer.current_text(), "!echo hello");
-    assert_eq!(composer.current_cursor(), original_cursor);
+    assert_eq!(composer.current_text(), "1. !echo hello");
+    assert_eq!(composer.current_cursor(), "1. !echo hello".len());
 }
 
 #[test]
