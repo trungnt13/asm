@@ -182,6 +182,9 @@ impl Session {
                 None
             } else {
                 mode.enabled = enabled;
+                state
+                    .decision_due_after_enable
+                    .store(enabled, Ordering::Release);
                 state.generation.fetch_add(/*val*/ 1, Ordering::AcqRel);
                 mode.revision = mode.revision.saturating_add(/*rhs*/ 1);
                 Some(*mode)
