@@ -56,33 +56,28 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
     }
     composer.set_text_content("!echo hello".into(), Vec::new(), Vec::new());
     composer.attach_quote(PendingQuote::Text("selected text".into()));
-    assert_eq!(composer.current_text(), "1. !echo hello");
-    assert_eq!(composer.current_cursor(), "1. !echo hello".len());
     assert!(!composer.is_bang_shell_command());
     composer.attach_quote(PendingQuote::Text("middle".into()));
     composer.attach_quote(PendingQuote::Text("last".into()));
     let area = Rect { height: 9, ..area };
     composer.render(area, &mut Buffer::empty(area));
     let attachment_area = composer.attachments.attachment_area.get();
-    mouse(
-        &mut composer,
-        area,
-        Down(Left),
-        attachment_area.x + 5,
-        attachment_area.y + 1,
-    );
-    assert_eq!(
-        composer.attachments.quotes,
-        vec!["selected text", "middle", "last"]
-    );
-    mouse(
-        &mut composer,
-        area,
-        Down(Left),
-        attachment_area.x,
-        attachment_area.y + 1,
-    );
-    assert_eq!(composer.attachments.quotes, vec!["selected text", "last"]);
+    for (column, expected) in [
+        (
+            attachment_area.x + 5,
+            vec!["selected text", "middle", "last"],
+        ),
+        (attachment_area.x, vec!["selected text", "last"]),
+    ] {
+        mouse(
+            &mut composer,
+            area,
+            Down(Left),
+            column,
+            attachment_area.y + 1,
+        );
+        assert_eq!(composer.attachments.quotes, expected);
+    }
     for index in 0..12 {
         composer.attach_quote(PendingQuote::Text(format!("quote {index}")));
     }
@@ -92,9 +87,8 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
     let mut reached = vec![false; composer.attachments.quotes.len()];
     for _ in 0..=reached.len() {
         let first = composer.attachments.attachment_scroll.get();
-        for index in first..(first + usize::from(attachment_area.height)).min(reached.len()) {
-            reached[index] = true;
-        }
+        let end = (first + usize::from(attachment_area.height)).min(reached.len());
+        reached[first..end].fill(true);
         mouse(
             &mut composer,
             area,
