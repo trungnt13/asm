@@ -19,8 +19,9 @@ pub struct AdaptiveReasoningConfig {
     /// Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.
     #[schemars(range(min = 1))]
     pub decision_every_n_turns: u64,
-    /// Decide before steps 1, 1 + N, 1 + 2N, ... in selected turns.
-    /// Step numbering restarts at each new turn.
+    /// Wait N model steps after each accepted decision in selected turns.
+    /// The first eligible step is due; failures do not restart the spacing.
+    /// Each new turn starts without a previous accepted decision.
     #[schemars(range(min = 1))]
     pub decision_every_n_steps: u64,
     pub decision_model: String,

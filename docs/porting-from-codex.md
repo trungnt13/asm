@@ -294,7 +294,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
 | `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
 | `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
-| `decision_every_n_steps` | `2` | Positive integer; decide at steps 1, 1 + N, 1 + 2N, ... in selected turns |
+| `decision_every_n_steps` | `2` | Positive integer; next due step is the last accepted decision step + N |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
 - Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
@@ -324,37 +324,68 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 #### Space decision calls by turn and step
 
 A turn is one request and its resulting work. A step is one ordinary model request
-within that turn, not an individual tool call. Use both settings to choose when to
-reassess effort. By default, adapt every turn before steps 1, 3, 5, ... . Set
-`decision_every_n_steps = 1` to decide before every eligible step.
+within that turn, not an individual tool call. Defaults select every turn and space
+accepted decisions by two steps. With eligible steps and no failures, decide before
+steps 1, 3, 5, ... . Set `decision_every_n_steps = 1` for every eligible step.
 
 ```toml
 [adaptive_reasoning]
 enabled = true
-decision_every_n_turns = 2
-decision_every_n_steps = 3
+decision_every_n_turns = 1
+decision_every_n_steps = 2
 ```
 
-The turn interval selects turns 1, 3, 5, ... . The step counter resets at **every
-new turn**. In selected turns, decisions run before steps 1, 4, 7, 10, ... .
-A selected turn does not carry leftover spacing from the previous turn:
+- Turn selection is unchanged: every N turns selects turns 1, 1 + N, 1 + 2N, ... .
+  Reset step numbering and successful-decision spacing at each new turn. With
+  every 2 turns / 3 steps, turns 1, 3, ... are selected; acceptance at step 1
+  makes step 4 due, and acceptance at step 4 makes step 7 due.
+- In a selected turn, the first eligible step is due. After a **current accepted**
+  decision at step S,
+  the next due step is S + N, including when the accepted effort is unchanged.
+  Due steps must still pass `update_on` and eligibility checks. Ineligible, failed,
+  cancelled, or superseded decisions never advance spacing; try at a later eligible
+  step when recovery permits. Collect fresh bounded evidence then.
+- Keep current effective effort between decisions and on failure. Skipped turns
+  use normal effective settings; skipping does not force a new effort.
+- Each agent owns recovery state across turns. A transient failure starts a
+  one-second cooldown; consecutive failures double it, capped at 30 seconds.
+  After expiry, probe on the next due eligible step. Never sleep the main turn or
+  schedule a background recovery timer. Cooldown skips do not extend cooldown.
+- Missing/invalid credentials, invalid requests, rejected settings, and HTTP 4xx
+  errors other than 408/429 block Decisions until
+  adaptation is explicitly turned off and on. This resets recovery and makes the
+  next eligible step due, even before a normally skipped turn. It does not reload
+  a successfully initialized client's cached credentials; changing those requires
+  a backend restart. Missing credentials are not cached: set them in the backend
+  environment and retry off/on. An HTTP credential failure retried after off/on
+  uses the same backend client.
+- Only a current accepted main-step decision clears error health; it also resets
+  recovery. Explicit off/on resets recovery, not error health. Warm-up errors
+  affect health and recovery; warm-up success never clears errors
+  or anchors spacing. Cancellation and supersession do not clear errors either.
 
-| Turn | Steps in this example | With every 1 turn / 3 steps | With every 2 turns / 3 steps |
-| --- | --- | --- | --- |
-| 1 | 11 | Decide before steps 1, 4, 7, 10 | Decide before steps 1, 4, 7, 10 |
-| 2 | 5 | Decide before steps 1, 4 | No decisions |
-| 3 | 2 | Decide before step 1 | Decide before step 1 |
-| 4 | 8 | Decide before steps 1, 4, 7 | No decisions |
+Example with defaults, all shown steps eligible, and times measured from session start:
 
-- Between decisions, keep the current effective effort. Skipped turns use normal effective settings; skipping does not force a new effort.
-- Cadence uses fixed slots, not a sliding delay. It does not bypass `update_on` or eligibility checks: an ineligible slot is skipped, not moved to the next step. With every 3 steps, an ineligible step 1 leaves step 4 as the next slot.
-- A failed attempt consumes its interval just like a successful attempt. Keep the effort and wait for the next due step; do not retry immediately.
-- Collect fresh bounded evidence when a decision is due, not when the interval begins.
-- Each agent owns its counters. Children inherit cadence configuration, not their parent's counter position. Re-enabling `/adapt` makes the next eligible step due, even when re-enabled while idle before a normally skipped turn. Regular fixed slots resume afterward.
-- Count an ordinary turn when it starts, before setup. It still counts if setup fails or the turn is cancelled before its first model request. Continuing the same turn does not count again; standalone compaction and warm-up do not count as turns.
-- Counters exist only in the running backend session. Resume, backend restart, or session eviction starts turn numbering again at 1. Conversation history is not rewritten.
-- Warm-up requests, transport retries, and compaction do not count as ordinary steps. Counter state is runtime scheduling state, not rewritten conversation history.
-- Larger intervals reduce decision frequency, not necessarily total runtime. They can retain unsuitable effort for intervening steps; do not claim a speedup without measurement.
+| Turn / step | Time | Decisions behavior |
+| --- | --- | --- |
+| 1 / 1 | 0.0s | Accepted; next due step is 3 |
+| 1 / 2 | 0.2s | Keep effort; spacing not due |
+| 1 / 3 | 0.4s | Transient failure; cooldown until 1.4s; step remains due |
+| 1 / 4 | 0.8s | Keep effort during cooldown |
+| 2 / 1 | 1.0s | New turn resets spacing, not cooldown; keep effort |
+| 2 / 2 | 1.5s | Probe fails; cooldown doubles to 2s, until 3.5s |
+| 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 5 |
+| 2 / 4 | 3.8s | Keep effort; spacing not due |
+| 2 / 5 | 4.0s | Due again |
+
+- Children inherit cadence configuration, not parent counters or recovery state.
+- Count an ordinary turn when it starts, before setup. Setup failure or cancellation
+  still counts; continuing that turn does not count again. Warm-up, compaction, and
+  transport retries do not count as ordinary steps or separate ordinary turns.
+- Counters and recovery are runtime-only. Resume, backend restart, or session
+  eviction starts turn numbering at 1; do not rewrite conversation history.
+- Larger intervals reduce decision frequency, not necessarily total runtime. They
+  can retain unsuitable effort between steps; do not claim speedups without measurement.
 
 ### TUI automatic session names
 

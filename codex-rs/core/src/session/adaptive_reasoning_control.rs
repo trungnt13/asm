@@ -182,6 +182,11 @@ impl Session {
                 None
             } else {
                 mode.enabled = enabled;
+                *state
+                    .recovery
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    super::AdaptiveRecovery::default();
                 state
                     .decision_due_after_enable
                     .store(enabled, Ordering::Release);

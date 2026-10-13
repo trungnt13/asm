@@ -26,6 +26,7 @@ use codex_protocol::protocol::ThreadSource;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
+use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -70,7 +71,8 @@ struct AdaptiveSession {
     turns_started: AtomicU64,
     decision_due_after_enable: AtomicBool,
     warmup_started: AtomicBool,
-    client: OnceLock<Result<Arc<DecisionsClient>, DecisionsError>>,
+    client: OnceLock<Arc<DecisionsClient>>,
+    recovery: StdMutex<AdaptiveRecovery>,
     shutdown: CancellationToken,
     evidence: StdMutex<CancellationToken>,
     warmup: StdMutex<Option<AbortOnDropHandle<()>>>,
@@ -82,7 +84,7 @@ pub(super) struct AdaptiveModelStepStarted;
 struct AdaptiveCadence {
     turn_index: u64,
     step_index: u64,
-    last_attempt_step: Option<u64>,
+    last_success_step: Option<u64>,
 }
 
 impl Default for AdaptiveSession {
@@ -96,6 +98,7 @@ impl Default for AdaptiveSession {
             decision_due_after_enable: AtomicBool::new(/*v*/ false),
             warmup_started: AtomicBool::new(/*v*/ false),
             client: OnceLock::new(),
+            recovery: StdMutex::new(AdaptiveRecovery::default()),
             evidence: StdMutex::new(shutdown.child_token()),
             shutdown,
             warmup: StdMutex::new(None),
@@ -109,21 +112,76 @@ impl Drop for AdaptiveSession {
     }
 }
 
+#[derive(Default)]
+struct AdaptiveRecovery {
+    failures: u32,
+    next_probe: Option<Instant>,
+    blocked: bool,
+    in_flight: bool,
+}
+
+// A dropped task releases its probe without recording a failure or retaining its session.
+struct AdaptiveProbe {
+    session: Weak<Session>,
+    generation: u64,
+}
+
+impl Drop for AdaptiveProbe {
+    fn drop(&mut self) {
+        let Some(owner) = self.session.upgrade() else {
+            return;
+        };
+        let Some(session) = owner
+            .services
+            .thread_extension_data
+            .get::<AdaptiveSession>()
+        else {
+            return;
+        };
+        let Some(mode) = session.mode.get() else {
+            return;
+        };
+        let mode = mode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !mode.enabled
+            || session.shutdown.is_cancelled()
+            || session.generation.load(Ordering::Acquire) != self.generation
+        {
+            return;
+        }
+        session
+            .recovery
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .in_flight = false;
+    }
+}
+
 impl AdaptiveSession {
     fn client(&self, config: &Config) -> Result<Arc<DecisionsClient>, DecisionsError> {
-        self.client.get_or_init(|| {
-            let result = std::env::var(&config.adaptive_reasoning.decision_model_api_env)
-                .map_err(|_| DecisionsError::Credentials)
-                .and_then(|key| DecisionsClient::new(
+        if let Some(client) = self.client.get() {
+            return Ok(Arc::clone(client));
+        }
+        let result = std::env::var(&config.adaptive_reasoning.decision_model_api_env)
+            .map_err(|_| DecisionsError::Credentials)
+            .and_then(|key| {
+                DecisionsClient::new(
                     RouteAwareClientPool::new_without_redirects_or_request_logging(
-                        config.http_client_factory(), ClientRouteClass::Api,
-                    ).into_client(), key,
-                )).map(Arc::new);
-            if let Err(error) = &result {
+                        config.http_client_factory(),
+                        ClientRouteClass::Api,
+                    )
+                    .into_client(),
+                    key,
+                )
+            });
+        match result {
+            Ok(client) => Ok(Arc::clone(self.client.get_or_init(|| Arc::new(client)))),
+            Err(error) => {
                 tracing::warn!(%error, "adaptive reasoning unavailable; retaining current effort");
+                Err(error)
             }
-            result
-        }).clone()
+        }
     }
 }
 
@@ -244,6 +302,20 @@ impl Session {
             .services
             .thread_extension_data
             .get_or_init(AdaptiveSession::default);
+        {
+            let recovery = session
+                .recovery
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if recovery.blocked
+                || recovery.in_flight
+                || recovery
+                    .next_probe
+                    .is_some_and(|deadline| Instant::now() < deadline)
+            {
+                return;
+            }
+        }
         if self.adaptive_reasoning_paused()
             || session.warmup_started.swap(/*val*/ true, Ordering::AcqRel)
         {
@@ -270,7 +342,11 @@ impl Session {
             }
         };
         let guard = AdaptiveDecisionGuard {
-            freshness: session.shutdown.child_token(),
+            freshness: session
+                .evidence
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .child_token(),
             deadline: Instant::now() + Duration::from_secs(/*secs*/ 2),
         };
         let warmup = AbortOnDropHandle::new(tokio::spawn(run_decision(
@@ -324,7 +400,7 @@ impl Session {
             StdMutex::new(AdaptiveCadence {
                 turn_index: session.turns_started.fetch_add(/*val*/ 1, Ordering::AcqRel),
                 step_index: 1,
-                last_attempt_step: None,
+                last_success_step: None,
             })
         });
     }
@@ -338,6 +414,30 @@ impl Session {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             cadence.step_index = cadence.step_index.saturating_add(/*rhs*/ 1);
         }
+    }
+
+    // Called only after guarded settings acceptance, while its publication permit is held.
+    pub(super) fn accept_adaptive_decision(&self, turn: &TurnContext) {
+        let Some(session) = self.services.thread_extension_data.get::<AdaptiveSession>() else {
+            return;
+        };
+        if let Some(cadence) = turn.extension_data.get::<StdMutex<AdaptiveCadence>>() {
+            let mut cadence = cadence
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            cadence.last_success_step = Some(cadence.step_index);
+        }
+        let mut recovery = session
+            .recovery
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *recovery = AdaptiveRecovery {
+            in_flight: recovery.in_flight,
+            ..AdaptiveRecovery::default()
+        };
+        session
+            .decision_due_after_enable
+            .store(/*val*/ false, Ordering::Release);
     }
 
     #[tracing::instrument(skip_all)]
@@ -364,15 +464,18 @@ impl Session {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             session.decision_due_after_enable.load(Ordering::Acquire)
-                || (cadence_state.last_attempt_step != Some(cadence_state.step_index)
-                    && cadence_state.turn_index % config.decision_every_n_turns == 0
-                    && (cadence_state.step_index - 1) % config.decision_every_n_steps == 0)
+                || (cadence_state.turn_index % config.decision_every_n_turns == 0
+                    && cadence_state.last_success_step.is_none_or(|step| {
+                        cadence_state.step_index.saturating_sub(step)
+                            >= config.decision_every_n_steps
+                    }))
         };
         if !mode.enabled {
             return;
         }
         let started = Instant::now();
         let deadline = started + Duration::from_millis(config.decision_timeout_ms);
+        let mut _probe = None;
         let prepared = {
             let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
                 return;
@@ -454,13 +557,23 @@ impl Session {
                 .thread_extension_data
                 .get_or_init(AdaptiveSession::default);
             {
-                let mut cadence = cadence
+                let mut recovery = session
+                    .recovery
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                cadence.last_attempt_step = Some(cadence.step_index);
-                session
-                    .decision_due_after_enable
-                    .store(/*val*/ false, Ordering::Release);
+                if recovery.blocked
+                    || recovery.in_flight
+                    || recovery
+                        .next_probe
+                        .is_some_and(|deadline| Instant::now() < deadline)
+                {
+                    return;
+                }
+                recovery.in_flight = true;
+                _probe = Some(AdaptiveProbe {
+                    session: Arc::downgrade(self),
+                    generation: session.generation.load(Ordering::Acquire),
+                });
             }
             let guard = AdaptiveDecisionGuard {
                 freshness: session
@@ -510,7 +623,7 @@ impl Session {
                             /*selected*/ None,
                         );
                     }
-                    Err((error, session.generation.load(Ordering::Acquire)))
+                    Err((error, session.generation.load(Ordering::Acquire), guard))
                 }
             }
         };
@@ -520,10 +633,15 @@ impl Session {
             Ok((client, request, cancellation, guard, target, attempt)) => {
                 run_decision(client, request, cancellation, guard, target, attempt).await;
             }
-            Err((error, generation)) => {
+            Err((error, generation, guard)) => {
+                let error = health::classify_error(error);
                 self.publish_adaptive_reasoning_error(
-                    Some(health::classify_error(error)),
+                    Some(error),
                     Some(generation),
+                    Some(health::AdaptiveDecisionHealthGuard {
+                        freshness: &guard.freshness,
+                        cancellation,
+                    }),
                 )
                 .await;
             }

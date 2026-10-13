@@ -11,7 +11,7 @@
       "properties": {
         "decision_every_n_steps": {
           "default": 2,
-          "description": "Decide before steps 1, 1 + N, 1 + 2N, ... in selected turns. Step numbering restarts at each new turn.",
+          "description": "Wait N model steps after each accepted decision in selected turns. The first eligible step is due; failures do not restart the spacing. Each new turn starts without a previous accepted decision.",
           "format": "uint64",
           "minimum": 1.0,
           "type": "integer"
