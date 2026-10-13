@@ -143,7 +143,8 @@
 //! - Prunes local attached images so only placeholders that survive expansion are sent.
 //! - Preserves remote image URLs as separate attachments even when text is empty.
 //! - Prepends numbered frozen transcript quotes and rebases draft elements.
-//!   Generated comment prefixes retain quote identity through edits and draft restoration.
+//!   Generated comments append below the existing draft without numbering ordinary text.
+//!   Their prefixes retain quote identity through edits and draft restoration.
 //!   Submission drops empty generated comments and escapes numbered prefixes to keep their labels.
 //!   Quote-plus-comment submissions are rejected above 10,000 UTF-8 bytes without losing the draft.
 //!   Attached quotes keep slash and shell comments literal.
@@ -6932,8 +6933,12 @@ mod tests {
         assert!(matches!(composer.popups.active, ActivePopup::None));
         let (result, _) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(result, InputResult::None);
+        assert_eq!(composer.current_text(), "use $notion later\n");
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
-            matches!(result, InputResult::Submitted { text, .. } if text == "> 1. reference\n\n1\\. use $notion later")
+            matches!(result, InputResult::Submitted { text, .. } if text == "> 1. reference\n\nuse $notion later")
         );
     }
 
@@ -10031,6 +10036,23 @@ mod tests {
         composer.set_disable_paste_burst(/*disabled*/ true);
         for multiline in [false, true] {
             composer.config.multiline_enter = multiline;
+            for draft in ["This is my message ...", "  1. ordinary list\n", "text  "] {
+                composer.set_text_content(draft.to_owned(), Vec::new(), Vec::new());
+                composer.attach_quote(PendingQuote::Text("reference".to_owned()));
+                assert_eq!(composer.current_text(), format!("{draft}\n1. "));
+                assert_eq!(composer.current_cursor(), composer.current_text().len());
+                let (result, _) =
+                    composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                assert_eq!(result, InputResult::None);
+                assert_eq!(composer.current_text(), format!("{draft}\n"));
+                assert!(composer.quote_comments().is_empty());
+                composer.set_quotes(Vec::new());
+                assert_eq!(composer.current_text(), format!("{draft}\n"));
+                composer.set_text_content(draft.to_owned(), Vec::new(), Vec::new());
+                composer.attach_quote(PendingQuote::Text("reference".to_owned()));
+                composer.set_quotes(Vec::new());
+                assert_eq!(composer.current_text(), draft);
+            }
             composer.set_text_content(String::new(), Vec::new(), Vec::new());
             composer.attach_quote(PendingQuote::Text("first".to_owned()));
             composer.insert_str("first comment");
@@ -12939,6 +12961,7 @@ mod tests {
             vec![PathBuf::from("/tmp/local.png")],
         );
         composer.attach_quote(PendingQuote::Text("café\nselected".to_string()));
+        composer.insert_str("first comment");
         composer.attach_quote(PendingQuote::Text("second".to_string()));
         composer.attach_quote(PendingQuote::Text("third".to_string()));
         composer.insert_str("\nthird comment\ncontinued");
@@ -12949,7 +12972,7 @@ mod tests {
         composer.attachments.quotes.remove(0);
         assert_eq!(
             composer.current_text(),
-            "[Image #2] comment\n2. \nthird comment\ncontinued"
+            "[Image #2] comment\nfirst comment\n2. \nthird comment\ncontinued"
         );
         composer.restore_draft(saved);
         let (result, _) =
@@ -12957,9 +12980,9 @@ mod tests {
         assert_eq!(
             result,
             InputResult::Submitted {
-                text: "> 1. café\n> selected\n\n> 2. second\n\n> 3. third\n\n1\\. [Image #2] comment\n3\\. \nthird comment\ncontinued".to_string(),
+                text: "> 1. café\n> selected\n\n> 2. second\n\n> 3. third\n\n[Image #2] comment\n1\\. first comment\n3\\. \nthird comment\ncontinued".to_string(),
                 text_elements: vec![TextElement::new(
-                    (52..62).into(),
+                    (48..58).into(),
                     Some("[Image #2]".to_string())
                 )]
             }
@@ -12967,11 +12990,12 @@ mod tests {
         assert!(composer.attachments.quotes.is_empty());
 
         for (paste, count) in [(false, 4994), (false, 4998), (true, 4998)] {
-            composer.attach_quote(PendingQuote::Text("x".to_owned()));
             let comment = "é".repeat(count);
             if paste {
                 composer.handle_paste(comment);
+                composer.attach_quote(PendingQuote::Text("x".to_owned()));
             } else {
+                composer.attach_quote(PendingQuote::Text("x".to_owned()));
                 composer.insert_str(&comment);
             }
             composer.set_current_cursor(/*cursor*/ 5);
@@ -13019,13 +13043,18 @@ mod tests {
             composer.set_quotes(Vec::new());
             composer.set_text_content(comment.to_owned(), Vec::new(), Vec::new());
             composer.attach_quote(PendingQuote::Text("selected".to_owned()));
-            if comment.is_empty() {
-                let (result, _) =
-                    composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-                assert_eq!(result, InputResult::None);
-                assert_eq!(composer.current_text(), "");
-                assert_eq!(composer.attachments.quotes, vec!["selected"]);
-            }
+            let (result, _) =
+                composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(result, InputResult::None);
+            assert_eq!(
+                composer.current_text(),
+                if comment.is_empty() {
+                    String::new()
+                } else {
+                    format!("{comment}\n")
+                }
+            );
+            assert_eq!(composer.attachments.quotes, vec!["selected"]);
             let (input, _) =
                 composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
             assert_eq!(
@@ -13034,7 +13063,7 @@ mod tests {
                     text: if comment.is_empty() {
                         "> 1. selected\n".to_owned()
                     } else {
-                        format!("> 1. selected\n\n1\\. {comment}")
+                        format!("> 1. selected\n\n{comment}")
                     },
                     text_elements: Vec::new()
                 },

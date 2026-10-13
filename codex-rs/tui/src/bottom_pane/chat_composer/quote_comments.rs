@@ -102,14 +102,10 @@ impl ChatComposer {
             .quote_comments
             .retain(|id, _| live_ids.contains(id));
         let index = self.attachments.quotes.len() - 1;
-        if index == 0 {
-            self.draft.textarea.set_cursor(/*pos*/ 0);
-        } else {
-            self.move_cursor_to_end();
-            if !self.draft.textarea.text().is_empty() && !self.draft.textarea.text().ends_with('\n')
-            {
-                self.draft.textarea.insert_str("\n");
-            }
+        self.move_cursor_to_end();
+        if !self.draft.textarea.text().is_empty() {
+            // Removing this separator must not consume the draft's own trailing newline.
+            self.draft.textarea.insert_str("\n");
         }
         let id = self
             .draft
