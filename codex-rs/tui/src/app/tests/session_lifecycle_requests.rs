@@ -246,6 +246,7 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
             .collect::<Vec<_>>(),
         vec![None, None, None, Some("daybreakBlue"), Some("standard")]
     );
+
     app.chat_widget.update_account_state(
         /*status_account_display*/ None, /*plan_type*/ None,
         /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
