@@ -4969,7 +4969,16 @@ impl ChatComposer {
         }
         if !self.draft.input_enabled || textarea_is_empty {
             let text = if self.draft.input_enabled {
-                self.placeholder_text.as_str().to_string()
+                if !self.attachments.quotes.is_empty()
+                    && self.placeholder_text == crate::chatwidget::PLACEHOLDER
+                    && !self.blocks_direct_input
+                    && mask_char.is_none()
+                    && matches!(self.popups.active, ActivePopup::None)
+                {
+                    "Add an optional comment…".to_string()
+                } else {
+                    self.placeholder_text.clone()
+                }
             } else {
                 self.draft
                     .input_disabled_placeholder
@@ -9388,9 +9397,35 @@ mod tests {
                     "https://example.com/one.png".to_string(),
                     "https://example.com/two.png".to_string(),
                 ]);
-                composer.set_text_content("describe these".to_string(), Vec::new(), Vec::new());
+                composer.set_placeholder_text(crate::chatwidget::PLACEHOLDER.to_string());
+                let rendered = |composer: &ChatComposer| {
+                    let area = Rect::new(
+                        /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 12,
+                    );
+                    let mut buffer = Buffer::empty(area);
+                    composer.render(area, &mut buffer);
+                    buffer
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect::<String>()
+                };
+                assert!(rendered(composer).contains(crate::chatwidget::PLACEHOLDER));
                 composer.attach_quote(PendingQuote::Text("Selected transcript text".to_string()));
+                assert!(rendered(composer).contains("Add an optional comment…"));
                 composer.attach_quote(PendingQuote::Text("Another reference".to_string()));
+                assert!(rendered(composer).contains("Add an optional comment…"));
+                let saved = composer.snapshot_draft();
+                composer.set_quotes(Vec::new());
+                assert!(rendered(composer).contains(crate::chatwidget::PLACEHOLDER));
+                composer.restore_draft(saved);
+                assert!(rendered(composer).contains("Add an optional comment…"));
+                composer.set_placeholder_text("Custom prompt".to_string());
+                assert!(rendered(composer).contains("Custom prompt"));
+                composer.set_placeholder_text(crate::chatwidget::PLACEHOLDER.to_string());
+                composer.blocks_direct_input = true;
+                assert!(rendered(composer).contains(crate::chatwidget::PLACEHOLDER));
+                composer.blocks_direct_input = false;
             },
         );
 
