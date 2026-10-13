@@ -141,7 +141,44 @@ impl ChatComposer {
     }
 
     /// Dispatch after preparation and rendering have refreshed the viewport.
-    pub(crate) fn handle_mouse(&mut self, event: MouseEvent) -> bool {
+    pub(crate) fn handle_mouse(
+        &mut self,
+        event: MouseEvent,
+        pending_quote: &mut Option<PendingQuote>,
+    ) -> bool {
+        let area = self.attachments.attachment_area.get();
+        if area.contains(ratatui::layout::Position::new(event.column, event.row)) {
+            let first = self.attachments.attachment_scroll.get();
+            match event.kind {
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    self.attachments.clear_remote_image_selection();
+                    let max = (self.attachments.quotes.len()
+                        + self.attachments.remote_image_urls.len())
+                    .saturating_sub(usize::from(area.height));
+                    let step = usize::from(area.height).min(/*other*/ 3);
+                    let next = if event.kind == MouseEventKind::ScrollUp {
+                        first.saturating_sub(step)
+                    } else {
+                        first.saturating_add(step).min(max)
+                    };
+                    self.attachments.attachment_scroll.set(next);
+                    return true;
+                }
+                MouseEventKind::Down(MouseButton::Left) if event.modifiers.is_empty() => {
+                    let index = first + usize::from(event.row - area.y);
+                    if event.column < area.x.saturating_add(/*rhs*/ 3)
+                        && index < self.attachments.quotes.len()
+                    {
+                        self.remove_quote_comment(index);
+                        self.attachments.quotes.remove(index);
+                        *pending_quote = None;
+                        self.sync_popups();
+                    }
+                    return true;
+                }
+                _ => {}
+            }
+        }
         if self
             .draft
             .textarea
@@ -156,7 +193,14 @@ impl ChatComposer {
         if handled {
             self.draft.textarea_state.borrow_mut().follow_cursor();
             self.attachments.clear_remote_image_selection();
-            self.sync_popups();
+            if event.kind == MouseEventKind::Down(MouseButton::Left)
+                && event.modifiers.is_empty()
+                && let Some(quote) = pending_quote.take()
+            {
+                self.attach_quote(quote);
+            } else {
+                self.sync_popups();
+            }
         }
         handled
     }
