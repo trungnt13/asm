@@ -101,23 +101,35 @@ impl ChatWidget {
             pet_http_client.clone(),
         );
         let config_panel_tui = local_settings.tui.clone();
+        let bottom_pane_params = BottomPaneParams {
+            frame_requester: frame_requester.clone(),
+            app_event_tx: app_event_tx.clone(),
+            has_input_focus: true,
+            enhanced_keys_supported,
+            placeholder_text: placeholder.clone(),
+            disable_paste_burst: local_settings.tui.disable_paste_burst.unwrap_or(false),
+            animations_enabled: local_settings.tui.animations,
+            effects: local_settings.tui.effects,
+            skills: None,
+        };
+        let bottom_pane = if local_settings.tui.multiline_enter {
+            BottomPane::new_with_composer_config(
+                bottom_pane_params,
+                crate::bottom_pane::ChatComposerConfig {
+                    multiline_enter: true,
+                    ..Default::default()
+                },
+            )
+        } else {
+            BottomPane::new(bottom_pane_params)
+        };
         let mut widget = Self {
             empty_state_animation: std::cell::RefCell::new(empty_state_animation),
             daybreak_enabled: false,
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
             codex_op_target,
-            bottom_pane: BottomPane::new(BottomPaneParams {
-                frame_requester,
-                app_event_tx,
-                has_input_focus: true,
-                enhanced_keys_supported,
-                placeholder_text: placeholder.clone(),
-                disable_paste_burst: local_settings.tui.disable_paste_burst.unwrap_or(false),
-                animations_enabled: local_settings.tui.animations,
-                effects: local_settings.tui.effects,
-                skills: None,
-            }),
+            bottom_pane,
             transcript: TranscriptState::new(active_cell),
             raw_output_mode: local_settings.tui.raw_output_mode,
             config,

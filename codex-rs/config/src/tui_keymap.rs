@@ -832,6 +832,22 @@ mod tests {
         "#;
         let keymap: TuiKeymap = toml::from_str(toml_input).expect("valid config");
         assert!(keymap.global.open_transcript.is_some());
+
+        for (setting, enabled) in [("", false), ("multiline_enter = true", true)] {
+            let tui: crate::types::Tui = toml::from_str(&format!(
+                r#"
+                {setting}
+                [keymap.composer]
+                submit = ["enter", "ctrl-enter"]
+                [keymap.editor]
+                insert_newline = ["enter", "shift-enter"]
+            "#
+            ))
+            .expect("valid multiline Enter recipe");
+            assert_eq!(tui.multiline_enter, enabled);
+            assert!(tui.keymap.composer.submit.is_some());
+            assert!(tui.keymap.editor.insert_newline.is_some());
+        }
     }
 
     #[test]
