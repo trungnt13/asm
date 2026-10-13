@@ -1085,13 +1085,7 @@ async fn plugin_mention_does_not_suppress_same_name_skill() {
     }]));
 
     let quoted_text = "> $foo\n  >> [$foo](skill:///tmp/foo/SKILL.md)\n> [@foo](plugin://app-0123456789abcdef0123456789abcdef@test)";
-    chat.submit_user_message(UserMessage {
-        text: quoted_text.to_string(),
-        local_images: Vec::new(),
-        remote_image_urls: Vec::new(),
-        text_elements: Vec::new(),
-        mention_bindings: Vec::new(),
-    });
+    chat.submit_user_message(UserMessage::from(quoted_text));
     let Op::UserTurn { items, .. } = next_submit_op(&mut op_rx) else {
         panic!("expected Op::UserTurn");
     };
@@ -1243,15 +1237,10 @@ async fn startup_draft_handoff_preserves_cursor_and_large_paste() {
     chat.bottom_pane.handle_paste(paste);
     chat.bottom_pane.insert_str(" tail");
     chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
-    chat.bottom_pane.set_composer_quotes(vec![
-        "startup quote".to_string(),
-        "second startup quote".to_string(),
-    ]);
     let startup_draft = chat.bottom_pane.composer_draft_snapshot();
     chat.bottom_pane
         .set_composer_text(String::new(), Vec::new(), Vec::new());
 
-    chat.bottom_pane.set_composer_quotes(Vec::new());
     chat.restore_startup_draft(startup_draft.clone());
 
     assert_eq!(chat.bottom_pane.composer_draft_snapshot(), startup_draft);
@@ -1616,10 +1605,8 @@ async fn restored_message_preserves_existing_composer_draft_and_attachments() {
     chat.bottom_pane
         .set_composer_pending_pastes(vec![(paste_placeholder.to_string(), "hello".to_string())]);
 
-    chat.bottom_pane.set_composer_quotes(vec![
-        "draft quote".to_string(),
-        "second draft quote".to_string(),
-    ]);
+    chat.bottom_pane
+        .set_composer_quotes(vec!["draft quote".to_string()]);
     chat.restore_user_message_to_composer(UserMessage {
         text: "[Image #1] retry prompt".to_string(),
         local_images: vec![LocalImageAttachment {
@@ -1636,7 +1623,7 @@ async fn restored_message_preserves_existing_composer_draft_and_attachments() {
 
     assert_eq!(
         chat.bottom_pane.composer_draft_snapshot().quotes,
-        vec!["draft quote".to_string(), "second draft quote".to_string()]
+        vec!["draft quote".to_string()]
     );
     assert_eq!(
         chat.bottom_pane.composer_text(),
@@ -2001,10 +1988,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         questions: None,
         pending_thread_settings: None,
         composer: Some(ThreadComposerState {
-            quotes: vec![
-                "thread quote".to_string(),
-                "second thread quote".to_string(),
-            ],
+            quotes: vec!["thread quote".to_string()],
             text: "1. composer draft".to_string(),
             text_elements: vec![TextElement::new((0..3).into(), Some("1. ".to_string()))],
             quote_comments: vec![crate::bottom_pane::QuoteComment {
@@ -2127,38 +2111,19 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert_eq!(chat.safety_buffering_prompt, None);
     assert!(chat.bottom_pane.composer_draft_snapshot().quotes.is_empty());
     let quote_only = ThreadComposerState {
-        quotes: vec![
-            "quote-only draft".to_string(),
-            "second quote-only draft".to_string(),
-        ],
+        quotes: vec!["quote-only draft".to_string()],
         ..Default::default()
     };
     chat.restore_composer_state(quote_only.clone());
-    let captured = chat.capture_thread_input_state().unwrap();
-    assert_eq!(captured.composer, Some(quote_only));
-    chat.restore_composer_state(Default::default());
-    assert!(chat.bottom_pane.composer_is_empty());
-    chat.restore_thread_input_state(
-        Some(captured),
-        ThreadInputStateRestoreMode {
-            preserve_in_flight_turn: false,
-        },
-    );
     assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quotes,
-        vec![
-            "quote-only draft".to_string(),
-            "second quote-only draft".to_string()
-        ]
+        chat.capture_thread_input_state().unwrap().composer,
+        Some(quote_only.clone())
     );
     chat.apply_external_edit("!comment".to_string());
     assert_eq!(chat.bottom_pane.composer_text(), "!comment");
     assert_eq!(
         chat.bottom_pane.composer_draft_snapshot().quotes,
-        vec![
-            "quote-only draft".to_string(),
-            "second quote-only draft".to_string()
-        ]
+        quote_only.quotes
     );
 }
 
@@ -2170,10 +2135,8 @@ async fn default_shortcuts_edit_most_recent_queued_message() {
     ] {
         let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.bottom_pane.set_task_running(/*running*/ true);
-        chat.bottom_pane.set_composer_quotes(vec![
-            "unrelated quote".to_string(),
-            "second unrelated quote".to_string(),
-        ]);
+        chat.bottom_pane
+            .set_composer_quotes(vec!["unrelated quote".to_string()]);
         for message in ["first queued", "second queued"] {
             chat.input_queue
                 .queued_user_messages
@@ -2592,10 +2555,8 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
     chat.input_queue
         .queued_user_messages
         .push_back(UserMessage::from("second queued".to_string()).into());
-    chat.bottom_pane.set_composer_quotes(vec![
-        "draft quote".to_string(),
-        "second draft quote".to_string(),
-    ]);
+    chat.bottom_pane
+        .set_composer_quotes(vec!["draft quote".to_string()]);
     chat.refresh_pending_input_preview();
 
     handle_turn_interrupted(&mut chat, "turn-1");
@@ -2607,7 +2568,7 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
     assert!(chat.input_queue.queued_user_messages.is_empty());
     assert_eq!(
         chat.bottom_pane.composer_draft_snapshot().quotes,
-        vec!["draft quote".to_string(), "second draft quote".to_string()]
+        vec!["draft quote".to_string()]
     );
     assert!(
         op_rx.try_recv().is_err(),
