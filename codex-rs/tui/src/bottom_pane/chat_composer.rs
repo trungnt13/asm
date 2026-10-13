@@ -12815,11 +12815,14 @@ mod tests {
         let (text, elements) = composer
             .prepare_submission_text(/*record_history*/ true)
             .unwrap();
-        assert_eq!(text, "> café\n> selected\n\n> second\n\n[Image #2] comment");
+        assert_eq!(
+            text,
+            "> 1. café\n> selected\n\n> 2. second\n\n[Image #2] comment"
+        );
         assert_eq!(
             elements,
             vec![TextElement::new(
-                (30..40).into(),
+                (36..46).into(),
                 Some("[Image #2]".to_string())
             )]
         );
@@ -12834,7 +12837,7 @@ mod tests {
         );
         assert_eq!(composer.current_text(), "é".repeat(4998));
         assert_eq!(composer.attachments.quotes, vec!["x"]);
-        composer.set_text_content(format!("{}a", "é".repeat(4997)), Vec::new(), Vec::new());
+        composer.set_text_content("é".repeat(4996), Vec::new(), Vec::new());
         let (text, _) = composer
             .prepare_submission_text(/*record_history*/ true)
             .unwrap();
@@ -12851,6 +12854,13 @@ mod tests {
         );
         assert_eq!(composer.snapshot_draft(), original_draft);
 
+        composer.set_quotes(vec!["x".to_string(); 10]);
+        composer.set_text_content("é".repeat(4959) + "a", Vec::new(), Vec::new());
+        let (numbered, _) = composer
+            .prepare_submission_text(/*record_history*/ true)
+            .unwrap();
+        assert!(numbered.contains("\n> 9. x\n\n> 10. x\n\n"));
+        assert_eq!(numbered.len(), 10000);
         composer.set_quotes(vec!["a".repeat(4997)]);
         composer.attach_quote(PendingQuote::Text("b".repeat(4997)));
         assert_eq!(composer.attachments.quotes, vec!["a".repeat(4997)]);
@@ -12870,9 +12880,9 @@ mod tests {
                 (text, text_elements),
                 (
                     if comment.is_empty() {
-                        "> selected\n".to_owned()
+                        "> 1. selected\n".to_owned()
                     } else {
-                        format!("> selected\n\n{comment}")
+                        format!("> 1. selected\n\n{comment}")
                     },
                     Vec::new()
                 ),

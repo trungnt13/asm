@@ -34,7 +34,7 @@ async fn startup_submission_waits_for_session_and_sends_exactly_once() {
     chat.set_model(&model);
     chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
     assert_matches!(next_submit_op(&mut op_rx), Op::UserTurn { items, .. } if items == vec![UserInput::Text {
-        text: "> startup first\n\n> startup second\n\nconfirmed before startup".into(), text_elements: Vec::new(),
+        text: "> 1. startup first\n\n> 2. startup second\n\nconfirmed before startup".into(), text_elements: Vec::new(),
     }]);
     chat.restore_startup_input_when_ready(&mut draft, &mut confirmed);
     assert_no_submit_op(&mut op_rx);
