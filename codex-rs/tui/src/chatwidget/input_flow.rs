@@ -286,6 +286,7 @@ impl ChatWidget {
                             user_message,
                             pending_pastes,
                             &mut used_paste_placeholders,
+                            &mut Vec::new(),
                         );
                     if !self.current_model().trim().is_empty()
                         && (self.current_model_supports_images()

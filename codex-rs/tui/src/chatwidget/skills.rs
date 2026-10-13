@@ -11,6 +11,7 @@ use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::mention_codec::is_common_env_var;
 use crate::mention_codec::is_mention_name_char;
 use crate::mention_codec::parse_linked_tool_mention;
+use crate::mention_codec::quoted_line_end;
 use crate::skills_helpers::skill_description;
 use crate::skills_helpers::skill_display_name;
 use codex_app_server_protocol::SkillMetadata;
@@ -314,6 +315,10 @@ fn extract_tool_mentions_from_text_with_sigil(text: &str, sigil: char) -> ToolMe
 
     let mut index = 0;
     while index < text_bytes.len() {
+        if let Some(end) = quoted_line_end(text, index) {
+            index = end;
+            continue;
+        }
         let byte = text_bytes[index];
         if byte == b'['
             && let Some((name, path, end_index)) = parse_linked_tool_mention(text, index, sigil)

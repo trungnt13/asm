@@ -179,6 +179,7 @@ impl TranscriptView {
     /// Rejoin current history, retaining Find offsets or a replaced group until navigation.
     /// Real selections keep their reading position, including a retired live revision.
     pub(crate) fn end_selection(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        self.pending_quote = None;
         self.copy_mode = None;
         let Some(selection) = self.selection.take() else {
             return;
@@ -398,7 +399,9 @@ impl TranscriptView {
             Ok(crate::clipboard_copy::CopyStatus::Confirmed) => {
                 if clear_selection {
                     let copy_mode = self.copy_mode.is_some();
+                    let pending_quote = self.pending_quote.take();
                     self.end_selection(cells);
+                    self.pending_quote = pending_quote;
                     if copy_mode {
                         self.jump_to_latest();
                     }
@@ -530,7 +533,9 @@ impl TranscriptView {
         if pending.clear_selection
             && completion.1 == Ok(crate::clipboard_copy::CopyStatus::Confirmed)
         {
+            let pending_quote = self.pending_quote.take();
             self.end_selection(cells);
+            self.pending_quote = pending_quote;
         }
         self.show_copy_feedback(&completion.1, characters);
         Some(pending.follow && completion.1 == Ok(crate::clipboard_copy::CopyStatus::Confirmed))
