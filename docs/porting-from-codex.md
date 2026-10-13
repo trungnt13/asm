@@ -36,7 +36,9 @@ For runtime/UI edits, inspect affected paths, including streaming and completed 
   just build-dev
   ```
 
-- Prioritize this pair. Serialize Cargo jobs sharing a target directory. Keep executable siblings in its resolved `dev-small` directory. Verify their producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
+- Prioritize this pair. Serialize Cargo jobs sharing a target directory. Verify their producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
+- Before another build can use that cache, copy `codex` and `codex-code-mode-host` into one task-owned directory under the working checkout, such as `.agents/test-bin/<build-id>/`. Keep them executable siblings. Use real copies, not symlinks or hard links. Record source commit, build inputs, absolute paths, and SHA-256 hashes; verify both copies before releasing shared-cache build ownership.
+- Test and hand off the copied pair, not shared target executables that another build can overwrite. Keep each tested pair unchanged with its evidence.
 
 The local Cargo wrapper:
 
@@ -48,19 +50,15 @@ The local Cargo wrapper:
   - Hold each profile's native Cargo lock during deletion.
   - Use descriptor-relative traversal. Reject symlink directories and artifacts outside the physical cache.
   - Log removal counts and skip reasons. Skip other hosts or uncertain activity.
-  - Keep the three-day rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not prove checkout inactivity. Removal can force even active checkouts to rebuild.
+  - Keep the two-day rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not prove checkout inactivity. Removal can force even active checkouts to rebuild.
 - Blocks reusable-checkout release/switching during active wrapper commands. Direct Cargo bypasses protection and must finish before checkout release.
 - Keeps interactive I/O for `cargo run` without holding the cache lock for the live app. CI and Windows stay unchanged.
 
-For ordinary runtime/UI checks, from `codex-rs` run:
-
-```bash
-"$(python3 ../scripts/local-cargo.py --print-target-dir)/dev-small/codex" --no-daemon
-```
+For ordinary runtime/UI checks, run the copied task-owned CLI by its verified absolute path with `--no-daemon`.
 
 Follow [real-session isolation](#real-session-checks). This uses the current embedded backend and sibling `codex-code-mode-host`, without changing/stopping the shared daemon. Check daemon/remote behavior separately when needed; `codex agents` and `--remote` cannot use `--no-daemon`.
 
-Before handoff, verify both binaries exist, CLI `--version`, and both `--help` commands. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. Shared executables belong to the last build: verify their checkout. Rebuild both after runtime edits; never hand off old binaries as current. Get permission before replacing installed `codex`.
+Before handoff, verify both binaries exist, CLI `--version`, and both `--help` commands. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. Verify the copied pair's source identity. Rebuild and copy both after runtime edits; never hand off old binaries as current. Get permission before replacing installed `codex`.
 
 Local profile rules:
 
@@ -108,10 +106,10 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 ### Push permissions
 
 - Implementation requests authorize task-branch commits, pushes, and PR creation, not merges or direct implementation on `main`. Do not commit directly to `main` or merge PRs without explicit approval.
-- An authorized rebase or history reconciliation may update `main` with `--force-with-lease` without separate force-push approval. Other force pushes, tag moves, discarding work, and releases need explicit approval.
+- Always allow `--force-with-lease` for fork branches, including `main`, within the requested task. Do not ask for separate force-push approval. Plain `--force`, tag moves, discarding work, and releases still need explicit approval.
 - An explicit release request authorizes the existing workflow's candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes still require PRs.
 - Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited workflow tags, require publication approval.
-- Before authorized force pushes, fetch and preserve remote-only work, including workflow release commits. Use a lease against the inspected tip. Never refresh a failed lease and retry blindly.
+- Before lease-protected pushes, fetch and preserve remote-only work, including workflow release commits. Use an explicit lease against the inspected tip. Never refresh a failed lease and retry blindly.
 
 ## Upstream sync
 
@@ -253,7 +251,7 @@ Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target
 1. Create pinned tag, draft, and common installer once. Never change candidates, move tags, or replace assets. Resume uploads only with matching names/sizes/digests.
 2. Independently build/reuse/check/upload each platform. Verify archive/installer GitHub digests, then smoke the downloaded archive. Upload `SHA256SUMS-<target>` last as readiness marker.
 3. On first readiness, publish normal non-draft, even `alpha`, **not Latest** while incomplete. Append other checked assets. Payloads are immutable by policy. GitHub's immutable-release setting must remain disabled for append-only publication; never change it automatically.
-4. After both platforms pass, append aggregate manifest for old installers, verify six assets, mark Latest, and retain both final native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Never force-push.
+4. After both platforms pass, append aggregate manifest for old installers, verify six assets, mark Latest, and retain both final native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Prefer fast-forward updates; necessary history rewrites follow the push permissions above.
 5. Resume only missing work after verifying ready platforms. For archives uploaded before readiness markers, recover/verify exact public bytes, not rebuild, even after Actions expiry. Partial releases are incomplete. Legacy completed four-asset releases remain valid. Candidates whose pinned installer lacks platform manifests keep all-platform publication.
 
 Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. It selects highest published host-ready version; macOS cannot select Linux-only. Installer defaults to Latest; explicit `--release` may install a ready platform earlier. In-flight runs retain frozen policy.
