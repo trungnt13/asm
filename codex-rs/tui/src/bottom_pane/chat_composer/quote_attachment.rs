@@ -23,8 +23,14 @@ impl ChatComposer {
     pub(crate) fn attach_quote(&mut self, quote: PendingQuote) {
         match quote {
             PendingQuote::Text(text) => {
+                let mut quotes = self.attachments.quotes.clone();
+                quotes.push(text);
+                if Self::quote_prefix(&quotes, "").len() > MAX_QUOTED_INPUT_BYTES {
+                    self.attach_quote(PendingQuote::TooLarge);
+                    return;
+                }
                 self.history.reset_navigation();
-                self.set_quote(Some(text));
+                self.set_quotes(quotes);
             }
             PendingQuote::TooLarge => {
                 self.show_footer_flash(
@@ -35,9 +41,9 @@ impl ChatComposer {
         }
     }
 
-    pub(in crate::bottom_pane) fn set_quote(&mut self, quote: Option<String>) {
-        self.attachments.quote = quote;
-        if self.attachments.quote.is_some() && self.draft.is_bash_mode {
+    pub(in crate::bottom_pane) fn set_quotes(&mut self, quotes: Vec<String>) {
+        self.attachments.quotes = quotes;
+        if !self.attachments.quotes.is_empty() && self.draft.is_bash_mode {
             let cursor = self.draft.textarea.cursor();
             self.draft.textarea.insert_str_at(/*pos*/ 0, "!");
             self.draft.textarea.set_cursor(cursor + 1);
@@ -46,42 +52,55 @@ impl ChatComposer {
         self.sync_popups();
     }
 
-    pub(super) fn render_quote_attachment(&self, area: Rect, buf: &mut Buffer) -> Rect {
-        self.attachments.quote_area.set(Rect::default());
-        let Some(quote) = &self.attachments.quote else {
-            return area;
-        };
+    pub(super) fn render_attachments(&self, area: Rect, buf: &mut Buffer) {
+        self.attachments.attachment_area.set(area);
         if area.is_empty() {
-            return area;
+            return;
         }
-        let row = Rect { height: 1, ..area };
-        self.attachments.quote_area.set(row);
-        let preview = quote
-            .split_whitespace()
-            .take(/*n*/ 24)
-            .collect::<Vec<_>>()
-            .join(" ");
-        Paragraph::new(Line::from(vec![
-            "[×] Quote · ".cyan().bold(),
-            preview.dim(),
-        ]))
+        let total = self.attachments.quotes.len() + self.attachments.remote_image_urls.len();
+        let height = usize::from(area.height);
+        let mut first = self
+            .attachments
+            .attachment_scroll
+            .get()
+            .min(total.saturating_sub(height));
+        if let Some(selected) = self.attachments.selected_remote_image_index {
+            let selected = selected + self.attachments.quotes.len();
+            first = first.min(selected).max(selected.saturating_sub(height - 1));
+        }
+        self.attachments.attachment_scroll.set(first);
+        let quotes = self.attachments.quotes.iter().map(|quote| {
+            let preview = quote
+                .split_whitespace()
+                .take(/*n*/ 24)
+                .collect::<Vec<_>>()
+                .join(" ");
+            Line::from(vec!["[×] Quote · ".cyan().bold(), preview.dim()])
+        });
+        Paragraph::new(
+            quotes
+                .chain(self.attachments.remote_image_lines())
+                .skip(first)
+                .take(height)
+                .collect::<Vec<_>>(),
+        )
         .style(user_message_style())
-        .render(row, buf);
-        Rect {
-            y: area.y.saturating_add(/*rhs*/ 1),
-            height: area.height - 1,
-            ..area
-        }
+        .render(area, buf);
     }
 
-    pub(crate) fn quote_prefix(quote: &str, comment: &str) -> String {
+    pub(crate) fn quote_prefix(quotes: &[String], comment: &str) -> String {
         let mut quoted = String::new();
-        for line in quote.split('\n') {
-            quoted.push_str("> ");
-            quoted.push_str(line);
-            quoted.push('\n');
+        for (index, quote) in quotes.iter().enumerate() {
+            if index > 0 {
+                quoted.push('\n');
+            }
+            for line in quote.split('\n') {
+                quoted.push_str("> ");
+                quoted.push_str(line);
+                quoted.push('\n');
+            }
         }
-        if !comment.is_empty() {
+        if !quotes.is_empty() && !comment.is_empty() {
             quoted.push('\n');
         }
         quoted
@@ -92,10 +111,10 @@ impl ChatComposer {
         text: &mut String,
         elements: &mut [TextElement],
     ) -> bool {
-        let Some(quote) = &self.attachments.quote else {
+        if self.attachments.quotes.is_empty() {
             return true;
         };
-        let mut quoted = Self::quote_prefix(quote, text);
+        let mut quoted = Self::quote_prefix(&self.attachments.quotes, text);
         if quoted.len().saturating_add(text.len()) > MAX_QUOTED_INPUT_BYTES {
             return false;
         }

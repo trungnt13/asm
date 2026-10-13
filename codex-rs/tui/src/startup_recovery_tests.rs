@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
 
 fn snapshot(text: &str) -> ComposerDraftSnapshot {
     ComposerDraftSnapshot {
-        quote: None,
+        quotes: Vec::new(),
         text: text.to_string(),
         cursor: text.len(),
         text_elements: Vec::new(),
@@ -30,7 +30,10 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
             let (mut chat, _sender, _rx, _op_rx) =
                 crate::chatwidget::tests::make_chatwidget_manual_with_sender().await;
             let mut draft = snapshot("startup draft");
-            draft.quote = Some("startup quote".to_string());
+            draft.quotes = vec![
+                "startup quote".to_string(),
+                "second startup quote".to_string(),
+            ];
             remember(draft.clone());
             chat.handle_paste(destination.trim_end().to_string());
             let mut pending = Some(draft);
@@ -44,7 +47,7 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
             assert_eq!(
                 take_unsent_text(),
                 Some(format!(
-                    "> startup quote\n\n{destination}startup draf{pasted}"
+                    "> startup quote\n\n> second startup quote\n\n{destination}startup draf{pasted}"
                 )),
             );
         })
@@ -85,7 +88,10 @@ async fn recovery_refresh_stops_after_submission_or_startup_completion() {
         refresh_after_handoff(|| panic!("protected input must not replace the startup draft"));
         handed_off(|| {
             let mut draft = snapshot("confirmed submission");
-            draft.quote = Some("quote already expanded into submission".to_string());
+            draft.quotes = vec![
+                "quote already expanded into submission".to_string(),
+                "second quote already expanded into submission".to_string(),
+            ];
             draft
         });
         bind_submission("confirmed submission", "initial-prompt");
