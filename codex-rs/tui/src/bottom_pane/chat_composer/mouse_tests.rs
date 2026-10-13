@@ -117,8 +117,8 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
     let prefix = ChatComposer::quote_prefix(&composer.attachments.quotes, "");
     assert!(prefix.starts_with("> 1. selected text\n\n> 2. last\n"));
     assert!(prefix.ends_with("> 13. quote 10\n"));
-    assert_eq!(composer.current_text(), "1. !echo hello");
-    assert_eq!(composer.current_cursor(), "1. !echo hello".len());
+    assert_eq!(composer.current_text(), "!echo hello");
+    assert_eq!(composer.current_cursor(), "!echo hello".len());
 }
 
 #[test]
