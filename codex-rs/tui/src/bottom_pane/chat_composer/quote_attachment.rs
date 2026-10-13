@@ -69,14 +69,22 @@ impl ChatComposer {
             first = first.min(selected).max(selected.saturating_sub(height - 1));
         }
         self.attachments.attachment_scroll.set(first);
-        let quotes = self.attachments.quotes.iter().map(|quote| {
-            let preview = quote
-                .split_whitespace()
-                .take(/*n*/ 24)
-                .collect::<Vec<_>>()
-                .join(" ");
-            Line::from(vec!["[×] Quote · ".cyan().bold(), preview.dim()])
-        });
+        let quotes = self
+            .attachments
+            .quotes
+            .iter()
+            .enumerate()
+            .map(|(index, quote)| {
+                let preview = quote
+                    .split_whitespace()
+                    .take(/*n*/ 24)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                Line::from(vec![
+                    format!("[×] • {}. ", index + 1).cyan().bold(),
+                    preview.dim(),
+                ])
+            });
         Paragraph::new(
             quotes
                 .chain(self.attachments.remote_image_lines())
@@ -94,8 +102,12 @@ impl ChatComposer {
             if index > 0 {
                 quoted.push('\n');
             }
-            for line in quote.split('\n') {
-                quoted.push_str("> ");
+            for (line_index, line) in quote.split('\n').enumerate() {
+                if line_index == 0 {
+                    quoted.push_str(&format!("> {}. ", index + 1));
+                } else {
+                    quoted.push_str("> ");
+                }
                 quoted.push_str(line);
                 quoted.push('\n');
             }

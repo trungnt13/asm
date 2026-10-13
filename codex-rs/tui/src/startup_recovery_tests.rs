@@ -47,7 +47,7 @@ async fn recovery_keeps_edits_and_pastes_after_chatwidget_handoff() {
             assert_eq!(
                 take_unsent_text(),
                 Some(format!(
-                    "> startup quote\n\n> second startup quote\n\n{destination}startup draf{pasted}"
+                    "> 1. startup quote\n\n> 2. second startup quote\n\n{destination}startup draf{pasted}"
                 )),
             );
         })

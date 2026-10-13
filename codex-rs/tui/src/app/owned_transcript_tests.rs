@@ -1645,18 +1645,18 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
         buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
             &tui.terminal
         ))
-        .matches("[×] Quote")
+        .matches("[×] •")
         .count(),
         2
     );
-    let quote_y = row_containing(&tui, "[×] Quote · transcript");
+    let quote_y = row_containing(&tui, "[×] • 1. transcript");
     app.handle_owned_transcript_event(
         &mut tui,
         &mut server,
         &mouse(Down(Left), /*column*/ 2, quote_y),
     )?;
     app.render_owned_transcript(&mut tui, size)?;
-    let quote_y = row_containing(&tui, "[×] Quote · transcript");
+    let quote_y = row_containing(&tui, "[×] • 1. transcript");
     app.handle_owned_transcript_event(
         &mut tui,
         &mut server,
@@ -1667,7 +1667,7 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
         !buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
             &tui.terminal
         ))
-        .contains("[×] Quote")
+        .contains("[×] •")
     );
     assert_eq!(app.chat_widget.composer_text_with_pending(), "hellox world");
     app.chat_widget.apply_external_edit("/".into());
