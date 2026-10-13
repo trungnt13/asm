@@ -1479,6 +1479,10 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
+    let reasoning_effort_updates = matches!(
+        selection,
+        FullHistoryV2ModelSelection::ReasoningEffortUpdates
+    );
     let server = start_mock_server().await;
     let seed_turn = mount_sse_once_match(
         &server,
@@ -1592,10 +1596,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             .features
             .enable(Feature::MultiAgentV2)
             .expect("test config should allow feature update");
-        if matches!(
-            selection,
-            FullHistoryV2ModelSelection::ReasoningEffortUpdates
-        ) {
+        if reasoning_effort_updates {
             config
                 .features
                 .enable(Feature::ReasoningEffortOverride)
@@ -1611,10 +1612,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
                 .iter_mut()
                 .find(|model_info| model_info.slug == model)
                 .unwrap_or_else(|| panic!("{model} should exist in bundled models.json"));
-            if matches!(
-                selection,
-                FullHistoryV2ModelSelection::ReasoningEffortUpdates
-            ) {
+            if reasoning_effort_updates {
                 model_info.supports_reasoning_effort_updates = true;
             }
             if model == INHERITED_MODEL {
@@ -1721,10 +1719,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             builder.with_external_time_provider(std::sync::Arc::new(FailFirstClockRead::default()));
     }
     let mut test = builder.build_with_auto_env(&server).await?;
-    if matches!(
-        selection,
-        FullHistoryV2ModelSelection::ReasoningEffortUpdates
-    ) {
+    if reasoning_effort_updates {
         // Real saved parent steps become adjacent updates only when spawning filters tools/reasoning.
         let mut options = test.start_thread_options().await;
         options.initial_history = InitialHistory::Forked(
@@ -1761,10 +1756,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         .await;
     }
 
-    if matches!(
-        selection,
-        FullHistoryV2ModelSelection::ReasoningEffortUpdates
-    ) {
+    if reasoning_effort_updates {
         // The settings-neutral helper preserves the fixture's configured XHigh selection.
         test.submit_text_turn(TURN_0_FORK_PROMPT).await?;
         assert_eq!(
@@ -1822,10 +1814,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             "restored parent policy should require an explicit delegation request"
         );
     }
-    if matches!(
-        selection,
-        FullHistoryV2ModelSelection::ReasoningEffortUpdates
-    ) {
+    if reasoning_effort_updates {
         test.submit_text_turn(TURN_1_PROMPT).await?;
     } else {
         test.submit_turn(TURN_1_PROMPT).await?;
@@ -1944,10 +1933,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         assert_eq!(notice_count(&child_request, "<current_time_reminder>"), 1);
     }
     let child_body = child_request.body_json();
-    if matches!(
-        selection,
-        FullHistoryV2ModelSelection::ReasoningEffortUpdates
-    ) {
+    if reasoning_effort_updates {
         let input = child_request.input();
         assert!(!input.windows(2).any(|pair| {
             pair.iter()
