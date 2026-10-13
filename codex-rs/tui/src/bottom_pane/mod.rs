@@ -261,7 +261,9 @@ pub(crate) use chat_composer::ChatComposerConfig;
 pub(crate) use chat_composer::ClipboardPasteTarget;
 pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
+pub(crate) use chat_composer::PendingQuote;
 pub(crate) use chat_composer::QueuedInputAction;
+pub(crate) use chat_composer::QuoteComment;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer_history::HistoryEntry;
 pub(crate) use textarea::KillBufferSnapshot;
@@ -1131,6 +1133,18 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_composer_quotes(&mut self, quotes: Vec<String>) {
+        self.composer
+            .edit_stored_draft(|composer| composer.set_quotes(quotes));
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_quote_comments(&mut self, comments: Vec<QuoteComment>) {
+        self.composer
+            .edit_stored_draft(|composer| composer.set_quote_comments(comments));
+        self.request_redraw();
+    }
+
     /// Replace the composer text with `text`.
     ///
     /// This is intended for fresh input where mention linkage does not need to
@@ -1955,8 +1969,12 @@ impl BottomPane {
         self.composer.prepare_mouse(event)
     }
 
-    pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
-        self.composer.handle_mouse(event)
+    pub(crate) fn handle_composer_mouse(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        pending_quote: &mut Option<PendingQuote>,
+    ) -> bool {
+        self.composer.handle_mouse(event, pending_quote)
     }
 
     pub(crate) fn show_view(&mut self, view: Box<dyn BottomPaneView>) {

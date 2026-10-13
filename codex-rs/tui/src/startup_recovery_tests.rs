@@ -9,6 +9,8 @@ use pretty_assertions::assert_eq;
 
 fn snapshot(text: &str) -> ComposerDraftSnapshot {
     ComposerDraftSnapshot {
+        quote_comments: Vec::new(),
+        quotes: Vec::new(),
         text: text.to_string(),
         cursor: text.len(),
         text_elements: Vec::new(),

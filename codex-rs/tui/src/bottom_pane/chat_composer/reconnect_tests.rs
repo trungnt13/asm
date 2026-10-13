@@ -27,12 +27,15 @@ fn offline_delete_reveals_the_edited_row_without_moving_the_caret() {
     composer.render_with_options(area, &mut buffer, /*mask_char*/ None, options);
     let (x, y) = composer.cursor_pos_with_options(area, options).unwrap();
     for _ in 0..3 {
-        assert!(composer.handle_mouse(MouseEvent {
-            kind: MouseEventKind::ScrollUp,
-            column: x,
-            row: y,
-            modifiers: KeyModifiers::NONE,
-        }));
+        assert!(composer.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            },
+            /*pending_quote*/ &mut None
+        ));
     }
     // Disconnect cleanup and blocked submits must not count as edits.
     for key in [KeyCode::Null, KeyCode::Enter, KeyCode::Tab] {

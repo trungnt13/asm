@@ -17,7 +17,7 @@ fn mouse(composer: &mut ChatComposer, area: Rect, kind: MouseEventKind, column: 
     };
     assert!(composer.prepare_mouse(event));
     composer.render(area, &mut Buffer::empty(area));
-    assert!(composer.handle_mouse(event));
+    assert!(composer.handle_mouse(event, /*pending_quote*/ &mut None));
 }
 
 #[test]

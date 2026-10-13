@@ -98,6 +98,7 @@ impl Default for Search {
 
 impl TranscriptView {
     pub(crate) fn begin_search(&mut self) {
+        self.pending_quote = None;
         self.cancel_beginning();
         if self.is_search_editing() {
             return;
