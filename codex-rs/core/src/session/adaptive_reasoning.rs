@@ -313,6 +313,22 @@ impl Session {
         }
     }
 
+    // Register a started regular turn even if setup fails before its first model step.
+    // Turn-local storage also makes same-turn task reentry idempotent.
+    pub(crate) fn start_adaptive_turn(&self, turn: &TurnContext) {
+        let session = self
+            .services
+            .thread_extension_data
+            .get_or_init(AdaptiveSession::default);
+        turn.extension_data.get_or_init(|| {
+            StdMutex::new(AdaptiveCadence {
+                turn_index: session.turns_started.fetch_add(/*val*/ 1, Ordering::AcqRel),
+                step_index: 1,
+                last_attempt_step: None,
+            })
+        });
+    }
+
     // Advance once per ordinary main-model request, outside transport retries.
     pub(super) fn record_adaptive_model_step(&self, turn: &TurnContext) {
         turn.extension_data.insert(AdaptiveModelStepStarted);
@@ -338,13 +354,11 @@ impl Session {
             .thread_extension_data
             .get_or_init(AdaptiveSession::default);
         let mode = self.adaptive_reasoning_state(config.enabled, /*initial_revision*/ 0);
-        let cadence = turn.extension_data.get_or_init(|| {
-            StdMutex::new(AdaptiveCadence {
-                turn_index: session.turns_started.fetch_add(/*val*/ 1, Ordering::AcqRel),
-                step_index: 1,
-                last_attempt_step: None,
-            })
-        });
+        self.start_adaptive_turn(turn);
+        let cadence = turn
+            .extension_data
+            .get::<StdMutex<AdaptiveCadence>>()
+            .expect("adaptive turn registered");
         let cadence_due = {
             let cadence_state = cadence
                 .lock()
