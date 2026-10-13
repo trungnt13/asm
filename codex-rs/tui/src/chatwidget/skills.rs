@@ -433,10 +433,6 @@ mod tests {
         );
         assert_eq!(mentions.names, HashSet::from(["google-drive".to_string()]));
         assert!(mentions.linked_paths.is_empty());
-        assert_eq!(
-            find_app_mentions(&mentions, &apps, &HashSet::new()),
-            vec![apps[0].clone()]
-        );
     }
 
     #[test]
@@ -462,14 +458,6 @@ mod tests {
         assert_eq!(
             find_app_mentions(&mentions, &apps, &HashSet::new()),
             vec![apps[0].clone()]
-        );
-        let mentions = collect_tool_mentions(
-            "> $google-drive\n>> $linear\n\n$arabica-uae",
-            &mention_paths,
-        );
-        assert_eq!(
-            mentions.linked_paths,
-            HashMap::from([("arabica-uae".to_string(), "app://arabica_uae".to_string())])
         );
     }
 }

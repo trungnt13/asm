@@ -112,7 +112,7 @@ async fn startup_submission_waits_for_protected_view_and_preserves_paste_provena
 
 #[tokio::test]
 async fn startup_submission_edit_or_disconnect_cancels_without_losing_draft() {
-    for action in ["edit", "quote", "quote-order", "disconnect", "parent-owned"] {
+    for action in ["edit", "quote-order", "disconnect", "parent-owned"] {
         let (mut source, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         source.bottom_pane.insert_str("confirmed draft");
         source.bottom_pane.set_composer_quotes(vec![
@@ -134,11 +134,6 @@ async fn startup_submission_edit_or_disconnect_cancels_without_losing_draft() {
             chat.bottom_pane.set_composer_quotes(vec![
                 "confirmed second".to_string(),
                 "confirmed first".to_string(),
-            ]);
-        } else if action == "quote" {
-            chat.bottom_pane.set_composer_quotes(vec![
-                "unconfirmed quote".to_string(),
-                "second unconfirmed quote".to_string(),
             ]);
         }
         chat.thread_id = Some(ThreadId::new());

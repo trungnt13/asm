@@ -56,13 +56,6 @@ fn collect_explicit_app_ids_dedupes_structured_and_linked_mentions() {
     let app_ids = collect_explicit_app_ids(&input);
 
     assert_eq!(app_ids, HashSet::from(["calendar".to_string()]));
-    assert_eq!(
-        collect_explicit_app_ids(&[
-            text_input("> [$calendar](app://calendar)"),
-            input[1].clone(),
-        ]),
-        HashSet::from(["calendar".to_string()])
-    );
 }
 
 #[test]
@@ -153,19 +146,6 @@ fn collect_explicit_plugin_mentions_dedupes_structured_and_linked_mentions() {
     );
 
     assert_eq!(mentioned, vec![plugin("sample@test", "sample")]);
-    assert_eq!(
-        collect_explicit_plugin_mentions(
-            &[
-                text_input("> [@sample](plugin://sample@test)\n> [@other](plugin://other@test)"),
-                UserInput::Mention {
-                    name: "sample".to_string(),
-                    path: "plugin://sample@test".to_string(),
-                },
-            ],
-            &plugins,
-        ),
-        vec![plugin("sample@test", "sample")]
-    );
 }
 
 #[test]

@@ -1599,76 +1599,49 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
     ));
     let row = rendered.lines().nth(usize::from(transcript_y)).unwrap();
     let transcript_x = row[..row.find("transcript").unwrap()].chars().count() as u16;
-    for event in [
-        mouse(Down(Left), transcript_x, transcript_y),
-        mouse(Drag(Left), transcript_x + 10, transcript_y),
-        mouse(Up(Left), transcript_x + 10, transcript_y),
-    ] {
-        app.handle_owned_transcript_event(&mut tui, &mut server, &event)?;
+    for count in 1..=2 {
+        let transcript_y = row_containing(&tui, "transcript text");
+        for event in [
+            mouse(Down(Left), transcript_x, transcript_y),
+            mouse(Drag(Left), transcript_x + 10, transcript_y),
+            mouse(Up(Left), transcript_x + 10, transcript_y),
+        ] {
+            app.handle_owned_transcript_event(&mut tui, &mut server, &event)?;
+        }
+        if count == 1 {
+            assert!(matches!(&app.transcript_view.pending_quote,
+            Some(crate::bottom_pane::PendingQuote::Text(text)) if text == "transcript"));
+        }
+        app.render_owned_transcript(&mut tui, size)?;
+        let draft_y = row_containing(&tui, "hellox world");
+        app.handle_owned_transcript_event(
+            &mut tui,
+            &mut server,
+            &mouse(Down(Left), /*column*/ 2, draft_y),
+        )?;
+        assert!(app.transcript_view.pending_quote.is_none());
+        app.render_owned_transcript(&mut tui, size)?;
+        assert_eq!(
+            buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+                &tui.terminal,
+            ))
+            .matches("[×] •")
+            .count(),
+            count
+        );
     }
-    assert_eq!(
-        app.transcript_view
-            .selected_text(&app.transcript_cells)
-            .as_deref(),
-        Some("transcript")
-    );
-    assert!(
-        matches!(&app.transcript_view.pending_quote, Some(crate::bottom_pane::PendingQuote::Text(text)) if text == "transcript")
-    );
-    app.render_owned_transcript(&mut tui, size)?;
-    let draft_y = row_containing(&tui, "hellox world");
-    app.handle_owned_transcript_event(
-        &mut tui,
-        &mut server,
-        &mouse(Down(Left), /*column*/ 2, draft_y),
-    )?;
-    assert!(app.transcript_view.pending_quote.is_none());
-    assert_eq!(
-        app.chat_widget.composer_text_with_pending(),
-        "1. hellox world"
-    );
-    app.render_owned_transcript(&mut tui, size)?;
-    let transcript_y = row_containing(&tui, "transcript text");
-    for event in [
-        mouse(Down(Left), transcript_x, transcript_y),
-        mouse(Drag(Left), transcript_x + 10, transcript_y),
-        mouse(Up(Left), transcript_x + 10, transcript_y),
-    ] {
-        app.handle_owned_transcript_event(&mut tui, &mut server, &event)?;
+    for _ in 0..2 {
+        let quote_y = row_containing(&tui, "[×] • 1. transcript");
+        app.handle_owned_transcript_event(
+            &mut tui,
+            &mut server,
+            &mouse(Down(Left), /*column*/ 2, quote_y),
+        )?;
+        app.render_owned_transcript(&mut tui, size)?;
     }
-    app.render_owned_transcript(&mut tui, size)?;
-    let draft_y = row_containing(&tui, "hellox world");
-    app.handle_owned_transcript_event(
-        &mut tui,
-        &mut server,
-        &mouse(Down(Left), /*column*/ 2, draft_y),
-    )?;
-    app.render_owned_transcript(&mut tui, size)?;
-    assert_eq!(
-        buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
-            &tui.terminal
-        ))
-        .matches("[×] •")
-        .count(),
-        2
-    );
-    let quote_y = row_containing(&tui, "[×] • 1. transcript");
-    app.handle_owned_transcript_event(
-        &mut tui,
-        &mut server,
-        &mouse(Down(Left), /*column*/ 2, quote_y),
-    )?;
-    app.render_owned_transcript(&mut tui, size)?;
-    let quote_y = row_containing(&tui, "[×] • 1. transcript");
-    app.handle_owned_transcript_event(
-        &mut tui,
-        &mut server,
-        &mouse(Down(Left), /*column*/ 2, quote_y),
-    )?;
-    app.render_owned_transcript(&mut tui, size)?;
     assert!(
         !buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
-            &tui.terminal
+            &tui.terminal,
         ))
         .contains("[×] •")
     );

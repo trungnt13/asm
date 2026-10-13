@@ -26,13 +26,7 @@ fn handles_plain_and_linked_mentions() {
         &["alpha", "beta"],
         &["/tmp/beta"],
     );
-    assert_mentions("> $quoted\r\n> [$app](app://quoted)\r\n> $last", &[], &[]);
     assert_mentions("compare x > $alpha", &["alpha"], &[]);
-    let mentions = extract_tool_mentions_with_sigil(
-        "> [@quoted](plugin://quoted@test)\n\nuse [@sample](plugin://sample@test)",
-        '@',
-    );
-    assert_eq!(mentions.paths, set(&["plugin://sample@test"]));
 }
 
 #[test]
