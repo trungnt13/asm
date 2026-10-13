@@ -9,6 +9,18 @@ pub(crate) struct QuoteComment {
 }
 
 impl QuoteComment {
+    fn empty_lines<'a>(
+        comments: &'a [Self],
+        text: &'a str,
+    ) -> impl DoubleEndedIterator<Item = (&'a Self, Option<Range<usize>>)> {
+        comments.iter().enumerate().map(|(index, comment)| {
+            (
+                comment,
+                comment.empty_line(text, comments.get(index + 1).map(|next| next.range.start)),
+            )
+        })
+    }
+
     fn empty_line(&self, text: &str, next_prefix: Option<usize>) -> Option<Range<usize>> {
         let end = next_prefix.unwrap_or(text.len());
         if !text.get(self.range.end..end)?.trim().is_empty()
@@ -16,11 +28,20 @@ impl QuoteComment {
         {
             return None;
         }
-        Some(if next_prefix.is_none() && self.range.start > 0 {
-            self.range.start - 1..end
+        // Only a real newline can be owned by the next row; joined prefixes stay conservative.
+        let separate_next = next_prefix.is_some() && end > 0 && text.as_bytes()[end - 1] == b'\n';
+        let start = if self.range.start > 0 && (next_prefix.is_none() || separate_next) {
+            self.range.start - 1
         } else {
-            self.range.start..end
-        })
+            self.range.start
+        };
+        Some(
+            start..if separate_next && self.range.start > 0 {
+                end - 1
+            } else {
+                end
+            },
+        )
     }
 }
 
@@ -77,15 +98,8 @@ impl ChatComposer {
     pub(super) fn append_quote_comment(&mut self) {
         self.draft.textarea.enter_vim_insert_mode();
         let comments = self.quote_comments();
-        let empty_lines = comments
-            .iter()
-            .enumerate()
-            .filter_map(|(index, comment)| {
-                comment.empty_line(
-                    self.draft.textarea.text(),
-                    comments.get(index + 1).map(|next| next.range.start),
-                )
-            })
+        let empty_lines = QuoteComment::empty_lines(&comments, self.draft.textarea.text())
+            .filter_map(|(_, range)| range)
             .collect::<Vec<_>>();
         for mut range in empty_lines.into_iter().rev() {
             range.end = range.end.min(self.draft.textarea.text().len());
@@ -118,15 +132,8 @@ impl ChatComposer {
 
     pub(super) fn remove_quote_comment(&mut self, index: usize) {
         let comments = self.quote_comments();
-        let empty_lines = comments
-            .iter()
-            .enumerate()
-            .map(|(position, comment)| {
-                comment.empty_line(
-                    self.draft.textarea.text(),
-                    comments.get(position + 1).map(|next| next.range.start),
-                )
-            })
+        let empty_lines = QuoteComment::empty_lines(&comments, self.draft.textarea.text())
+            .map(|(_, range)| range)
             .collect::<Vec<_>>();
         for (comment, empty_line) in comments.iter().zip(empty_lines).rev() {
             if comment.quote_index == index {
@@ -173,15 +180,6 @@ impl ChatComposer {
             return false;
         };
         let started_vim_edit = self.begin_direct_vim_edit();
-        if let Some(element) = self
-            .draft
-            .textarea
-            .text_element_snapshots()
-            .into_iter()
-            .find(|element| element.range.start == range.start)
-        {
-            self.draft.quote_comments.remove(&element.id);
-        }
         self.draft.textarea.replace_range(range.clone(), "");
         self.draft.textarea.set_cursor(range.start);
         if started_vim_edit {
@@ -201,12 +199,8 @@ impl ChatComposer {
                     && element.byte_range.end == comment.range.end
             })
         });
-        let empty_lines = comments
-            .iter()
-            .enumerate()
-            .map(|(index, comment)| {
-                comment.empty_line(text, comments.get(index + 1).map(|next| next.range.start))
-            })
+        let empty_lines = QuoteComment::empty_lines(comments, text)
+            .map(|(_, range)| range)
             .collect::<Vec<_>>();
         for (comment, empty_line) in comments.iter().zip(empty_lines).rev() {
             if let Some(mut range) = empty_line {
