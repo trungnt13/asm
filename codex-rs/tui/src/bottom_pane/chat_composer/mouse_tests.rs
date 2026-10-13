@@ -60,11 +60,58 @@ fn composer_mouse_edits_flush_typing_and_reconcile_placeholders() {
     assert_eq!(composer.current_text(), "!echo hello");
     assert_eq!(composer.current_cursor(), original_cursor);
     assert!(!composer.is_bang_shell_command());
-    let area = Rect { height: 8, ..area };
+    composer.attach_quote(PendingQuote::Text("middle".into()));
+    composer.attach_quote(PendingQuote::Text("last".into()));
+    let area = Rect { height: 9, ..area };
     composer.render(area, &mut Buffer::empty(area));
-    let quote_area = composer.attachments.quote_area.get();
-    mouse(&mut composer, area, Down(Left), quote_area.x, quote_area.y);
-    assert!(composer.attachments.quote.is_none());
+    let attachment_area = composer.attachments.attachment_area.get();
+    mouse(
+        &mut composer,
+        area,
+        Down(Left),
+        attachment_area.x + 5,
+        attachment_area.y + 1,
+    );
+    assert_eq!(
+        composer.attachments.quotes,
+        vec!["selected text", "middle", "last"]
+    );
+    mouse(
+        &mut composer,
+        area,
+        Down(Left),
+        attachment_area.x,
+        attachment_area.y + 1,
+    );
+    assert_eq!(composer.attachments.quotes, vec!["selected text", "last"]);
+    for index in 0..12 {
+        composer.attach_quote(PendingQuote::Text(format!("quote {index}")));
+    }
+    let area = Rect { height: 5, ..area };
+    composer.render(area, &mut Buffer::empty(area));
+    let attachment_area = composer.attachments.attachment_area.get();
+    let mut reached = vec![false; composer.attachments.quotes.len()];
+    for _ in 0..=reached.len() {
+        let first = composer.attachments.attachment_scroll.get();
+        for index in first..(first + usize::from(attachment_area.height)).min(reached.len()) {
+            reached[index] = true;
+        }
+        mouse(
+            &mut composer,
+            area,
+            MouseEventKind::ScrollDown,
+            attachment_area.x,
+            attachment_area.y,
+        );
+    }
+    composer.render(area, &mut Buffer::empty(area));
+    assert!(
+        reached.iter().all(|visible| *visible),
+        "every reference must be reachable"
+    );
+    let last_row = attachment_area.bottom() - 1;
+    mouse(&mut composer, area, Down(Left), attachment_area.x, last_row);
+    assert_eq!(composer.attachments.quotes.last().unwrap(), "quote 10");
     assert_eq!(composer.current_text(), "!echo hello");
     assert_eq!(composer.current_cursor(), original_cursor);
 }

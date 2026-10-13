@@ -89,7 +89,7 @@ pub(crate) fn submitted(result: &InputResult) {
             && matches!(draft.stage, RecoveryStage::HandedOff)
         {
             if let Some((text, text_elements, pending_pastes)) = submission {
-                draft.snapshot.quote = None;
+                draft.snapshot.quotes.clear();
                 draft.snapshot.text.clone_from(text);
                 draft.snapshot.text_elements.clone_from(text_elements);
                 draft.snapshot.pending_pastes = pending_pastes.to_vec();
@@ -153,8 +153,8 @@ fn take_unsent_text() -> Option<String> {
         snapshot.text_elements,
         &snapshot.pending_pastes,
     );
-    if let Some(quote) = snapshot.quote {
-        let mut quoted = ChatComposer::quote_prefix(&quote, &text);
+    if !snapshot.quotes.is_empty() {
+        let mut quoted = ChatComposer::quote_prefix(&snapshot.quotes, &text);
         quoted.push_str(&text);
         text = quoted;
     }

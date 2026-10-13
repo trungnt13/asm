@@ -1243,13 +1243,15 @@ async fn startup_draft_handoff_preserves_cursor_and_large_paste() {
     chat.bottom_pane.handle_paste(paste);
     chat.bottom_pane.insert_str(" tail");
     chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
-    chat.bottom_pane
-        .set_composer_quote(Some("startup quote".to_string()));
+    chat.bottom_pane.set_composer_quotes(vec![
+        "startup quote".to_string(),
+        "second startup quote".to_string(),
+    ]);
     let startup_draft = chat.bottom_pane.composer_draft_snapshot();
     chat.bottom_pane
         .set_composer_text(String::new(), Vec::new(), Vec::new());
 
-    chat.bottom_pane.set_composer_quote(/*quote*/ None);
+    chat.bottom_pane.set_composer_quotes(Vec::new());
     chat.restore_startup_draft(startup_draft.clone());
 
     assert_eq!(chat.bottom_pane.composer_draft_snapshot(), startup_draft);
@@ -1263,6 +1265,10 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     startup_chat.bottom_pane.handle_paste(startup_paste.clone());
     startup_chat.bottom_pane.insert_str(" startup draft");
     startup_chat.bottom_pane.set_composer_cursor(/*cursor*/ 0);
+    startup_chat.bottom_pane.set_composer_quotes(vec![
+        "startup first".to_string(),
+        "startup second".to_string(),
+    ]);
     let startup_draft = startup_chat.bottom_pane.composer_draft_snapshot();
 
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
@@ -1278,6 +1284,10 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     );
     let initial_paste = "y".repeat(/*n*/ 1_001);
     chat.bottom_pane.handle_paste(initial_paste.clone());
+    chat.bottom_pane.set_composer_quotes(vec![
+        "existing first".to_string(),
+        "existing second".to_string(),
+    ]);
     let existing_draft = chat.bottom_pane.composer_draft_snapshot();
     let existing_placeholder = existing_draft.pending_pastes[0].0.clone();
 
@@ -1286,12 +1296,19 @@ async fn startup_draft_handoff_merges_existing_prompt_images_and_large_pastes() 
     let restored = chat.bottom_pane.composer_draft_snapshot();
     assert_eq!(
         (
+            restored.quotes,
             restored.text,
             restored.cursor,
             restored.pending_pastes,
             restored.local_images,
         ),
         (
+            vec![
+                "existing first".to_string(),
+                "existing second".to_string(),
+                "startup first".to_string(),
+                "startup second".to_string(),
+            ],
             format!(
                 "{}\n{existing_placeholder} #2 startup draft",
                 existing_draft.text
@@ -1563,8 +1580,10 @@ async fn restored_message_preserves_existing_composer_draft_and_attachments() {
     chat.bottom_pane
         .set_composer_pending_pastes(vec![(paste_placeholder.to_string(), "hello".to_string())]);
 
-    chat.bottom_pane
-        .set_composer_quote(Some("draft quote".to_string()));
+    chat.bottom_pane.set_composer_quotes(vec![
+        "draft quote".to_string(),
+        "second draft quote".to_string(),
+    ]);
     chat.restore_user_message_to_composer(UserMessage {
         text: "[Image #1] retry prompt".to_string(),
         local_images: vec![LocalImageAttachment {
@@ -1580,8 +1599,8 @@ async fn restored_message_preserves_existing_composer_draft_and_attachments() {
     });
 
     assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quote.as_deref(),
-        Some("draft quote")
+        chat.bottom_pane.composer_draft_snapshot().quotes,
+        vec!["draft quote".to_string(), "second draft quote".to_string()]
     );
     assert_eq!(
         chat.bottom_pane.composer_text(),
@@ -1946,7 +1965,10 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         questions: None,
         pending_thread_settings: None,
         composer: Some(ThreadComposerState {
-            quote: Some("thread quote".to_string()),
+            quotes: vec![
+                "thread quote".to_string(),
+                "second thread quote".to_string(),
+            ],
             text: "composer draft".to_string(),
             ..Default::default()
         }),
@@ -2062,9 +2084,12 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     assert!(!chat.turn_lifecycle.sleep_inhibitor.is_turn_running());
     assert!(!chat.bottom_pane.is_task_running());
     assert_eq!(chat.safety_buffering_prompt, None);
-    assert!(chat.bottom_pane.composer_draft_snapshot().quote.is_none());
+    assert!(chat.bottom_pane.composer_draft_snapshot().quotes.is_empty());
     let quote_only = ThreadComposerState {
-        quote: Some("quote-only draft".to_string()),
+        quotes: vec![
+            "quote-only draft".to_string(),
+            "second quote-only draft".to_string(),
+        ],
         ..Default::default()
     };
     chat.restore_composer_state(quote_only.clone());
@@ -2079,14 +2104,20 @@ async fn restore_thread_input_state_applies_running_state_policy() {
         },
     );
     assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quote.as_deref(),
-        Some("quote-only draft")
+        chat.bottom_pane.composer_draft_snapshot().quotes,
+        vec![
+            "quote-only draft".to_string(),
+            "second quote-only draft".to_string()
+        ]
     );
     chat.apply_external_edit("!comment".to_string());
     assert_eq!(chat.bottom_pane.composer_text(), "!comment");
     assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quote.as_deref(),
-        Some("quote-only draft")
+        chat.bottom_pane.composer_draft_snapshot().quotes,
+        vec![
+            "quote-only draft".to_string(),
+            "second quote-only draft".to_string()
+        ]
     );
 }
 
@@ -2098,8 +2129,10 @@ async fn default_shortcuts_edit_most_recent_queued_message() {
     ] {
         let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.bottom_pane.set_task_running(/*running*/ true);
-        chat.bottom_pane
-            .set_composer_quote(Some("unrelated quote".to_string()));
+        chat.bottom_pane.set_composer_quotes(vec![
+            "unrelated quote".to_string(),
+            "second unrelated quote".to_string(),
+        ]);
         for message in ["first queued", "second queued"] {
             chat.input_queue
                 .queued_user_messages
@@ -2110,7 +2143,7 @@ async fn default_shortcuts_edit_most_recent_queued_message() {
         chat.handle_key_event(key);
 
         assert_eq!(chat.bottom_pane.composer_text(), "second queued");
-        assert!(chat.bottom_pane.composer_draft_snapshot().quote.is_none());
+        assert!(chat.bottom_pane.composer_draft_snapshot().quotes.is_empty());
         assert_eq!(chat.queued_user_message_texts(), vec!["first queued"]);
     }
 }
@@ -2518,8 +2551,10 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
     chat.input_queue
         .queued_user_messages
         .push_back(UserMessage::from("second queued".to_string()).into());
-    chat.bottom_pane
-        .set_composer_quote(Some("draft quote".to_string()));
+    chat.bottom_pane.set_composer_quotes(vec![
+        "draft quote".to_string(),
+        "second draft quote".to_string(),
+    ]);
     chat.refresh_pending_input_preview();
 
     handle_turn_interrupted(&mut chat, "turn-1");
@@ -2530,8 +2565,8 @@ async fn interrupt_prepends_queued_messages_before_existing_composer_text() {
     );
     assert!(chat.input_queue.queued_user_messages.is_empty());
     assert_eq!(
-        chat.bottom_pane.composer_draft_snapshot().quote.as_deref(),
-        Some("draft quote")
+        chat.bottom_pane.composer_draft_snapshot().quotes,
+        vec!["draft quote".to_string(), "second draft quote".to_string()]
     );
     assert!(
         op_rx.try_recv().is_err(),
