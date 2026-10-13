@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use crate::bottom_pane::ComposerDraftSnapshot;
 use crate::bottom_pane::KillBufferSnapshot;
 
+use super::user_messages::merge_composer_messages;
 use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
 
@@ -40,10 +41,19 @@ impl ChatWidget {
             remote_image_urls: draft.remote_image_urls,
             mention_bindings: draft.mention_bindings,
         };
-        let startup_has_content = !startup_message.text.is_empty()
+        let startup_has_content = !draft.quotes.is_empty()
+            || !startup_message.text.is_empty()
             || !startup_message.local_images.is_empty()
             || !startup_message.remote_image_urls.is_empty()
             || !draft.pending_pastes.is_empty();
+
+        let mut quotes = existing_draft.quotes;
+        let mut existing_comments = existing_draft.quote_comments;
+        let mut startup_comments = draft.quote_comments;
+        for comment in &mut startup_comments {
+            comment.quote_index += quotes.len();
+        }
+        quotes.extend(draft.quotes);
 
         let cursor = if existing_has_content && startup_has_content {
             let mut used_paste_placeholders = HashSet::new();
@@ -51,8 +61,14 @@ impl ChatWidget {
                 existing_message,
                 existing_draft.pending_pastes,
                 &mut used_paste_placeholders,
+                &mut existing_comments,
             );
-            let startup_offset = existing_message.text.len().saturating_add(1);
+            let existing_element_count = existing_message.text_elements.len();
+            let startup_text_len = startup_message.text.len();
+            let startup_first_element_start = startup_message
+                .text_elements
+                .first()
+                .map(|element| element.byte_range.start);
             let preceding_text_element = startup_message
                 .text_elements
                 .iter()
@@ -64,28 +80,37 @@ impl ChatWidget {
                 startup_message,
                 draft.pending_pastes,
                 &mut used_paste_placeholders,
+                &mut startup_comments,
             );
-            let cursor_adjustment = preceding_text_element.map_or(0, |(index, original_end)| {
-                startup_message.text_elements[index]
-                    .byte_range
-                    .end
-                    .saturating_sub(original_end)
-            });
             pending_pastes.extend(startup_pending_pastes);
-            self.restore_composer_state(Self::composer_state_from_user_message(
-                merge_user_messages(vec![existing_message, startup_message]),
-                pending_pastes,
-            ));
-            startup_offset
-                .saturating_add(draft.cursor)
-                .saturating_add(cursor_adjustment)
+            let (message, quote_comments) = merge_composer_messages(vec![
+                (existing_message, existing_comments),
+                (startup_message, startup_comments),
+            ]);
+            self.restore_composer_state(ThreadComposerState {
+                quotes,
+                quote_comments,
+                ..Self::composer_state_from_user_message(message, pending_pastes)
+            });
+            let restored = self.bottom_pane.composer_draft_snapshot();
+            let startup_elements = &restored.text_elements[existing_element_count..];
+            if let Some((index, original_end)) = preceding_text_element {
+                startup_elements[index].byte_range.end + draft.cursor - original_end
+            } else {
+                let startup_offset = startup_first_element_start.map_or_else(
+                    || restored.text.len() - startup_text_len,
+                    |start| startup_elements[0].byte_range.start - start,
+                );
+                startup_offset + draft.cursor
+            }
         } else if existing_has_content || !startup_has_content {
             existing_cursor
         } else {
-            self.restore_composer_state(Self::composer_state_from_user_message(
-                startup_message,
-                draft.pending_pastes,
-            ));
+            self.restore_composer_state(ThreadComposerState {
+                quotes,
+                quote_comments: startup_comments,
+                ..Self::composer_state_from_user_message(startup_message, draft.pending_pastes)
+            });
             draft.cursor
         };
         self.bottom_pane.set_composer_cursor(cursor);
@@ -410,6 +435,7 @@ impl ChatWidget {
 
         let composer = self.bottom_pane.composer_draft_snapshot();
         let composer_pending_pastes = composer.pending_pastes;
+        let mut quote_comments = composer.quote_comments;
         let existing_message = UserMessage {
             text: composer.text,
             text_elements: composer.text_elements,
@@ -433,17 +459,23 @@ impl ChatWidget {
             rejected_messages.len(),
             UserMessageHistoryRecord::UserMessageText,
         );
-        let mut to_merge: Vec<UserMessage> = rejected_messages
-            .into_iter()
-            .zip(rejected_history_records.iter())
-            .map(|(message, history_record)| user_message_for_restore(message, history_record))
-            .collect();
-        to_merge.extend(
-            self.input_queue
-                .pending_steers
-                .drain(..)
-                .map(|steer| user_message_for_restore(steer.user_message, &steer.history_record)),
-        );
+        let mut to_merge: Vec<(UserMessage, Vec<crate::bottom_pane::QuoteComment>)> =
+            rejected_messages
+                .into_iter()
+                .zip(rejected_history_records.iter())
+                .map(|(message, history_record)| {
+                    (
+                        user_message_for_restore(message, history_record),
+                        Vec::new(),
+                    )
+                })
+                .collect();
+        to_merge.extend(self.input_queue.pending_steers.drain(..).map(|steer| {
+            (
+                user_message_for_restore(steer.user_message, &steer.history_record),
+                Vec::new(),
+            )
+        }));
         let queued_messages = self
             .input_queue
             .queued_user_messages
@@ -468,9 +500,10 @@ impl ChatWidget {
                 user_message_for_restore(message.user_message, history_record),
                 message.pending_pastes,
                 &mut used_paste_placeholders,
+                &mut Vec::new(),
             );
             pending_pastes.extend(message_pastes);
-            to_merge.push(message);
+            to_merge.push((message, Vec::new()));
         }
         let has_existing_message = !existing_message.text.is_empty()
             || !existing_message.local_images.is_empty()
@@ -480,15 +513,18 @@ impl ChatWidget {
                 existing_message,
                 composer_pending_pastes,
                 &mut used_paste_placeholders,
+                &mut quote_comments,
             );
-            to_merge.push(existing_message);
+            to_merge.push((existing_message, quote_comments));
             pending_pastes.extend(composer_pending_pastes);
         }
 
-        Some(Self::composer_state_from_user_message(
-            merge_user_messages(to_merge),
-            pending_pastes,
-        ))
+        let (message, quote_comments) = merge_composer_messages(to_merge);
+        Some(ThreadComposerState {
+            quotes: composer.quotes,
+            quote_comments,
+            ..Self::composer_state_from_user_message(message, pending_pastes)
+        })
     }
 
     pub(crate) fn restore_user_message_to_composer(&mut self, user_message: UserMessage) {
@@ -501,21 +537,25 @@ impl ChatWidget {
             remote_image_urls: draft.remote_image_urls,
             mention_bindings: draft.mention_bindings,
         };
-        let mut messages = vec![user_message];
+        let mut messages = vec![(user_message, Vec::new())];
         if !draft_message.text.is_empty()
             || !draft_message.local_images.is_empty()
             || !draft_message.remote_image_urls.is_empty()
         {
-            messages.push(draft_message);
+            messages.push((draft_message, draft.quote_comments));
         }
-        self.restore_composer_state(Self::composer_state_from_user_message(
-            merge_user_messages(messages),
-            pending_pastes,
-        ));
+        let (message, quote_comments) = merge_composer_messages(messages);
+        self.restore_composer_state(ThreadComposerState {
+            quotes: draft.quotes,
+            quote_comments,
+            ..Self::composer_state_from_user_message(message, pending_pastes)
+        });
     }
 
     pub(super) fn restore_composer_state(&mut self, composer: ThreadComposerState) {
         let ThreadComposerState {
+            quotes,
+            quote_comments,
             text,
             local_images,
             remote_image_urls,
@@ -524,6 +564,7 @@ impl ChatWidget {
             pending_pastes,
         } = composer;
         let local_image_paths = local_images.into_iter().map(|img| img.path).collect();
+        self.bottom_pane.set_composer_quotes(quotes);
         self.set_remote_image_urls(remote_image_urls);
         self.bottom_pane.set_composer_text_with_mention_bindings(
             text,
@@ -531,6 +572,7 @@ impl ChatWidget {
             local_image_paths,
             mention_bindings,
         );
+        self.bottom_pane.set_composer_quote_comments(quote_comments);
         self.bottom_pane.set_composer_pending_pastes(pending_pastes);
     }
 
@@ -546,6 +588,8 @@ impl ChatWidget {
             mention_bindings,
         } = user_message;
         ThreadComposerState {
+            quotes: Vec::new(),
+            quote_comments: Vec::new(),
             text,
             local_images,
             remote_image_urls,
@@ -559,6 +603,8 @@ impl ChatWidget {
         self.cancel_image_submission();
         let draft = self.bottom_pane.composer_draft_snapshot();
         let composer = ThreadComposerState {
+            quotes: draft.quotes,
+            quote_comments: draft.quote_comments,
             text: draft.text,
             text_elements: draft.text_elements,
             local_images: draft.local_images,

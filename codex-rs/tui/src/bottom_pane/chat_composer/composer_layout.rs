@@ -110,14 +110,22 @@ impl ChatComposer {
             /*bottom*/ 1,
             /*right*/ 1u16.saturating_add(options.textarea_right_reserve),
         ));
+        let quote_height = self.attachments.quotes.len();
         let remote_images_height = self
             .attachments
             .remote_image_lines()
             .len()
+            .saturating_add(quote_height)
             .try_into()
             .unwrap_or(u16::MAX)
-            .min(textarea_rect.height.saturating_sub(2));
-        let remote_images_separator = u16::from(remote_images_height > 0);
+            .min(
+                textarea_rect
+                    .height
+                    .saturating_sub(2)
+                    .max(u16::from(textarea_rect.height >= 2)),
+            );
+        let remote_images_separator =
+            u16::from(remote_images_height > 0 && textarea_rect.height > remote_images_height + 1);
         let consumed = remote_images_height.saturating_add(remote_images_separator);
         let remote_images_rect = Rect {
             x: textarea_rect.x,
@@ -176,10 +184,12 @@ impl ChatComposer {
         const COLS_WITH_MARGIN: u16 = LIVE_PREFIX_COLS + 1;
         let inner_width =
             width.saturating_sub(COLS_WITH_MARGIN.saturating_add(options.textarea_right_reserve));
+        let quote_height = self.attachments.quotes.len();
         let remote_images_height: u16 = self
             .attachments
             .remote_image_lines()
             .len()
+            .saturating_add(quote_height)
             .try_into()
             .unwrap_or(u16::MAX);
         let remote_images_separator = u16::from(remote_images_height > 0);
