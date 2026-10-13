@@ -1623,7 +1623,10 @@ async fn fullscreen_composer_mouse_copy_and_input_ownership() -> Result<()> {
         &mouse(Down(Left), /*column*/ 2, draft_y),
     )?;
     assert!(app.transcript_view.pending_quote.is_none());
-    assert_eq!(app.chat_widget.composer_text_with_pending(), "hellox world");
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "1. hellox world"
+    );
     app.render_owned_transcript(&mut tui, size)?;
     let transcript_y = row_containing(&tui, "transcript text");
     for event in [

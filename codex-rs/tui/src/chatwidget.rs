@@ -426,7 +426,6 @@ use self::user_messages::UserMessageSource;
 use self::user_messages::app_server_text_elements;
 pub(crate) use self::user_messages::create_initial_user_message;
 pub(crate) use self::user_messages::mention_bindings_from_user_inputs;
-use self::user_messages::merge_user_messages;
 use self::user_messages::merge_user_messages_with_history_record;
 #[cfg(test)]
 use self::user_messages::remap_placeholders_for_message;
