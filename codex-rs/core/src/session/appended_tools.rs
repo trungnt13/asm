@@ -56,11 +56,28 @@ impl Session {
             .acquire()
             .await
             .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
-        let context = self.new_default_turn().await;
-        let step = self
-            .capture_speculative_step_context(context, &CancellationToken::new())
-            .await?;
-        if !step.tool_router.appended_tools_available {
+        let mut appended = self
+            .state
+            .lock()
+            .await
+            .session_configuration
+            .appended_tools
+            .clone();
+        let registered_count = appended.len();
+        let exact_repeat = !tools.is_empty() && tools.iter().all(|spec| appended.contains(spec));
+        let context = if exact_repeat {
+            // Validate current model/mode without discovering skills, AGENTS.md or MCP tools.
+            // This recording-only context is never used to capture or execute a step.
+            self.new_inject_items_context().await
+        } else {
+            self.new_default_turn().await
+        };
+        if !context.model_info().use_responses_lite
+            || crate::tools::spec_plan::code_mode_only_strict_3p_tools(
+                &context,
+                context.model_info(),
+            )
+        {
             return Err(CodexErr::InvalidRequest(
                 "append-only tools require Responses Lite without strict third-party Code Mode Only".to_string(),
             ));
@@ -70,8 +87,6 @@ impl Session {
                 "tools must not be empty".to_string(),
             ));
         }
-        let mut state = self.state.lock().await;
-        let mut appended = state.session_configuration.appended_tools.clone();
         for spec in tools {
             let DynamicToolSpec::Function(tool) = &spec else {
                 return Err(CodexErr::InvalidRequest(
@@ -92,15 +107,35 @@ impl Session {
             if appended.contains(&spec) {
                 continue;
             }
-            if step.tool_router.registered_tool(&name).is_some()
-                || appended.iter().any(|existing| matches!(existing, DynamicToolSpec::Function(existing) if existing.name == tool.name))
+            if appended.iter().any(|existing| matches!(existing, DynamicToolSpec::Function(existing) if existing.name == tool.name))
             {
                 return Err(CodexErr::InvalidRequest(format!("tool already registered: {}", tool.name)));
             }
             appended.push(spec);
         }
-        if appended == state.session_configuration.appended_tools {
+        if appended.len() == registered_count {
             return Ok(());
+        }
+        let step = self
+            .capture_speculative_step_context(context, &CancellationToken::new())
+            .await?;
+        if !step.tool_router.appended_tools_available {
+            return Err(CodexErr::InvalidRequest(
+                "append-only tools require Responses Lite without strict third-party Code Mode Only".to_string(),
+            ));
+        }
+        for spec in &appended[registered_count..] {
+            if let DynamicToolSpec::Function(tool) = spec
+                && step
+                    .tool_router
+                    .registered_tool(&ToolName::plain(tool.name.clone()))
+                    .is_some()
+            {
+                return Err(CodexErr::InvalidRequest(format!(
+                    "tool already registered: {}",
+                    tool.name
+                )));
+            }
         }
         crate::context::world_state::AppendedToolsState::new(
             appended.clone(),
@@ -114,6 +149,9 @@ impl Session {
                 .into_iter()
                 .collect(),
         );
+        // Keep persistence and publication atomic to readers and cancellation. The shared
+        // permit also prevents compaction/settings checkpoints from overtaking admission.
+        let mut state = self.state.lock().await;
         if !self
             .persist_rollout_items(&[RolloutItem::WorldState(patch)])
             .await

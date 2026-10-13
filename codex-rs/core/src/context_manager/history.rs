@@ -1362,7 +1362,21 @@ fn estimate_function_output_bytes(output: &FunctionCallOutputBody) -> i64 {
 
 fn is_model_generated_item(item: &ResponseItem) -> bool {
     match item {
-        ResponseItem::Message { role, .. } => role == "assistant",
+        ResponseItem::Message {
+            role,
+            internal_chat_message_metadata_passthrough,
+            ..
+        } => {
+            // Peer delivery uses the assistant role, but is locally injected input rather
+            // than provider output. Its trusted kind must not advance the usage boundary.
+            role == "assistant"
+                && !internal_chat_message_metadata_passthrough
+                    .as_ref()
+                    .and_then(|metadata| metadata.content_item_kinds.as_deref())
+                    .is_some_and(|kinds| {
+                        kinds.len() == 1 && kinds[0].0 == crate::context::PeerMessage::KIND
+                    })
+        }
         ResponseItem::Reasoning { .. }
         | ResponseItem::FunctionCall { .. }
         | ResponseItem::ToolSearchCall { .. }

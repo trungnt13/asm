@@ -62,6 +62,7 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
     let mut catalog = codex_models_manager::bundled_models_response()?;
     catalog.models.retain(|model| model.slug == "gpt-5.6-terra");
     ensure!(catalog.models.len() == 1, "mock model metadata");
+    catalog.models[0].use_responses_lite = true;
     catalog.models[0].service_tiers = vec![codex_protocol::openai_models::ModelServiceTier {
         id: codex_protocol::config_types::ServiceTier::Fast
             .request_value()
@@ -136,9 +137,33 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
     .into_iter()
     .enumerate()
     {
+        let started = Instant::now();
         submit(&mut terminal, command)?;
         terminal.wait_for_screen(&format!("{title} from main thread"))?;
         terminal.ensure_running()?;
+        ensure!(
+            !terminal.screen_contains("Companion messaging is unavailable"),
+            "pair must register messaging"
+        );
+        eprintln!(
+            "companion pairing {command} {attempt}: {:?}",
+            started.elapsed()
+        );
+        if command != "/parallel" {
+            let started = Instant::now();
+            submit(&mut terminal, "/sync")?;
+            terminal
+                .wait_for_screen("Synced with main; previous Side/Chat history was discarded.")?;
+            terminal.ensure_running()?;
+            ensure!(
+                !terminal.screen_contains("Companion messaging is unavailable"),
+                "synced pair must register messaging"
+            );
+            eprintln!(
+                "companion sync {command} {attempt}: {:?}",
+                started.elapsed()
+            );
+        }
         terminal.write_input(b"\x03")?;
         terminal.wait_for_screen("STACK_SAVED_HISTORY")?;
         terminal.wait_for_screen("Ask ASM to do anything")?;

@@ -89,9 +89,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
             let mut history = sess.clone_history().await;
             let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
             let tools_in_history = step_context.settings.model_info.use_responses_lite
-                && history
-                    .raw_items()
-                    .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
+                && history.has_tool_declarations();
             let base_instructions = if tools_in_history {
                 BaseInstructions {
                     text: String::new(),
@@ -167,7 +165,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let tools_in_history = model_info.use_responses_lite
         && input
             .iter()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
+            .any(|item| matches!(item, ResponseItem::AdditionalTools { id, .. } if !id.as_ref().is_some_and(|id| id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))));
     let tool_router = &step_context.tool_router;
     input.push(ResponseItem::CompactionTrigger {});
     let prompt = Prompt {
@@ -244,7 +242,7 @@ pub(crate) fn capture_background_input(
     let base_instructions = if step_context.settings.model_info.use_responses_lite
         && snapshot
             .raw_items()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
+            .any(|item| matches!(item, ResponseItem::AdditionalTools { id, .. } if !id.as_ref().is_some_and(|id| id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))))
     {
         BaseInstructions {
             text: String::new(),
