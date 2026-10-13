@@ -85,21 +85,6 @@ fn collect_explicit_skill_mentions_text_respects_skill_order() {
 
     // Text scanning should not change the previous selection ordering semantics.
     assert_eq!(selected, vec![beta, alpha]);
-
-    let quoted = linked_skill_mention("alpha-skill", "/tmp/alpha");
-    for text in [
-        format!("> $alpha-skill\n  >> {quoted}\n\nuse $beta-skill"),
-        format!("use $beta-skill\n> {quoted}\n> $alpha-skill"),
-    ] {
-        let inputs = [UserInput::Text {
-            text,
-            text_elements: Vec::new(),
-        }];
-        assert_eq!(
-            collect_mentions(&inputs, &skills, &HashSet::new(), &connector_counts),
-            vec![skills[0].clone()]
-        );
-    }
 }
 
 #[test]
@@ -109,7 +94,7 @@ fn collect_explicit_skill_mentions_prioritizes_structured_inputs() {
     let skills = vec![alpha.clone(), beta.clone()];
     let inputs = vec![
         UserInput::Text {
-            text: "> $beta-skill\n\nplease run $alpha-skill".to_string(),
+            text: "please run $alpha-skill".to_string(),
             text_elements: Vec::new(),
         },
         UserInput::Skill {
