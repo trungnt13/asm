@@ -287,6 +287,8 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | Setting | Default | Validation |
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in only |
+| `profile` | Absent: legacy OpenAI configuration | User-defined name in `profiles`; cannot mix with legacy model/key settings |
+| `profiles.<name>` | Empty map | Required `backend` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env` |
 | `decision_model` | `"gpt-6-luna"` | Nonblank |
 | `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
 | `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
@@ -297,12 +299,45 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | `decision_every_n_steps` | `2` | Positive integer; next due step is the last accepted decision step + N |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
-- Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the Decisions API to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
+Profiles name connection settings, not separate adaptation policies. Keep effort bounds,
+cadence, evidence limits, timeout, and rubric shared. Profile names have no built-in
+meaning. Require explicit backend, model, and credential-variable name in each
+profile; do not infer a backend from its name or credentials. Validate all defined
+profiles and reject unknown selections/backends rather than falling back. Without
+`profile`, preserve legacy OpenAI defaults and explicit overrides. Selecting a
+profile together with either legacy `decision_model` or `decision_model_api_env`
+is an error, even if the legacy value matches its default.
+
+```toml
+[adaptive_reasoning]
+enabled = true
+profile = "jev"
+
+[adaptive_reasoning.profiles.jev]
+backend = "typesafe"
+model = "jev-latest"
+api_key_env = "TYPESAFE_API_KEY"
+
+[adaptive_reasoning.profiles.decision_api]
+backend = "openai"
+model = "gpt-6-luna"
+api_key_env = "DECISION_API_KEY"
+```
+
+Resolve the connection profile once on first use in each session, including failed
+credential attempts. Keep its backend/model together across warm-up and decisions;
+configuration reloads do not switch an active session's profile. Both adapters use
+the same cancellation, deadline, allowed-choice validation, and recovery policy.
+No automatic failover or adapter-internal retries. Selecting TypeSafe sends bounded
+conversation evidence to TypeSafe, not OpenAI. Use official fixed HTTPS endpoints;
+keep credentials separate from main-model authentication and diagnostics sanitized.
+
+- Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the selected decision backend to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
 - If fewer than two efforts remain, skip Decisions and warm-up; keep current effort.
-- Read credentials only from the named backend environment variable, default `DECISION_API_KEY`. Do not fall back to `OPENAI_API_KEY`; explicit variable-name overrides remain supported. Keep main-model authentication separate. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
+- Read credentials only from the selected profile's `api_key_env`, or the legacy named backend environment variable (default `DECISION_API_KEY`). Do not fall back to `OPENAI_API_KEY`; explicit variable-name overrides remain supported. Keep main-model authentication separate. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
 - If set, use `rubric_instructions` instead of the built-in rubric, without a suffix. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
 - Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, images, and encrypted reasoning. Scale scan limits with the byte budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. These scan limits and the byte budget can still omit older history; they do not promise a complete transcript.
-- **P0 manual review:** bound total evidence and rubric separately using the table limits. Split larger evidence into ordered Decisions input messages of at most 8192 UTF-8 bytes each, preferring line boundaries. Preserve text and the default single-message request. Rubric instructions remain at most 4096 bytes. Each item can exceed 1000 tokens, but its byte cap keeps it below the 10K-token item limit. Keep this evidence outside the main conversation.
+- **P0 manual review:** bound total evidence and rubric separately using the table limits. Split larger evidence into ordered OpenAI input messages or TypeSafe state-array strings of at most 8192 UTF-8 bytes each, preferring line boundaries. TypeSafe keeps a string state when one chunk suffices. Preserve text and the default single-message request. Rubric instructions remain at most 4096 bytes. Each item can exceed 1000 tokens, but its byte cap keeps it below the 10K-token item limit. Keep this evidence outside the main conversation.
 - At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
 - Limit warm-up to two seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
 - Before each cadence-selected main step with an enabled trigger, collect current evidence and await Decisions and validation in the turn task, without a separate step job or completion channel. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit. Keep only warm-up and log writing in the background.

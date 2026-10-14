@@ -6,6 +6,13 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
+    "AdaptiveReasoningBackend": {
+      "enum": [
+        "openai",
+        "typesafe"
+      ],
+      "type": "string"
+    },
     "AdaptiveReasoningConfig": {
       "additionalProperties": false,
       "properties": {
@@ -24,11 +31,11 @@
           "type": "integer"
         },
         "decision_model": {
-          "default": "gpt-6-luna",
+          "default": null,
           "type": "string"
         },
         "decision_model_api_env": {
-          "default": "DECISION_API_KEY",
+          "default": null,
           "type": "string"
         },
         "decision_timeout_ms": {
@@ -65,6 +72,17 @@
           ],
           "default": "low"
         },
+        "profile": {
+          "default": null,
+          "type": "string"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AdaptiveReasoningProfile"
+          },
+          "default": {},
+          "type": "object"
+        },
         "rubric_instructions": {
           "default": null,
           "type": "string"
@@ -80,6 +98,27 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "AdaptiveReasoningProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "description": "Environment variable name, never the credential itself.",
+          "type": "string"
+        },
+        "backend": {
+          "$ref": "#/definitions/AdaptiveReasoningBackend"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_key_env",
+        "backend",
+        "model"
+      ],
       "type": "object"
     },
     "AdaptiveReasoningTrigger": {

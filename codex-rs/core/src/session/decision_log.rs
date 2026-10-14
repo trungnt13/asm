@@ -64,6 +64,7 @@ struct Record {
     phase: &'static str,
     elapsed_ms: Option<u128>,
     http_attempted: bool,
+    backend: Option<&'static str>,
     api: Option<&'static str>,
     error: Option<&'static str>,
     http_status: Option<u16>,
@@ -154,6 +155,7 @@ impl DecisionLog {
             phase: "start",
             elapsed_ms: None,
             http_attempted: false,
+            backend: None,
             api: None,
             error: None,
             http_status: None,
@@ -202,8 +204,9 @@ pub(super) struct DecisionAttempt {
 }
 
 impl DecisionAttempt {
-    pub(super) fn mark_http_attempted(&mut self) {
+    pub(super) fn mark_http_attempted(&mut self, backend: &'static str) {
         self.record.http_attempted = true;
+        self.record.backend = Some(backend);
     }
 
     pub(super) fn finish(

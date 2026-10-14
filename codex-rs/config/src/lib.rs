@@ -53,7 +53,9 @@ pub mod types;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 
+pub use adaptive_reasoning::AdaptiveReasoningBackend;
 pub use adaptive_reasoning::AdaptiveReasoningConfig;
+pub use adaptive_reasoning::AdaptiveReasoningProfile;
 pub use adaptive_reasoning::AdaptiveReasoningTrigger;
 pub use application_requirements::ApplicationNetworkRequirementsToml;
 pub use application_requirements::ApplicationRequirementsToml;

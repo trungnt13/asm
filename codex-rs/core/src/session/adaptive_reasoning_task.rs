@@ -87,7 +87,7 @@ pub(super) async fn run_decision(
         result = tokio::time::timeout_at(guard.deadline,
             async {
                 if let Some(attempt) = &mut attempt {
-                    attempt.mark_http_attempted();
+                    attempt.mark_http_attempted(client.backend_name());
                 }
                 client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices).await
             }

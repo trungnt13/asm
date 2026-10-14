@@ -1,5 +1,7 @@
 //! Opt-in controls for choosing ordinary reasoning budgets without changing execution modes.
 
+use std::collections::BTreeMap;
+
 use codex_protocol::openai_models::ReasoningEffort;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -10,6 +12,22 @@ use serde::Serialize;
 pub enum AdaptiveReasoningTrigger {
     TurnStart,
     ToolResult,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AdaptiveReasoningBackend {
+    Openai,
+    Typesafe,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AdaptiveReasoningProfile {
+    pub backend: AdaptiveReasoningBackend,
+    pub model: String,
+    /// Environment variable name, never the credential itself.
+    pub api_key_env: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -24,8 +42,10 @@ pub struct AdaptiveReasoningConfig {
     /// Each new turn starts without a previous accepted decision.
     #[schemars(range(min = 1))]
     pub decision_every_n_steps: u64,
-    pub decision_model: String,
-    pub decision_model_api_env: String,
+    pub profile: Option<String>,
+    pub profiles: BTreeMap<String, AdaptiveReasoningProfile>,
+    pub decision_model: Option<String>,
+    pub decision_model_api_env: Option<String>,
     pub min_effort: ReasoningEffort,
     pub max_effort: ReasoningEffort,
     #[schemars(range(min = 1, max = 5000))]
@@ -42,8 +62,10 @@ impl Default for AdaptiveReasoningConfig {
             enabled: false,
             decision_every_n_turns: 1,
             decision_every_n_steps: 2,
-            decision_model: "gpt-6-luna".to_string(),
-            decision_model_api_env: "DECISION_API_KEY".to_string(),
+            profile: None,
+            profiles: BTreeMap::new(),
+            decision_model: None,
+            decision_model_api_env: None,
             min_effort: ReasoningEffort::Low,
             max_effort: ReasoningEffort::Max,
             decision_timeout_ms: 200,
@@ -58,6 +80,31 @@ impl Default for AdaptiveReasoningConfig {
 }
 
 impl AdaptiveReasoningConfig {
+    pub fn resolved_profile(&self) -> Result<AdaptiveReasoningProfile, String> {
+        let profile = if let Some(name) = &self.profile {
+            if self.decision_model.is_some() || self.decision_model_api_env.is_some() {
+                return Err("adaptive_reasoning.profile cannot be combined with decision_model or decision_model_api_env".to_string());
+            }
+            self.profiles.get(name).cloned().ok_or_else(|| {
+                format!("adaptive_reasoning.profile references unknown profile {name:?}")
+            })?
+        } else {
+            AdaptiveReasoningProfile {
+                backend: AdaptiveReasoningBackend::Openai,
+                model: self
+                    .decision_model
+                    .clone()
+                    .unwrap_or_else(|| "gpt-6-luna".to_string()),
+                api_key_env: self
+                    .decision_model_api_env
+                    .clone()
+                    .unwrap_or_else(|| "DECISION_API_KEY".to_string()),
+            }
+        };
+        profile.validate()?;
+        Ok(profile)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.decision_every_n_turns == 0 || self.decision_every_n_steps == 0 {
             return Err("adaptive_reasoning decision_every_n_turns and decision_every_n_steps must be positive integers".to_string());
@@ -83,16 +130,12 @@ impl AdaptiveReasoningConfig {
         if min > max {
             return Err("adaptive_reasoning.min_effort must not exceed max_effort".to_string());
         }
-        if self.decision_model.trim().is_empty() {
-            return Err("adaptive_reasoning.decision_model must not be blank".to_string());
-        }
-        let mut name = self.decision_model_api_env.bytes();
-        if !name
-            .next()
-            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-            || !name.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-        {
-            return Err("adaptive_reasoning.decision_model_api_env must be an ASCII environment variable identifier".to_string());
+        self.resolved_profile()?;
+        for (name, profile) in &self.profiles {
+            if name.trim().is_empty() {
+                return Err("adaptive_reasoning profile names must not be blank".to_string());
+            }
+            profile.validate()?;
         }
         if !(1..=5000).contains(&self.decision_timeout_ms) {
             return Err(
@@ -114,6 +157,23 @@ impl AdaptiveReasoningConfig {
                         .to_string(),
                 );
             }
+        }
+        Ok(())
+    }
+}
+
+impl AdaptiveReasoningProfile {
+    fn validate(&self) -> Result<(), String> {
+        if self.model.trim().is_empty() {
+            return Err("adaptive_reasoning decision model must not be blank".to_string());
+        }
+        let mut name = self.api_key_env.bytes();
+        if !name
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+            || !name.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err("adaptive_reasoning API key environment variable must be an ASCII environment variable identifier".to_string());
         }
         Ok(())
     }
