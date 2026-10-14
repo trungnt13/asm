@@ -1065,6 +1065,8 @@ pub struct Config {
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
     pub adaptive_reasoning: codex_config::AdaptiveReasoningConfig,
+    /// Retains role restrictions across live-toggle inheritance and child reloads.
+    pub(crate) role_adaptive_reasoning_disabled: bool,
     /// Runtime-only revision seed when an evicted child session is reloaded.
     pub adaptive_reasoning_initial_revision: u64,
     pub adaptive_reasoning_initial_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
@@ -4654,6 +4656,7 @@ impl Config {
                 .unwrap_or_default(),
             model_reasoning_effort: cfg.model_reasoning_effort,
             adaptive_reasoning,
+            role_adaptive_reasoning_disabled: false,
             adaptive_reasoning_initial_revision: 0,
             adaptive_reasoning_initial_error: None,
             adaptive_reasoning_initial_failure_episode: 0,

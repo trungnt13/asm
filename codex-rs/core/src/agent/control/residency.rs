@@ -9,6 +9,7 @@ use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrKind;
@@ -60,6 +61,8 @@ impl ThreadManagerState {
         tokio::spawn(async move {
             let _residency_guard = residency_guard;
             thread.ensure_rollout_materialized().await;
+            // Keep effective child restrictions when a different sender reloads it.
+            let child_config = thread.session.get_config().await;
             if let Err(err) = thread.shutdown_and_wait().await {
                 teardown.record_shutdown_failure("stop_resident", CodexErrKind::from(&err).into());
                 teardown.complete();
@@ -92,6 +95,9 @@ impl ThreadManagerState {
                 EvictedAgentRuntimeState {
                     environments,
                     adaptive_reasoning_enabled: adaptive.adaptive_reasoning_enabled,
+                    role_adaptive_reasoning_disabled: child_config.role_adaptive_reasoning_disabled,
+                    web_search_disabled: child_config.web_search_mode.value()
+                        == WebSearchMode::Disabled,
                     adaptive_reasoning_revision: adaptive.adaptive_reasoning_revision,
                     adaptive_reasoning_error: adaptive.adaptive_reasoning_error,
                     adaptive_reasoning_failure_episode: adaptive.adaptive_reasoning_failure_episode,
