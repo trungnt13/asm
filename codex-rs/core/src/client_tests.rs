@@ -569,6 +569,17 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
     let output = output_with_tool_result_metadata(ToolResultMetadata::new(&json!({
         "private": { "resource": "raw-result-metadata" },
     })));
+    let mut attributed_output = output.clone();
+    let ResponseItem::FunctionCallOutput {
+        internal_chat_message_metadata_passthrough: Some(metadata),
+        ..
+    } = &mut attributed_output
+    else {
+        panic!("tool output should carry internal metadata");
+    };
+    metadata.content_item_metadata = Some(vec![codex_protocol::models::ContentItemMetadata::tool(
+        /*namespace*/ None,
+    )]);
     let without_raw_metadata = output_with_tool_result_metadata(ToolResultMetadata::default());
     let attribution = McpAttribution {
         status: McpAttributionStatus::Complete,
@@ -582,7 +593,7 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
         }],
     };
     let prompt = Prompt {
-        input: vec![output.clone(), omitted_output.clone()],
+        input: vec![attributed_output.clone(), omitted_output.clone()],
         ..Default::default()
     };
     let mut responses_metadata = test_responses_metadata_for_client(
@@ -674,7 +685,10 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
                     .get("mcp_attribution")
                     .is_none()
             );
-            assert_eq!(prompt.input, vec![output.clone(), omitted_output.clone()]);
+            assert_eq!(
+                prompt.input,
+                vec![attributed_output.clone(), omitted_output.clone()]
+            );
         }
     }
     responses_metadata.mcp_attribution = Some(McpAttribution {
