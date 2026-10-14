@@ -1408,15 +1408,6 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             .unwrap(),
         ThreadEvictionOutcome::Evicted
     );
-    assert_eq!(
-        control
-            .runtime
-            .registry
-            .evicted_runtime_state(spawned_agent.thread_id)
-            .unwrap()
-            .adaptive_reasoning_enabled,
-        born_adaptive
-    );
     let stored_child = child_thread
         .read_thread(
             /*include_archived*/ true, /*include_history*/ false,
@@ -1524,31 +1515,21 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             crate::ThreadEvictionOutcome::Busy,
         );
     }
-    assert_eq!(
-        reloaded_child
-            .config_snapshot()
-            .await
-            .adaptive_reasoning_enabled,
-        born_adaptive
-    );
-    assert_eq!(
-        reloaded_child
-            .config_snapshot()
-            .await
-            .adaptive_reasoning_revision,
-        born_revision
-    );
     let restored_health = reloaded_child.config_snapshot().await;
     assert_eq!(
         (
+            restored_health.adaptive_reasoning_enabled,
+            restored_health.adaptive_reasoning_revision,
             restored_health.adaptive_reasoning_error,
             restored_health.adaptive_reasoning_failure_episode
         ),
         (
+            born_adaptive,
+            born_revision,
             child_health.adaptive_reasoning_error,
             child_health.adaptive_reasoning_failure_episode
         ),
-        "reload retains this child's own failure episode"
+        "reload retains this child's own mode and failure episode"
     );
     let reloaded_instructions = reloaded_child.session.inherited_instructions().await;
     assert_eq!(
