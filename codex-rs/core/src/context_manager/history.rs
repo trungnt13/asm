@@ -637,8 +637,10 @@ impl ContextManager {
     }
 
     pub(crate) fn has_tool_declarations(&self) -> bool {
-        self.raw_items()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { id, .. } if !id.as_ref().is_some_and(|id| id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))))
+        self.raw_items().any(|item| {
+            matches!(item, ResponseItem::AdditionalTools { .. })
+                && !crate::context::world_state::is_appended_declaration(item)
+        })
     }
 
     /// Returns annotated history items without cloning their response payloads.
@@ -1362,20 +1364,10 @@ fn estimate_function_output_bytes(output: &FunctionCallOutputBody) -> i64 {
 
 fn is_model_generated_item(item: &ResponseItem) -> bool {
     match item {
-        ResponseItem::Message {
-            role,
-            internal_chat_message_metadata_passthrough,
-            ..
-        } => {
+        ResponseItem::Message { role, .. } => {
             // Peer delivery uses the assistant role, but is locally injected input rather
             // than provider output. Its trusted kind must not advance the usage boundary.
-            role == "assistant"
-                && !internal_chat_message_metadata_passthrough
-                    .as_ref()
-                    .and_then(|metadata| metadata.content_item_kinds.as_deref())
-                    .is_some_and(|kinds| {
-                        kinds.len() == 1 && kinds[0].0 == crate::context::PeerMessage::KIND
-                    })
+            role == "assistant" && !crate::context::PeerMessage::matches(item)
         }
         ResponseItem::Reasoning { .. }
         | ResponseItem::FunctionCall { .. }

@@ -9,8 +9,13 @@ use codex_protocol::models::ResponseItem;
 use serde::Deserialize;
 use serde::Serialize;
 
-pub(crate) const APPENDED_TOOL_ID_PREFIX: &str = "at_appended_";
+const APPENDED_TOOL_ID_PREFIX: &str = "at_appended_";
 pub(crate) const APPENDED_TOOL_REGISTRY: &str = "appended_tool_registry";
+
+pub(crate) fn is_appended_declaration(item: &ResponseItem) -> bool {
+    matches!(item, ResponseItem::AdditionalTools { id: Some(id), .. }
+        if id.as_str().starts_with(APPENDED_TOOL_ID_PREFIX))
+}
 
 pub(crate) struct AppendedToolsState {
     specs: Vec<DynamicToolSpec>,

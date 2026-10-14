@@ -476,13 +476,7 @@ impl TurnInputQueue {
                 input,
                 TurnInput::UserInput { .. } | TurnInput::FunctionCallOutput(_)
             ) || matches!(input, TurnInput::ResponseItem(envelope)
-            if matches!(&envelope.item, ResponseItem::Message {
-                role,
-                internal_chat_message_metadata_passthrough: Some(metadata),
-                ..
-            } if role == "assistant" && metadata.content_item_kinds.as_deref().is_some_and(|kinds| {
-                kinds.len() == 1 && kinds[0].0 == crate::context::PeerMessage::KIND
-            })))
+            if crate::context::PeerMessage::matches(&envelope.item))
         }) {
             Some(InputQueueActivity::Steer)
         } else if self

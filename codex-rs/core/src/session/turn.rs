@@ -1709,10 +1709,7 @@ pub(crate) fn build_prompt(
 ) -> Prompt {
     let turn_context = &step_context.turn;
     if !step_context.tool_router.appended_tools_available {
-        input.retain(|item| {
-            !matches!(item, ResponseItem::AdditionalTools { id: Some(id), .. }
-                if id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))
-        });
+        input.retain(|item| !crate::context::world_state::is_appended_declaration(item));
     }
     Prompt {
         input,

@@ -1,10 +1,21 @@
 use super::ContextualUserFragment;
 use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::ResponseItem;
 
 pub struct PeerMessage(String);
 
 impl PeerMessage {
-    pub(crate) const KIND: &'static str = "peer.message";
+    const KIND: &'static str = "peer.message";
+    pub(crate) fn matches(item: &ResponseItem) -> bool {
+        matches!(item, ResponseItem::Message {
+            role,
+            internal_chat_message_metadata_passthrough: Some(metadata),
+            ..
+        } if role == "assistant" && metadata.content_item_kinds.as_deref().is_some_and(|kinds| {
+            kinds.len() == 1 && kinds[0].0 == Self::KIND
+        }))
+    }
+
     pub fn new(text: String) -> codex_protocol::error::Result<Self> {
         let message = Self(text);
         super::validate_injected_item_size(&message.render_fragment().into())?;

@@ -47,6 +47,19 @@ pub(super) fn restore_appended_tools(history: &InitialHistory) -> Result<Vec<Dyn
     Ok(Vec::new())
 }
 
+// Retain the first advertised spec when only its description changes. Argument
+// schemas and loading behavior must still agree with the executor's contract.
+fn same_appended_tool_contract(left: &DynamicToolSpec, right: &DynamicToolSpec) -> bool {
+    match (left, right) {
+        (DynamicToolSpec::Function(left), DynamicToolSpec::Function(right)) => {
+            left.name == right.name
+                && left.input_schema == right.input_schema
+                && left.defer_loading == right.defer_loading
+        }
+        (DynamicToolSpec::Namespace(_), _) | (_, DynamicToolSpec::Namespace(_)) => false,
+    }
+}
+
 impl Session {
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn is_appended_tool(&self, name: &str) -> bool {
@@ -75,8 +88,13 @@ impl Session {
             .appended_tools
             .clone();
         let registered_count = appended.len();
-        let exact_repeat = !tools.is_empty() && tools.iter().all(|spec| appended.contains(spec));
-        let context = if exact_repeat {
+        let compatible_repeat = !tools.is_empty()
+            && tools.iter().all(|spec| {
+                appended
+                    .iter()
+                    .any(|existing| same_appended_tool_contract(existing, spec))
+            });
+        let context = if compatible_repeat {
             // Validate current model/mode without discovering skills, AGENTS.md or MCP tools.
             // This recording-only context is never used to capture or execute a step.
             self.new_inject_items_context().await
@@ -115,7 +133,10 @@ impl Session {
             }
             codex_tools::dynamic_tool_to_responses_api_tool(tool)
                 .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
-            if appended.contains(&spec) {
+            if appended
+                .iter()
+                .any(|existing| same_appended_tool_contract(existing, &spec))
+            {
                 continue;
             }
             if appended.iter().any(|existing| matches!(existing, DynamicToolSpec::Function(existing) if existing.name == tool.name))

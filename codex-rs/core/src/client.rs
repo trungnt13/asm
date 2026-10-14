@@ -966,10 +966,7 @@ impl ModelClient {
         let mut input = prompt.get_formatted_input_for_request(model_info);
         if !model_info.use_responses_lite {
             // Keep saved declarations for a compatible model; only this request lacks the tools.
-            input.retain(|item| {
-                !matches!(item, ResponseItem::AdditionalTools { id: Some(id), .. }
-                if id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))
-            });
+            input.retain(|item| !crate::context::world_state::is_appended_declaration(item));
         }
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.

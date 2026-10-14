@@ -163,9 +163,10 @@ pub(super) async fn run_remote_compact_v2_attempt(
         ),
     };
     let tools_in_history = model_info.use_responses_lite
-        && input
-            .iter()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { id, .. } if !id.as_ref().is_some_and(|id| id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))));
+        && input.iter().any(|item| {
+            matches!(item, ResponseItem::AdditionalTools { .. })
+                && !crate::context::world_state::is_appended_declaration(item)
+        });
     let tool_router = &step_context.tool_router;
     input.push(ResponseItem::CompactionTrigger {});
     let prompt = Prompt {
@@ -240,10 +241,10 @@ pub(crate) fn capture_background_input(
     window: (String, u64, uuid::Uuid),
 ) -> BackgroundCompactionInput {
     let base_instructions = if step_context.settings.model_info.use_responses_lite
-        && snapshot
-            .raw_items()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { id, .. } if !id.as_ref().is_some_and(|id| id.as_str().starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX))))
-    {
+        && snapshot.raw_items().any(|item| {
+            matches!(item, ResponseItem::AdditionalTools { .. })
+                && !crate::context::world_state::is_appended_declaration(item)
+        }) {
         BaseInstructions {
             text: String::new(),
             provenance: None,

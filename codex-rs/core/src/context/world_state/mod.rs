@@ -39,9 +39,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 pub(crate) use agents_md::AgentsMdState;
-pub(crate) use appended_tools::APPENDED_TOOL_ID_PREFIX;
 pub(crate) use appended_tools::APPENDED_TOOL_REGISTRY;
 pub(crate) use appended_tools::AppendedToolsState;
+pub(crate) use appended_tools::is_appended_declaration;
 pub(crate) use apps_instructions::AppsInstructionsState;
 pub(crate) use collaboration_mode::CollaborationModeState;
 pub(crate) use compact_permissions::CompactPermissionsState;

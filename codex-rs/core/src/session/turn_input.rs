@@ -345,18 +345,9 @@ async fn start_or_steer(
     let origin = UserInputOrigin::from_turn_trigger(start.turn_trigger.as_deref());
     let has_explicit_input = match &input {
         SubmittedTurnInput::UserInput { content, .. } => !content.is_empty(),
-        SubmittedTurnInput::ResponseItem(
-            item @ ResponseItem::Message {
-                role,
-                content,
-                internal_chat_message_metadata_passthrough: Some(metadata),
-                ..
-            },
-        ) if role == "assistant"
-            && matches!(content.as_slice(), [codex_protocol::models::ContentItem::InputText { text }] if !text.trim().is_empty())
-            && metadata.content_item_kinds.as_deref().is_some_and(|kinds| {
-                kinds.len() == 1 && kinds[0].0 == crate::context::PeerMessage::KIND
-            }) =>
+        SubmittedTurnInput::ResponseItem(item @ ResponseItem::Message { content, .. })
+            if crate::context::PeerMessage::matches(item)
+                && matches!(content.as_slice(), [codex_protocol::models::ContentItem::InputText { text }] if !text.trim().is_empty()) =>
         {
             crate::context::validate_injected_item_size(item)?;
             true
