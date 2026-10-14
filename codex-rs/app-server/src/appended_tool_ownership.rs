@@ -24,15 +24,9 @@ pub(super) struct AppendedToolOwners {
 }
 
 impl AppendedToolOwners {
-    pub(super) fn release_connection(
-        &mut self,
-        connection_id: ConnectionId,
-        thread_id: Option<ThreadId>,
-    ) {
-        for ((registered_thread, _), owner) in &mut self.tools {
-            if *owner == Some(connection_id)
-                && thread_id.is_none_or(|thread_id| thread_id == *registered_thread)
-            {
+    fn revoke_tools(&mut self, matches: impl Fn(ThreadId, Option<ConnectionId>) -> bool) {
+        for ((thread_id, _), owner) in &mut self.tools {
+            if matches(*thread_id, *owner) {
                 *owner = None;
             }
         }
@@ -134,18 +128,14 @@ impl OutgoingMessageSender {
             None => None,
         };
         let mut owners = self.appended_tool_owners.lock().await;
-        for ((registered_thread, _), owner) in &mut owners.tools {
-            if *registered_thread == thread_id {
-                *owner = None;
-            }
-        }
+        owners.revoke_tools(|registered_thread, _| registered_thread == thread_id);
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn disconnect_appended_tool_connection(&self, connection_id: ConnectionId) {
         let mut owners = self.appended_tool_owners.lock().await;
         owners.live_connections.remove(&connection_id);
-        owners.release_connection(connection_id, /*thread_id*/ None);
+        owners.revoke_tools(|_, owner| owner == Some(connection_id));
         self.request_id_to_callback
             .lock()
             .await
@@ -159,7 +149,9 @@ impl OutgoingMessageSender {
         thread_id: ThreadId,
     ) {
         let mut owners = self.appended_tool_owners.lock().await;
-        owners.release_connection(connection_id, Some(thread_id));
+        owners.revoke_tools(|registered_thread, owner| {
+            registered_thread == thread_id && owner == Some(connection_id)
+        });
         self.request_id_to_callback.lock().await.retain(|_, entry| {
             entry.thread_id != Some(thread_id)
                 || entry.connection_owner != Some(connection_id)

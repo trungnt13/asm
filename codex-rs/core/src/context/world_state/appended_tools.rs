@@ -38,13 +38,12 @@ impl AppendedToolsState {
                         "appended tools must be standalone functions".to_string(),
                     ));
                 };
-                let tool =
-                    codex_tools::dynamic_tool_to_responses_api_tool(tool).map_err(|error| {
+                codex_tools::dynamic_tool_to_responses_api_tool(tool)
+                    .map(codex_tools::ToolSpec::Function)
+                    .and_then(serde_json::to_value)
+                    .map_err(|error| {
                         codex_protocol::error::CodexErr::InvalidRequest(error.to_string())
-                    })?;
-                serde_json::to_value(codex_tools::ToolSpec::Function(tool)).map_err(|error| {
-                    codex_protocol::error::CodexErr::InvalidRequest(error.to_string())
-                })
+                    })
             })
             .collect::<codex_protocol::error::Result<Vec<_>>>()?;
         let namespace_description = baseline

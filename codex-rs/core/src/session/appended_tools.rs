@@ -18,26 +18,23 @@ use tokio_util::sync::CancellationToken;
 pub(super) fn restore_appended_tools(history: &InitialHistory) -> Result<Vec<DynamicToolSpec>> {
     // Admission/checkpoint state outranks a subsequently rendered, older step snapshot.
     let items = history.get_rollout_items();
-    let registry = items.iter().rev().find_map(|item| {
+    let mut states = items.iter().rev().filter_map(|item| {
         if let RolloutItem::WorldState(state) = item {
-            state
-                .state
-                .get(APPENDED_TOOL_REGISTRY)
-                .filter(|value| !value.is_null())
+            Some(&state.state)
         } else {
             None
         }
     });
+    let registry = states.clone().find_map(|state| {
+        state
+            .get(APPENDED_TOOL_REGISTRY)
+            .filter(|value| !value.is_null())
+    });
     let snapshot = || {
-        items.iter().rev().find_map(|item| {
-            if let RolloutItem::WorldState(state) = item {
-                state
-                    .state
-                    .get("appended_tools")
-                    .and_then(|value| value.get("specs"))
-            } else {
-                None
-            }
+        states.find_map(|state| {
+            state
+                .get("appended_tools")
+                .and_then(|value| value.get("specs"))
         })
     };
     if let Some(value) = registry.or_else(snapshot) {
@@ -204,20 +201,19 @@ impl Session {
         model: &ModelInfo,
         router: &mut ToolRouter,
     ) -> Result<()> {
-        let specs = self
+        router.appended_tools = self
             .state
             .lock()
             .await
             .session_configuration
             .appended_tools
             .clone();
-        router.appended_tools = specs.clone();
         router.appended_tools_available = model.use_responses_lite
             && !crate::tools::spec_plan::code_mode_only_strict_3p_tools(turn_context, model);
         if !router.appended_tools_available {
             return Ok(());
         }
-        for spec in &specs {
+        for spec in &router.appended_tools {
             let DynamicToolSpec::Function(tool) = spec else {
                 return Err(CodexErr::InvalidRequest(
                     "appended tools must be standalone functions".to_string(),

@@ -94,39 +94,32 @@ impl App {
             );
             Ok((recipient, message))
         })();
-        let (recipient, message) = match route {
-            Ok(route) => route,
-            Err(error) => {
-                self.app_event_tx.send(AppEvent::DynamicToolCallCompleted {
-                    request_id,
-                    response: crate::dynamic_tools::failure_response(error),
-                });
-                return;
-            }
-        };
-        // Admission completes before the TUI can close or replace this pair. This
-        // awaits only the atomic start/steer acknowledgement, never a model reply.
-        let result = app_server
-            .request_handle()
-            .request_typed::<TurnStartResponse>(ClientRequest::TurnStart {
-                request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
-                params: TurnStartParams {
-                    thread_id: recipient.to_string(),
-                    assistant_message: Some(message),
-                    ..TurnStartParams::default()
-                },
-            })
-            .await;
-        let response = match result {
-            Ok(_) => DynamicToolCallResponse {
+        let response = async {
+            let (recipient, message) = route?;
+            // Admission completes before the TUI can close or replace this pair. This
+            // awaits only the atomic start/steer acknowledgement, never a model reply.
+            app_server
+                .request_handle()
+                .request_typed::<TurnStartResponse>(ClientRequest::TurnStart {
+                    request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
+                    params: TurnStartParams {
+                        thread_id: recipient.to_string(),
+                        assistant_message: Some(message),
+                        ..TurnStartParams::default()
+                    },
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>(DynamicToolCallResponse {
                 success: true,
                 content_items: vec![DynamicToolCallOutputContentItem::InputText {
                     text: json!({"status": "accepted", "recipient": recipient.to_string()})
                         .to_string(),
                 }],
-            },
-            Err(error) => crate::dynamic_tools::failure_response(error.to_string()),
-        };
+            })
+        }
+        .await
+        .unwrap_or_else(crate::dynamic_tools::failure_response);
         self.app_event_tx.send(AppEvent::DynamicToolCallCompleted {
             request_id,
             response,
