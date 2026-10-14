@@ -1,4 +1,7 @@
-load("//:defs.bzl", "codex_rust_crate")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("//:defs.bzl", "WINDOWS_RUSTC_LINK_FLAGS", "codex_rust_crate")
+load("//bazel/rules:schema_bundle.bzl", "schema_generator_sources")
 
 codex_rust_crate(
     name = "app-server-protocol",
@@ -16,4 +19,46 @@ alias(
     actual = ":app-server-protocol-unit-tests-bin",
     tags = ["manual"],
     visibility = ["//bazel/schema:__pkg__"],
+)
+
+schema_generator_sources(
+    name = "schema-generator-sources",
+    srcs = glob(["src/**/*.rs"]),
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "schema-generator-root",
+    srcs = [":schema-generator-sources"],
+    output_group = "crate_root",
+    tags = ["manual"],
+)
+
+filegroup(
+    name = "schema-generator-placeholders",
+    srcs = [":schema-generator-sources"],
+    output_group = "precomputed",
+    tags = ["manual"],
+)
+
+# Compile the crate's test harness, including its unit tests.
+# Each schema action runs only write_schema_fixtures_from_env via --exact --ignored.
+rust_binary(
+    name = "schema-generator-on-demand",
+    srcs = [":schema-generator-sources"],
+    compile_data = [":schema-generator-placeholders"],
+    crate_name = "codex_app_server_protocol",
+    crate_root = ":schema-generator-root",
+    edition = "2024",
+    rustc_env = {
+        "BAZEL_PACKAGE": "codex-rs/app-server-protocol",
+        "CARGO_PKG_NAME": "codex-app-server-protocol",
+    },
+    rustc_flags = ["--test"] + WINDOWS_RUSTC_LINK_FLAGS,
+    tags = ["manual"],
+    visibility = ["//bazel/schema:__pkg__"],
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
 )

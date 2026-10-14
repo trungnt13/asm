@@ -1,4 +1,4 @@
-"""Cache schema generation from the filtered public Rust test executable."""
+"""Generate API artifacts with the existing Rust and Python exporters."""
 
 def _schema_bundle_impl(ctx):
     outputs = []
@@ -27,7 +27,10 @@ def _schema_bundle_impl(ctx):
     # can normalize the JSON without a separate `bazel run` invocation.
     zstd = ctx.actions.declare_file(ctx.label.name + ".zstd")
     ctx.actions.symlink(output = zstd, target_file = ctx.executable.zstd, is_executable = True)
-    return [DefaultInfo(files = depset(outputs + [zstd]))]
+    return [
+        DefaultInfo(files = depset(outputs + [zstd])),
+        OutputGroupInfo(stable = depset([outputs[0]]), experimental = depset([outputs[1]])),
+    ]
 
 schema_bundle = rule(
     implementation = _schema_bundle_impl,
@@ -36,4 +39,72 @@ schema_bundle = rule(
         "zstd": attr.label(default = "@zstd//:zstd_cli", executable = True, cfg = "exec"),
     },
     doc = "Generates both schema modes as cacheable actions with explicit tool dependencies.",
+)
+
+def _schema_generator_sources_impl(ctx):
+    sources = []
+    crate_root = None
+    prefix = ctx.label.package + "/"
+    for source in ctx.files.srcs:
+        if not source.short_path.startswith(prefix):
+            fail("Schema generator sources must belong to " + ctx.label.package)
+        relative = source.short_path[len(prefix):]
+        output = ctx.actions.declare_file(ctx.label.name + "/" + relative)
+        ctx.actions.symlink(output = output, target_file = source)
+        sources.append(output)
+        if relative == "src/lib.rs":
+            crate_root = output
+    if crate_root == None:
+        fail("Schema generator sources must include src/lib.rs")
+
+    # The ignored generation function derives schemas from Rust. These embedded
+    # bundles are unused on that path, so do not read the committed artifacts.
+    precomputed = [
+        ctx.actions.declare_file(ctx.label.name + "/schema/precomputed/app-server-exports-" + mode + ".json.zst")
+        for mode in ["stable", "experimental"]
+    ]
+    for output in precomputed:
+        ctx.actions.write(output, "")
+    return [
+        DefaultInfo(files = depset(sources)),
+        OutputGroupInfo(crate_root = depset([crate_root]), precomputed = depset(precomputed)),
+    ]
+
+schema_generator_sources = rule(
+    implementation = _schema_generator_sources_impl,
+    attrs = {"srcs": attr.label_list(allow_files = [".rs"])},
+)
+
+def _python_sdk_exports_impl(ctx):
+    output = ctx.actions.declare_directory(ctx.label.name)
+    manifest = ctx.actions.declare_file(ctx.label.name + ".json")
+    prefix = ctx.label.package + "/"
+    files = []
+    for source in ctx.files.srcs:
+        if not source.short_path.startswith(prefix):
+            fail("Python SDK generator inputs must belong to " + ctx.label.package)
+        files.append([source.path, source.short_path[len(prefix):]])
+    ctx.actions.write(manifest, json.encode(files))
+    ctx.actions.run(
+        executable = ctx.executable._generator,
+        arguments = [manifest.path, ctx.file.schema.path + "/json", output.path],
+        inputs = ctx.files.srcs + [ctx.file.schema, manifest],
+        tools = [ctx.attr._generator[DefaultInfo].files_to_run],
+        outputs = [output],
+        env = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"},
+        mnemonic = "PythonSdkExports",
+    )
+    return [DefaultInfo(files = depset([output]))]
+
+python_sdk_exports = rule(
+    implementation = _python_sdk_exports_impl,
+    attrs = {
+        "srcs": attr.label_list(allow_files = True),
+        "schema": attr.label(mandatory = True, allow_single_file = True),
+        "_generator": attr.label(
+            default = "//bazel/schema/tools:python-codegen",
+            executable = True,
+            cfg = "exec",
+        ),
+    },
 )

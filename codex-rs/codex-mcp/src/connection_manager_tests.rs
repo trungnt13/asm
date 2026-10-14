@@ -548,6 +548,10 @@ async fn prepared_call_timeout_includes_trusted_access_lookup() {
 
     assert_eq!(started.elapsed(), Duration::from_secs(1));
     assert!(format!("{error:#}").contains("timed out awaiting tools/call after 1s"));
+    assert_eq!(
+        codex_rmcp_client::request_error_code(&error),
+        Some("request_timeout")
+    );
 }
 
 pub(crate) async fn create_ready_async_managed_client(tools: Vec<ToolInfo>) -> AsyncManagedClient {
