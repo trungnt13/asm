@@ -15,6 +15,15 @@ use crate::session_start::SessionStartOutcome;
 use crate::session_start::cancel_session_start;
 use crate::session_start::complete_session_start;
 use crate::unarchive_prompt::run_unarchive_prompt;
+use std::future::Future;
+use std::pin::Pin;
+
+// Construct the dispatch future in a separate frame: Box::pin(handle_event(...))
+// still reserves its full temporary size in the long-lived app run-loop poll frame.
+#[inline(never)]
+fn box_future<F: Future>(create: impl FnOnce() -> F) -> Pin<Box<F>> {
+    Box::pin(create())
+}
 
 fn spawn_startup_thread_start(
     app_server: &AppServerSession,
@@ -1179,14 +1188,16 @@ See the Codex keymap documentation for supported actions and examples."
 
         #[cfg(not(debug_assertions))]
         let pre_loop_exit_reason = if let Some(latest_version) = upgrade_version {
-            let control = Box::pin(app.handle_event(
-                tui,
-                &mut app_server,
-                AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                    latest_version,
-                    crate::update_action::get_update_action(),
-                ))),
-            ))
+            let control = box_future(|| {
+                app.handle_event(
+                    tui,
+                    &mut app_server,
+                    AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
+                        latest_version,
+                        crate::update_action::get_update_action(),
+                    ))),
+                )
+            })
             .await?;
             match control {
                 AppRunControl::Continue => None,
@@ -1312,7 +1323,7 @@ See the Codex keymap documentation for supported actions and examples."
                                 if cell.as_any().is::<history_cell::SessionInfoCell>()
                         );
                         let had_active_modal = app.chat_widget.has_active_modal();
-                        match Box::pin(app.handle_event(tui, &mut app_server, event)).await {
+                        match box_future(|| app.handle_event(tui, &mut app_server, event)).await {
                             Ok(AppRunControl::Continue) => {
                                 if is_initial_session_header {
                                     waiting_for_initial_session_header = false;

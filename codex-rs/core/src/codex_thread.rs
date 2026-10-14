@@ -832,6 +832,12 @@ impl CodexThread {
         Ok(())
     }
 
+    /// Distinguishes persisted appended tools from initial client tools for callback routing.
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub async fn is_appended_tool(&self, name: &str) -> bool {
+        self.session.is_appended_tool(name).await
+    }
+
     pub async fn append_tools(
         &self,
         tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,

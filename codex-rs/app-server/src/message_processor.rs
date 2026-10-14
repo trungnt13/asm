@@ -814,6 +814,9 @@ impl MessageProcessor {
         connection_id: ConnectionId,
         request_attestation: bool,
     ) {
+        self.outgoing
+            .appended_tool_connection_initialized(connection_id)
+            .await;
         self.account_processor
             .notify_workspace_routing_to_connection(connection_id);
         self.thread_processor
@@ -873,6 +876,9 @@ impl MessageProcessor {
         self.request_serialization_queues.discard_closed().await;
         self.outgoing
             .disconnect_user_verification_connection(connection_id)
+            .await;
+        self.outgoing
+            .disconnect_appended_tool_connection(connection_id)
             .await;
         session_state.mcp_event_streams.clear().await;
         if timeout(

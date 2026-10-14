@@ -53,6 +53,9 @@ pub(crate) use account_notifications::AccountNotification;
 #[path = "user_verification_auth.rs"]
 mod user_verification_auth;
 
+#[path = "appended_tool_ownership.rs"]
+mod appended_tool_ownership;
+
 /// Stable identifier for a client request scoped to a transport connection.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ConnectionRequestId {
@@ -129,6 +132,7 @@ pub(crate) enum OutgoingEnvelope {
 pub(crate) struct OutgoingMessageSender {
     verification_auth: OnceLock<Arc<codex_login::AuthManager>>,
     verification_connections: Mutex<HashSet<ConnectionId>>,
+    appended_tool_owners: Mutex<appended_tool_ownership::AppendedToolOwners>,
     next_server_request_id: AtomicI64,
     sender: mpsc::Sender<OutgoingEnvelope>,
     request_id_to_callback: Mutex<HashMap<RequestId, PendingCallbackEntry>>,
@@ -147,6 +151,7 @@ pub(crate) struct ThreadScopedOutgoingMessageSender {
 }
 
 struct PendingCallbackEntry {
+    connection_owner: Option<ConnectionId>,
     verification_owner: Option<ConnectionId>,
     verification_auth_revision: Option<u64>,
     verification_identity: Option<user_verification_auth::Identity>,
@@ -167,6 +172,17 @@ impl ThreadScopedOutgoingMessageSender {
             connection_ids: Arc::new(connection_ids),
             thread_id,
         }
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(crate) async fn mark_appended_tool(&self, tool: &str) {
+        self.outgoing
+            .appended_tool_owners
+            .lock()
+            .await
+            .tools
+            .entry((self.thread_id, tool.to_string()))
+            .or_insert(None);
     }
 
     pub(crate) async fn send_request(
@@ -251,6 +267,7 @@ impl OutgoingMessageSender {
         Self {
             verification_auth: OnceLock::new(),
             verification_connections: Mutex::new(HashSet::new()),
+            appended_tool_owners: Mutex::new(Default::default()),
             next_server_request_id: AtomicI64::new(0),
             sender,
             request_id_to_callback: Mutex::new(HashMap::new()),
@@ -280,6 +297,8 @@ impl OutgoingMessageSender {
 
     pub(crate) async fn connection_closed(&self, connection_id: ConnectionId) {
         self.disconnect_user_verification_connection(connection_id)
+            .await;
+        self.disconnect_appended_tool_connection(connection_id)
             .await;
         let mut request_contexts = self.request_contexts.lock().await;
         request_contexts.retain(|request_id, _| request_id.connection_id != connection_id);
@@ -361,6 +380,23 @@ impl OutgoingMessageSender {
                     || verification_identity != self.verification_identity())
         };
         let (tx_approve, rx_approve) = oneshot::channel();
+        // Hold registration through callback insertion so disconnect cannot finish cleanup first.
+        let owners = self.appended_tool_owners.lock().await;
+        let appended_owner = match (&request, thread_id) {
+            (ServerRequest::DynamicToolCall { params, .. }, Some(thread_id))
+                if params.namespace.is_none() =>
+            {
+                owners.tools.get(&(thread_id, params.tool.clone())).copied()
+            }
+            _ => None,
+        };
+        let dynamic_owner = match appended_owner {
+            Some(Some(owner)) if connection_ids.is_some_and(|ids| ids.contains(&owner)) => {
+                Some(owner)
+            }
+            Some(_) => return (outgoing_message_id, rx_approve),
+            None => None,
+        };
         // One app owns this ceremony. Reconnect and other subscribers cannot answer it.
         let verification_owner = if user_verification {
             let eligible = self.verification_connections.lock().await;
@@ -373,8 +409,9 @@ impl OutgoingMessageSender {
         if user_verification && (verification_owner.is_none() || auth_changed()) {
             return (outgoing_message_id, rx_approve);
         }
-        let connection_ids = if user_verification {
-            verification_owner.as_ref().map(std::slice::from_ref)
+        let connection_owner = verification_owner.or(dynamic_owner);
+        let connection_ids = if connection_owner.is_some() {
+            connection_owner.as_ref().map(std::slice::from_ref)
         } else {
             connection_ids
         };
@@ -383,6 +420,7 @@ impl OutgoingMessageSender {
             request_id_to_callback.insert(
                 id,
                 PendingCallbackEntry {
+                    connection_owner,
                     verification_owner,
                     verification_auth_revision,
                     verification_identity: verification_identity.clone(),
@@ -393,6 +431,7 @@ impl OutgoingMessageSender {
                 },
             );
         }
+        drop(owners);
         // Disconnect may finish its callback cleanup before registration acquires the lock.
         // Recheck afterward so that ordering cannot leave an orphaned verification callback.
         if let Some(owner) = verification_owner {
@@ -571,10 +610,13 @@ impl OutgoingMessageSender {
     ) -> Option<(RequestId, PendingCallbackEntry)> {
         let mut callbacks = self.request_id_to_callback.lock().await;
         let entry = callbacks.get(id)?;
-        if let Some(owner) = entry.verification_owner {
-            if owner != connection_id {
-                return None;
-            }
+        if entry
+            .connection_owner
+            .is_some_and(|owner| owner != connection_id)
+        {
+            return None;
+        }
+        if entry.verification_owner.is_some() {
             if entry.verification_identity != self.verification_identity()
                 || entry.verification_auth_revision != self.verification_auth_revision()
             {
@@ -593,7 +635,7 @@ impl OutgoingMessageSender {
         let mut requests = request_id_to_callback
             .values()
             .filter_map(|entry| {
-                (entry.thread_id == Some(thread_id) && entry.verification_owner.is_none())
+                (entry.thread_id == Some(thread_id) && entry.connection_owner.is_none())
                     .then_some(entry.request.clone())
             })
             .collect::<Vec<_>>();
@@ -1509,7 +1551,7 @@ mod tests {
 
     #[tokio::test]
     async fn pending_requests_for_thread_returns_thread_requests_in_request_id_order() {
-        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(8);
+        let (tx, mut rx) = mpsc::channel::<OutgoingEnvelope>(16);
         let outgoing = Arc::new(OutgoingMessageSender::new(
             tx,
             codex_analytics::AnalyticsEventsClient::disabled(),
@@ -1517,7 +1559,7 @@ mod tests {
         let thread_id = ThreadId::new();
         let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing.clone(),
-            vec![ConnectionId(1)],
+            vec![ConnectionId(1), ConnectionId(2)],
             thread_id,
         );
 
@@ -1568,6 +1610,117 @@ mod tests {
                 &first_request_id,
                 &second_request_id
             ]
+        );
+
+        outgoing
+            .cancel_requests_for_thread(thread_id, /*error*/ None)
+            .await;
+        while rx.try_recv().is_ok() {}
+        let dynamic_call = ServerRequestPayload::DynamicToolCall(DynamicToolCallParams {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-owned".to_string(),
+            call_id: "call-owned".to_string(),
+            namespace: None,
+            tool: "appended".to_string(),
+            arguments: json!({}),
+        });
+        thread_outgoing.mark_appended_tool("appended").await;
+        let (_, unowned_waiter) = thread_outgoing.send_request(dynamic_call.clone()).await;
+        assert!(unowned_waiter.await.is_err());
+        assert!(rx.try_recv().is_err());
+
+        outgoing
+            .appended_tool_connection_initialized(ConnectionId(1))
+            .await;
+        outgoing
+            .appended_tool_connection_initialized(ConnectionId(2))
+            .await;
+        outgoing
+            .appended_tool_owners
+            .lock()
+            .await
+            .tools
+            .insert((thread_id, "appended".to_string()), Some(ConnectionId(1)));
+        let (owned_id, mut owned_waiter) = thread_outgoing.send_request(dynamic_call.clone()).await;
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(OutgoingEnvelope::ToConnection {
+                connection_id: ConnectionId(1),
+                ..
+            })
+        ));
+        assert!(rx.try_recv().is_err());
+        assert!(
+            outgoing
+                .pending_requests_for_thread(thread_id)
+                .await
+                .is_empty()
+        );
+        outgoing
+            .replay_requests_to_connection_for_thread(ConnectionId(2), thread_id)
+            .await;
+        assert!(rx.try_recv().is_err());
+        let result = json!({"success": true, "contentItems": []});
+        outgoing
+            .notify_client_response(ConnectionId(2), owned_id.clone(), result.clone())
+            .await;
+        outgoing
+            .notify_client_error(
+                ConnectionId(2),
+                owned_id.clone(),
+                internal_error("wrong owner"),
+            )
+            .await;
+        assert!(matches!(
+            owned_waiter.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        outgoing
+            .notify_client_response(ConnectionId(1), owned_id, result.clone())
+            .await;
+        assert_eq!(
+            owned_waiter.await.expect("owner callback"),
+            Ok(result.clone())
+        );
+
+        let (disconnected_id, disconnected_waiter) =
+            thread_outgoing.send_request(dynamic_call.clone()).await;
+        assert!(rx.try_recv().is_ok());
+        outgoing.connection_closed(ConnectionId(1)).await;
+        assert!(disconnected_waiter.await.is_err());
+        outgoing
+            .notify_client_response(ConnectionId(2), disconnected_id, result)
+            .await;
+        let (_, disconnected_waiter) = thread_outgoing.send_request(dynamic_call.clone()).await;
+        assert!(disconnected_waiter.await.is_err());
+        assert!(rx.try_recv().is_err());
+
+        outgoing
+            .appended_tool_owners
+            .lock()
+            .await
+            .tools
+            .insert((thread_id, "appended".to_string()), Some(ConnectionId(2)));
+        let (_, unsubscribed_waiter) = thread_outgoing.send_request(dynamic_call).await;
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(OutgoingEnvelope::ToConnection {
+                connection_id: ConnectionId(2),
+                ..
+            })
+        ));
+        outgoing
+            .release_appended_tool_connection(ConnectionId(2), thread_id)
+            .await;
+        assert!(unsubscribed_waiter.await.is_err());
+        assert_eq!(
+            outgoing
+                .appended_tool_owners
+                .lock()
+                .await
+                .tools
+                .get(&(thread_id, "appended".to_string())),
+            Some(&None),
         );
     }
 

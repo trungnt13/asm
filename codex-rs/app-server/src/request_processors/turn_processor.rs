@@ -197,14 +197,29 @@ impl TurnRequestProcessor {
         request_id: &ConnectionRequestId,
         params: ThreadAppendToolsParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        let (thread_id, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
         super::thread_processor::validate_dynamic_tools(&params.tools).map_err(invalid_request)?;
-        thread
-            .append_tools(params.tools)
+        if !self
+            .thread_state_manager
+            .subscribed_connection_ids(thread_id)
             .await
-            .map_err(|error| invalid_request(error.to_string()))?;
+            .contains(&request_id.connection_id)
+        {
+            return Err(invalid_request(
+                "tool registration requires a thread subscription",
+            ));
+        }
+        self.outgoing
+            .append_connection_tools(
+                thread_id,
+                request_id.connection_id,
+                &thread,
+                &self.thread_state_manager,
+                params.tools,
+            )
+            .await?;
         Ok(Some(ThreadAppendToolsResponse {}.into()))
     }
 

@@ -1019,6 +1019,7 @@ impl ThreadRequestProcessor {
     }
 
     async fn finalize_thread_teardown(&self, thread_id: ThreadId) {
+        self.outgoing.clear_appended_tool_owners(thread_id).await;
         self.outgoing
             .cancel_requests_for_thread(thread_id, /*error*/ None)
             .await;
@@ -1051,6 +1052,9 @@ impl ThreadRequestProcessor {
             .unsubscribe_connection_from_thread(thread_id, connection_id)
             .await;
 
+        self.outgoing
+            .release_appended_tool_connection(connection_id, thread_id)
+            .await;
         let status = if was_subscribed {
             ThreadUnsubscribeStatus::Unsubscribed
         } else {

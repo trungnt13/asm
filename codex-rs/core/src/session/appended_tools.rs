@@ -49,6 +49,17 @@ pub(super) fn restore_appended_tools(history: &InitialHistory) -> Result<Vec<Dyn
 
 impl Session {
     #[tracing::instrument(level = "trace", skip_all)]
+    pub(crate) async fn is_appended_tool(&self, name: &str) -> bool {
+        self.state
+            .lock()
+            .await
+            .session_configuration
+            .appended_tools
+            .iter()
+            .any(|spec| matches!(spec, DynamicToolSpec::Function(tool) if tool.name == name))
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn append_tools(self: &Arc<Self>, tools: Vec<DynamicToolSpec>) -> Result<()> {
         // Serialize append admission with other append calls and compaction checkpoints.
         let _permit = self
