@@ -1328,7 +1328,6 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     child_config.adaptive_reasoning_initial_error =
         Some(codex_protocol::protocol::AdaptiveReasoningError::InvalidResponse);
     child_config.adaptive_reasoning_initial_failure_episode = 999;
-    child_config.adaptive_reasoning.decision_model_api_env = Some(String::new());
     child_config.model = Some("gpt-6.1-sol".to_string());
     let spawned_agent =
         spawn_v2_reload_test_child(&control, child_config, &parent_thread, "worker").await;
