@@ -524,6 +524,16 @@ allowed_agent_roles = ["reviewer"]
 - This is visibility, not access isolation. Do not change filesystem, script execution, sandbox, network, or approval permissions. Inherited history can retain old lists or previously read skill content; never scrub history to conceal it.
 - Configure the two skills only after using a supporting binary. Keep reviewer role descriptions generic so root's role list does not disclose their skill inventory.
 
+### Role configuration restrictions
+
+Role TOML files may disable web search with `web_search = "disabled"` and adaptive
+reasoning with `[adaptive_reasoning] enabled = false`. Only explicit disabling is
+applied; omitted fields retain inheritance, including the parent's live adaptive toggle.
+Role settings cannot enable either capability against parent restrictions. Adaptive
+restrictions survive child spawn and reload; other adaptive settings remain inherited.
+Keep the projected role layer aligned with runtime settings. This does not add support
+for arbitrary role configuration fields or change session authority.
+
 ### Model catalog instruction visibility
 
 Top-level `include_model_catalog_in_spawn_agent_list`, default `true`:
