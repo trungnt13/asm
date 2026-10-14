@@ -711,3 +711,7 @@ insert_newline = ["enter", "shift-enter"]
 Use Shift+Enter to start a multiline draft, Ctrl+Enter to send it. Terminals must support
 the configured modified keys. Queue bindings retain their existing behavior.
 Vim Insert/Replace use the editor newline binding; Vim Normal retains its editing semantics.
+
+### Composer destination
+
+Keep the active prompt destination visible on the composer’s top-right border: Main, Side, Chat, or Parallel. Main uses neutral border styling and retains its existing prompt-marker signals. Companion modes use magenta borders and prompt markers; typed text stays neutral. Derive the destination from active thread state, not footer text, and preserve input geometry.
