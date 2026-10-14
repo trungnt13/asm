@@ -159,11 +159,6 @@ impl Session {
             String::new()
         };
         let mut world_state = WorldState::default();
-        world_state.add_section(crate::context::world_state::AppendedToolsState::new(
-            step_context.tool_router.appended_tools.clone(),
-            &step_context.tool_router.model_visible_specs(),
-            step_context.tool_router.appended_tools_available,
-        )?);
 
         let extension_metrics = super::extension_metrics::from_session_telemetry(
             step_context.session_telemetry.clone(),

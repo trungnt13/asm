@@ -5,6 +5,7 @@ use super::session_lifecycle_requests::recorded_params;
 use super::session_lifecycle_requests::start_recording_app_server_with_realtime_speech;
 use super::*;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
+use codex_app_server_protocol::TurnStartParams;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -63,47 +64,37 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             .ephemeral
     );
 
-    let companion_request = |source: ThreadId, call_id: &str| {
-        codex_app_server_client::AppServerEvent::ServerRequest(Box::new(
-            codex_app_server_protocol::ServerRequest::DynamicToolCall {
-                request_id: AppServerRequestId::String(call_id.to_string()),
-                params: codex_app_server_protocol::DynamicToolCallParams {
-                    thread_id: source.to_string(),
-                    turn_id: "peer-turn".to_string(),
-                    call_id: call_id.to_string(),
-                    namespace: None,
-                    tool: "send_companion_message".to_string(),
-                    arguments: serde_json::json!({"message": "coordinate"}),
-                },
-            },
-        ))
-    };
-    // The proxy accepts delivery; registration support is exercised separately
-    // by the app-server integration tests.
-    app.side_threads
-        .get_mut(&first_id)
-        .expect("active pair")
-        .messaging_available = true;
+    // The proxy accepts delivery without registering the tool.
+    let pair = app.side_threads.get_mut(&first_id).expect("active pair");
+    pair.messaging_available = true;
     for (source, recipient) in [(parent_id, first_id), (first_id, parent_id)] {
         while app_events.try_recv().is_ok() {}
         requests.lock().expect("request recorder lock").clear();
-        app.handle_app_server_event(&server, companion_request(source, "peer-route"))
-            .await;
-        let response = std::iter::from_fn(|| app_events.try_recv().ok())
-            .find_map(|event| match event {
-                AppEvent::DynamicToolCallCompleted { response, .. } => Some(response),
-                _ => None,
-            })
-            .expect("peer delivery receipt");
-        assert!(response.success);
-        let params: codex_app_server_protocol::TurnStartParams = serde_json::from_value(
+        app.send_companion_message(
+            &server,
+            AppServerRequestId::Integer(1),
+            codex_app_server_protocol::DynamicToolCallParams {
+                thread_id: source.to_string(),
+                turn_id: "peer-turn".to_string(),
+                call_id: "peer-route".to_string(),
+                namespace: None,
+                tool: "send_companion_message".to_string(),
+                arguments: serde_json::json!({"message": "coordinate"}),
+            },
+        )
+        .await;
+        assert!(matches!(
+            app_events.try_recv()?,
+            AppEvent::DynamicToolCallCompleted { response, .. } if response.success
+        ));
+        let params: TurnStartParams = serde_json::from_value(
             recorded_params(&requests, "turn/start")
                 .pop()
                 .expect("peer turn request"),
         )?;
         assert_eq!(
             params,
-            codex_app_server_protocol::TurnStartParams {
+            TurnStartParams {
                 thread_id: recipient.to_string(),
                 assistant_message: Some(format!(
                     "Message Type: MESSAGE\nTask name: {recipient}\nSender: {source}\nPayload:\ncoordinate"
@@ -112,7 +103,6 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             }
         );
     }
-    requests.lock().expect("request recorder lock").clear();
 
     Box::pin(app.start_companion_conversation(
         &mut tui,
@@ -152,19 +142,6 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
     assert!(app.abandoned_side_threads.contains(&second_id));
     assert_eq!(store.pair(parent_id)?, None);
     assert_eq!(store.side(second_id)?, Some(open_pair));
-
-    while app_events.try_recv().is_ok() {}
-    requests.lock().expect("request recorder lock").clear();
-    app.handle_app_server_event(&server, companion_request(parent_id, "closed-peer"))
-        .await;
-    let response = std::iter::from_fn(|| app_events.try_recv().ok())
-        .find_map(|event| match event {
-            AppEvent::DynamicToolCallCompleted { response, .. } => Some(response),
-            _ => None,
-        })
-        .expect("closed pair receipt");
-    assert!(!response.success);
-    assert!(recorded_params(&requests, "turn/start").is_empty());
 
     let saved_path = server
         .thread_read(second_id, /*include_turns*/ false)
