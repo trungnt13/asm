@@ -7296,6 +7296,10 @@
       "description": "Legacy fallback for `tui.disable_paste_burst`. Prefer the setting under `[tui]`.",
       "type": "boolean"
     },
+    "enable_side_communication": {
+      "description": "Expose companion messaging at TUI startup; defaults to off.",
+      "type": "boolean"
+    },
     "experimental_compact_prompt_file": {
       "$ref": "#/definitions/AbsolutePathBuf"
     },

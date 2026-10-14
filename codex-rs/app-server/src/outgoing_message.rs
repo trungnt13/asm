@@ -53,8 +53,8 @@ pub(crate) use account_notifications::AccountNotification;
 #[path = "user_verification_auth.rs"]
 mod user_verification_auth;
 
-#[path = "appended_tool_ownership.rs"]
-mod appended_tool_ownership;
+#[path = "companion_tool_ownership.rs"]
+mod companion_tool_ownership;
 
 /// Stable identifier for a client request scoped to a transport connection.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -132,7 +132,7 @@ pub(crate) enum OutgoingEnvelope {
 pub(crate) struct OutgoingMessageSender {
     verification_auth: OnceLock<Arc<codex_login::AuthManager>>,
     verification_connections: Mutex<HashSet<ConnectionId>>,
-    appended_tool_owners: Mutex<appended_tool_ownership::AppendedToolOwners>,
+    companion_tool_owners: Mutex<companion_tool_ownership::CompanionToolOwners>,
     next_server_request_id: AtomicI64,
     sender: mpsc::Sender<OutgoingEnvelope>,
     request_id_to_callback: Mutex<HashMap<RequestId, PendingCallbackEntry>>,
@@ -172,17 +172,6 @@ impl ThreadScopedOutgoingMessageSender {
             connection_ids: Arc::new(connection_ids),
             thread_id,
         }
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn mark_appended_tool(&self, tool: &str) {
-        self.outgoing
-            .appended_tool_owners
-            .lock()
-            .await
-            .tools
-            .entry((self.thread_id, tool.to_string()))
-            .or_insert(None);
     }
 
     pub(crate) async fn send_request(
@@ -267,7 +256,7 @@ impl OutgoingMessageSender {
         Self {
             verification_auth: OnceLock::new(),
             verification_connections: Mutex::new(HashSet::new()),
-            appended_tool_owners: Mutex::new(Default::default()),
+            companion_tool_owners: Mutex::new(Default::default()),
             next_server_request_id: AtomicI64::new(0),
             sender,
             request_id_to_callback: Mutex::new(HashMap::new()),
@@ -298,8 +287,7 @@ impl OutgoingMessageSender {
     pub(crate) async fn connection_closed(&self, connection_id: ConnectionId) {
         self.disconnect_user_verification_connection(connection_id)
             .await;
-        self.disconnect_appended_tool_connection(connection_id)
-            .await;
+        self.disconnect_companion_connection(connection_id).await;
         let mut request_contexts = self.request_contexts.lock().await;
         request_contexts.retain(|request_id, _| request_id.connection_id != connection_id);
     }
@@ -381,21 +369,26 @@ impl OutgoingMessageSender {
         };
         let (tx_approve, rx_approve) = oneshot::channel();
         // Hold registration through callback insertion so disconnect cannot finish cleanup first.
-        let owners = self.appended_tool_owners.lock().await;
-        let appended_owner = match (&request, thread_id) {
-            (ServerRequest::DynamicToolCall { params, .. }, Some(thread_id))
-                if params.namespace.is_none() =>
+        let owners = self.companion_tool_owners.lock().await;
+        let dynamic_owner = match &request {
+            ServerRequest::DynamicToolCall { params, .. }
+                if params.namespace.is_none() && params.tool == "send_companion_message" =>
             {
-                owners.tools.get(&(thread_id, params.tool.clone())).copied()
-            }
-            _ => None,
-        };
-        let dynamic_owner = match appended_owner {
-            Some(Some(owner)) if connection_ids.is_some_and(|ids| ids.contains(&owner)) => {
+                // This reserved tool never falls back to subscriber broadcast.
+                let Some(owner) = thread_id
+                    .and_then(|thread_id| owners.threads.get(&thread_id))
+                    .copied()
+                else {
+                    return (outgoing_message_id, rx_approve);
+                };
+                if !owners.live_connections.contains(&owner)
+                    || !connection_ids.is_some_and(|ids| ids.contains(&owner))
+                {
+                    return (outgoing_message_id, rx_approve);
+                }
                 Some(owner)
             }
-            Some(_) => return (outgoing_message_id, rx_approve),
-            None => None,
+            _ => None,
         };
         // One app owns this ceremony. Reconnect and other subscribers cannot answer it.
         let verification_owner = if user_verification {

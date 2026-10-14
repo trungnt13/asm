@@ -329,6 +329,10 @@ pub(super) async fn ensure_listener_task_running(
                         }
                     };
 
+                    if matches!(event.msg, EventMsg::ShutdownComplete) {
+                        outgoing_for_task.clear_companion_tool_owner(conversation_id).await;
+                    }
+
                     if let Some(worker) = &turn_cost_worker {
                         worker.observe_event(
                             conversation_id,
@@ -453,6 +457,7 @@ pub(super) async fn ensure_listener_task_running(
                         }
                         // Release the status receiver before removing its watch entry.
                         drop(unloading_state);
+                        outgoing_for_task.clear_companion_tool_owner(conversation_id).await;
                         outgoing_for_task
                             .cancel_requests_for_thread(conversation_id, /*error*/ None)
                             .await;
@@ -507,6 +512,7 @@ pub(super) async fn ensure_listener_task_running(
                         }
                         // Release the status receiver before removing its watch entry.
                         drop(unloading_state);
+                        outgoing_for_task.clear_companion_tool_owner(conversation_id).await;
                         outgoing_for_task
                             .cancel_requests_for_thread(conversation_id, /*error*/ None)
                             .await;
@@ -566,6 +572,8 @@ pub(super) async fn unload_thread_without_subscribers(
     thread: Arc<CodexThread>,
 ) {
     info!("thread {thread_id} has no subscribers and is idle; shutting down");
+
+    outgoing.clear_companion_tool_owner(thread_id).await;
 
     // Any pending app-server -> client requests for this thread can no longer be
     // answered; cancel their callbacks before shutdown/unload.
@@ -843,6 +851,14 @@ pub(super) async fn handle_pending_thread_resume_request(
         }
     }
 
+    if let Err(error) = outgoing
+        .check_companion_connection(conversation_id, connection_id)
+        .await
+    {
+        outgoing.send_error(request_id, error).await;
+        return;
+    }
+
     {
         let pending_thread_unloads = pending_thread_unloads.lock().await;
         if pending_thread_unloads.contains_key(&conversation_id) {
@@ -868,6 +884,19 @@ pub(super) async fn handle_pending_thread_resume_request(
             );
             return;
         }
+    }
+
+    if let Err(error) = outgoing
+        .claim_companion_tool(
+            conversation_id,
+            conversation.as_ref(),
+            connection_id,
+            thread_state_manager,
+        )
+        .await
+    {
+        outgoing.send_error(request_id, error).await;
+        return;
     }
 
     let (turns_backwards_cursor, items_backwards_cursor) = if let Some(thread_store) =

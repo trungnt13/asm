@@ -2348,6 +2348,9 @@ impl App {
         {
             self.mark_agent_picker_thread_closed(closed_thread_id);
             if self.side_threads.contains_key(&closed_thread_id) {
+                self.abandoned_side_threads.insert(closed_thread_id);
+                self.record_companion_closed(app_server, closed_thread_id)
+                    .await;
                 self.discard_closed_side_thread(closed_thread_id).await;
                 self.select_agent_thread(tui, app_server, primary_thread_id)
                     .await?;

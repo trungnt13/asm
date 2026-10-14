@@ -330,6 +330,9 @@ pub(crate) struct AppServerSession {
     side_conversations: Option<crate::side_conversations::SideConversationStore>,
     task_tool_threads: HashSet<ThreadId>,
     task_tool_capabilities_dir: Option<AbsolutePathBuf>,
+    communication_enabled: Option<bool>,
+    communication_threads: HashSet<ThreadId>,
+    communication_capabilities_dir: Option<AbsolutePathBuf>,
     task_search_generation: Arc<AtomicU64>,
     remote_cwd_override: Option<PathBuf>,
     thread_params_mode: ThreadParamsMode,
@@ -439,6 +442,9 @@ impl AppServerSession {
             side_conversations: None,
             task_tool_threads: HashSet::new(),
             task_tool_capabilities_dir: None,
+            communication_enabled: None,
+            communication_threads: HashSet::new(),
+            communication_capabilities_dir: None,
             task_search_generation: Arc::new(AtomicU64::new(0)),
             remote_cwd_override: None,
             thread_params_mode,
@@ -503,9 +509,12 @@ impl AppServerSession {
         };
         let services = crate::dynamic_tools_mcp::ToolServices {
             task_tools: !self.uses_embedded_app_server(),
+            communication: *self
+                .communication_enabled
+                .get_or_insert(config.enable_side_communication),
             worktrees,
         };
-        if !services.task_tools && services.worktrees.is_none() {
+        if !services.task_tools && services.worktrees.is_none() && !services.communication {
             return Ok(());
         }
         if config.mcp_servers.get().contains_key(services.namespace()) {
@@ -570,12 +579,15 @@ impl AppServerSession {
             ThreadToolTransport::Mcp(Arc::clone(server))
         } else if self.uses_embedded_app_server() {
             ThreadToolTransport::Disabled
+        } else if self.communication_enabled == Some(true) {
+            ThreadToolTransport::DynamicWithCommunication
         } else {
             ThreadToolTransport::Dynamic
         }
     }
 
     pub(crate) fn with_thread_tool_transport(mut self, transport: ThreadToolTransport) -> Self {
+        self.communication_enabled = Some(transport.communication_namespace().is_some());
         if let ThreadToolTransport::Mcp(server) = transport {
             self.dynamic_tool_mcp = Some(server);
         }
@@ -602,6 +614,41 @@ impl AppServerSession {
     /// Carry capabilities that may exist only in memory when the optional cache is unwritable.
     pub(crate) fn inherit_task_tool_capabilities(&mut self, previous: &Self) {
         self.task_tool_threads.extend(&previous.task_tool_threads);
+        self.communication_threads
+            .extend(&previous.communication_threads);
+        self.communication_enabled = previous.communication_enabled;
+    }
+
+    pub(crate) fn companion_connection_matches(&self, generation: uuid::Uuid) -> bool {
+        self.dynamic_tool_mcp
+            .as_ref()
+            .is_some_and(|server| server.owns_generation(generation))
+    }
+
+    pub(crate) fn companion_messages_available(&self, thread_id: ThreadId) -> bool {
+        let transport = self.thread_tool_transport();
+        let Some(namespace) = transport.communication_namespace() else {
+            return false;
+        };
+        self.communication_threads.contains(&thread_id)
+            || self
+                .communication_capabilities_dir
+                .as_ref()
+                .is_some_and(|directory| {
+                    std::fs::read_to_string(directory.join(thread_id.to_string()))
+                        .is_ok_and(|saved| saved == namespace)
+                })
+    }
+
+    fn remember_communication_thread(&mut self, thread_id: ThreadId) {
+        let transport = self.thread_tool_transport();
+        let Some(namespace) = transport.communication_namespace() else {
+            return;
+        };
+        self.communication_threads.insert(thread_id);
+        if let Some(directory) = &self.communication_capabilities_dir {
+            persist_communication_capability(directory, thread_id, namespace);
+        }
     }
 
     pub(crate) fn task_tools_available(&self, thread_id: ThreadId) -> bool {
@@ -686,6 +733,8 @@ impl AppServerSession {
         account: GetAccountResponse,
         fallback: EmptyCatalogFallback,
     ) -> Result<AppServerBootstrap> {
+        self.communication_enabled
+            .get_or_insert(config.enable_side_communication);
         let started_at = Instant::now();
         // `hooks/list` holds the global config queue during startup. Submit models and config
         // requirements together so an uncached model fetch can overlap both config requests.
@@ -929,6 +978,9 @@ impl AppServerSession {
             started.session.permission_profile = permissions;
         }
         started.task_tools_available = task_tools_available;
+        if task_tools_available || self.dynamic_tool_mcp.is_some() {
+            self.remember_communication_thread(started.session.thread_id);
+        }
         if task_tools_available {
             self.remember_task_tool_thread(started.session.thread_id);
         }
@@ -1102,8 +1154,15 @@ impl AppServerSession {
             params.approvals_reviewer = selected_profile.approvals_reviewer.map(Into::into);
             remove_permission_config_overrides(&mut params.config);
         }
-        self.thread_tool_transport()
-            .configure_mcp(&mut params.config);
+        if self
+            .thread_tool_transport()
+            .communication_namespace()
+            .is_none()
+            || self.companion_messages_available(thread_id)
+        {
+            self.thread_tool_transport()
+                .configure_mcp(&mut params.config);
+        }
         let response: ThreadForkResponse = match self
             .client
             .request_typed(ClientRequest::ThreadFork {
@@ -1181,6 +1240,9 @@ impl AppServerSession {
         }
         if presentation == ForkPresentation::SideConversation && config.ephemeral {
             started.session.daybreak_enabled = false;
+        }
+        if self.companion_messages_available(thread_id) {
+            self.remember_communication_thread(started.session.thread_id);
         }
         started.session.fork_parent_title = fork_parent.and_then(|thread| thread.name);
         if self.task_tools_available(thread_id) {
@@ -1517,6 +1579,7 @@ impl AppServerSession {
                     input: items,
                     tool_output: None,
                     assistant_message: None,
+                    assistant_message_source_thread_id: None,
                     responsesapi_client_metadata: None,
                     additional_context: None,
                     environments: None,
@@ -1900,11 +1963,32 @@ pub(crate) async fn start_thread_with_request_handle(
             .map_err(|err| {
                 bootstrap_request_error("thread/start failed during TUI bootstrap", err)
             })?;
+    if let Some(namespace) = thread_tool_transport.communication_namespace()
+        && (task_tools_available || matches!(thread_tool_transport, ThreadToolTransport::Mcp(_)))
+    {
+        persist_communication_capability(
+            &config.codex_home.join("tui-companion-startup-capabilities"),
+            ThreadId::from_string(&response.thread.id)?,
+            namespace,
+        );
+    }
     let mut started =
         started_thread_from_start_response(response, local_settings, &config, thread_params_mode)
             .await?;
     started.task_tools_available = task_tools_available;
     Ok(started)
+}
+
+fn persist_communication_capability(
+    directory: &AbsolutePathBuf,
+    thread_id: ThreadId,
+    namespace: &str,
+) {
+    if let Err(error) = std::fs::create_dir_all(directory)
+        .and_then(|()| std::fs::write(directory.join(thread_id.to_string()), namespace))
+    {
+        tracing::warn!(%error, %thread_id, "failed to persist startup communication capability");
+    }
 }
 
 pub(crate) fn status_account_display_from_auth_mode(

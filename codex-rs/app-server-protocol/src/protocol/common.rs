@@ -891,11 +891,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadInjectItemsResponse,
     },
-    #[experimental("thread/appendTools")]
-    ThreadAppendTools => "thread/appendTools" {
-        params: v2::ThreadAppendToolsParams,
+    #[experimental("thread/companionLifecycle")]
+    ThreadCompanionLifecycle => "thread/companionLifecycle" {
+        params: v2::ThreadCompanionLifecycleParams,
         serialization: thread_id(params.thread_id),
-        response: v2::ThreadAppendToolsResponse,
+        response: v2::ThreadCompanionLifecycleResponse,
     },
     SkillsList => "skills/list" {
         params: v2::SkillsListParams,

@@ -651,6 +651,13 @@ pub(crate) enum AppEvent {
         registered: tokio::sync::oneshot::Sender<()>,
     },
 
+    /// Accept an authenticated MCP message only on its original connection generation.
+    CompanionMcpMessage {
+        params: codex_app_server_protocol::DynamicToolCallParams,
+        generation: Uuid,
+        receipt: tokio::sync::oneshot::Sender<DynamicToolCallResponse>,
+    },
+
     /// Return a completed client-owned dynamic tool call to app server.
     DynamicToolCallCompleted {
         request_id: AppServerRequestId,

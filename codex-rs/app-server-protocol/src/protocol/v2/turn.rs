@@ -200,6 +200,9 @@ pub struct TurnStartParams {
     #[experimental("turn/start.assistantMessage")]
     #[ts(optional = nullable)]
     pub assistant_message: Option<String>,
+    #[experimental("turn/start.assistantMessage")]
+    #[ts(optional = nullable)]
+    pub assistant_message_source_thread_id: Option<String>,
     /// Optional metadata to enrich Codex's ResponsesAPI turn metadata.
     ///
     /// Entries are flattened into the JSON string sent as

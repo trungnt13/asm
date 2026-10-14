@@ -100,6 +100,8 @@ impl App {
             ));
         }
         // Keep the child record and its transcript boundary even when its parent is gone.
+        self.record_companion_closed(app_server, side_thread_id)
+            .await;
         self.side_threads.remove(&side_thread_id);
         self.agent_navigation.remove(target_thread_id);
         self.primary_thread_id = self.current_displayed_thread_id();

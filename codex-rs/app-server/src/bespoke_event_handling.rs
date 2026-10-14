@@ -1137,9 +1137,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                 outgoing.send_server_notification(notification).await;
             }
             if let Some(params) = dynamic_tool_call_params {
-                if params.namespace.is_none() && conversation.is_appended_tool(&params.tool).await {
-                    outgoing.mark_appended_tool(&params.tool).await;
-                }
                 let call_id = params.call_id.clone();
                 let (_pending_request_id, rx) = outgoing
                     .send_request(ServerRequestPayload::DynamicToolCall(params))

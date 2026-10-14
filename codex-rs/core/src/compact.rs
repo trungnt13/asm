@@ -1,4 +1,4 @@
-use crate::context::UserGoalUpdate;
+use crate::context::retained_host_context_message_ids;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -74,7 +74,7 @@ pub struct AutoCompactionDisabled;
 /// `Session::replace_compacted_history` assigns missing item IDs before constructing the persisted
 /// `CompactedItem`, ensuring the live and persisted histories remain identical.
 pub(crate) struct CompactedHistoryMetadata {
-    pub(crate) input_goal_ids: HashSet<ResponseItemId>,
+    pub(crate) input_host_context_ids: HashSet<ResponseItemId>,
     pub(crate) message: String,
     pub(crate) window_number: u64,
     pub(crate) window_ids: AutoCompactWindowIds,
@@ -277,7 +277,7 @@ async fn run_compact_task_inner_impl(
     let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
 
     let mut history = sess.clone_history().await;
-    let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
+    let input_host_context_ids = retained_host_context_message_ids(history.raw_items());
     history.record_items(
         &[initial_input_for_turn.into()],
         turn_context.model_info().truncation_policy.into(),
@@ -426,7 +426,7 @@ async fn run_compact_task_inner_impl(
         replacement_step_context.to_turn_context_item(),
         world_state_baseline,
         CompactedHistoryMetadata {
-            input_goal_ids,
+            input_host_context_ids,
             message: summary_text,
             window_number,
             window_ids,

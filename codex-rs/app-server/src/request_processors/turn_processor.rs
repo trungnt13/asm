@@ -192,15 +192,14 @@ impl TurnRequestProcessor {
         .map(|response| Some(response.into()))
     }
 
-    pub(crate) async fn thread_append_tools(
+    pub(crate) async fn thread_companion_lifecycle(
         &self,
         request_id: &ConnectionRequestId,
-        params: ThreadAppendToolsParams,
+        params: ThreadCompanionLifecycleParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let (thread_id, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
-        super::thread_processor::validate_dynamic_tools(&params.tools).map_err(invalid_request)?;
         if !self
             .thread_state_manager
             .subscribed_connection_ids(thread_id)
@@ -208,19 +207,41 @@ impl TurnRequestProcessor {
             .contains(&request_id.connection_id)
         {
             return Err(invalid_request(
-                "tool registration requires a thread subscription",
+                "companion lifecycle requires a thread subscription",
             ));
         }
-        self.outgoing
-            .append_connection_tools(
-                thread_id,
-                request_id.connection_id,
-                &thread,
-                &self.thread_state_manager,
-                params.tools,
-            )
-            .await?;
-        Ok(Some(ThreadAppendToolsResponse {}.into()))
+        if !self
+            .outgoing
+            .owns_companion_tool(thread_id, request_id.connection_id)
+            .await
+        {
+            return Err(invalid_request(
+                "companion lifecycle requires connection ownership",
+            ));
+        }
+        use codex_protocol::companion::CompanionLifecycleEvent;
+        match &params.event {
+            CompanionLifecycleEvent::Opened { session_id, .. }
+            | CompanionLifecycleEvent::Closed { session_id } => {
+                ThreadId::from_string(session_id)
+                    .map_err(|error| invalid_request(error.to_string()))?;
+            }
+            CompanionLifecycleEvent::Replaced {
+                old_session_id,
+                new_session_id,
+                ..
+            } => {
+                ThreadId::from_string(old_session_id)
+                    .map_err(|error| invalid_request(error.to_string()))?;
+                ThreadId::from_string(new_session_id)
+                    .map_err(|error| invalid_request(error.to_string()))?;
+            }
+        }
+        thread
+            .record_companion_lifecycle(params.event)
+            .await
+            .map_err(|error| internal_error(error.to_string()))?;
+        Ok(Some(ThreadCompanionLifecycleResponse {}.into()))
     }
 
     pub(crate) async fn thread_inject_items(
@@ -580,6 +601,37 @@ impl TurnRequestProcessor {
             return Err(invalid_request(
                 "assistantMessage must be nonempty and cannot be combined with input or toolOutput",
             ));
+        }
+        match (
+            &params.assistant_message,
+            &params.assistant_message_source_thread_id,
+        ) {
+            (Some(_), Some(source)) => {
+                let source_id = ThreadId::from_string(source)
+                    .map_err(|error| invalid_request(error.to_string()))?;
+                for endpoint in [source_id, thread_id] {
+                    if !self
+                        .outgoing
+                        .owns_companion_tool(endpoint, request_id.connection_id)
+                        .await
+                        || !self
+                            .thread_state_manager
+                            .subscribed_connection_ids(endpoint)
+                            .await
+                            .contains(&request_id.connection_id)
+                    {
+                        return Err(invalid_request(
+                            "companion delivery requires ownership of both threads",
+                        ));
+                    }
+                }
+            }
+            (None, None) => {}
+            _ => {
+                return Err(invalid_request(
+                    "assistantMessage requires assistantMessageSourceThreadId",
+                ));
+            }
         }
         if let Some(tool_output) = &params.tool_output {
             if !params.input.is_empty() {

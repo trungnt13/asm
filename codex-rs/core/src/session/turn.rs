@@ -1702,15 +1702,12 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
 
 #[instrument(level = "trace", skip_all)]
 pub(crate) fn build_prompt(
-    mut input: Vec<ResponseItem>,
+    input: Vec<ResponseItem>,
     step_context: &StepContext,
     base_instructions: BaseInstructions,
     incremental_tools: bool,
 ) -> Prompt {
     let turn_context = &step_context.turn;
-    if !step_context.tool_router.appended_tools_available {
-        input.retain(|item| !crate::context::world_state::is_appended_declaration(item));
-    }
     Prompt {
         input,
         tools: if incremental_tools {
@@ -1999,7 +1996,7 @@ pub(crate) async fn built_tools(
             .instrument(trace_span!("built_tools.load_discoverable_tools"))
             .await
         };
-    let mut router = build_tool_router(
+    Ok(Arc::new(build_tool_router(
         sess,
         turn_context,
         model_info,
@@ -2008,10 +2005,7 @@ pub(crate) async fn built_tools(
         apps_enabled,
         step_store,
         tool_suggest_candidates.as_ref(),
-    )?;
-    sess.register_appended_tools(turn_context, model_info, &mut router)
-        .await?;
-    Ok(Arc::new(router))
+    )?))
 }
 
 #[derive(Debug)]

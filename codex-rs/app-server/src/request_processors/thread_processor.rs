@@ -1019,7 +1019,7 @@ impl ThreadRequestProcessor {
     }
 
     async fn finalize_thread_teardown(&self, thread_id: ThreadId) {
-        self.outgoing.clear_appended_tool_owners(thread_id).await;
+        self.outgoing.clear_companion_tool_owner(thread_id).await;
         self.outgoing
             .cancel_requests_for_thread(thread_id, /*error*/ None)
             .await;
@@ -1053,7 +1053,7 @@ impl ThreadRequestProcessor {
             .await;
 
         self.outgoing
-            .release_appended_tool_connection(connection_id, thread_id)
+            .release_companion_connection(connection_id, thread_id)
             .await;
         let status = if was_subscribed {
             ThreadUnsubscribeStatus::Unsubscribed
@@ -1295,6 +1295,9 @@ impl ThreadRequestProcessor {
     }
 
     pub(crate) async fn clear_all_thread_listeners(&self) {
+        for thread_id in self.thread_manager.list_thread_ids().await {
+            self.outgoing.clear_companion_tool_owner(thread_id).await;
+        }
         self.thread_state_manager.clear_all_listeners().await;
     }
 
@@ -1581,10 +1584,11 @@ impl ThreadRequestProcessor {
                 otel.name = "app_server.thread_start.config_snapshot",
             ))
             .await;
+        let codex_thread = thread;
         let mut thread = build_thread_from_snapshot(
             thread_id,
             session_configured.session_id.to_string(),
-            thread.multi_agent_version(),
+            codex_thread.multi_agent_version(),
             &config_snapshot,
             session_configured.rollout_path.clone(),
         );
@@ -1609,6 +1613,16 @@ impl ThreadRequestProcessor {
             request_id.connection_id,
             "thread",
         );
+
+        listener_task_context
+            .outgoing
+            .claim_companion_tool(
+                thread_id,
+                codex_thread.as_ref(),
+                request_id.connection_id,
+                &listener_task_context.thread_state_manager,
+            )
+            .await?;
 
         listener_task_context
             .thread_watch_manager
@@ -4323,6 +4337,15 @@ impl ThreadRequestProcessor {
                     "thread",
                 );
 
+                self.outgoing
+                    .claim_companion_tool(
+                        thread_id,
+                        codex_thread.as_ref(),
+                        request_id.connection_id,
+                        &self.thread_state_manager,
+                    )
+                    .await?;
+
                 let mut thread = match self
                     .load_thread_from_resume_source_or_send_internal(
                         thread_id,
@@ -4582,6 +4605,9 @@ impl ThreadRequestProcessor {
         };
 
         if let Some((existing_thread_id, existing_thread, mut source_thread)) = running_thread {
+            self.outgoing
+                .check_companion_connection(existing_thread_id, request_id.connection_id)
+                .await?;
             let paginated_resume =
                 matches!(source_thread.history_mode, ThreadHistoryMode::Paginated);
             let existing_thread_rollout_path = existing_thread.rollout_path();
@@ -5692,6 +5718,15 @@ impl ThreadRequestProcessor {
             request_id.connection_id,
             "thread",
         );
+
+        self.outgoing
+            .claim_companion_tool(
+                thread_id,
+                forked_thread.as_ref(),
+                request_id.connection_id,
+                &self.thread_state_manager,
+            )
+            .await?;
 
         let config_snapshot = forked_thread.config_snapshot().await;
 

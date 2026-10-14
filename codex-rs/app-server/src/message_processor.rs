@@ -815,7 +815,7 @@ impl MessageProcessor {
         request_attestation: bool,
     ) {
         self.outgoing
-            .appended_tool_connection_initialized(connection_id)
+            .companion_connection_initialized(connection_id)
             .await;
         self.account_processor
             .notify_workspace_routing_to_connection(connection_id);
@@ -878,7 +878,7 @@ impl MessageProcessor {
             .disconnect_user_verification_connection(connection_id)
             .await;
         self.outgoing
-            .disconnect_appended_tool_connection(connection_id)
+            .disconnect_companion_connection(connection_id)
             .await;
         session_state.mcp_event_streams.clear().await;
         if timeout(
@@ -1655,9 +1655,9 @@ impl MessageProcessor {
                     )
                     .await
             }
-            ClientRequest::ThreadAppendTools { params, .. } => {
+            ClientRequest::ThreadCompanionLifecycle { params, .. } => {
                 self.turn_processor
-                    .thread_append_tools(&request_id, params)
+                    .thread_companion_lifecycle(&request_id, params)
                     .await
             }
             ClientRequest::ThreadInjectItems { params, .. } => {

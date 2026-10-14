@@ -1,18 +1,19 @@
 use super::*;
+use crate::app_event::SideConversationMode;
 use codex_app_server_protocol::DynamicToolCallOutputContentItem;
 use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::DynamicToolCallResponse;
-use codex_app_server_protocol::DynamicToolFunctionSpec;
-use codex_app_server_protocol::DynamicToolSpec;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ThreadAppendToolsParams;
-use codex_app_server_protocol::ThreadAppendToolsResponse;
+use codex_app_server_protocol::ThreadCompanionLifecycleParams;
+use codex_app_server_protocol::ThreadCompanionLifecycleResponse;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
+use codex_protocol::companion::CompanionLifecycleEvent;
+use codex_protocol::companion::CompanionRelationship;
 use serde::Deserialize;
 use serde_json::json;
 
-pub(super) const COMPANION_MESSAGE_TOOL: &str = "send_companion_message";
+pub(super) use crate::dynamic_tools::COMPANION_MESSAGE_TOOL;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,32 +23,71 @@ struct MessageArgs {
 
 impl App {
     #[tracing::instrument(skip_all)]
-    pub(super) async fn enable_companion_messages(
-        &self,
+    pub(super) async fn record_companion_lifecycle(
+        &mut self,
         app_server: &AppServerSession,
-        thread_id: ThreadId,
-    ) -> Result<()> {
-        app_server
-            .request_handle()
-            .request_typed::<ThreadAppendToolsResponse>(ClientRequest::ThreadAppendTools {
-                request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
-                params: ThreadAppendToolsParams {
-                    thread_id: thread_id.to_string(),
-                    tools: vec![DynamicToolSpec::Function(DynamicToolFunctionSpec {
-                        name: COMPANION_MESSAGE_TOOL.to_string(),
-                        description: "Send a message to the other conversation in the active main/companion pair. Deliver promptly to a running recipient or start an idle recipient. Returns after acceptance without waiting for a reply.".to_string(),
-                        input_schema: json!({
-                            "type": "object",
-                            "properties": {"message": {"type": "string"}},
-                            "required": ["message"],
-                            "additionalProperties": false
-                        }),
-                        defer_loading: false,
-                    })],
-                },
-            })
-            .await?;
-        Ok(())
+        notices: impl IntoIterator<Item = (ThreadId, CompanionLifecycleEvent)>,
+    ) {
+        for (thread_id, event) in notices {
+            if let Err(error) = app_server
+                .request_handle()
+                .request_typed::<ThreadCompanionLifecycleResponse>(
+                    ClientRequest::ThreadCompanionLifecycle {
+                        request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
+                        params: ThreadCompanionLifecycleParams {
+                            thread_id: thread_id.to_string(),
+                            event,
+                        },
+                    },
+                )
+                .await
+            {
+                tracing::warn!(%thread_id, %error, "failed to record companion lifecycle");
+                let expected_closed_child = self.abandoned_side_threads.contains(&thread_id)
+                    && matches!(&error, codex_app_server_client::TypedRequestError::Server { source, .. }
+                        if source.code == -32600 && (source.message.contains("thread not found")
+                            || source.message.contains("thread not loaded")
+                            || source.message.contains("companion lifecycle requires")));
+                if !expected_closed_child {
+                    self.chat_widget.add_error_message(format!(
+                        "Companion lifecycle notice could not be saved for {thread_id}: {error}"
+                    ));
+                }
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn record_companion_closed(
+        &mut self,
+        app_server: &AppServerSession,
+        child: ThreadId,
+    ) {
+        let Some(state) = self.side_threads.get_mut(&child) else {
+            return;
+        };
+        if !std::mem::take(&mut state.lifecycle_open) {
+            return;
+        }
+        let parent = state.parent_thread_id;
+        self.record_companion_lifecycle(
+            app_server,
+            [
+                (
+                    parent,
+                    CompanionLifecycleEvent::Closed {
+                        session_id: child.to_string(),
+                    },
+                ),
+                (
+                    child,
+                    CompanionLifecycleEvent::Closed {
+                        session_id: parent.to_string(),
+                    },
+                ),
+            ],
+        )
+        .await;
     }
 
     #[tracing::instrument(skip_all)]
@@ -60,9 +100,28 @@ impl App {
         if self.dynamic_tool_tasks.contains_key(&request_id) {
             return;
         }
+        let response = self.accept_companion_message(app_server, params).await;
+        self.app_event_tx.send(AppEvent::DynamicToolCallCompleted {
+            request_id,
+            response,
+        });
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn accept_companion_message(
+        &mut self,
+        app_server: &AppServerSession,
+        params: DynamicToolCallParams,
+    ) -> DynamicToolCallResponse {
         let route = (|| {
+            if self.reconnect.offline {
+                return Err("TUI is reconnecting; message was not sent".to_string());
+            }
             let source =
                 ThreadId::from_string(&params.thread_id).map_err(|error| error.to_string())?;
+            if !app_server.companion_messages_available(source) {
+                return Err("This thread has no saved startup communication declaration; start a new conversation with enable_side_communication enabled".to_string());
+            }
             let args: MessageArgs = serde_json::from_value(params.arguments.clone())
                 .map_err(|error| error.to_string())?;
             if args.message.trim().is_empty() {
@@ -94,7 +153,7 @@ impl App {
             );
             Ok((recipient, message))
         })();
-        let response = async {
+        async {
             let (recipient, message) = route?;
             // Admission completes before the TUI can close or replace this pair. This
             // awaits only the atomic start/steer acknowledgement, never a model reply.
@@ -105,6 +164,7 @@ impl App {
                     params: TurnStartParams {
                         thread_id: recipient.to_string(),
                         assistant_message: Some(message),
+                        assistant_message_source_thread_id: Some(params.thread_id.clone()),
                         ..TurnStartParams::default()
                     },
                 })
@@ -119,10 +179,16 @@ impl App {
             })
         }
         .await
-        .unwrap_or_else(crate::dynamic_tools::failure_response);
-        self.app_event_tx.send(AppEvent::DynamicToolCallCompleted {
-            request_id,
-            response,
-        });
+        .unwrap_or_else(crate::dynamic_tools::failure_response)
+    }
+}
+
+impl SideThreadState {
+    pub(super) fn relationship(&self) -> CompanionRelationship {
+        match (self.kind, self.mode) {
+            (CompanionKind::Parallel, _) => CompanionRelationship::Parallel,
+            (CompanionKind::Side, SideConversationMode::Chat) => CompanionRelationship::Chat,
+            (CompanionKind::Side, SideConversationMode::Side) => CompanionRelationship::Side,
+        }
     }
 }

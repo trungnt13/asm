@@ -832,19 +832,17 @@ impl CodexThread {
         Ok(())
     }
 
-    /// Distinguishes persisted appended tools from initial client tools for callback routing.
-    #[tracing::instrument(level = "trace", skip_all)]
-    pub async fn is_appended_tool(&self, name: &str) -> bool {
-        self.session.is_appended_tool(name).await
+    /// Records companion lifecycle context without scheduling a model response.
+    pub async fn record_companion_lifecycle(
+        &self,
+        event: codex_protocol::companion::CompanionLifecycleEvent,
+    ) -> std::io::Result<()> {
+        self.session.record_companion_lifecycle(event).await
     }
 
-    pub async fn append_tools(
-        &self,
-        tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
-    ) -> CodexResult<()> {
-        self.session.append_tools(tools).await?;
-        self.checkpoint_preparation().await?;
-        Ok(())
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub async fn dynamic_tools(&self) -> Vec<codex_protocol::dynamic_tools::DynamicToolSpec> {
+        self.session.dynamic_tools().await
     }
 
     /// Record raw Responses API items without starting a new turn.

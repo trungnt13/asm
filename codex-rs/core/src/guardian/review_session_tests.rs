@@ -86,7 +86,7 @@ async fn run_review_preserves_evidence_during_parent_compaction() {
             turn.to_turn_context_item(),
             crate::context::world_state::WorldStateSnapshot::default(),
             crate::compact::CompactedHistoryMetadata {
-                input_goal_ids: Default::default(),
+                input_host_context_ids: Default::default(),
                 message: String::new(),
                 window_number,
                 window_ids,

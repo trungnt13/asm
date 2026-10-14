@@ -676,6 +676,7 @@ async fn turn_start_jsonrpc_span_parents_core_turn_spans() -> Result<()> {
                 request_id: RequestId::Integer(3),
                 params: TurnStartParams {
                     assistant_message: None,
+                    assistant_message_source_thread_id: None,
                     disabled_plugin_ids: None,
                     environments: None,
                     thread_id,

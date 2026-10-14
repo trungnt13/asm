@@ -1188,6 +1188,9 @@ impl App {
                 AppEvent::ResetTranscriptForThreadSwitch
             },
         );
+        for child in Vec::from_iter(self.side_threads.keys().copied()) {
+            self.record_companion_closed(app_server, child).await;
+        }
         self.reset_thread_event_state().await;
         let mut config = self.config.clone();
         if matches!(presentation, ThreadAttachPresentation::SessionLineage)
@@ -1482,6 +1485,8 @@ impl App {
             .get(&resumed_thread_id)
             .is_some_and(|state| state.kind == CompanionKind::Parallel)
         {
+            self.record_companion_closed(app_server, resumed_thread_id)
+                .await;
             self.side_threads.remove(&resumed_thread_id);
         }
         self.detach_current_thread_for_navigation(app_server, Some(resumed_thread_id))

@@ -1,6 +1,6 @@
 //! Builds and sends foreground and speculative remote V2 compaction attempts.
 
-use crate::context::UserGoalUpdate;
+use crate::context::retained_host_context_message_ids;
 use codex_protocol::ResponseItemId;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -32,7 +32,7 @@ use codex_rollout_trace::CompactionTraceContext;
 use tracing::info;
 
 pub(super) struct RemoteCompactV2Attempt {
-    pub(super) input_goal_ids: HashSet<ResponseItemId>,
+    pub(super) input_host_context_ids: HashSet<ResponseItemId>,
     pub(super) trace_input_history: Option<Vec<ResponseItem>>,
     pub(super) prompt_input: Vec<ResponseItem>,
     pub(super) prompt_input_metadata: Vec<Option<CodexHarnessMetadata>>,
@@ -76,7 +76,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let mut owned_client_session = None;
     let (
         model_info,
-        input_goal_ids,
+        input_host_context_ids,
         trace_input_history,
         base_instructions,
         mut input,
@@ -87,9 +87,11 @@ pub(super) async fn run_remote_compact_v2_attempt(
         RemoteCompactV2AttemptInput::Foreground(client_session) => {
             let model_info = turn_context.model_info();
             let mut history = sess.clone_history().await;
-            let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
+            let input_host_context_ids = retained_host_context_message_ids(history.raw_items());
             let tools_in_history = step_context.settings.model_info.use_responses_lite
-                && history.has_tool_declarations();
+                && history
+                    .raw_items()
+                    .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
             let base_instructions = if tools_in_history {
                 BaseInstructions {
                     text: String::new(),
@@ -139,7 +141,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
             });
             (
                 model_info,
-                input_goal_ids,
+                input_host_context_ids,
                 trace_input_history,
                 base_instructions,
                 input,
@@ -150,7 +152,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         }
         RemoteCompactV2AttemptInput::Background(input) => (
             &step_context.settings.model_info,
-            UserGoalUpdate::message_ids(input.input.iter()),
+            retained_host_context_message_ids(input.input.iter()),
             None,
             input.base_instructions,
             input.input,
@@ -163,10 +165,9 @@ pub(super) async fn run_remote_compact_v2_attempt(
         ),
     };
     let tools_in_history = model_info.use_responses_lite
-        && input.iter().any(|item| {
-            matches!(item, ResponseItem::AdditionalTools { .. })
-                && !crate::context::world_state::is_appended_declaration(item)
-        });
+        && input
+            .iter()
+            .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
     input.push(ResponseItem::CompactionTrigger {});
     let prompt = Prompt {
@@ -220,7 +221,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let mut prompt_input = prompt.input;
     prompt_input.pop();
     Ok(RemoteCompactV2Attempt {
-        input_goal_ids,
+        input_host_context_ids,
         trace_input_history,
         prompt_input,
         prompt_input_metadata,
@@ -241,10 +242,10 @@ pub(crate) fn capture_background_input(
     window: (String, u64, uuid::Uuid),
 ) -> BackgroundCompactionInput {
     let base_instructions = if step_context.settings.model_info.use_responses_lite
-        && snapshot.raw_items().any(|item| {
-            matches!(item, ResponseItem::AdditionalTools { .. })
-                && !crate::context::world_state::is_appended_declaration(item)
-        }) {
+        && snapshot
+            .raw_items()
+            .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
+    {
         BaseInstructions {
             text: String::new(),
             provenance: None,

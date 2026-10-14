@@ -4521,7 +4521,6 @@ async fn set_rate_limits_retains_previous_credits() {
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
-        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -4645,7 +4644,6 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
-        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -5271,7 +5269,6 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
-        appended_tools: Vec::new(),
         user_shell_override: None,
     }
 }
@@ -5973,7 +5970,7 @@ async fn settings_checkpoint_waits_for_accepted_settings_persistence() {
             turn_context.to_turn_context_item(),
             WorldStateSnapshot::default(),
             CompactedHistoryMetadata {
-                input_goal_ids: Default::default(),
+                input_host_context_ids: Default::default(),
                 message: "summary".to_string(),
                 window_number,
                 window_ids,
@@ -6107,7 +6104,7 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
             turn_context.to_turn_context_item(),
             WorldStateSnapshot::default(),
             CompactedHistoryMetadata {
-                input_goal_ids: Default::default(),
+                input_host_context_ids: Default::default(),
                 message: "summary".to_string(),
                 window_number,
                 window_ids,
@@ -6267,8 +6264,9 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     session
         .record_started_turn(&turn_context.sub_id, Some(turn_context.attribution()))
         .await;
-    let input_goal_ids =
-        crate::context::UserGoalUpdate::message_ids(session.clone_history().await.raw_items());
+    let input_host_context_ids = crate::context::retained_host_context_message_ids(
+        session.clone_history().await.raw_items(),
+    );
     // The goal edit is accepted after the compaction input was captured.
     session
         .record_user_goal_update(crate::context::UserGoalUpdate::Clear)
@@ -6288,7 +6286,7 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
             turn_context_baseline.clone(),
             world_state.render_full().0,
             CompactedHistoryMetadata {
-                input_goal_ids,
+                input_host_context_ids,
                 message: String::new(),
                 window_number,
                 window_ids,
@@ -6868,7 +6866,6 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
-        appended_tools: Vec::new(),
         user_shell_override: None,
     };
     let session_telemetry = session_telemetry(
@@ -7193,7 +7190,6 @@ async fn make_session_with_config_and_rx(
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
-        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -7328,7 +7324,6 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools: Vec::new(),
-        appended_tools: Vec::new(),
         user_shell_override: None,
     };
 
@@ -9143,7 +9138,6 @@ where
         thread_source: None,
         originator: "test_originator".to_string(),
         dynamic_tools,
-        appended_tools: Vec::new(),
         user_shell_override: None,
     };
     let session_telemetry = session_telemetry(

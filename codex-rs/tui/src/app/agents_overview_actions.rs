@@ -386,6 +386,18 @@ impl App {
             {
                 removed.insert(primary);
             }
+            let closing_pairs: Vec<_> = self
+                .side_threads
+                .iter()
+                .filter_map(|(child, state)| {
+                    (removed.contains(child) || removed.contains(&state.parent_thread_id))
+                        .then_some(*child)
+                })
+                .collect();
+            self.abandoned_side_threads.insert(thread_id);
+            for child in closing_pairs {
+                self.record_companion_closed(app_server, child).await;
+            }
             self.prepare_agents_overview_removal(&removed);
             for removed_id in removed {
                 self.remove_agents_overview_thread(removed_id);
@@ -404,6 +416,9 @@ impl App {
                 .send(AppEvent::ResetTranscriptForThreadSwitch);
             self.detach_current_thread_for_navigation(app_server, /*destination*/ None)
                 .await;
+            for child in Vec::from_iter(self.side_threads.keys().copied()) {
+                self.record_companion_closed(app_server, child).await;
+            }
             self.reset_thread_event_state().await;
             let init = self.chatwidget_init_for_forked_or_resumed_thread(
                 tui,

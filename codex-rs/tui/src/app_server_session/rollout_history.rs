@@ -112,6 +112,8 @@ impl AppServerSession {
     }
 
     pub(crate) fn with_local_codex_home(mut self, codex_home: &AbsolutePathBuf) -> Self {
+        self.communication_capabilities_dir =
+            Some(codex_home.join("tui-companion-startup-capabilities"));
         self.task_tool_capabilities_dir = (!self.uses_embedded_app_server())
             .then(|| codex_home.join("tui-thread-reference-capabilities"));
         self
@@ -210,8 +212,15 @@ impl AppServerSession {
                 }
             }
         }
-        self.thread_tool_transport()
-            .configure_mcp(&mut params.config);
+        if self
+            .thread_tool_transport()
+            .communication_namespace()
+            .is_none()
+            || self.companion_messages_available(thread_id)
+        {
+            self.thread_tool_transport()
+                .configure_mcp(&mut params.config);
+        }
         let mut rollout_maintenance_guard = None;
         params.exclude_turns = if self.history_support == ThreadHistorySupport::Paginated {
             let known_legacy_history = self

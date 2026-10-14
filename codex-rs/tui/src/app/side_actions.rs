@@ -145,14 +145,10 @@ impl App {
                     );
                     return Ok(());
                 }
-                let mut messaging_error = None;
-                for endpoint in [state.parent_thread_id, replacement_id] {
-                    if let Err(error) = self.enable_companion_messages(app_server, endpoint).await {
-                        messaging_error = Some(error);
-                        break;
-                    }
-                }
-                state.messaging_available = messaging_error.is_none();
+                let messaging_available = app_server
+                    .companion_messages_available(state.parent_thread_id)
+                    && app_server.companion_messages_available(replacement_id);
+                state.messaging_available = messaging_available;
                 if let Err(error) = app_server
                     .thread_inject_items(
                         replacement_id,
@@ -171,6 +167,7 @@ impl App {
                     let mut store = channel.store.lock().await;
                     Self::install_side_thread_snapshot(&mut store, forked.session, forked.turns);
                 }
+                let lifecycle_open = std::mem::take(&mut state.lifecycle_open);
                 self.side_threads.insert(replacement_id, state);
                 self.upsert_agent_picker_thread(
                     replacement_id,
@@ -182,10 +179,55 @@ impl App {
                     .select_agent_thread(tui, app_server, replacement_id)
                     .await;
                 if result.is_ok() && self.current_displayed_thread_id() == Some(replacement_id) {
-                    if let Some(error) = messaging_error {
-                        self.chat_widget.add_error_message(format!(
-                            "Companion messaging is unavailable on this pair: {error}"
-                        ));
+                    if lifecycle_open {
+                        let replacement = self
+                            .side_threads
+                            .get_mut(&replacement_id)
+                            .expect("selected replacement has pair state");
+                        replacement.lifecycle_open = true;
+                        let parent = replacement.parent_thread_id;
+                        let relationship = replacement.relationship();
+                        self.side_threads
+                            .get_mut(&thread_id)
+                            .expect("replacement retains old pair until commit")
+                            .lifecycle_open = false;
+                        self.record_companion_lifecycle(
+                            app_server,
+                            [
+                                (
+                                    parent,
+                                    codex_protocol::companion::CompanionLifecycleEvent::Replaced {
+                                        old_session_id: thread_id.to_string(),
+                                        new_session_id: replacement_id.to_string(),
+                                        relationship,
+                                    },
+                                ),
+                                (
+                                    thread_id,
+                                    codex_protocol::companion::CompanionLifecycleEvent::Closed {
+                                        session_id: parent.to_string(),
+                                    },
+                                ),
+                                (
+                                    replacement_id,
+                                    codex_protocol::companion::CompanionLifecycleEvent::Opened {
+                                        session_id: parent.to_string(),
+                                        relationship,
+                                    },
+                                ),
+                            ],
+                        )
+                        .await;
+                    }
+                    if !messaging_available
+                        && app_server
+                            .thread_tool_transport()
+                            .communication_namespace()
+                            .is_some()
+                    {
+                        self.chat_widget.add_error_message(
+                            "Companion messaging needs a saved startup declaration on both threads; start a new main conversation with enable_side_communication enabled.".into(),
+                        );
                     }
                     self.discard_side_thread_in_background(app_server, thread_id)
                         .await;

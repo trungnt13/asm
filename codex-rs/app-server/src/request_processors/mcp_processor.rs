@@ -683,7 +683,23 @@ impl McpRequestProcessor {
     ) -> Result<(), JSONRPCErrorError> {
         let outgoing = Arc::clone(&self.outgoing);
         let thread_id = params.thread_id.clone();
-        let (_, thread) = self.load_thread(&thread_id).await?;
+        let (parsed_thread_id, thread) = self.load_thread(&thread_id).await?;
+        if matches!(params.server.as_str(), "codex_tui" | "codex_companion")
+            && params.tool == "send_companion_message"
+            && (!self
+                .outgoing
+                .owns_companion_tool(parsed_thread_id, request_id.connection_id)
+                .await
+                || !self
+                    .thread_state_manager
+                    .subscribed_connection_ids(parsed_thread_id)
+                    .await
+                    .contains(&request_id.connection_id))
+        {
+            return Err(invalid_request(
+                "companion tool calls require connection ownership",
+            ));
+        }
         ensure_direct_input_allowed(thread.as_ref()).await?;
         let meta = with_mcp_tool_call_thread_id_meta(params.meta, &thread_id);
         let request_id = request_id.clone();

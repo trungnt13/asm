@@ -639,6 +639,7 @@ pub struct Config {
     pub model: Option<String>,
     /// Model for temporary `/chat` conversations; absent inherits the parent.
     pub chat_model: Option<String>,
+    pub enable_side_communication: bool,
     /// Initial `/chat` effort; absent inherits the parent.
     pub chat_reasoning: Option<ReasoningEffort>,
 
@@ -4497,6 +4498,7 @@ impl Config {
                 .chat_model
                 .map(|model| model.trim().to_string())
                 .filter(|model| !model.is_empty()),
+            enable_side_communication: cfg.enable_side_communication.unwrap_or(false),
             chat_reasoning: cfg.chat_reasoning,
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
             service_tier,

@@ -721,6 +721,8 @@ impl App {
                 .get(&root_thread_id)
                 .is_some_and(|state| state.kind == CompanionKind::Parallel)
             {
+                self.record_companion_closed(app_server, root_thread_id)
+                    .await;
                 self.side_threads.remove(&root_thread_id);
             }
             if !previous_running_thread_ids.is_empty() {

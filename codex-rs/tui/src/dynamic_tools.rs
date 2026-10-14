@@ -73,6 +73,22 @@ use uuid::Uuid;
 mod response;
 
 pub(crate) const NAMESPACE: &str = "codex_tui";
+pub(crate) const COMPANION_MESSAGE_TOOL: &str = "send_companion_message";
+
+pub(crate) fn companion_message_spec() -> DynamicToolSpec {
+    DynamicToolSpec::Function(DynamicToolFunctionSpec {
+        name: COMPANION_MESSAGE_TOOL.to_string(),
+        description: "Send a message to the other conversation in the active main/companion pair. Deliver promptly to a running recipient or start an idle recipient. Returns after acceptance without waiting for a reply. Fails when no active pair is open.".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {"message": {"type": "string"}},
+            "required": ["message"],
+            "additionalProperties": false
+        }),
+        defer_loading: false,
+    })
+}
+
 pub(crate) const DELEGATION_TOOLS: [&str; 3] =
     ["create_thread", "send_message_to_thread", "fork_thread"];
 const DEFAULT_LIST_LIMIT: u32 = 10;

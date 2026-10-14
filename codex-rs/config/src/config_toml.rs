@@ -168,6 +168,8 @@ pub struct ConfigToml {
     pub model: Option<String>,
     /// Model for temporary `/chat` conversations; empty inherits the parent.
     pub chat_model: Option<String>,
+    /// Expose companion messaging at TUI startup; defaults to off.
+    pub enable_side_communication: Option<bool>,
     /// Initial `/chat` effort; missing or empty inherits the parent.
     #[serde(
         default,

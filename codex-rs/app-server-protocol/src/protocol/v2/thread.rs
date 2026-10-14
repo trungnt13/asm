@@ -1809,15 +1809,15 @@ pub struct ThreadInjectItemsResponse {}
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadAppendToolsParams {
+pub struct ThreadCompanionLifecycleParams {
     pub thread_id: String,
-    pub tools: Vec<DynamicToolSpec>,
+    pub event: codex_protocol::companion::CompanionLifecycleEvent,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadAppendToolsResponse {}
+pub struct ThreadCompanionLifecycleResponse {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

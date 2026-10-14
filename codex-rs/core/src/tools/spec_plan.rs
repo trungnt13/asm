@@ -186,10 +186,7 @@ pub(crate) fn build_tool_router(
 }
 
 /// Use the effective mode because the model can override the thread's configured mode.
-pub(crate) fn code_mode_only_strict_3p_tools(
-    turn_context: &TurnContext,
-    model_info: &ModelInfo,
-) -> bool {
+fn code_mode_only_strict_3p_tools(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
     effective_tool_mode(turn_context, model_info) == ToolMode::CodeModeOnly
         && turn_context
             .config

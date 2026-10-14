@@ -241,9 +241,9 @@ use codex_protocol::error::Result as CodexResult;
 #[cfg(test)]
 use codex_protocol::exec_output::StreamOutput;
 
-mod appended_tools;
 pub(crate) mod async_compaction;
 mod code_mode_warning;
+mod companion_lifecycle;
 mod config_refresh;
 pub(crate) mod context_window;
 mod daemon_recovery;
@@ -961,7 +961,6 @@ impl Session {
             thread_source,
             originator,
             dynamic_tools,
-            appended_tools: appended_tools::restore_appended_tools(&conversation_history)?,
             user_shell_override,
         };
         session_configuration
@@ -4278,7 +4277,7 @@ impl Session {
         // Wait for accepted updates to finish persisting, then keep later updates from
         // overtaking the current settings snapshot while its checkpoint is written.
         let _settings_guard = thread_settings::acquire_persistence_lock(self).await;
-        let (compacted_item, started_item, world_state_item) = {
+        let (compacted_item, started_item) = {
             let mut state = self.state.lock().await;
             let complete_replacement =
                 matches!(&installation, CompactedHistoryInstallation::Complete(_));
@@ -4325,11 +4324,11 @@ impl Session {
                         world_state_baseline = WorldStateSnapshot::from(&checkpoint.state);
                     }
                     // Prefix replacement already retains all edits in the live suffix.
-                    let input_goal_ids = Default::default();
+                    let input_host_context_ids = Default::default();
                     let (window_number, window_ids) = state.advance_auto_compact_window();
                     (
                         CompactedHistoryMetadata {
-                            input_goal_ids,
+                            input_host_context_ids,
                             message: String::new(),
                             window_number,
                             window_ids,
@@ -4344,31 +4343,23 @@ impl Session {
             for envelope in &mut items {
                 Self::assign_missing_response_item_id(&mut envelope.item);
             }
-            let mut world_state_item =
-                WorldStateItem::full(world_state_baseline.clone().into_object());
-            // Capture current accepted registrations, not the older model-visible snapshot.
-            if !state.session_configuration.appended_tools.is_empty() {
-                world_state_item.state.insert(
-                    crate::context::world_state::APPENDED_TOOL_REGISTRY.to_string(),
-                    serde_json::json!(state.session_configuration.appended_tools),
-                );
-            }
-            // Goal edits are published outside the running task. Keep edits accepted after
-            // the compaction input snapshot, in their original order, after its replacement.
+            // Goal edits and companion lifecycle context arrive outside the running task.
+            // Keep those accepted after the compaction snapshot in their original order.
             if complete_replacement {
-                let replacement_goal_ids = crate::context::UserGoalUpdate::message_ids(
-                    items.iter().map(|envelope| &envelope.item),
-                );
+                let replacement_host_context_ids =
+                    crate::context::retained_host_context_message_ids(
+                        items.iter().map(|envelope| &envelope.item),
+                    );
                 items.extend(
                     state
                         .history
                         .annotated_items()
                         .iter()
                         .filter(|envelope| {
-                            crate::context::UserGoalUpdate::message_text(&envelope.item).is_some()
+                            crate::context::is_retained_host_context_message(&envelope.item)
                                 && envelope.item.id().is_some_and(|id| {
-                                    !metadata.input_goal_ids.contains(id)
-                                        && !replacement_goal_ids.contains(id)
+                                    !metadata.input_host_context_ids.contains(id)
+                                        && !replacement_host_context_ids.contains(id)
                                 })
                         })
                         .cloned(),
@@ -4408,13 +4399,14 @@ impl Session {
                     previous_turn_settings: state.previous_turn_settings(),
                 }),
             };
-            (compacted_item, started_item, world_state_item)
+            (compacted_item, started_item)
         };
 
         if let Some((turn_context, item)) = started_item {
             // The prefix is now known to be valid; announce the install before checkpoint I/O.
             self.emit_turn_item_started(turn_context, item).await;
         }
+        let world_state_item = WorldStateItem::full(world_state_baseline.into_object());
         let rollout_items = [
             RolloutItem::Compacted(compacted_item),
             RolloutItem::WorldState(world_state_item),
@@ -4872,7 +4864,8 @@ impl Session {
     ) {
         let turn_context = step_context.turn.as_ref();
         let history = self.clone_history().await;
-        let input_goal_ids = crate::context::UserGoalUpdate::message_ids(history.raw_items());
+        let input_host_context_ids =
+            crate::context::retained_host_context_message_ids(history.raw_items());
         let retained_client_items =
             crate::compact_remote_v2::truncate_retained_messages_for_remote_compaction(
                 history
@@ -4910,7 +4903,7 @@ impl Session {
             turn_context_item,
             world_state_snapshot,
             CompactedHistoryMetadata {
-                input_goal_ids,
+                input_host_context_ids,
                 message: String::new(),
                 window_number,
                 window_ids,

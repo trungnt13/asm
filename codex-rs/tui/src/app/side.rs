@@ -216,6 +216,7 @@ pub(super) struct SideThreadState {
     pub(super) kind: CompanionKind,
     pub(super) mode: SideConversationMode,
     pub(super) messaging_available: bool,
+    pub(super) lifecycle_open: bool,
     /// Parent-thread condition that changed while this side thread is visible.
     pub(super) parent_status: Option<SideParentStatus>,
 }
@@ -227,6 +228,7 @@ impl SideThreadState {
             kind: CompanionKind::Side,
             mode: SideConversationMode::Side,
             messaging_available: false,
+            lifecycle_open: false,
             parent_status: None,
         }
     }
@@ -505,15 +507,18 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> bool {
-        if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
-            let message =
-                format!("Failed to close side conversation {thread_id}; it is still open: {err}");
-            tracing::warn!("{message}");
-            self.add_agents_overview_error(message);
-            return false;
-        }
+        // Closing the pair commits while both endpoints are still owned. Subscription
+        // cleanup follows that commit; a cleanup failure must not reopen message routing.
+        self.record_companion_closed(app_server, thread_id).await;
         self.abandoned_side_threads.insert(thread_id);
         self.discard_thread_local_state(thread_id).await;
+        if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
+            let message = format!(
+                "Companion conversation {thread_id} was closed, but its subscription could not be released: {err}"
+            );
+            tracing::warn!("{message}");
+            self.add_agents_overview_error(message);
+        }
         true
     }
 
@@ -523,6 +528,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
+        self.record_companion_closed(app_server, thread_id).await;
         self.abandoned_side_threads.insert(thread_id);
         self.pending_app_server_requests
             .cancel_thread_verification(&thread_id.to_string());
@@ -1008,13 +1014,8 @@ impl App {
                         .add_error_message(format!("Failed to save parallel navigation: {error}"));
                     return Ok(AppRunControl::Continue);
                 }
-                let mut messaging_error = None;
-                for endpoint in [parent_thread_id, child_thread_id] {
-                    if let Err(error) = self.enable_companion_messages(app_server, endpoint).await {
-                        messaging_error = Some(error);
-                        break;
-                    }
-                }
+                let messaging_available = app_server.companion_messages_available(parent_thread_id)
+                    && app_server.companion_messages_available(child_thread_id);
                 let channel = self.ensure_thread_channel(child_thread_id);
                 {
                     let mut store = channel.store.lock().await;
@@ -1024,7 +1025,7 @@ impl App {
                     child_thread_id,
                     SideThreadState {
                         mode,
-                        messaging_available: messaging_error.is_none(),
+                        messaging_available,
                         ..match kind {
                             CompanionKind::Side => SideThreadState::new(parent_thread_id),
                             CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
@@ -1078,10 +1079,47 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 if self.active_thread_id == Some(child_thread_id) {
-                    if let Some(error) = messaging_error {
-                        self.chat_widget.add_error_message(format!(
-                            "Companion messaging is unavailable on this pair: {error}"
-                        ));
+                    if app_server
+                        .thread_tool_transport()
+                        .communication_namespace()
+                        .is_some()
+                    {
+                        let state = self
+                            .side_threads
+                            .get_mut(&child_thread_id)
+                            .expect("selected companion has pair state");
+                        state.lifecycle_open = true;
+                        let relationship = state.relationship();
+                        self.record_companion_lifecycle(
+                            app_server,
+                            [
+                                (
+                                    parent_thread_id,
+                                    codex_protocol::companion::CompanionLifecycleEvent::Opened {
+                                        session_id: child_thread_id.to_string(),
+                                        relationship,
+                                    },
+                                ),
+                                (
+                                    child_thread_id,
+                                    codex_protocol::companion::CompanionLifecycleEvent::Opened {
+                                        session_id: parent_thread_id.to_string(),
+                                        relationship,
+                                    },
+                                ),
+                            ],
+                        )
+                        .await;
+                    }
+                    if !messaging_available
+                        && app_server
+                            .thread_tool_transport()
+                            .communication_namespace()
+                            .is_some()
+                    {
+                        self.chat_widget.add_error_message(
+                            "Companion messaging needs a saved startup declaration on both threads; start a new main conversation with enable_side_communication enabled.".into(),
+                        );
                     }
                     if selected_profile.is_some() {
                         self.adopt_inherited_server_selection();

@@ -349,6 +349,14 @@ impl App {
                 self.repaint_agents_overview();
                 let _ = registered.send(());
             }
+            AppEvent::CompanionMcpMessage { params, generation, receipt } => {
+                let response = if !self.reconnect.offline && app_server.companion_connection_matches(generation) {
+                    self.accept_companion_message(app_server, params).await
+                } else {
+                    crate::dynamic_tools::failure_response("TUI connection changed; message was not sent")
+                };
+                let _ = receipt.send(response);
+            }
             AppEvent::DynamicToolCallCompleted {
                 request_id,
                 response,
@@ -3836,6 +3844,8 @@ impl App {
                     "Failed to save the closed side selection: {error}"
                 ));
             }
+            self.abandoned_side_threads.insert(thread_id);
+            self.record_companion_closed(app_server, thread_id).await;
             self.discard_thread_local_state(thread_id).await;
             self.agents_overview.input_states.remove(&thread_id);
             self.agents_overview.dispatched_requests.remove(&thread_id);
@@ -3853,6 +3863,8 @@ impl App {
                         thread_id: thread_id.to_string(),
                     },
                 ));
+                self.abandoned_side_threads.insert(thread_id);
+                self.record_companion_closed(app_server, thread_id).await;
                 self.discard_thread_local_state(thread_id).await;
                 self.agents_overview.input_states.remove(&thread_id);
                 self.agents_overview.dispatched_requests.remove(&thread_id);
@@ -3862,6 +3874,9 @@ impl App {
                     .send(AppEvent::ResetTranscriptForThreadSwitch);
                 self.detach_current_thread_for_navigation(app_server, /*destination*/ None)
                     .await;
+                for child in Vec::from_iter(self.side_threads.keys().copied()) {
+                    self.record_companion_closed(app_server, child).await;
+                }
                 self.reset_thread_event_state().await;
                 let init = self.chatwidget_init_for_forked_or_resumed_thread(
                     tui,
@@ -3927,6 +3942,8 @@ impl App {
                     "Failed to save the closed side selection: {error}"
                 ));
             }
+            self.abandoned_side_threads.insert(thread_id);
+            self.record_companion_closed(app_server, thread_id).await;
             self.discard_thread_local_state(thread_id).await;
             self.agents_overview.input_states.remove(&thread_id);
             self.agents_overview.dispatched_requests.remove(&thread_id);
@@ -3944,6 +3961,8 @@ impl App {
                         thread_id: thread_id.to_string(),
                     },
                 ));
+                self.abandoned_side_threads.insert(thread_id);
+                self.record_companion_closed(app_server, thread_id).await;
                 self.discard_thread_local_state(thread_id).await;
                 self.agents_overview.input_states.remove(&thread_id);
                 self.agents_overview.dispatched_requests.remove(&thread_id);
@@ -3953,6 +3972,9 @@ impl App {
                     .send(AppEvent::ResetTranscriptForThreadSwitch);
                 self.detach_current_thread_for_navigation(app_server, /*destination*/ None)
                     .await;
+                for child in Vec::from_iter(self.side_threads.keys().copied()) {
+                    self.record_companion_closed(app_server, child).await;
+                }
                 self.reset_thread_event_state().await;
                 let init = self.chatwidget_init_for_forked_or_resumed_thread(
                     tui,

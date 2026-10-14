@@ -55,10 +55,19 @@ use uuid::Uuid;
 pub(crate) enum ThreadToolTransport {
     Disabled,
     Dynamic,
+    DynamicWithCommunication,
     Mcp(Arc<DynamicToolMcpServer>),
 }
 
 impl ThreadToolTransport {
+    pub(crate) fn communication_namespace(&self) -> Option<&str> {
+        match self {
+            Self::Mcp(server) if server.communication => Some(server.namespace),
+            Self::DynamicWithCommunication => Some("dynamic"),
+            Self::Disabled | Self::Dynamic | Self::Mcp(_) => None,
+        }
+    }
+
     pub(crate) fn validate_config(
         &self,
         config: &crate::legacy_core::config::Config,
@@ -75,10 +84,18 @@ impl ThreadToolTransport {
     }
 
     pub(crate) fn configure(&self, params: &mut ThreadStartParams) {
+        params.config.get_or_insert_default().insert(
+            "enable_side_communication".to_string(),
+            Value::Bool(self.communication_namespace().is_some()),
+        );
         match self {
             Self::Disabled => params.dynamic_tools = None,
-            Self::Dynamic => {
-                params.dynamic_tools = Some(dynamic_tools::non_delegation_tool_specs());
+            Self::Dynamic | Self::DynamicWithCommunication => {
+                let mut tools = dynamic_tools::non_delegation_tool_specs();
+                if matches!(self, Self::DynamicWithCommunication) {
+                    tools.push(dynamic_tools::companion_message_spec());
+                }
+                params.dynamic_tools = Some(tools);
             }
             Self::Mcp(_) => {
                 params.dynamic_tools = None;
@@ -88,6 +105,13 @@ impl ThreadToolTransport {
     }
 
     pub(crate) fn configure_mcp(&self, config: &mut Option<HashMap<String, Value>>) {
+        // Restoring a saved dynamic declaration needs the same frozen opt-in as MCP,
+        // without injecting a new declaration into an older thread.
+        if self.communication_namespace().is_some() {
+            config
+                .get_or_insert_default()
+                .insert("enable_side_communication".to_string(), Value::Bool(true));
+        }
         if let Self::Mcp(server) = self {
             config.get_or_insert_default().insert(
                 format!("mcp_servers.{}", server.namespace),
@@ -100,6 +124,7 @@ impl ThreadToolTransport {
 #[derive(Clone)]
 pub(crate) struct ToolServices {
     pub(crate) task_tools: bool,
+    pub(crate) communication: bool,
     pub(crate) worktrees: Option<crate::managed_worktree_tools::ManagedWorktreeTools>,
 }
 
@@ -107,22 +132,33 @@ impl ToolServices {
     pub(crate) fn namespace(&self) -> &'static str {
         if self.task_tools {
             dynamic_tools::NAMESPACE
+        } else if self.communication {
+            "codex_companion"
         } else {
             "codex_worktrees"
         }
     }
 }
 
-type ToolConnection = Arc<RwLock<Option<(AppServerRequestHandle, AppEventSender)>>>;
+type ToolConnection = Arc<RwLock<Option<(AppServerRequestHandle, AppEventSender, Uuid)>>>;
 
 pub(crate) struct DynamicToolMcpServer {
     connection: ToolConnection,
     config: Value,
     namespace: &'static str,
     task: JoinHandle<()>,
+    communication: bool,
 }
 
 impl DynamicToolMcpServer {
+    pub(crate) fn owns_generation(&self, generation: Uuid) -> bool {
+        self.connection
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|(_, _, current)| *current == generation)
+    }
+
     pub(crate) fn suspend(&self) {
         *self
             .connection
@@ -134,7 +170,7 @@ impl DynamicToolMcpServer {
         *self
             .connection
             .write()
-            .unwrap_or_else(PoisonError::into_inner) = Some((handle, events));
+            .unwrap_or_else(PoisonError::into_inner) = Some((handle, events, Uuid::new_v4()));
     }
 
     pub(crate) async fn start(
@@ -149,7 +185,7 @@ impl DynamicToolMcpServer {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let authorization = Arc::new(format!("Bearer {}", Uuid::new_v4()));
-        let server_config = json!({
+        let mut server_config = json!({
             "url": format!("http://{address}/mcp"),
             "http_headers": {"Authorization": authorization.as_str()},
             "default_tools_approval_mode": "approve",
@@ -160,6 +196,10 @@ impl DynamicToolMcpServer {
                 "create_worktree": {"approval_mode": "approve"}
             }
         });
+        if services.communication {
+            server_config["tools"][dynamic_tools::COMPANION_MESSAGE_TOOL] =
+                json!({"approval_mode": "approve"});
+        }
         if let Some(requirement) = managed_requirement {
             let raw_config = serde_json::from_value::<RawMcpServerConfig>(server_config.clone())
                 .map_err(|error| {
@@ -177,8 +217,17 @@ impl DynamicToolMcpServer {
         if let Some(overrides) = thread_start_params.config.as_mut() {
             overrides.remove("web_search");
         }
-        let connection = Arc::new(RwLock::new(Some((request_handle, app_event_tx))));
+        thread_start_params.config.get_or_insert_default().insert(
+            "enable_side_communication".to_string(),
+            Value::Bool(services.communication),
+        );
+        let connection = Arc::new(RwLock::new(Some((
+            request_handle,
+            app_event_tx,
+            Uuid::new_v4(),
+        ))));
         let namespace = services.namespace();
+        let communication = services.communication;
         let handler = DynamicToolMcpHandler {
             connection: Arc::clone(&connection),
             thread_start_params,
@@ -209,6 +258,7 @@ impl DynamicToolMcpServer {
             config: server_config,
             namespace,
             task,
+            communication,
         })
     }
 }
@@ -261,6 +311,9 @@ impl ServerHandler for DynamicToolMcpHandler {
         } else {
             Vec::new()
         };
+        if self.services.communication {
+            specs.push(dynamic_tools::companion_message_spec());
+        }
         if self.services.worktrees.is_some() {
             specs.extend(crate::managed_worktree_tool_specs::specs());
         }
@@ -317,6 +370,14 @@ impl ServerHandler for DynamicToolMcpHandler {
             .or_else(|| turn_metadata.as_ref()?.get("thread_id")?.as_str())
             .filter(|thread_id| !thread_id.is_empty())
             .ok_or_else(|| McpError::invalid_params("missing task metadata", None))?;
+        if request.name.as_ref() == dynamic_tools::COMPANION_MESSAGE_TOOL
+            && metadata.get("threadId").and_then(Value::as_str) != Some(thread_id)
+        {
+            return Err(McpError::invalid_params(
+                "Companion messages require core threadId metadata",
+                None,
+            ));
+        }
         let turn_id = metadata
             .get("turnId")
             .and_then(Value::as_str)
@@ -340,7 +401,7 @@ impl ServerHandler for DynamicToolMcpHandler {
             self.server_config.clone(),
         );
         // Snapshot once: an in-flight call must never switch connections or replay a mutation.
-        let (request_handle, app_event_tx) = self
+        let (request_handle, app_event_tx, generation) = self
             .connection
             .read()
             .unwrap_or_else(PoisonError::into_inner)
@@ -348,7 +409,25 @@ impl ServerHandler for DynamicToolMcpHandler {
             .ok_or_else(|| {
                 McpError::internal_error("TUI is reconnecting; tool was not sent", None)
             })?;
-        let response = if matches!(
+        let response = if params.tool == dynamic_tools::COMPANION_MESSAGE_TOOL {
+            if !self.services.communication {
+                return Err(McpError::invalid_params(
+                    "Companion communication is disabled",
+                    None,
+                ));
+            }
+            let (receipt, accepted) = tokio::sync::oneshot::channel();
+            app_event_tx.send(crate::app_event::AppEvent::CompanionMcpMessage {
+                params,
+                generation,
+                receipt,
+            });
+            accepted.await.unwrap_or_else(|_| {
+                dynamic_tools::failure_response(
+                    "The owning TUI closed before accepting this message",
+                )
+            })
+        } else if matches!(
             params.tool.as_str(),
             "create_worktree" | "get_worktree_creation_status" | "list_worktrees"
         ) {

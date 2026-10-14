@@ -174,7 +174,7 @@ async fn build_and_install_compaction(
         (attempt, compaction_turn_context, None)
     };
     let RemoteCompactV2Attempt {
-        input_goal_ids,
+        input_host_context_ids,
         trace_input_history,
         prompt_input,
         prompt_input_metadata,
@@ -236,7 +236,7 @@ async fn build_and_install_compaction(
         .await;
         let (window_number, window_ids) = sess.advance_auto_compact_window().await;
         let installation = CompactedHistoryMetadata {
-            input_goal_ids,
+            input_host_context_ids,
             message: String::new(),
             window_number,
             window_ids,
