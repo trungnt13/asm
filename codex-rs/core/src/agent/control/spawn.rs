@@ -506,7 +506,8 @@ impl LocalAgentControl {
         // Reload restores this child's runtime toggle, never the parent's current preference.
         config.adaptive_reasoning.enabled = evicted_runtime_state
             .as_ref()
-            .is_some_and(|state| state.adaptive_reasoning_enabled);
+            .is_some_and(|state| state.adaptive_reasoning_enabled)
+            && !config.role_adaptive_reasoning_disabled;
         config.adaptive_reasoning_initial_revision = evicted_runtime_state.as_ref().map_or(
             /*default*/ 0,
             |state| state.adaptive_reasoning_revision,
@@ -750,12 +751,12 @@ impl LocalAgentControl {
             parent_thread_id, ..
         })) = session_source.as_ref()
         {
-            // Freeze the parent's live toggle after child role and model overrides.
+            // Freeze the parent's live toggle without relaxing inherited role restrictions.
             // Later parent changes do not belong to this child's runtime state.
             config.adaptive_reasoning.enabled = match state.get_thread(*parent_thread_id).await {
                 Ok(parent) => parent.config_snapshot().await.adaptive_reasoning_enabled,
                 Err(_) => false,
-            };
+            } && !config.role_adaptive_reasoning_disabled;
         }
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
