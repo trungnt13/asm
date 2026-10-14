@@ -2864,7 +2864,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
                 .await?;
             // A queued close from the old runtime must not undo the new attachment.
             app.handle_app_server_event(&app_server, closed).await;
-            app.drain_active_thread_events(&mut tui).await?;
+            app.drain_active_thread_events(&mut tui, &app_server).await?;
             assert_eq!(app.active_thread_id, Some(child_thread_id));
             assert!(!matches!(
                 app_server.thread_read(child_thread_id, /*include_turns*/ false).await?.status,
