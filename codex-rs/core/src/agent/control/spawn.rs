@@ -36,6 +36,7 @@ use codex_context_fragments::to_annotated_content;
 use codex_features::Feature;
 use codex_history::ResponseItemEnvelope;
 use codex_prompts::ResolvedModelMessages;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::intersect_effective_permission_profiles;
 use codex_protocol::protocol::EnvironmentConfigState;
@@ -424,6 +425,17 @@ impl LocalAgentControl {
         } else {
             None
         };
+        if let Some(evicted) = &evicted_runtime_state {
+            config.role_adaptive_reasoning_disabled |= evicted.role_adaptive_reasoning_disabled;
+            if evicted.web_search_disabled {
+                config
+                    .web_search_mode
+                    .set(WebSearchMode::Disabled)
+                    .map_err(|err| {
+                        CodexErr::InvalidRequest(format!("web_search is invalid: {err}"))
+                    })?;
+            }
+        }
         config.model_reasoning_effort = stored_reasoning_effort;
         if let Some(role_name) = session_source.get_agent_role() {
             let runtime_approval_policy = config.permissions.approval_policy.value();
