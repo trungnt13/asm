@@ -205,7 +205,7 @@ async fn adaptive_fixture(
         .thread_extension_data
         .get_or_init(AdaptiveSession::default)
         .client
-        .set(Ok(client))
+        .set(client)
         .ok()
         .expect("seed synthetic Decisions client");
     session
@@ -243,31 +243,33 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
 
     let mut proxy = DecisionProxy::start().await;
     let primary = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &primary,
-        vec![
+    let mut steps = ["plan-call", "continue-call"]
+        .map(|call| {
             responses::sse(vec![
                 responses::ev_function_call(
-                    "plan-call",
+                    call,
                     "update_plan",
                     &json!({
                         "plan": [{"step":"Check the arithmetic", "status":"completed"}]
                     })
                     .to_string(),
                 ),
-                responses::ev_completed("plan-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("final-message", "The result is four."),
-                responses::ev_completed("final-response"),
-            ]),
-        ],
-    )
-    .await;
+                responses::ev_completed(call),
+            ])
+        })
+        .to_vec();
+    steps.push(responses::sse(vec![
+        responses::ev_assistant_message("final-message", "The result is four."),
+        responses::ev_completed("final-response"),
+    ]));
+    let requests = responses::mount_sse_sequence(&primary, steps).await;
     let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
         config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
         config.model_provider.supports_websockets = false;
         config.update_plan_enabled = true;
+        if scenario == "success" {
+            config.adaptive_reasoning.decision_every_n_steps = 2;
+        }
         if scenario == "timeout" {
             config.adaptive_reasoning.decision_timeout_ms = 500;
         }
@@ -307,8 +309,8 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
     tokio::time::sleep(Duration::from_millis(/*millis*/ 100)).await;
     assert_eq!(
         requests.requests().len(),
-        1,
-        "tool continuation waits for its decision"
+        if scenario == "success" { 2 } else { 1 },
+        "success skips the intervening step; failure cases decide before step two"
     );
     assert_eq!(
         turn.next_step_settings.load().effective_reasoning_effort(),
@@ -347,9 +349,13 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
     .expect("normal turn continues after decision success or bounded fallback");
     drop(reply);
     let requests = requests.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert_eq!(
         requests[1].function_call_output_text("plan-call"),
+        Some("Plan updated".to_string())
+    );
+    assert_eq!(
+        requests[2].function_call_output_text("continue-call"),
         Some("Plan updated".to_string())
     );
     let updates = requests
@@ -365,8 +371,8 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
     let high = json!({"type":"configuration_update", "reasoning":{"effort":"high"}});
     let low = json!({"type":"configuration_update", "reasoning":{"effort":"low"}});
     let expected = match scenario {
-        "success" => vec![vec![high.clone()], vec![high, low]],
-        "failure" | "timeout" => vec![vec![high.clone()], vec![high]],
+        "success" => vec![vec![high.clone()], vec![high.clone()], vec![high, low]],
+        "failure" | "timeout" => vec![vec![high.clone()], vec![high.clone()], vec![high]],
         _ => unreachable!("defined test scenarios"),
     };
     assert_eq!(updates, expected);
@@ -375,7 +381,7 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
             .iter()
             .map(|request| request.body_json()["reasoning"]["effort"].clone())
             .collect::<Vec<_>>(),
-        vec![json!("high"), json!("high")]
+        vec![json!("high"), json!("high"), json!("high")]
     );
     let first_input = requests[0].input();
     let second_input = requests[1].input();
@@ -394,7 +400,7 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
     );
     assert!(
         proxy.requests.try_recv().is_err(),
-        "two main steps require exactly two real decisions"
+        "three main steps make only two decisions: spacing or cooldown skips the other"
     );
     session.stop_adaptive_reasoning().await;
 }
