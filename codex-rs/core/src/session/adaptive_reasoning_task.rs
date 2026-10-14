@@ -125,13 +125,21 @@ pub(super) async fn run_decision(
             }
         }
     };
-    if let Some(error) = error
-        && !cancellation.is_cancelled()
-        && !guard.freshness.is_cancelled()
-        && let Some(session) = session.upgrade()
+    let error = error.filter(|_| !cancellation.is_cancelled() && !guard.freshness.is_cancelled());
+    if let Some(session) = session.upgrade()
+        && let Some(error) = error
     {
         session
-            .publish_adaptive_reasoning_error(Some(error), generation)
+            .publish_adaptive_reasoning_error(
+                Some(error),
+                generation,
+                Some(
+                    super::adaptive_reasoning::health::AdaptiveDecisionHealthGuard {
+                        freshness: &guard.freshness,
+                        cancellation: &cancellation,
+                    },
+                ),
+            )
             .await;
     }
     if let Some(attempt) = attempt {

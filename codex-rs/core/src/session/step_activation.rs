@@ -279,8 +279,11 @@ impl Session {
         .await
         .unwrap_or(TurnSettingsUpdateOutcome::TargetUnavailable);
         if outcome == TurnSettingsUpdateOutcome::Applied {
-            self.publish_adaptive_reasoning_error(/*error*/ None, /*generation*/ None)
-                .await;
+            self.accept_adaptive_decision(turn);
+            self.publish_adaptive_reasoning_error(
+                /*error*/ None, /*generation*/ None, /*guard*/ None,
+            )
+            .await;
         }
         outcome
     }
