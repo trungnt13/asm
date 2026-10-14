@@ -3,6 +3,7 @@
 //! This is the single app-server submission path for both new user turns and steering.
 
 use super::*;
+use codex_protocol::config_types::ServiceTier;
 
 pub(super) async fn try_submit_user_turn(
     app: &mut App,
@@ -27,6 +28,34 @@ pub(super) async fn try_submit_user_turn(
     else {
         return Ok(false);
     };
+    let request_model = collaboration_mode
+        .as_ref()
+        .map_or(model.as_str(), |mode| mode.settings.model.as_str());
+    if app
+        .side_threads
+        .get(&thread_id)
+        .is_some_and(|state| state.mode == crate::app_event::SideConversationMode::Chat)
+        && (service_tier.as_ref().and_then(|tier| tier.as_deref())
+            != Some(ServiceTier::Fast.request_value())
+            || !app
+                .chat_widget
+                .config_ref()
+                .features
+                .service_tier_enabled(ServiceTier::Fast.request_value())
+            || !app.chat_widget.model_catalog().models.iter().any(|preset| {
+                preset.model == request_model
+                    && crate::service_tier_resolution::model_supports_service_tier(
+                        preset,
+                        ServiceTier::Fast.request_value(),
+                    )
+            }))
+    {
+        let message = "Chat requires Fast; no message was sent.".to_string();
+        if !app.chat_widget.handle_turn_start_rejection(message.clone()) {
+            app.chat_widget.add_error_message(message);
+        }
+        return Ok(true);
+    }
     if let Some(turn_id) = app.active_turn_id_for_thread(thread_id).await {
         let mut steer_turn_id = turn_id;
         let mut retried_after_turn_mismatch = false;
@@ -93,7 +122,10 @@ pub(super) async fn try_submit_user_turn(
     let eligible_account = app.chat_widget.daybreak_account_eligible();
     let enabled = app.chat_widget.daybreak_enabled
         && !app.chat_widget.side_conversation_active()
-        && !app.side_threads.contains_key(&thread_id);
+        && app
+            .side_threads
+            .get(&thread_id)
+            .is_none_or(|side| side.kind == CompanionKind::Parallel);
     let cyber_access_program = match crate::daybreak::program_for_turn(
         &app.chat_widget.model_catalog().models,
         model,
@@ -144,6 +176,7 @@ pub(super) async fn try_submit_user_turn(
         .as_ref()
         .filter(|profile| {
             profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
+                && profile.matches_config(config)
         });
     let permissions_override = App::turn_permissions_override_from_config(
         config,
