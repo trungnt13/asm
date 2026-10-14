@@ -2349,12 +2349,12 @@ impl std::fmt::Display for AdaptiveReasoningError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Credentials => f.write_str("configured API key is missing; load the key in the backend environment and restart"),
-            Self::InvalidRequest => f.write_str("invalid Decisions request"),
-            Self::Transport => f.write_str("Decisions connection failed"),
-            Self::Timeout => f.write_str("Decisions request timed out"),
-            Self::Http { status } => write!(f, "Decisions HTTP {status}"),
-            Self::ResponseTooLarge => f.write_str("Decisions response exceeded the size limit"),
-            Self::InvalidResponse => f.write_str("invalid Decisions response"),
+            Self::InvalidRequest => f.write_str("invalid decision request"),
+            Self::Transport => f.write_str("decision backend connection failed"),
+            Self::Timeout => f.write_str("decision request timed out"),
+            Self::Http { status } => write!(f, "decision backend HTTP {status}"),
+            Self::ResponseTooLarge => f.write_str("decision response exceeded the size limit"),
+            Self::InvalidResponse => f.write_str("invalid decision response"),
             Self::Rejected => f.write_str("selected effort could not be applied"),
         }
     }
