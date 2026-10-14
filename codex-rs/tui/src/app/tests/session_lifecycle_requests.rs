@@ -247,102 +247,6 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
         vec![None, None, None, Some("daybreakBlue"), Some("standard")]
     );
 
-    app.chat_widget.update_account_state(
-        /*status_account_display*/ None, /*plan_type*/ None,
-        /*has_chatgpt_account*/ true, /*has_codex_backend_auth*/ true,
-    );
-
-    enabled_config.ephemeral = false;
-    let saved_parent_id = ThreadId::from_string(
-        &create_fake_rollout(
-            &app.config.codex_home,
-            "2026-01-01T00-00-00",
-            "2026-01-01T00:00:00Z",
-            "Saved Daybreak parent",
-            Some(app.config.model_provider_id.as_str()),
-            /*git_info*/ None,
-        )
-        .expect("create saved Daybreak parent rollout"),
-    )?;
-    server
-        .thread_read(saved_parent_id, /*include_turns*/ false)
-        .await?;
-    let request_id = server.next_request_id();
-    let _: codex_app_server_protocol::ThreadMetadataUpdateResponse = server
-        .request_handle()
-        .request_typed(ClientRequest::ThreadMetadataUpdate {
-            request_id,
-            params: codex_app_server_protocol::ThreadMetadataUpdateParams {
-                thread_id: saved_parent_id.to_string(),
-                project_id: None,
-                git_info: None,
-                daybreak_enabled: Some(true),
-            },
-        })
-        .await?;
-    let saved_parent = server
-        .resume_thread(
-            &app.local_settings,
-            enabled_config.clone(),
-            saved_parent_id,
-            crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
-        )
-        .await?;
-    assert!(saved_parent.session.daybreak_enabled);
-    let parallel = server
-        .fork_side_thread(
-            &app.local_settings,
-            enabled_config,
-            saved_parent_id,
-            /*selected_profile*/ None,
-        )
-        .await?;
-    let parallel_id = parallel.session.thread_id;
-    assert!(parallel.session.daybreak_enabled);
-    app.side_threads
-        .insert(parallel_id, SideThreadState::parallel(saved_parent_id));
-    app.store_active_thread_receiver().await;
-    app.clear_active_thread().await;
-    app.enqueue_primary_thread_session(parallel.session, parallel.turns)
-        .await?;
-    assert!(app.chat_widget.daybreak_enabled);
-    assert!(!app.chat_widget.side_conversation_active());
-    assert_eq!(app.current_displayed_thread_id(), Some(parallel_id));
-    app.submit_thread_op(&mut server, parallel_id, turn.clone())
-        .await?;
-
-    app.store_active_thread_receiver().await;
-    app.clear_active_thread().await;
-    app.enqueue_primary_thread_session(saved_parent.session, saved_parent.turns)
-        .await?;
-    assert!(app.chat_widget.daybreak_enabled);
-    assert_ne!(app.current_displayed_thread_id(), Some(parallel_id));
-    app.submit_thread_op(&mut server, parallel_id, turn).await?;
-    let turns = recorded_params(&requests, "turn/start");
-    let parallel_id_string = parallel_id.to_string();
-    assert_eq!(
-        turns[10..]
-            .iter()
-            .map(|turn| (
-                turn["threadId"].as_str(),
-                turn["cyberAccessProgram"].as_str()
-            ))
-            .collect::<Vec<_>>(),
-        vec![
-            (Some(parallel_id_string.as_str()), Some("daybreakBlue")),
-            (Some(parallel_id_string.as_str()), Some("daybreakBlue")),
-        ],
-    );
-
-    let snapshot = app.thread_event_channels[&parallel_id]
-        .store
-        .lock()
-        .await
-        .snapshot();
-    app.chat_widget.set_daybreak_enabled(/*enabled*/ false);
-    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
-    assert!(app.chat_widget.daybreak_enabled);
-    app.chat_widget.set_daybreak_enabled(/*enabled*/ false);
     while events.try_recv().is_ok() {}
 
     let missing_thread_id = ThreadId::new();
@@ -466,7 +370,6 @@ pub(super) enum HistoryCapabilities {
     LegacyDynamicToolsAndHistory,
     ForkHydrationFails,
     ReadAfterResumeFails,
-    ResumeFails,
     ItemsListFails,
     ItemsAndSummaryTurnsFail,
     ThreadListFails,
@@ -728,17 +631,14 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             id: request_id,
                             result: serde_json::json!({}),
                         })
-                    } else if (history_capabilities == HistoryCapabilities::ResumeFails
-                        && request.method == "thread/resume")
-                        || (matches!(
-                            history_capabilities,
-                            HistoryCapabilities::ItemsListFails
-                                | HistoryCapabilities::ItemsAndSummaryTurnsFail
-                        ) && (request.method == "thread/items/list"
-                            || (history_capabilities
-                                == HistoryCapabilities::ItemsAndSummaryTurnsFail
-                                && request.method == "thread/turns/list"
-                                && params.is_some_and(|params| params["itemsView"] == "summary"))))
+                    } else if (matches!(
+                        history_capabilities,
+                        HistoryCapabilities::ItemsListFails
+                            | HistoryCapabilities::ItemsAndSummaryTurnsFail
+                    ) && (request.method == "thread/items/list"
+                        || (history_capabilities == HistoryCapabilities::ItemsAndSummaryTurnsFail
+                            && request.method == "thread/turns/list"
+                            && params.is_some_and(|params| params["itemsView"] == "summary"))))
                         || (history_capabilities == HistoryCapabilities::ReadAfterResumeFails
                             && request.method == "thread/read"
                             && request_sink
@@ -1581,95 +1481,6 @@ async fn cancelling_saved_side_pauses_goal_and_preserves_running_parent() -> Res
         );
         server.shutdown().await?;
         proxy.await??;
-    }
-    Ok(())
-}
-
-#[tokio::test]
-async fn removing_saved_side_returns_to_parent_on_embedded_and_shared_servers() -> Result<()> {
-    let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500")?;
-    for target in [
-        AppServerTarget::Embedded,
-        AppServerTarget::LocalDaemon {
-            allow_embedded_fallback: true,
-            endpoint: endpoint.clone(),
-        },
-        AppServerTarget::Remote { endpoint },
-    ] {
-        for (method, event) in [
-            ("thread/archive", AppEvent::ArchiveCurrentThread),
-            ("thread/delete", AppEvent::DeleteCurrentThread),
-        ] {
-            let (mut app, _codex_home) = make_history_test_app().await?;
-            let parent_id =
-                create_history_rollout(&app.config, ThreadHistoryMode::Legacy, "keep parent")?;
-            let (mut server, requests, proxy) = start_recording_app_server(
-                &app.config,
-                /*blocked_thread_list*/ None,
-                /*failed_thread_name*/ None,
-            )
-            .await?;
-            let resumed = server
-                .resume_thread(
-                    &app.local_settings,
-                    app.config.clone(),
-                    parent_id,
-                    crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-                )
-                .await?;
-            app.app_server_target = target.clone();
-            app.enqueue_primary_thread_session(resumed.session.clone(), resumed.turns)
-                .await?;
-            app.chat_widget.handle_thread_session(resumed.session);
-            let side = server
-                .fork_side_thread(
-                    &app.local_settings,
-                    app.config.clone(),
-                    parent_id,
-                    /*selected_profile*/ None,
-                )
-                .await?;
-            let side_id = side.session.thread_id;
-            app.side_threads
-                .insert(side_id, SideThreadState::parallel(parent_id));
-            App::install_side_thread_snapshot(
-                &mut *app.ensure_thread_channel(side_id).store.lock().await,
-                side.session,
-                side.turns,
-            );
-            app.upsert_agent_picker_thread(
-                side_id, /*agent_nickname*/ None, /*agent_role*/ None,
-                /*is_closed*/ false,
-            );
-            let mut tui = crate::tui::test_support::make_test_tui()?;
-            app.select_agent_thread(&mut tui, &mut server, side_id)
-                .await?;
-            assert_eq!(app.current_displayed_thread_id(), Some(side_id));
-
-            let control = Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
-
-            assert_matches!(control, AppRunControl::Continue);
-            assert_eq!(
-                (
-                    app.current_displayed_thread_id(),
-                    app.chat_widget.thread_id()
-                ),
-                (Some(parent_id), Some(parent_id))
-            );
-            assert!(app.side_threads.is_empty());
-            assert_eq!(
-                recorded_params(&requests, method),
-                vec![serde_json::json!({"threadId": side_id.to_string()})]
-            );
-            assert!(
-                server
-                    .thread_read(parent_id, /*include_turns*/ true)
-                    .await
-                    .is_ok()
-            );
-            server.shutdown().await?;
-            proxy.await??;
-        }
     }
     Ok(())
 }

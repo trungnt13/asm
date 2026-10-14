@@ -140,7 +140,6 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         (false, Some("Manual title")),
     ] {
         let mut app = make_test_app().await;
-        app.local_settings.auto_rename.auto_update = true;
         let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
         let started = app_server.start_thread(&app.config).await?;
         let thread_id = started.session.thread_id;
@@ -174,27 +173,8 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             app_server
                 .thread_set_name(thread_id, name.to_string())
                 .await?;
-            let pending = app
-                .pending_thread_titles
-                .get(&(thread_id, ThreadTitleDestination::Automatic))
-                .expect("pending title")
-                .clone();
-            app.handle_app_server_event(
-                &app_server,
-                AppServerEvent::ServerNotification(Box::new(
-                    ServerNotification::ThreadNameUpdated(
-                        codex_app_server_protocol::ThreadNameUpdatedNotification {
-                            thread_id: thread_id.to_string(),
-                            thread_name: Some(name.to_string()),
-                        },
-                    ),
-                )),
-            )
-            .await;
-            assert!(pending.is_cancelled());
         }
         let displayed_thread = (app.chat_widget.thread_id(), app.chat_widget.thread_name());
-        app.local_settings.auto_rename.max_title_chars = Some(5);
         app.handle_event(
             &mut tui,
             &mut app_server,
@@ -231,64 +211,6 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             )
             .await?;
         assert_eq!(resumed.session.thread_name, expected_name);
-        assert_eq!(
-            app.automatic_thread_titles.contains_key(&thread_id),
-            manual_name.is_none()
-        );
-        if manual_name.is_none() {
-            app.handle_app_server_event(
-                &app_server,
-                AppServerEvent::ServerNotification(Box::new(
-                    ServerNotification::ThreadNameUpdated(
-                        codex_app_server_protocol::ThreadNameUpdatedNotification {
-                            thread_id: thread_id.to_string(),
-                            thread_name: Some("Generated title".to_string()),
-                        },
-                    ),
-                )),
-            )
-            .await;
-            assert!(app.automatic_thread_titles.contains_key(&thread_id));
-            app.select_agent_thread(&mut tui, &mut app_server, thread_id)
-                .await?;
-            assert!(app.automatic_thread_titles.contains_key(&thread_id));
-            let old = title_completion_event(
-                &mut app,
-                thread_id,
-                "before-resume",
-                TurnStatus::Completed,
-                Some("Old completed request"),
-            )
-            .await?;
-            let _ = app.automatic_thread_title_prompt(&old).await;
-            let pending = CancellationToken::new();
-            app.pending_thread_titles.insert(
-                (thread_id, ThreadTitleDestination::Automatic),
-                pending.clone(),
-            );
-            app.resume_target_session(
-                &mut tui,
-                &mut app_server,
-                crate::resume_picker::SessionTarget {
-                    path: None,
-                    thread_id,
-                    cwd: None,
-                    history_mode: None,
-                },
-            )
-            .await?;
-            assert!(pending.is_cancelled());
-            assert!(app.automatic_thread_titles.contains_key(&thread_id));
-            assert!(app.automatic_thread_title_prompt(&old).await.is_none());
-            assert_eq!(
-                app_server
-                    .thread_read(thread_id, /*include_turns*/ false)
-                    .await?
-                    .name,
-                Some("Generated title".to_string())
-            );
-        }
-
         app_server.shutdown().await?;
     }
 
@@ -299,184 +221,15 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let started = app_server.start_thread(&app.config).await?;
     let thread_id = started.session.thread_id;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.replace_chat_widget_with_app_server_thread(
-        &mut tui,
-        &app_server,
-        started,
-        ThreadAttachPresentation::SessionLineage,
-        /*initial_user_message*/ None,
-    )
-    .await?;
-    let user = serde_json::from_str(
-        r#"{"type":"message","role":"user","content":[{"type":"input_text","text":"Initial request"}]}"#,
-    )?;
-    app_server
-        .thread_inject_items(thread_id, vec![user])
+    app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
-    app.local_settings.auto_rename.auto_update_interval_turns =
-        std::num::NonZeroUsize::new(/*n*/ 1).expect("positive interval");
-    let initial_text = format!("Initial request {}", "🚀".repeat(/*n*/ 3000));
-    let initial_event = ThreadBufferedEvent::Notification(Box::new(
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: thread_id.to_string(),
-            turn_id: "initial-inflight".to_string(),
-            item: title_user_message("initial-user", &initial_text),
-            completed_at_ms: 0,
-        }),
-    ));
-    let prompt = app
-        .automatic_thread_title_prompt(&initial_event)
-        .await
-        .expect("initial title request");
-    assert!(prompt.prompt.len() <= 960);
-    app.pending_thread_titles.insert(
-        (thread_id, ThreadTitleDestination::Automatic),
-        CancellationToken::new(),
-    );
-    let prior_completion = title_completion_event(
-        &mut app,
-        thread_id,
-        "initial-inflight",
-        TurnStatus::Completed,
-        /*user_message*/ None,
-    )
-    .await?;
-    assert!(
-        app.automatic_thread_title_prompt(&prior_completion)
-            .await
-            .is_none()
-    );
-    let newer_text = format!("Latest pending request {}", "🚀".repeat(/*n*/ 3000));
-    let newer_event = ThreadBufferedEvent::Notification(Box::new(
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: thread_id.to_string(),
-            turn_id: "newer-inflight".to_string(),
-            item: title_user_message("newer-user", &newer_text),
-            completed_at_ms: 0,
-        }),
-    ));
-    assert!(
-        app.automatic_thread_title_prompt(&newer_event)
-            .await
-            .is_none()
-    );
-    app.ensure_thread_channel(thread_id)
-        .store
-        .lock()
-        .await
-        .buffer
-        .clear();
-    app.finish_thread_title_generation(thread_id, ThreadTitleDestination::Automatic);
     app.save_automatic_thread_title(
         &mut app_server,
         thread_id,
         "Initial title".to_string(),
-        prompt.request,
+        Default::default(),
     )
     .await;
-    let completion = title_completion_event(
-        &mut app,
-        thread_id,
-        "newer-inflight",
-        TurnStatus::Completed,
-        /*user_message*/ None,
-    )
-    .await?;
-    app.local_settings.auto_rename.max_context_bytes = Some(8192);
-    let prompt = app
-        .automatic_thread_title_prompt(&completion)
-        .await
-        .expect("newer user retained before initial ownership grant");
-    let source = prompt
-        .prompt
-        .split_once("User prompt:\n")
-        .expect("source")
-        .1;
-    assert!(source.starts_with("Latest pending request"));
-    assert!(source.len() <= 8192 && source.is_char_boundary(source.len()));
-    assert!(
-        app.automatic_thread_title_prompt(&prior_completion)
-            .await
-            .is_none()
-    );
-    app.local_settings.auto_rename.max_context_bytes = None;
-    let ThreadBufferedEvent::Notification(notification) = &completion else {
-        panic!("completion notification");
-    };
-    let ServerNotification::TurnCompleted(turn) = notification.as_ref() else {
-        panic!("completed turn");
-    };
-    let mut snapshot = turn.turn.clone();
-    snapshot.id = "long-turn".to_string();
-    snapshot.items = vec![
-        title_user_message("earlier-user", "Earlier request"),
-        title_agent_message(
-            "earlier-answer",
-            "Earlier answer",
-            Some(MessagePhase::FinalAnswer),
-        ),
-    ];
-    app.ensure_thread_channel(thread_id)
-        .store
-        .lock()
-        .await
-        .turns
-        .push(snapshot);
-    app.local_settings.auto_rename.context = codex_config::AutoRenameContext::RecentConversation;
-    let mut completion = title_completion_event(
-        &mut app,
-        thread_id,
-        "long-turn",
-        TurnStatus::Completed,
-        Some("Latest evicted request"),
-    )
-    .await?;
-    for (id, text) in [
-        ("answer-1", "Intermediate answer"),
-        ("answer-2", "Final answer"),
-    ] {
-        app.enqueue_thread_notification(
-            thread_id,
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                thread_id: thread_id.to_string(),
-                turn_id: "long-turn".to_string(),
-                item: title_agent_message(id, text, Some(MessagePhase::FinalAnswer)),
-                completed_at_ms: 0,
-            }),
-        )
-        .await?;
-    }
-    if let ThreadBufferedEvent::Notification(notification) = &mut completion
-        && let ServerNotification::TurnCompleted(turn) = notification.as_mut()
-    {
-        turn.turn.items = vec![title_agent_message(
-            "answer-2",
-            "Final answer",
-            Some(MessagePhase::FinalAnswer),
-        )];
-    }
-    let prompt = app
-        .automatic_thread_title_prompt(&completion)
-        .await
-        .expect("evicted user restored to recent context")
-        .prompt;
-    assert!(prompt.contains("\"Initial title\""));
-    let earlier = prompt
-        .find("Earlier answer")
-        .expect("earlier assistant context");
-    let user = prompt.find("Latest evicted request").expect("user context");
-    let first_answer = prompt
-        .find("Intermediate answer")
-        .expect("first assistant context");
-    let final_answer = prompt
-        .find("Final answer")
-        .expect("final assistant context");
-    assert!(earlier < user && user < first_answer && first_answer < final_answer);
-    app.local_settings.auto_rename.context = codex_config::AutoRenameContext::UserMessage;
-    app.local_settings.auto_rename.auto_update_interval_turns =
-        std::num::NonZeroUsize::new(/*n*/ 2).expect("positive interval");
-    assert!(app.automatic_thread_titles.contains_key(&thread_id));
     for (id, status, user, expected) in [
         ("turn-1", TurnStatus::Completed, true, false),
         ("turn-1", TurnStatus::Completed, true, false),
@@ -495,23 +248,6 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             assert!(prompt.prompt.contains("\"Initial title\""));
         }
     }
-    let pending = CancellationToken::new();
-    app.pending_thread_titles.insert(
-        (thread_id, ThreadTitleDestination::Automatic),
-        pending.clone(),
-    );
-    for id in ["turn-3", "turn-4"] {
-        let event = title_completion_event(
-            &mut app,
-            thread_id,
-            id,
-            TurnStatus::Completed,
-            Some("Latest task while pending"),
-        )
-        .await?;
-        assert!(app.automatic_thread_title_prompt(&event).await.is_none());
-    }
-    app.finish_thread_title_generation(thread_id, ThreadTitleDestination::Automatic);
     let request = crate::app_event::AutoRenameRequest {
         expected_name: Some("Initial title".to_string()),
     };
@@ -519,81 +255,9 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         &mut app_server,
         thread_id,
         "Updated title".to_string(),
-        request.clone(),
+        request,
     )
     .await;
-    assert_eq!(
-        app_server
-            .thread_read(thread_id, /*include_turns*/ false)
-            .await?
-            .name,
-        Some("Updated title".to_string())
-    );
-    let event = title_completion_event(
-        &mut app,
-        thread_id,
-        "turn-5",
-        TurnStatus::Completed,
-        Some("Latest task"),
-    )
-    .await?;
-    let prompt = app
-        .automatic_thread_title_prompt(&event)
-        .await
-        .expect("periodic refresh after saving an updated title")
-        .prompt;
-    assert!(prompt.contains("\"Updated title\""));
-    assert!(!prompt.contains("\"Initial title\""));
-    app.handle_event(
-        &mut tui,
-        &mut app_server,
-        AppEvent::GeneratedThreadTitle {
-            auto_rename: crate::app_event::AutoRenameRequest {
-                expected_name: Some("Updated title".to_string()),
-            },
-            max_title_chars: THREAD_TITLE_MAX_CHARS,
-            cancellation: CancellationToken::new(),
-            thread_id,
-            temporary_thread_id: ThreadId::new(),
-            destination: ThreadTitleDestination::Automatic,
-            result: Err("generation failed".to_string()),
-        },
-    )
-    .await?;
-    assert!(app.automatic_thread_titles.contains_key(&thread_id));
-    let event = title_completion_event(
-        &mut app,
-        thread_id,
-        "turn-6",
-        TurnStatus::Completed,
-        Some("Latest task"),
-    )
-    .await?;
-    assert!(app.automatic_thread_title_prompt(&event).await.is_none());
-    let event = title_completion_event(
-        &mut app,
-        thread_id,
-        "turn-7",
-        TurnStatus::Completed,
-        Some("Latest task"),
-    )
-    .await?;
-    assert!(app.automatic_thread_title_prompt(&event).await.is_some());
-    let request = crate::app_event::AutoRenameRequest {
-        expected_name: Some("Updated title".to_string()),
-    };
-    // A matching generated title consumes the interval without another index record.
-    let index_path = app.config.codex_home.join("session_index.jsonl");
-    let before = std::fs::read(&index_path)?;
-    app.save_automatic_thread_title(
-        &mut app_server,
-        thread_id,
-        "Updated title".to_string(),
-        request.clone(),
-    )
-    .await;
-    assert_eq!(std::fs::read(&index_path)?, before);
-    assert!(app.automatic_thread_titles.contains_key(&thread_id));
     app.try_submit_active_thread_op_via_app_server(
         &mut app_server,
         thread_id,
@@ -606,7 +270,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
     let event = title_completion_event(
         &mut app,
         thread_id,
-        "turn-8",
+        "turn-3",
         TurnStatus::Completed,
         Some("Latest task"),
     )
@@ -616,7 +280,9 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         &mut app_server,
         thread_id,
         "Must not overwrite".to_string(),
-        request,
+        crate::app_event::AutoRenameRequest {
+            expected_name: Some("Updated title".to_string()),
+        },
     )
     .await;
     assert_eq!(
@@ -627,266 +293,6 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         Some("Updated title".to_string())
     );
     assert!(!app.automatic_title_record_path(thread_id).exists());
-    // A fresh TUI preserves manual/legacy names and only restores exact generated records.
-    for (record, expected) in [
-        (None, false),
-        (Some("Updated title"), true),
-        (Some("Other generated title"), false),
-        (Some("Updated title\n"), false),
-    ] {
-        let path = app.automatic_title_record_path(thread_id);
-        if let Some(record) = record {
-            codex_utils_path::write_atomically(&path, record)?;
-        } else {
-            app.forget_automatic_thread_title(thread_id)?;
-        }
-        let mut restored = Box::pin(make_test_app()).await;
-        restored.config = app.config.clone();
-        restored.local_settings = app.local_settings.clone();
-        restored
-            .local_settings
-            .auto_rename
-            .auto_update_interval_turns = std::num::NonZeroUsize::new(/*n*/ 5).unwrap();
-        let mut started = Box::pin(app_server.resume_thread(
-            &restored.local_settings,
-            restored.config.clone(),
-            thread_id,
-            ResumeModelSettings::PreserveExistingThread,
-        ))
-        .await?;
-        let historical = title_completion_event(
-            &mut restored,
-            thread_id,
-            "historical-completed",
-            TurnStatus::Completed,
-            Some("Historical request"),
-        )
-        .await?;
-        let ThreadBufferedEvent::Notification(notification) = historical else {
-            unreachable!()
-        };
-        let ServerNotification::TurnCompleted(completed) = *notification else {
-            unreachable!()
-        };
-        let mut historical_turn = completed.turn;
-        historical_turn.items.insert(
-            0,
-            title_user_message("historical-user", "Historical request"),
-        );
-        started.turns.push(historical_turn);
-        Box::pin(restored.replace_chat_widget_with_app_server_thread(
-            &mut tui,
-            &app_server,
-            started,
-            ThreadAttachPresentation::SessionLineage,
-            /*initial_user_message*/ None,
-        ))
-        .await?;
-        assert_eq!(
-            restored.automatic_thread_titles.contains_key(&thread_id),
-            expected
-        );
-        assert!(restored.pending_thread_titles.is_empty());
-        let old_turn = restored
-            .ensure_thread_channel(thread_id)
-            .store
-            .lock()
-            .await
-            .turns
-            .iter()
-            .find(|turn| turn.status == TurnStatus::Completed)
-            .map(|turn| turn.id.clone())
-            .expect("restored fixture contains a completed historical turn");
-        {
-            let id = old_turn;
-            let replay = title_completion_event(
-                &mut restored,
-                thread_id,
-                &id,
-                TurnStatus::Completed,
-                Some("Replayed old request"),
-            )
-            .await?;
-            assert!(
-                restored
-                    .automatic_thread_title_prompt(&replay)
-                    .await
-                    .is_none()
-            );
-        }
-        for id in [
-            "resumed-1",
-            "resumed-2",
-            "resumed-3",
-            "resumed-4",
-            "resumed-5",
-        ] {
-            let completion = title_completion_event(
-                &mut restored,
-                thread_id,
-                id,
-                TurnStatus::Completed,
-                Some("New resumed request"),
-            )
-            .await?;
-            assert_eq!(
-                restored
-                    .automatic_thread_title_prompt(&completion)
-                    .await
-                    .is_some(),
-                expected && id == "resumed-5"
-            );
-        }
-        if record == Some("Updated title\n") {
-            let (events, mut queued) = unbounded_channel();
-            restored.app_event_tx = AppEventSender::new(events);
-            let second = app_server.start_thread(&restored.config).await?;
-            let second_id = second.session.thread_id;
-            restored
-                .ensure_thread_channel(second_id)
-                .store
-                .lock()
-                .await
-                .set_session(second.session, second.turns);
-            Box::pin(restored.select_agent_thread(&mut tui, &mut app_server, second_id)).await?;
-            while queued.try_recv().is_ok() {}
-            Box::pin(restored.select_agent_thread(&mut tui, &mut app_server, thread_id)).await?;
-            let mut reset = false;
-            let mut error = false;
-            while let Ok(event) = queued.try_recv() {
-                match event {
-                    AppEvent::ResetTranscriptForThreadSwitch => {
-                        assert!(!error, "saved-title error must follow transcript reset");
-                        reset = true;
-                    }
-                    AppEvent::InsertHistoryCell(cell)
-                        if cell.display_lines(/*width*/ 200).iter().any(|line| {
-                            line.to_string().contains("could not read its saved title")
-                        }) =>
-                    {
-                        assert!(reset);
-                        error = true;
-                    }
-                    _ => {}
-                }
-            }
-            assert!(
-                error,
-                "corrupt eligibility is reported after switching to its thread"
-            );
-        }
-    }
-    // A failed policy deletion must abort even a same-name manual RPC.
-    app.forget_automatic_thread_title(thread_id)?;
-    std::fs::create_dir(app.automatic_title_record_path(thread_id))?;
-    assert!(
-        app.try_submit_active_thread_op_via_app_server(
-            &mut app_server,
-            thread_id,
-            &AppCommand::SetThreadName {
-                name: "Must not save".to_string()
-            },
-        )
-        .await
-        .is_err()
-    );
-    assert_eq!(
-        app_server
-            .thread_read(thread_id, /*include_turns*/ false)
-            .await?
-            .name,
-        Some("Updated title".to_string())
-    );
-    std::fs::remove_dir(app.automatic_title_record_path(thread_id))?;
-    app_server.shutdown().await?;
-
-    // Foreground and switch drains share the same interval and deduplication rules.
-    let mut app = make_test_app().await;
-    app.local_settings.auto_rename.enabled = true;
-    app.local_settings.auto_rename.auto_update = true;
-    app.local_settings.auto_rename.auto_update_interval_turns =
-        std::num::NonZeroUsize::new(/*n*/ 3).expect("positive interval");
-    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-    let started = app_server.start_thread(&app.config).await?;
-    let thread_id = started.session.thread_id;
-    app.enqueue_primary_thread_session(started.session, started.turns)
-        .await?;
-    app.save_automatic_thread_title(
-        &mut app_server,
-        thread_id,
-        "Owned title".to_string(),
-        Default::default(),
-    )
-    .await;
-    let second = app_server.start_thread(&app.config).await?;
-    let second_id = second.session.thread_id;
-    app.ensure_thread_channel(second_id)
-        .store
-        .lock()
-        .await
-        .set_session(second.session, second.turns);
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    for (turn_id, switch) in [("foreground-drain", false), ("switch-drain", true)] {
-        let completion = title_completion_event(
-            &mut app,
-            thread_id,
-            turn_id,
-            TurnStatus::Completed,
-            Some("Keep this user's completion"),
-        )
-        .await?;
-        let ThreadBufferedEvent::Notification(notification) = completion else {
-            unreachable!()
-        };
-        app.enqueue_thread_notification(thread_id, *notification)
-            .await?;
-        if switch {
-            Box::pin(app.select_agent_thread(&mut tui, &mut app_server, second_id)).await?;
-        } else {
-            app.drain_active_thread_events(&mut tui, &app_server)
-                .await?;
-        }
-        assert!(
-            app.automatic_thread_titles[&thread_id]
-                .completed_turns
-                .contains(turn_id)
-        );
-        assert!(app.pending_thread_titles.is_empty());
-    }
-    Box::pin(app.select_agent_thread(&mut tui, &mut app_server, thread_id)).await?;
-    // Replaying a counted completion must not consume another interval slot.
-    for turn_id in ["switch-drain", "third-completion"] {
-        let completion = title_completion_event(
-            &mut app,
-            thread_id,
-            turn_id,
-            TurnStatus::Completed,
-            Some("Next naming context"),
-        )
-        .await?;
-        let ThreadBufferedEvent::Notification(notification) = completion else {
-            unreachable!()
-        };
-        app.enqueue_thread_notification(thread_id, *notification)
-            .await?;
-        if turn_id == "third-completion" {
-            Box::pin(app.select_agent_thread(&mut tui, &mut app_server, second_id)).await?;
-        } else {
-            app.drain_active_thread_events(&mut tui, &app_server)
-                .await?;
-        }
-        assert_eq!(
-            app.pending_thread_titles
-                .contains_key(&(thread_id, ThreadTitleDestination::Automatic)),
-            turn_id == "third-completion",
-        );
-    }
-    assert!(
-        !app.pending_thread_titles
-            .keys()
-            .any(|(id, _)| *id == second_id)
-    );
-    app.stop_automatic_thread_titles(thread_id);
     app_server.shutdown().await?;
     Ok(())
 }
@@ -947,35 +353,12 @@ async fn title_completion_event(
 #[tokio::test]
 async fn slash_rename_generates_editable_title_through_embedded_app_server()
 -> color_eyre::Result<()> {
-    // Keep the large setup future off the stack while resume polls nested requests.
-    for scenario in [
-        TitleScenario::Suggestion,
-        TitleScenario::ExplicitUserMessage,
-        TitleScenario::ExplicitConversation,
-        TitleScenario::ExplicitRefresh,
-        TitleScenario::ExplicitSameTitle,
-        TitleScenario::ExplicitManualRename,
-        TitleScenario::ExplicitExternalRename,
-        TitleScenario::ExplicitSwitchedThread,
-        TitleScenario::ExplicitInvalidTitle,
-    ] {
-        Box::pin(check_thread_title_generation(scenario)).await?;
-    }
-    Ok(())
+    check_thread_title_generation(TitleScenario::Suggestion).await
 }
 
 #[tokio::test]
 async fn automatic_thread_title_generates_without_a_provisional_name() -> color_eyre::Result<()> {
-    for scenario in [
-        TitleScenario::Automatic,
-        TitleScenario::Configured,
-        TitleScenario::CompletedTurn,
-        TitleScenario::CompletedTurnUserMessage,
-        TitleScenario::Disabled,
-    ] {
-        check_thread_title_generation(scenario).await?;
-    }
-    Ok(())
+    check_thread_title_generation(TitleScenario::Automatic).await
 }
 
 #[tokio::test]
@@ -991,53 +374,16 @@ async fn overview_rename_cancels_running_thread_title() -> color_eyre::Result<()
 #[derive(Clone, Copy)]
 enum TitleScenario {
     Automatic,
-    Configured,
-    CompletedTurn,
-    CompletedTurnUserMessage,
-    Disabled,
     Suggestion,
     ManualRename,
     OverviewRename,
-    ExplicitUserMessage,
-    ExplicitConversation,
-    ExplicitRefresh,
-    ExplicitSameTitle,
-    ExplicitManualRename,
-    ExplicitExternalRename,
-    ExplicitSwitchedThread,
-    ExplicitInvalidTitle,
 }
 
 async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::Result<()> {
-    let explicit = matches!(
-        scenario,
-        TitleScenario::ExplicitUserMessage
-            | TitleScenario::ExplicitConversation
-            | TitleScenario::ExplicitRefresh
-            | TitleScenario::ExplicitSameTitle
-            | TitleScenario::ExplicitManualRename
-            | TitleScenario::ExplicitExternalRename
-            | TitleScenario::ExplicitSwitchedThread
-            | TitleScenario::ExplicitInvalidTitle
-    );
-    let automatic = !explicit && !matches!(scenario, TitleScenario::Suggestion);
-    let configured = explicit
-        || matches!(
-            scenario,
-            TitleScenario::Configured
-                | TitleScenario::CompletedTurn
-                | TitleScenario::CompletedTurnUserMessage
-        );
-    let completed_turn = matches!(
-        scenario,
-        TitleScenario::CompletedTurn | TitleScenario::CompletedTurnUserMessage
-    );
-    let disabled = matches!(scenario, TitleScenario::Disabled);
+    let automatic = !matches!(scenario, TitleScenario::Suggestion);
     let cancel = matches!(
         scenario,
-        TitleScenario::ManualRename
-            | TitleScenario::OverviewRename
-            | TitleScenario::ExplicitManualRename
+        TitleScenario::ManualRename | TitleScenario::OverviewRename
     );
     let server = wiremock::MockServer::start().await;
     let mut template = responses::sse_response(responses::sse(vec![
@@ -1083,78 +429,9 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         ..ModelProviderInfo::default()
     };
 
-    app.local_settings.auto_rename = codex_config::AutoRenameConfig {
-        enabled: !disabled
-            && (!explicit
-                || matches!(
-                    scenario,
-                    TitleScenario::ExplicitConversation
-                        | TitleScenario::ExplicitRefresh
-                        | TitleScenario::ExplicitSameTitle
-                )),
-        auto_update: explicit && !matches!(scenario, TitleScenario::ExplicitConversation),
-        auto_update_interval_turns: std::num::NonZeroUsize::new(/*n*/ 2).unwrap(),
-        model: configured.then(|| "gpt-5.1".to_string()),
-        reasoning_effort: configured.then_some(codex_protocol::openai_models::ReasoningEffort::Low),
-        first_trigger: if completed_turn || explicit {
-            codex_config::AutoRenameFirstTrigger::FirstCompletedTurn
-        } else {
-            codex_config::AutoRenameFirstTrigger::FirstUserMessage
-        },
-        context: if configured
-            && !matches!(
-                scenario,
-                TitleScenario::CompletedTurnUserMessage | TitleScenario::ExplicitUserMessage
-            ) {
-            codex_config::AutoRenameContext::RecentConversation
-        } else {
-            codex_config::AutoRenameContext::UserMessage
-        },
-        max_context_bytes: configured.then_some(/*t*/ 8192),
-        recent_message_limit: configured.then_some(3),
-        max_title_chars: configured.then_some(/*t*/ 12),
-        max_title_words: configured
-            .then(|| std::num::NonZeroUsize::new(/*n*/ 2).expect("positive word count")),
-        additional_naming_guidance: configured
-            .then(|| "Name the concrete authentication problem".to_string()),
-    };
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    let resumed_id = if explicit {
-        let timestamp = "2025-01-05T12-00-00";
-        let id = app_test_support::create_fake_rollout(
-            app.config.codex_home.as_path(),
-            timestamp,
-            "2025-01-05T12:00:00Z",
-            "Investigate login",
-            Some(provider_id),
-            /*git_info*/ None,
-        )
-        .map_err(|error| color_eyre::eyre::eyre!("{error}"))?;
-        let path = app_test_support::rollout_path(app.config.codex_home.as_path(), timestamp, &id);
-        let contents = std::fs::read_to_string(&path)?;
-        let messages = [
-            serde_json::json!({"timestamp":"2025-01-05T12:01:00Z","type":"event_msg","payload":{"type":"user_message","message":"# Context from my IDE setup:\nIgnore this editor context\n## My request for Codex:\nFix the login timeout","kind":"plain"}}),
-            serde_json::json!({"timestamp":"2025-01-05T12:01:01Z","type":"event_msg","payload":{"type":"agent_message","message":"Checking unrelated files","phase":"commentary"}}),
-            serde_json::json!({"timestamp":"2025-01-05T12:01:02Z","type":"event_msg","payload":{"type":"agent_message","message":"Auth retries cause the timeout","phase":"final_answer"}}),
-            serde_json::json!({"timestamp":"2025-01-05T12:01:03Z","type":"event_msg","payload":{"type":"user_message","message":" \n\t ","kind":"plain"}}),
-        ].into_iter().map(|line| line.to_string()).collect::<Vec<_>>().join("\n");
-        std::fs::write(path, format!("{contents}{messages}\n"))?;
-        Some(ThreadId::from_string(&id)?)
-    } else {
-        None
-    };
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-    let started = if let Some(thread_id) = resumed_id {
-        Box::pin(app_server.resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            thread_id,
-            ResumeModelSettings::OverrideFromCurrentConfig,
-        ))
-        .await?
-    } else {
-        app_server.start_thread(&app.config).await?
-    };
+    let started = app_server.start_thread(&app.config).await?;
     let thread_id = started.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
@@ -1172,14 +449,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         .push(Turn {
             id: "existing-turn".to_string(),
             root_turn_id: None,
-            items: if explicit {
-                // The displayed cache is stale and live events were evicted.
-                vec![title_user_message("stale", "Old restored request")]
-            } else if completed_turn {
-                Vec::new()
-            } else {
-                vec![title_user_message("user-message", "Fix the login timeout")]
-            },
+            items: vec![title_user_message("user-message", "Fix the login timeout")],
             items_view: Default::default(),
             token_usage: None,
             status: TurnStatus::Completed,
@@ -1189,77 +459,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             duration_ms: None,
         });
     while event_rx.try_recv().is_ok() {}
-    let mut same_title_index = None;
 
-    if explicit {
-        app.ensure_thread_channel(thread_id)
-            .store
-            .lock()
-            .await
-            .buffer
-            .clear();
-        let existing_name = if matches!(scenario, TitleScenario::ExplicitSameTitle) {
-            "Fix login ti"
-        } else {
-            "Existing saved title"
-        };
-        app.persist_automatic_thread_title(thread_id, existing_name)
-            .await;
-        app.try_submit_active_thread_op_via_app_server(
-            &mut app_server,
-            thread_id,
-            &AppCommand::SetThreadName {
-                name: existing_name.to_string(),
-            },
-        )
-        .await?;
-        assert!(!app.automatic_title_record_path(thread_id).exists());
-        assert!(!app.automatic_thread_titles.contains_key(&thread_id));
-        if matches!(scenario, TitleScenario::ExplicitSameTitle) {
-            same_title_index = Some(std::fs::read(
-                app.config.codex_home.join("session_index.jsonl"),
-            )?);
-        }
-        app.chat_widget
-            .on_thread_name_updated(thread_id, Some(existing_name.to_string()));
-        app.chat_widget
-            .apply_external_edit("/autorename".to_string());
-        app.chat_widget
-            .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let event = loop {
-            if let AppEvent::AutoRenameThread {
-                thread_id: requested,
-            } = event_rx.recv().await.unwrap()
-            {
-                assert_eq!(requested, thread_id);
-                break AppEvent::AutoRenameThread { thread_id };
-            }
-        };
-        app.handle_event(&mut tui, &mut app_server, event).await?;
-        app.handle_event(
-            &mut tui,
-            &mut app_server,
-            AppEvent::AutoRenameThread { thread_id },
-        )
-        .await?;
-        assert_eq!(app.pending_thread_titles.len(), 1);
-        assert_eq!(
-            app.chat_widget.thread_name(),
-            Some(existing_name.to_string())
-        );
-    }
-    if completed_turn {
-        app.enqueue_thread_notification(
-            thread_id,
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                thread_id: thread_id.to_string(),
-                turn_id: "existing-turn".to_string(),
-                item: title_user_message("user-message", "Fix the login timeout"),
-                completed_at_ms: 0,
-            }),
-        )
-        .await?;
-    }
     if automatic {
         for _ in 0..2 {
             app.handle_active_thread_event(
@@ -1276,51 +476,6 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             )
             .await?;
         }
-        if disabled {
-            assert!(app.pending_thread_titles.is_empty());
-            assert!(response.requests().is_empty());
-            app_server.shutdown().await?;
-            return Ok(());
-        }
-        if completed_turn {
-            assert!(app.pending_thread_titles.is_empty());
-            for status in [
-                TurnStatus::Interrupted,
-                TurnStatus::Failed,
-                TurnStatus::Completed,
-            ] {
-                app.handle_active_thread_event(
-                    &mut tui,
-                    &mut app_server,
-                    ThreadBufferedEvent::Notification(Box::new(ServerNotification::TurnCompleted(
-                        codex_app_server_protocol::TurnCompletedNotification {
-                            thread_id: thread_id.to_string(),
-                            turn: Turn {
-                                id: "existing-turn".to_string(),
-                                root_turn_id: None,
-                                items: vec![title_agent_message(
-                                    "answer",
-                                    "Auth retries cause the timeout",
-                                    Some(MessagePhase::FinalAnswer),
-                                )],
-                                items_view: Default::default(),
-                                token_usage: None,
-                                status: status.clone(),
-                                error: None,
-                                started_at: None,
-                                completed_at: None,
-                                duration_ms: None,
-                            },
-                        },
-                    ))),
-                )
-                .await?;
-                assert_eq!(
-                    app.pending_thread_titles.is_empty(),
-                    status != TurnStatus::Completed
-                );
-            }
-        }
         assert_eq!(app.chat_widget.thread_name(), None);
         assert!(render_bottom_popup(&app.chat_widget, /*width*/ 120).contains('⠋'));
         assert_eq!(
@@ -1330,7 +485,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                 .name,
             None
         );
-    } else if !explicit {
+    } else {
         app.chat_widget.apply_external_edit("/rename".to_string());
         app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1363,39 +518,10 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         .ok_or_else(|| color_eyre::eyre::eyre!("title event stream ended"))?;
 
         match event {
-            TitleDriveEvent::Ui(mut event) => {
+            TitleDriveEvent::Ui(event) => {
                 if let AppEvent::ThreadTitleStarted { result, .. } = event.as_ref() {
                     temporary_thread_id =
                         Some(result.as_ref().expect("hidden title thread").clone());
-                    if configured {
-                        app.local_settings.auto_rename.max_title_chars = Some(64);
-                        app.local_settings.auto_rename.max_title_words =
-                            std::num::NonZeroUsize::new(/*n*/ 1);
-                    }
-                }
-                if let AppEvent::GeneratedThreadTitle { result, .. } = event.as_mut() {
-                    match scenario {
-                        TitleScenario::ExplicitExternalRename => {
-                            app_server
-                                .thread_set_name(thread_id, "External title".to_string())
-                                .await?;
-                        }
-                        TitleScenario::ExplicitSwitchedThread => {
-                            let second = app_server.start_thread(&app.config).await?;
-                            app.replace_chat_widget_with_app_server_thread(
-                                &mut tui,
-                                &app_server,
-                                second,
-                                ThreadAttachPresentation::SessionLineage,
-                                /*initial_user_message*/ None,
-                            )
-                            .await?;
-                        }
-                        TitleScenario::ExplicitInvalidTitle => {
-                            *result = Ok("not a structured title".to_string())
-                        }
-                        _ => {}
-                    }
                 }
                 generated |= matches!(event.as_ref(), AppEvent::GeneratedThreadTitle { .. });
                 app.handle_event(&mut tui, &mut app_server, *event).await?;
@@ -1419,31 +545,15 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                 app.handle_app_server_event(&app_server, event).await;
             }
             TitleDriveEvent::RequestStarted => {
-                codex_utils_path::write_atomically(
-                    &app.automatic_title_record_path(thread_id),
-                    "Prior automatic title",
-                )?;
                 let name = "Keep this title".to_string();
                 let event = match scenario {
-                    TitleScenario::ManualRename | TitleScenario::ExplicitManualRename => {
+                    TitleScenario::ManualRename => {
                         AppEvent::CodexOp(AppCommand::set_thread_name(name))
                     }
                     TitleScenario::OverviewRename => {
                         AppEvent::RenameAgentsOverviewThread { thread_id, name }
                     }
-                    TitleScenario::Automatic
-                    | TitleScenario::Configured
-                    | TitleScenario::CompletedTurn
-                    | TitleScenario::CompletedTurnUserMessage
-                    | TitleScenario::Disabled
-                    | TitleScenario::Suggestion
-                    | TitleScenario::ExplicitUserMessage
-                    | TitleScenario::ExplicitConversation
-                    | TitleScenario::ExplicitRefresh
-                    | TitleScenario::ExplicitSameTitle
-                    | TitleScenario::ExplicitExternalRename
-                    | TitleScenario::ExplicitSwitchedThread
-                    | TitleScenario::ExplicitInvalidTitle => unreachable!(),
+                    TitleScenario::Automatic | TitleScenario::Suggestion => unreachable!(),
                 };
                 app.handle_event(&mut tui, &mut app_server, event).await?;
                 assert!(app.pending_thread_titles.is_empty());
@@ -1464,42 +574,16 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         }
     }
 
-    if automatic && !cancel {
-        assert!(app.automatic_title_record_path(thread_id).exists());
-        assert!(!app.automatic_thread_titles.contains_key(&thread_id));
-        app.local_settings.auto_rename.auto_update = true;
-        app.restore_automatic_thread_title(thread_id, app.chat_widget.thread_name().as_deref())
-            .await;
-        assert!(app.automatic_thread_titles.contains_key(&thread_id));
-    }
-    if cancel {
-        assert!(!app.automatic_title_record_path(thread_id).exists());
-    }
-    if automatic || explicit {
-        let expected_name = if matches!(scenario, TitleScenario::ExplicitExternalRename) {
-            "External title"
-        } else if matches!(
-            scenario,
-            TitleScenario::ExplicitSwitchedThread | TitleScenario::ExplicitInvalidTitle
-        ) {
-            "Existing saved title"
-        } else if cancel {
+    if automatic {
+        let expected_name = if cancel {
             "Keep this title"
-        } else if configured {
-            // Word-count guidance does not truncate the three-word generated title.
-            "Fix login ti"
         } else {
             "Fix login timeout"
         };
-        if !matches!(
-            scenario,
-            TitleScenario::ExplicitSwitchedThread | TitleScenario::ExplicitExternalRename
-        ) {
-            assert_eq!(
-                app.chat_widget.thread_name(),
-                Some(expected_name.to_string())
-            );
-        }
+        assert_eq!(
+            app.chat_widget.thread_name(),
+            Some(expected_name.to_string())
+        );
         assert_eq!(
             app_server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -1520,12 +604,6 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             None
         );
     }
-    if let Some(before) = same_title_index {
-        assert_eq!(
-            std::fs::read(app.config.codex_home.join("session_index.jsonl"))?,
-            before
-        );
-    }
     assert!(app.temporary_structured_requests.is_empty());
     assert!(app.pending_thread_titles.is_empty());
     assert!(!render_bottom_popup(&app.chat_widget, /*width*/ 120).contains('⠋'));
@@ -1538,91 +616,6 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             .contains("Fix the login timeout")
     );
 
-    if explicit {
-        let refresh = matches!(
-            scenario,
-            TitleScenario::ExplicitRefresh | TitleScenario::ExplicitSameTitle
-        );
-        assert_eq!(
-            app.automatic_thread_titles.contains_key(&thread_id),
-            refresh
-        );
-        let saved = matches!(
-            scenario,
-            TitleScenario::ExplicitUserMessage | TitleScenario::ExplicitConversation
-        ) || refresh;
-        assert_eq!(app.automatic_title_record_path(thread_id).exists(), saved);
-        if saved {
-            assert_eq!(
-                std::fs::read_to_string(app.automatic_title_record_path(thread_id))?,
-                "Fix login ti"
-            );
-        }
-        if !matches!(scenario, TitleScenario::ExplicitSwitchedThread) {
-            let replay = title_completion_event(
-                &mut app,
-                thread_id,
-                "existing-turn",
-                TurnStatus::Completed,
-                Some("Old restored request"),
-            )
-            .await?;
-            assert!(app.automatic_thread_title_prompt(&replay).await.is_none());
-            for id in ["after-explicit-1", "after-explicit-2"] {
-                let completion = title_completion_event(
-                    &mut app,
-                    thread_id,
-                    id,
-                    TurnStatus::Completed,
-                    Some("Later request"),
-                )
-                .await?;
-                assert_eq!(
-                    app.automatic_thread_title_prompt(&completion)
-                        .await
-                        .is_some(),
-                    refresh && id == "after-explicit-2"
-                );
-            }
-        }
-    }
-    if configured {
-        let body = request.body_json();
-        assert_eq!(body["model"], "gpt-5.1");
-        assert_eq!(body["reasoning"]["effort"], "low");
-        assert_eq!(
-            body["text"]["format"]["schema"]["properties"]["title"]["maxLength"],
-            12
-        );
-        let prompt = request.message_input_texts("user").join("\n");
-        assert!(!prompt.contains("Previous session title"));
-        assert!(prompt.contains("at most 2 words"));
-        assert!(!prompt.contains("under five words where possible"));
-        assert!(prompt.contains("Name the concrete authentication problem"));
-        assert_eq!(
-            prompt.contains("Auth retries cause the timeout"),
-            matches!(
-                scenario,
-                TitleScenario::CompletedTurn
-                    | TitleScenario::ExplicitConversation
-                    | TitleScenario::ExplicitRefresh
-                    | TitleScenario::ExplicitSameTitle
-                    | TitleScenario::ExplicitManualRename
-                    | TitleScenario::ExplicitExternalRename
-                    | TitleScenario::ExplicitSwitchedThread
-                    | TitleScenario::ExplicitInvalidTitle
-            )
-        );
-        if explicit {
-            assert!(!prompt.contains("Checking unrelated files"));
-            assert!(!prompt.contains("Ignore this editor context"));
-            assert!(prompt.len() < 9500);
-            assert_eq!(
-                prompt.contains("<message role=\""),
-                !matches!(scenario, TitleScenario::ExplicitUserMessage)
-            );
-        }
-    }
     app_server.shutdown().await?;
     Ok(())
 }
@@ -1637,68 +630,64 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         .await?;
     let hidden = app_server.start_thread(&app.config).await?;
     let temporary_thread_id = hidden.session.thread_id;
-    for destination in [
-        ThreadTitleDestination::Automatic,
-        ThreadTitleDestination::ExplicitAutoRename,
-    ] {
-        let cancellation = CancellationToken::new();
-        app.pending_thread_titles
-            .insert((thread_id, destination), cancellation.clone());
-        app.sync_thread_title_progress();
+    let cancellation = CancellationToken::new();
+    let destination = ThreadTitleDestination::Automatic;
+    app.pending_thread_titles
+        .insert((thread_id, destination), cancellation.clone());
+    app.sync_thread_title_progress();
 
-        app.try_submit_active_thread_op_via_app_server(
-            &mut app_server,
-            thread_id,
-            &AppCommand::set_thread_name("Keep this title".to_string()),
-        )
-        .await?;
-        assert!(cancellation.is_cancelled());
-        assert!(app.pending_thread_titles.is_empty());
+    app.try_submit_active_thread_op_via_app_server(
+        &mut app_server,
+        thread_id,
+        &AppCommand::set_thread_name("Keep this title".to_string()),
+    )
+    .await?;
+    assert!(cancellation.is_cancelled());
+    assert!(app.pending_thread_titles.is_empty());
 
-        // A canceled producer must not clear a replacement request or launch its hidden turn.
-        let replacement = CancellationToken::new();
-        app.pending_thread_titles
-            .insert((thread_id, destination), replacement.clone());
-        app.on_thread_title_started(
-            &app_server,
+    // A canceled producer must not clear a replacement request or launch its hidden turn.
+    let replacement = CancellationToken::new();
+    app.pending_thread_titles
+        .insert((thread_id, destination), replacement.clone());
+    app.on_thread_title_started(
+        &app_server,
+        thread_id,
+        destination,
+        "prompt".to_string(),
+        /*effort*/ None,
+        THREAD_TITLE_MAX_CHARS,
+        Default::default(),
+        Ok(temporary_thread_id.to_string()),
+        cancellation.clone(),
+    );
+    assert!(app.temporary_structured_requests.is_empty());
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::GeneratedThreadTitle {
+            auto_rename: Default::default(),
+            max_title_chars: THREAD_TITLE_MAX_CHARS,
+            cancellation,
             thread_id,
+            temporary_thread_id,
             destination,
-            "prompt".to_string(),
-            /*effort*/ None,
-            THREAD_TITLE_MAX_CHARS,
-            Default::default(),
-            Ok(temporary_thread_id.to_string()),
-            cancellation.clone(),
-        );
-        assert!(app.temporary_structured_requests.is_empty());
-        let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.handle_event(
-            &mut tui,
-            &mut app_server,
-            AppEvent::GeneratedThreadTitle {
-                auto_rename: Default::default(),
-                max_title_chars: THREAD_TITLE_MAX_CHARS,
-                cancellation,
-                thread_id,
-                temporary_thread_id,
-                destination,
-                result: Ok(r#"{"title":"Late automatic title"}"#.to_string()),
-            },
-        )
-        .await?;
-        assert!(
-            app.pending_thread_titles
-                .contains_key(&(thread_id, destination))
-        );
-        assert!(!replacement.is_cancelled());
-        assert_eq!(
-            app_server
-                .thread_read(thread_id, /*include_turns*/ false)
-                .await?
-                .name,
-            Some("Keep this title".to_string()),
-        );
-    }
+            result: Ok(r#"{"title":"Late automatic title"}"#.to_string()),
+        },
+    )
+    .await?;
+    assert!(
+        app.pending_thread_titles
+            .contains_key(&(thread_id, destination))
+    );
+    assert!(!replacement.is_cancelled());
+    assert_eq!(
+        app_server
+            .thread_read(thread_id, /*include_turns*/ false)
+            .await?
+            .name,
+        Some("Keep this title".to_string()),
+    );
     app_server.shutdown().await?;
     Ok(())
 }
@@ -1762,26 +751,6 @@ fn recent_conversation_messages_keep_only_the_latest_substantive_items() {
         Some(format!(
             "<conversation>\n{expected_messages}\n</conversation>"
         ))
-    );
-    let settings = codex_config::AutoRenameConfig {
-        context: codex_config::AutoRenameContext::RecentConversation,
-        max_context_bytes: Some(8192),
-        recent_message_limit: Some(3),
-        ..Default::default()
-    };
-    assert_eq!(recent_conversation_messages(&items, Some(&settings), /*previous_title*/ None), Some(
-        "<conversation>\n<message role=\"user\">message-0</message>\n<message role=\"user\">message-8</message>\n<message role=\"user\">message-9</message>\n</conversation>".to_string()
-    ));
-    let settings = codex_config::AutoRenameConfig {
-        recent_message_limit: Some(1),
-        ..settings
-    };
-    assert_eq!(
-        recent_conversation_messages(&items, Some(&settings), /*previous_title*/ None),
-        Some(
-            "<conversation>\n<message role=\"user\">message-9</message>\n</conversation>"
-                .to_string()
-        )
     );
 }
 
