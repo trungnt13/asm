@@ -1332,7 +1332,8 @@ impl Session {
                 effective_skill_roots,
                 &turn_environments,
             );
-            let skills_input = skills_input.with_agent_role(session_configuration.session_source.get_agent_role());
+            let skills_input =
+                skills_input.with_agent_role(session_configuration.session_source.get_agent_role());
             self.services
                 .skills_service
                 .snapshot_for_config(&skills_input, fs)
