@@ -20,6 +20,7 @@ use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::Verbosity;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::openai_models::ReasoningEffort;
 use serde::Serialize;
@@ -42,9 +43,16 @@ struct AgentRoleOverrides {
     model_verbosity: Option<Verbosity>,
     personality: Option<Personality>,
     service_tier: Option<String>,
+    web_search: Option<WebSearchMode>,
+    adaptive_reasoning: Option<AdaptiveReasoningRoleOverride>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     features: BTreeMap<String, bool>,
     skills: Option<SkillsConfig>,
+}
+
+#[derive(Serialize)]
+struct AdaptiveReasoningRoleOverride {
+    enabled: bool,
 }
 
 /// Applies typed role overrides to the existing parent-derived configuration.
@@ -76,6 +84,12 @@ async fn apply_role_to_config_inner(
         return Ok(());
     };
     let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
+    // Check the raw field: the typed table defaults an omitted `enabled` to false.
+    let disables_adaptive_reasoning = role_layer_toml
+        .get("adaptive_reasoning")
+        .and_then(|adaptive| adaptive.get("enabled"))
+        .and_then(TomlValue::as_bool)
+        == Some(false);
     let role_config = deserialize_config_toml_with_base(role_layer_toml, &config.codex_home)?;
     let mut overrides = AgentRoleOverrides {
         developer_instructions: role_config.developer_instructions,
@@ -85,6 +99,11 @@ async fn apply_role_to_config_inner(
         model_verbosity: role_config.model_verbosity,
         personality: role_config.personality,
         service_tier: role_config.service_tier,
+        web_search: role_config
+            .web_search
+            .filter(|mode| *mode == WebSearchMode::Disabled),
+        adaptive_reasoning: disables_adaptive_reasoning
+            .then_some(AdaptiveReasoningRoleOverride { enabled: false }),
         ..Default::default()
     };
 
@@ -212,6 +231,13 @@ mod role_overrides {
                     .then(|| service_tier.clone()),
                 None => Some(service_tier.clone()),
             };
+        }
+        if let Some(mode) = overrides.web_search {
+            next_config.web_search_mode.set(mode)?;
+        }
+        if overrides.adaptive_reasoning.is_some() {
+            next_config.adaptive_reasoning.enabled = false;
+            next_config.role_adaptive_reasoning_disabled = true;
         }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {
