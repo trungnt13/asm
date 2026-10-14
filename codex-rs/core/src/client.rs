@@ -1004,11 +1004,10 @@ impl ModelClient {
             prefix.push(instructions);
         }
         input.splice(0..0, prefix);
-        if !model_info.use_responses_lite {
-            // Only RLite accepts per-content attribution until the Responses API schema expands.
-            for item in &mut input {
-                item.clear_content_item_metadata();
-            }
+        // Responses Lite selection does not prove deployed endpoints accept per-content attribution.
+        // Omit only this field from the request copy until support is established; retain local metadata.
+        for item in &mut input {
+            item.clear_content_item_metadata();
         }
         if !is_openai {
             for item in &mut input {
