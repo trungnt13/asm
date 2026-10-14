@@ -1259,7 +1259,7 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         .enable(Feature::ReasoningEffortOverride)
         .unwrap();
     config.adaptive_reasoning.decision_model_api_env =
-        "CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string();
+        Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
     config.multi_agent_v2.max_concurrent_threads_per_session = 3;
     config.permissions.allow_login_shell = true;
     config
@@ -1328,10 +1328,6 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     child_config.adaptive_reasoning_initial_error =
         Some(codex_protocol::protocol::AdaptiveReasoningError::InvalidResponse);
     child_config.adaptive_reasoning_initial_failure_episode = 999;
-    child_config
-        .adaptive_reasoning
-        .decision_model_api_env
-        .clear();
     child_config.model = Some("gpt-6.1-sol".to_string());
     let spawned_agent =
         spawn_v2_reload_test_child(&control, child_config, &parent_thread, "worker").await;
@@ -2213,7 +2209,7 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         .enable(Feature::ReasoningEffortOverride)
         .unwrap();
     config.adaptive_reasoning.decision_model_api_env =
-        "CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string();
+        Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
     let harness = AgentControlHarness::new_with_config(home, config).await;
     let (parent_id, parent) = harness.start_thread().await;
     parent

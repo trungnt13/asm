@@ -469,7 +469,7 @@ consolidation_reasoning_effort = "high"
         adaptive_config.adaptive_reasoning,
         codex_config::AdaptiveReasoningConfig {
             enabled: true,
-            decision_model_api_env: "CUSTOM_DECISION_KEY".to_string(),
+            decision_model_api_env: Some("CUSTOM_DECISION_KEY".to_string()),
             min_effort: ReasoningEffort::Minimal,
             max_effort: ReasoningEffort::High,
             update_on: vec![codex_config::AdaptiveReasoningTrigger::ToolResult],
