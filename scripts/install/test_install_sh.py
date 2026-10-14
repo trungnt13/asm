@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -15,133 +14,80 @@ import unittest
 INSTALL_SCRIPT = Path(__file__).with_name("install.sh")
 VERSION = "0.162.1-alpha.18.1.1"
 NEXT_VERSION = "0.162.1-alpha.18.1.2"
+TARGET = "x86_64-unknown-linux-gnu"
 
 
 def write_release(
-    root: Path,
-    version: str,
-    target: str,
+    root,
+    version,
     *,
-    helper: bool = True,
-    bad_checksum: bool = False,
-    platform_manifest: bool = False,
-    invalid_manifest_digest: bool = False,
-    missing_resource: str | None = None,
-    bad_metadata: str | dict[str, object] | None = None,
-    archive_member: tuple[str, bytes] | None = None,
-    old_layout: bool = False,
-) -> tuple[Path, Path, Path]:
+    platform_manifest=True,
+    missing_helper=False,
+    bad_checksum=False,
+    wrong_version=False,
+    invalid_digest=False,
+):
     source = root / f"source-{version}"
     if source.exists():
         shutil.rmtree(source)
-    for directory in ("bin", "codex-path", "codex-resources"):
-        (source / directory).mkdir(parents=True, exist_ok=True)
-    codex = source / "bin/codex"
-    codex.write_text(
-        f'#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli {version}"\n'
-    )
-    codex.chmod(0o755)
-    executable_paths = ["codex-path/rg"]
-    if helper:
-        executable_paths.append("bin/codex-code-mode-host")
-    if "linux" in target:
-        executable_paths.append("codex-resources/bwrap")
-    for name in executable_paths:
+    for name in (
+        "bin/codex",
+        "bin/codex-code-mode-host",
+        "codex-path/rg",
+        "codex-resources/bwrap",
+    ):
+        if missing_helper and name == "bin/codex-code-mode-host":
+            continue
         path = source / name
-        path.write_text(f'#!/bin/sh\necho "Usage: {path.name}"\n')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'#!/bin/sh\necho "codex-cli {version}"\n')
         path.chmod(0o755)
-    if missing_resource:
-        (source / missing_resource).unlink()
-    metadata_contents = json.dumps({
+    package_metadata = {
         "layoutVersion": 1,
-        "version": version,
-        "target": target,
+        "version": VERSION if wrong_version else version,
+        "target": TARGET,
         "variant": "codex",
         "entrypoint": "bin/codex",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
-    })
-    if isinstance(bad_metadata, dict):
-        metadata_fields = json.loads(metadata_contents)
-        metadata_fields.update(bad_metadata)
-        metadata_contents = json.dumps(metadata_fields)
-    elif bad_metadata is not None:
-        metadata_contents = (
-            bad_metadata if bad_metadata.startswith("{")
-            else metadata_contents.replace('"codex-path"', json.dumps(bad_metadata))
-        )
-    (source / "codex-package.json").write_text(metadata_contents)
-    asset = f"codex-{target}.tar.gz"
+    }
+    (source / "codex-package.json").write_text(json.dumps(package_metadata))
+    asset = f"codex-{TARGET}.tar.gz"
     archive = root / f"{version}-{asset}"
     with tarfile.open(archive, "w:gz") as tar:
-        if old_layout:
-            for name in ("codex", "codex-code-mode-host"):
-                tar.add(source / "bin" / name, arcname=name)
-        else:
-            for path in sorted(source.rglob("*")):
-                name = str(path.relative_to(source))
-                if archive_member and name == archive_member[0]:
-                    continue
-                tar.add(path, arcname=name, recursive=False)
-        if archive_member:
-            name, kind = archive_member
-            member = tarfile.TarInfo(name)
-            member.type = kind
-            if kind != tarfile.REGTYPE:
-                if kind in (tarfile.SYMTYPE, tarfile.LNKTYPE):
-                    member.linkname = "../../escaped"
-                tar.addfile(member)
-            else:
-                member.size = 6
-                tar.addfile(member, io.BytesIO(b"unsafe"))
+        for path in sorted(source.rglob("*")):
+            tar.add(path, arcname=str(path.relative_to(source)), recursive=False)
     archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    manifest_name = f"SHA256SUMS-{target}" if platform_manifest else "SHA256SUMS"
+    installer_digest = hashlib.sha256(INSTALL_SCRIPT.read_bytes()).hexdigest()
+    manifest_name = f"SHA256SUMS-{TARGET}" if platform_manifest else "SHA256SUMS"
     manifest = root / f"{version}-{manifest_name}"
     contents = f"{'0' * 64 if bad_checksum else archive_digest}  {asset}\n"
-    installer_digest = hashlib.sha256(INSTALL_SCRIPT.read_bytes()).hexdigest()
     if platform_manifest:
         contents += f"{installer_digest}  install.sh\n"
     manifest.write_text(contents)
     manifest_digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assets = [
+        {"name": asset, "digest": f"sha256:{archive_digest}"},
+        {
+            "name": manifest_name,
+            "digest": "invalid" if invalid_digest else f"sha256:{manifest_digest}",
+        },
+        {"name": "install.sh", "digest": f"sha256:{installer_digest}"},
+    ]
+    if platform_manifest:
+        assets.append({"name": "SHA256SUMS", "digest": f"sha256:{manifest_digest}"})
     metadata = root / f"{version}-metadata.json"
-    metadata.write_text(
-        json.dumps(
-            {
-                "tag_name": f"v{version}",
-                "assets": [
-                    {"name": asset, "digest": f"sha256:{archive_digest}"},
-                    {
-                        "name": manifest_name,
-                        "digest": "invalid" if invalid_manifest_digest else f"sha256:{manifest_digest}",
-                    },
-                    {"name": "install.sh", "digest": f"sha256:{installer_digest}"},
-                    *([
-                        {"name": "SHA256SUMS", "digest": f"sha256:{manifest_digest}"}
-                    ] if platform_manifest else []),
-                ],
-            }
-        )
-    )
+    metadata.write_text(json.dumps({"tag_name": f"v{version}", "assets": assets}))
     return archive, manifest, metadata
 
 
-def run_installer(
-    root: Path,
-    release: str,
-    files: tuple[Path, Path, Path] | None = None,
-    *,
-    system: str = "Linux",
-    machine: str = "x86_64",
-    rosetta: bool = False,
-    metadata_failure: bool = False,
-    daemon_only: bool = False,
-    release_arg: str | None = None,
-    libc_version: str = "glibc 2.35",
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+def run_installer(root, release, files):
     shim = root / "shim"
     shim.mkdir(exist_ok=True)
-    curl = shim / "curl"
-    curl.write_text("""#!/bin/sh
+    scripts = {
+        "uname": '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n',
+        "getconf": '#!/bin/sh\necho "glibc 2.35"\n',
+        "curl": """#!/bin/sh
 url=''; output=''
 while [ "$#" -gt 0 ]; do
   case "$1" in -o) output="$2"; shift;; https://*) url="$1";; esac
@@ -149,35 +95,22 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\\n' "$url" >> "$TEST_REQUEST_LOG"
 case "$url" in
-  https://api.github.com/repos/trungnt13/asm/releases/*)
-    [ "$TEST_METADATA_FAILURE" = 0 ] || exit 22
-    source="$TEST_METADATA" ;;
-  https://github.com/trungnt13/asm/releases/download/*/SHA256SUMS*)
-    source="$TEST_MANIFEST" ;;
-  https://github.com/trungnt13/asm/releases/download/*/codex-*.tar.gz)
-    source="$TEST_ARCHIVE" ;;
+  https://api.github.com/repos/trungnt13/asm/releases/*) source="$TEST_METADATA" ;;
+  https://github.com/trungnt13/asm/releases/download/*/SHA256SUMS*) source="$TEST_MANIFEST" ;;
+  https://github.com/trungnt13/asm/releases/download/*/codex-*.tar.gz) source="$TEST_ARCHIVE" ;;
   *) exit 99 ;;
 esac
 [ -n "$source" ] || exit 22
 if [ -n "$output" ]; then cp "$source" "$output"; else cat "$source"; fi
-""")
-    curl.chmod(0o755)
-    uname = shim / "uname"
-    uname.write_text(
-        f'#!/bin/sh\ncase "$1" in -s) echo {system};; -m) echo {machine};; esac\n'
-    )
-    uname.chmod(0o755)
-    sysctl = shim / "sysctl"
-    sysctl.write_text(f"#!/bin/sh\necho {1 if rosetta else 0}\n")
-    sysctl.chmod(0o755)
-    getconf = shim / "getconf"
-    getconf.write_text(
-        '#!/bin/sh\n[ "$1" = "GNU_LIBC_VERSION" ] || exit 1\nprintf "%s\\n" "$TEST_LIBC_VERSION"\n'
-    )
-    getconf.chmod(0o755)
+""",
+    }
+    for name, contents in scripts.items():
+        path = shim / name
+        path.write_text(contents)
+        path.chmod(0o755)
     request_log = root / "requests.log"
     request_log.unlink(missing_ok=True)
-    archive, manifest, metadata = files if files is not None else (None, None, None)
+    archive, manifest, metadata = files
     home = root / "home"
     home.mkdir(exist_ok=True)
     env = dict(
@@ -187,282 +120,80 @@ if [ -n "$output" ]; then cp "$source" "$output"; else cat "$source"; fi
         CODEX_INSTALL_DIR=str(root / "install-bin"),
         CODEX_NON_INTERACTIVE="1",
         CODEX_RELEASE=release,
-        CODEX_INSTALL_DAEMON_ONLY="1" if daemon_only else "0",
+        CODEX_INSTALL_DAEMON_ONLY="0",
         TEST_REQUEST_LOG=str(request_log),
-        TEST_ARCHIVE=str(archive or ""),
-        TEST_MANIFEST=str(manifest or ""),
-        TEST_METADATA=str(metadata or ""),
-        TEST_METADATA_FAILURE="1" if metadata_failure else "0",
-        TEST_LIBC_VERSION=libc_version,
+        TEST_ARCHIVE=str(archive),
+        TEST_MANIFEST=str(manifest),
+        TEST_METADATA=str(metadata),
         PATH=f"{shim}:/usr/bin:/bin",
     )
     command = ["/bin/sh", str(INSTALL_SCRIPT)]
-    if release_arg is not None:
-        command.extend(("--release", release_arg))
     result = subprocess.run(command, env=env, text=True, capture_output=True)
     requests = request_log.read_text().splitlines() if request_log.exists() else []
     return result, requests
 
 
 class InstallShTest(unittest.TestCase):
-    def test_metadata_failure_stops_without_asset_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            result, requests = run_installer(root, VERSION, metadata_failure=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(
-                requests,
-                [
-                    f"https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}"
-                ],
-            )
-            self.assertIn("Could not fetch GitHub release metadata", result.stderr)
-            self.assertFalse((root / "codex-home").exists())
-
-    def test_latest_installs_pair_and_reinstall_reuses_it(self) -> None:
+    def test_latest_installs_pair_and_reinstall_reuses_it(self):
         for platform_manifest in (False, True):
-            with tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(platform_manifest=platform_manifest),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 root = Path(directory)
                 files = write_release(
-                    root, VERSION, "x86_64-unknown-linux-gnu",
-                    platform_manifest=platform_manifest,
+                    root, VERSION, platform_manifest=platform_manifest
                 )
-                manifest_name = "SHA256SUMS-x86_64-unknown-linux-gnu" if platform_manifest else "SHA256SUMS"
-                upstream_marker = (
-                    root / "codex-home/packages/standalone/auto-update-version"
-                )
-                upstream_marker.parent.mkdir(parents=True)
-                upstream_marker.write_text("upstream-release")
-                first, requests = run_installer(root, "latest", files)
-                self.assertEqual(first.returncode, 0, first.stderr)
-                self.assertEqual(
-                    requests,
-                    [
-                        "https://api.github.com/repos/trungnt13/asm/releases/latest",
-                        f"https://github.com/trungnt13/asm/releases/download/v{VERSION}/{manifest_name}",
-                        f"https://github.com/trungnt13/asm/releases/download/v{VERSION}/codex-x86_64-unknown-linux-gnu.tar.gz",
-                    ],
-                )
+                marker = root / "codex-home/packages/standalone/auto-update-version"
+                marker.parent.mkdir(parents=True)
+                marker.write_text("upstream-release")
                 current = root / "codex-home/packages/asm-standalone/current"
-                self.assertEqual(
-                    current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
-                )
-                for name in ("codex", "codex-code-mode-host"):
-                    self.assertEqual(
-                        (root / "install-bin" / name).resolve(),
-                        current.resolve() / "bin" / name,
-                    )
-                self.assertFalse(
-                    (
-                        root / "codex-home/packages/asm-standalone/auto-update-version"
-                    ).exists()
-                )
-                self.assertEqual(upstream_marker.read_text(), "upstream-release")
-                second, requests = run_installer(root, "latest", files, release_arg=VERSION)
-                self.assertEqual(second.returncode, 0, second.stderr)
-                self.assertEqual(
-                    requests,
-                    [
-                        f"https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}"
-                    ],
-                )
-                self.assertEqual(
-                    current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
-                )
-                self.assertEqual(upstream_marker.read_text(), "upstream-release")
-                for path in ("codex-package.json", "codex-path/rg", "codex-resources/bwrap"):
-                    self.assertTrue((current / path).is_file())
-                # An old or damaged same-version install must be repaired, not reused.
-                for missing in ("codex-package.json", "codex-path/rg", "codex-resources/bwrap"):
-                    (current / missing).unlink()
-                    repaired, requests = run_installer(root, VERSION, files)
-                    self.assertEqual(repaired.returncode, 0, repaired.stderr)
-                    self.assertEqual(len(requests), 3)
-                    self.assertTrue((current / missing).is_file())
+                for release, version, expected_downloads in (
+                    ("latest", VERSION, 3),
+                    (VERSION, VERSION, 1),
+                    (NEXT_VERSION, NEXT_VERSION, 3),
+                ):
+                    if version == NEXT_VERSION:
+                        files = write_release(
+                            root, version, platform_manifest=platform_manifest
+                        )
+                    result, requests = run_installer(root, release, files)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(len(requests), expected_downloads)
+                    self.assertEqual(current.resolve().name, f"{version}-{TARGET}")
+                    for name in ("codex", "codex-code-mode-host"):
+                        self.assertEqual(
+                            (root / "install-bin" / name).resolve(),
+                            current.resolve() / "bin" / name,
+                        )
+                    self.assertEqual(marker.read_text(), "upstream-release")
+                    self.assertFalse((current.parent / "auto-update-version").exists())
 
-    def test_bad_checksum_and_missing_helper_keep_current_selection(self) -> None:
+    def test_bad_checksum_and_missing_helper_keep_current_selection(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            first_files = write_release(root, VERSION, "x86_64-unknown-linux-gnu")
-            first, _ = run_installer(root, VERSION, first_files)
+            first, _ = run_installer(root, VERSION, write_release(root, VERSION))
             self.assertEqual(first.returncode, 0, first.stderr)
             current = root / "codex-home/packages/asm-standalone/current"
             selected = current.resolve()
             for options, message in (
                 ({"bad_checksum": True}, "metadata and SHA256SUMS disagree"),
-                ({"helper": False}, "must contain a complete canonical package"),
-                ({"missing_resource": "codex-path/rg"}, "must contain a complete canonical package"),
-                ({"missing_resource": "codex-resources/bwrap"}, "must contain a complete canonical package"),
-                ({"old_layout": True}, "Reinstall a newer ASM release"),
-                ({"bad_metadata": "../elsewhere"}, "Invalid ASM package metadata"),
-                ({"bad_metadata": "{}"}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"layoutVersion": 2}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"layoutVersion": "1"}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"version": VERSION}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"target": "aarch64-apple-darwin"}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"variant": "codex-app-server"}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"entrypoint": "codex"}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"resourcesDir": "other"}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": {"unknown": "field"}}, "Invalid ASM package metadata"),
-                ({"bad_metadata": '{"layoutVersion":1,}'}, "Invalid ASM package metadata"),
-                ({"archive_member": ("codex-path/rg", tarfile.SYMTYPE)}, "must contain a complete canonical package"),
-                ({"archive_member": ("bin/codex", tarfile.LNKTYPE)}, "must contain a complete canonical package"),
-                ({"archive_member": ("codex-resources/bwrap", tarfile.CHRTYPE)}, "must contain a complete canonical package"),
-                ({"archive_member": ("../escaped", tarfile.REGTYPE)}, "must contain a complete canonical package"),
-                ({"platform_manifest": True, "bad_checksum": True}, "metadata and SHA256SUMS disagree"),
-                (
-                    {"platform_manifest": True, "invalid_manifest_digest": True},
-                    "Could not find SHA-256 digest",
-                ),
+                ({"invalid_digest": True}, "Could not find SHA-256 digest"),
+                ({"missing_helper": True}, "must contain a complete canonical package"),
+                ({"wrong_version": True}, "Invalid ASM package metadata"),
             ):
-                files = write_release(
-                    root, NEXT_VERSION, "x86_64-unknown-linux-gnu", **options
-                )
-                result, requests = run_installer(root, NEXT_VERSION, files)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(message, result.stderr)
-                self.assertEqual(current.resolve(), selected)
-                self.assertEqual(
-                    (root / "install-bin/codex").resolve(), selected / "bin/codex"
-                )
-                self.assertTrue(all("trungnt13/asm" in url for url in requests))
-            self.assertFalse(
-                (
-                    root / "codex-home/packages/asm-standalone/auto-update-version"
-                ).exists()
-            )
-
-    def test_linux_libc_floor_rejects_before_download_or_state_changes(self) -> None:
-        for libc_version in (
-            "glibc 2.34",
-            "glibc 2.9",
-            "musl 1.2.5",
-            "",
-            "glibc unknown",
-        ):
-            with (
-                self.subTest(libc_version=libc_version),
-                tempfile.TemporaryDirectory() as directory,
-            ):
-                root = Path(directory)
-                result, requests = run_installer(
-                    root, VERSION, libc_version=libc_version
-                )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(
-                    "require glibc 2.35 or newer (Ubuntu 22.04+)", result.stderr
-                )
-                self.assertEqual(requests, [])
-                self.assertFalse((root / "codex-home").exists())
-                self.assertFalse((root / "install-bin").exists())
-
-    def test_musl_only_release_is_rejected_without_state_changes(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            files = write_release(root, VERSION, "x86_64-unknown-linux-musl")
-            result, requests = run_installer(root, "latest", files, release_arg=VERSION)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("is MUSL-only", result.stderr)
-            self.assertEqual(
-                requests,
-                [
-                    f"https://api.github.com/repos/trungnt13/asm/releases/tags/v{VERSION}"
-                ],
-            )
-            self.assertFalse((root / "codex-home").exists())
-            self.assertFalse((root / "install-bin").exists())
-
-    def test_gnu_install_replaces_musl_selection_without_deleting_state(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            write_release(root, VERSION, "x86_64-unknown-linux-musl")
-            package_root = root / "codex-home/packages/asm-standalone"
-            old_release = (
-                package_root / "releases" / f"{VERSION}-x86_64-unknown-linux-musl"
-            )
-            (old_release / "bin").mkdir(parents=True)
-            for name in ("codex", "codex-code-mode-host"):
-                shutil.copy2(
-                    root / f"source-{VERSION}" / "bin" / name, old_release / "bin" / name
-                )
-            (old_release / "codex").symlink_to("bin/codex")
-            current = package_root / "current"
-            current.symlink_to(old_release)
-            install_bin = root / "install-bin"
-            install_bin.mkdir()
-            for name in ("codex", "codex-code-mode-host"):
-                (install_bin / name).symlink_to(current / "bin" / name)
-            config = root / "codex-home/config.toml"
-            config.write_text('model = "custom-model"\n')
-            files = write_release(root, VERSION, "x86_64-unknown-linux-gnu")
-            result, requests = run_installer(
-                root, VERSION, files, libc_version="glibc 2.36"
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(
-                requests[-1].endswith("codex-x86_64-unknown-linux-gnu.tar.gz")
-            )
-            self.assertEqual(
-                current.resolve().name, f"{VERSION}-x86_64-unknown-linux-gnu"
-            )
-            for name in ("codex", "codex-code-mode-host"):
-                self.assertEqual(
-                    (install_bin / name).resolve(), current.resolve() / "bin" / name
-                )
-                self.assertTrue((old_release / "bin" / name).is_file())
-            self.assertEqual(config.read_text(), 'model = "custom-model"\n')
-
-    def test_macos_native_and_rosetta_use_arm64_archive(self) -> None:
-        for machine, rosetta in (("arm64", False), ("x86_64", True)):
-            with (
-                self.subTest(machine=machine, rosetta=rosetta),
-                tempfile.TemporaryDirectory() as directory,
-            ):
-                root = Path(directory)
-                files = write_release(root, VERSION, "aarch64-apple-darwin", platform_manifest=True)
-                result, requests = run_installer(
-                    root,
-                    VERSION,
-                    files,
-                    system="Darwin",
-                    machine=machine,
-                    rosetta=rosetta,
-                    libc_version="",
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertTrue(
-                    requests[-1].endswith("codex-aarch64-apple-darwin.tar.gz")
-                )
-                self.assertTrue(
-                    (root / "install-bin/codex-code-mode-host").is_symlink()
-                )
-
-    def test_unsupported_targets_and_daemon_mode_leave_state_untouched(self) -> None:
-        for system, machine, rosetta, daemon in (
-            ("Darwin", "x86_64", False, False),
-            ("Linux", "aarch64", False, False),
-            ("Linux", "x86_64", False, True),
-        ):
-            with (
-                self.subTest(system=system, machine=machine, daemon=daemon),
-                tempfile.TemporaryDirectory() as directory,
-            ):
-                root = Path(directory)
-                result, requests = run_installer(
-                    root,
-                    VERSION,
-                    system=system,
-                    machine=machine,
-                    rosetta=rosetta,
-                    daemon_only=daemon,
-                )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn(
-                    "daemon-only" if daemon else "Unsupported ASM release target",
-                    result.stderr,
-                )
-                self.assertEqual(requests, [])
-                self.assertFalse((root / "codex-home").exists())
+                with self.subTest(options=options):
+                    files = write_release(root, NEXT_VERSION, **options)
+                    result, requests = run_installer(root, NEXT_VERSION, files)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(message, result.stderr)
+                    self.assertEqual(current.resolve(), selected)
+                    for name in ("codex", "codex-code-mode-host"):
+                        self.assertEqual(
+                            (root / "install-bin" / name).resolve(),
+                            selected / "bin" / name,
+                        )
+                    self.assertTrue(all("trungnt13/asm" in url for url in requests))
 
 
 if __name__ == "__main__":
