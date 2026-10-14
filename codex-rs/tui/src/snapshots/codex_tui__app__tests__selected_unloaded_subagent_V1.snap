@@ -1,0 +1,7 @@
+---
+source: tui/src/app/tests.rs
+expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))"
+---
+› Ask ASM to do anything
+
+  sol61 def·/tmp/project·child-0[worker]

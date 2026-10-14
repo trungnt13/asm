@@ -416,11 +416,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             .cloud_config_bundle(gate_cloud_config.clone())
             .build()
             .await?;
-        if !gate_config.features.enabled(Feature::Worktrees) {
-            anyhow::bail!(
-                "--worktree requires the worktrees feature; enable it with --enable worktrees"
-            );
-        }
         if let Some(ExecCommand::Fork(args)) = command.as_mut() {
             let saved_cwd = worktree::fork_source(
                 args,
@@ -1249,6 +1244,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                         input: items.into_iter().map(Into::into).collect(),
                         tool_output: None,
                         responsesapi_client_metadata: None,
+                        responsesapi_client_metadata_patch: None,
                         additional_context: None,
                         environments: None,
                         cwd: Some(default_cwd),
@@ -1851,8 +1847,10 @@ async fn latest_thread_cwd(thread: &AppServerThread) -> PathBuf {
 
 async fn parse_latest_turn_context_cwd(path: &Path) -> Option<PathBuf> {
     let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let reader = codex_rollout::open_rollout_seekable_reader(&path).ok()?;
+    let (stop, keep_running) = tokio::sync::oneshot::channel::<()>();
+    let result = tokio::task::spawn_blocking(move || {
+        let reader =
+            codex_rollout::open_rollout_seekable_reader(&path, || stop.is_closed()).ok()?;
         let mut scanner = codex_rollout::ReverseJsonlScanner::new(reader).ok()?;
         while let Some(outcome) = scanner.scan_next_rollout_line().ok()? {
             if let codex_rollout::ScanOutcome::Parsed(RolloutLine {
@@ -1867,7 +1865,9 @@ async fn parse_latest_turn_context_cwd(path: &Path) -> Option<PathBuf> {
     })
     .await
     .ok()
-    .flatten()
+    .flatten();
+    drop(keep_running);
+    result
 }
 
 fn cwds_match(current_cwd: &Path, session_cwd: &Path) -> bool {

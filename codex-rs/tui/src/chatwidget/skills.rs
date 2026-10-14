@@ -102,6 +102,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_manage_skills_closed(&mut self) {
+        self.refresh_skills_for_current_cwd(/*force_reload*/ true);
         let Some(initial_state) = self.skills_initial_state.take() else {
             return;
         };
