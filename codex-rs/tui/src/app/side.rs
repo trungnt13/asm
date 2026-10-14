@@ -242,6 +242,7 @@ impl App {
         let clear_side_ui = |chat_widget: &mut crate::chatwidget::ChatWidget| {
             chat_widget.set_side_conversation_context_label(/*label*/ None);
             chat_widget.set_side_conversation_active(/*active*/ false);
+            chat_widget.set_composer_mode(crate::bottom_pane::ComposerMode::Main);
             chat_widget.clear_thread_rename_block();
             chat_widget.set_parallel_conversation_active(/*active*/ false);
             chat_widget.set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Default);
@@ -315,15 +316,17 @@ impl App {
             "{} to close",
             crate::key_hint::ctrl(KeyCode::Char('c')).display_label()
         ));
-        let title = match kind {
+        let mode = match kind {
             CompanionKind::Side
                 if self.side_threads[&active_thread_id].mode == SideConversationMode::Chat =>
             {
-                "Chat"
+                crate::bottom_pane::ComposerMode::Chat
             }
-            CompanionKind::Side => "Side",
-            CompanionKind::Parallel => "Parallel",
+            CompanionKind::Side => crate::bottom_pane::ComposerMode::Side,
+            CompanionKind::Parallel => crate::bottom_pane::ComposerMode::Parallel,
         };
+        self.chat_widget.set_composer_mode(mode);
+        let title = mode.name();
         self.chat_widget
             .set_side_conversation_context_label(Some(format!(
                 "{title} {}",

@@ -301,6 +301,7 @@ async fn side_context_label_preserves_status_line_snapshot() {
     chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
     chat.refresh_status_line();
     chat.set_side_conversation_active(/*active*/ true);
+    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Side);
     chat.set_side_conversation_context_label(Some(
         "Side from main thread · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
@@ -322,8 +323,9 @@ async fn side_context_label_shows_parent_status_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
     chat.set_side_conversation_active(/*active*/ true);
+    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Chat);
     chat.set_side_conversation_context_label(Some(
-        "Side from main thread · main needs input · ctrl+/ to switch · ctrl+c to close".to_string(),
+        "Chat from main thread · main needs input · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
 
     let width = 80;

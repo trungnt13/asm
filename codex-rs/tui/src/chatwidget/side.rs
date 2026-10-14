@@ -48,6 +48,10 @@ impl ChatWidget {
         self.active_parallel_conversation
     }
 
+    pub(crate) fn set_composer_mode(&mut self, mode: crate::bottom_pane::ComposerMode) {
+        self.bottom_pane.set_composer_mode(mode);
+    }
+
     pub(crate) fn set_side_conversation_context_label(&mut self, label: Option<String>) {
         self.bottom_pane.set_side_conversation_context_label(label);
     }
