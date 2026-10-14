@@ -49,8 +49,9 @@ async fn basic_decisions_uses_custom_rubric_and_large_context() {
         .await;
     assert_eq!(
         client()
-            .choose_effort_at(
-                &format!("{}/v1/decisions", server.uri()),
+            .with_endpoint(format!("{}/v1/decisions", server.uri()))
+            .unwrap()
+            .choose_effort(
                 "gpt-6-luna",
                 &input,
                 rubric,
@@ -67,17 +68,28 @@ async fn basic_decisions_returns_low_effort() {
     let server = MockServer::start().await;
     // Basic: a valid ordinary request accepts a supported low-effort answer.
     Mock::given(method("POST"))
+        .and(body_json(json!({
+            "model": "jev-latest",
+            "state": "Greet the user.",
+            "questions": {"reasoning_effort": {
+                "type": "choice", "instructions": "Choose sufficient effort.",
+                "criteria": {"low": null, "medium": null}
+            }}
+        })))
         .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
-            "answers": [{"type": "choice", "name": "reasoning_effort", "choice": "low"}]
+            "answers": {"reasoning_effort": {"type": "choice", "choice": "low"}}
         })))
         .expect(/*r*/ 1)
         .mount(&server)
         .await;
+    let mut client = client();
+    client.backend = DecisionBackend::TypeSafe;
     assert_eq!(
-        client()
-            .choose_effort_at(
-                &server.uri(),
-                "gpt-6-luna",
+        client
+            .with_endpoint(server.uri())
+            .unwrap()
+            .choose_effort(
+                "jev-latest",
                 "Greet the user.",
                 "Choose sufficient effort.",
                 &["low".to_string(), "medium".to_string()],

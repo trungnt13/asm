@@ -14,7 +14,9 @@ use super::turn_context::TurnContext;
 use crate::config::Config;
 use codex_api::DecisionsClient;
 use codex_api::DecisionsError;
+use codex_config::AdaptiveReasoningBackend;
 use codex_config::AdaptiveReasoningConfig;
+use codex_config::AdaptiveReasoningProfile;
 use codex_config::AdaptiveReasoningTrigger;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
@@ -71,6 +73,7 @@ struct AdaptiveSession {
     turns_started: AtomicU64,
     decision_due_after_enable: AtomicBool,
     warmup_started: AtomicBool,
+    profile: OnceLock<AdaptiveReasoningProfile>,
     client: OnceLock<Arc<DecisionsClient>>,
     recovery: StdMutex<AdaptiveRecovery>,
     shutdown: CancellationToken,
@@ -97,6 +100,7 @@ impl Default for AdaptiveSession {
             turns_started: AtomicU64::new(/*v*/ 0),
             decision_due_after_enable: AtomicBool::new(/*v*/ false),
             warmup_started: AtomicBool::new(/*v*/ false),
+            profile: OnceLock::new(),
             client: OnceLock::new(),
             recovery: StdMutex::new(AdaptiveRecovery::default()),
             evidence: StdMutex::new(shutdown.child_token()),
@@ -159,24 +163,43 @@ impl Drop for AdaptiveProbe {
 }
 
 impl AdaptiveSession {
-    fn client(&self, config: &Config) -> Result<Arc<DecisionsClient>, DecisionsError> {
+    fn client(&self, config: &Config) -> Result<(Arc<DecisionsClient>, String), DecisionsError> {
+        let profile = if let Some(profile) = self.profile.get() {
+            profile
+        } else {
+            let profile = config
+                .adaptive_reasoning
+                .resolved_profile()
+                .map_err(|_| DecisionsError::InvalidRequest)?;
+            self.profile.get_or_init(|| profile)
+        };
         if let Some(client) = self.client.get() {
-            return Ok(Arc::clone(client));
+            return Ok((Arc::clone(client), profile.model.clone()));
         }
-        let result = std::env::var(&config.adaptive_reasoning.decision_model_api_env)
+        let result = std::env::var(&profile.api_key_env)
             .map_err(|_| DecisionsError::Credentials)
             .and_then(|key| {
-                DecisionsClient::new(
-                    RouteAwareClientPool::new_without_redirects_or_request_logging(
-                        config.http_client_factory(),
-                        ClientRouteClass::Api,
-                    )
-                    .into_client(),
-                    key,
+                let client = RouteAwareClientPool::new_without_redirects_or_request_logging(
+                    config.http_client_factory(),
+                    ClientRouteClass::Api,
                 )
+                .into_client();
+                let client = match profile.backend {
+                    AdaptiveReasoningBackend::Openai => DecisionsClient::new(client, key),
+                    AdaptiveReasoningBackend::Typesafe => {
+                        DecisionsClient::new_typesafe(client, key)
+                    }
+                }?;
+                match &profile.endpoint {
+                    Some(endpoint) => client.with_endpoint(endpoint.clone()),
+                    None => Ok(client),
+                }
             });
         match result {
-            Ok(client) => Ok(Arc::clone(self.client.get_or_init(|| Arc::new(client)))),
+            Ok(client) => Ok((
+                Arc::clone(self.client.get_or_init(|| Arc::new(client))),
+                profile.model.clone(),
+            )),
             Err(error) => {
                 tracing::warn!(%error, "adaptive reasoning unavailable; retaining current effort");
                 Err(error)
@@ -328,7 +351,7 @@ impl Session {
                 source.step_settings.collaboration_mode.reasoning_effort(),
             )
         });
-        let client = match session.client(config) {
+        let (client, model) = match session.client(config) {
             Ok(client) => client,
             Err(error) => {
                 if let Some(attempt) = attempt {
@@ -352,7 +375,7 @@ impl Session {
         let warmup = AbortOnDropHandle::new(tokio::spawn(run_decision(
             client,
             DecisionRequest {
-                model: config.adaptive_reasoning.decision_model.clone(),
+                model,
                 input: "Acknowledge a greeting.".to_string(),
                 instructions: "Choose the lowest effort sufficient for this routine task."
                     .to_string(),
@@ -592,10 +615,10 @@ impl Session {
                 )
             });
             match session.client(&turn.config) {
-                Ok(client) => Ok((
+                Ok((client, model)) => Ok((
                     client,
                     DecisionRequest {
-                        model: config.decision_model.clone(),
+                        model,
                         input: text,
                         instructions: config
                             .rubric_instructions
