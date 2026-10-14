@@ -2,9 +2,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::style::Styled;
-use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
+use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::widgets::Widget;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -34,15 +33,13 @@ impl ComposerMode {
     }
 
     pub(super) fn render(self, area: Rect, buf: &mut Buffer) {
-        // Use the existing vertical padding; input geometry and wrapping stay unchanged.
-        if area.height < 3 {
+        // Use the existing top padding; input geometry and wrapping stay unchanged.
+        let name = self.name();
+        if area.height < 3 || area.width < name.len() as u16 {
             return;
         }
-        Block::default()
-            .borders(Borders::TOP | Borders::BOTTOM)
-            .border_style(self.style())
-            .title(format!(" {} ", self.name()).set_style(self.style()))
-            .title_alignment(Alignment::Right)
-            .render(area, buf);
+        Line::from(Span::styled(name, self.style()))
+            .alignment(Alignment::Right)
+            .render(Rect { height: 1, ..area }, buf);
     }
 }

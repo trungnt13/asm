@@ -1,7 +1,7 @@
 //! The chat composer is the bottom-pane text input state machine.
 //!
-//! The active destination appears on the top-right border without changing input geometry.
-//! Companion borders and prompt markers use magenta; draft text keeps its normal styling.
+//! The active destination appears in the top-right padding without changing input geometry.
+//! Companion labels use magenta; prompt markers and draft text keep their existing styling.
 //! It edits [`TextArea`] and attachments, routes popup keys, makes completed slash commands atomic,
 //! and handles Enter/newlines. It shows Luna Reserve's yellow arrow and detects unbracketed paste
 //! bursts, especially on Windows. Paste timing uses Tokio's clock so asynchronous flush deadlines
@@ -4942,7 +4942,7 @@ impl ChatComposer {
         Block::default().style(style).render(composer_rect, buf);
         self.render_attachments(remote_images_rect, buf);
         if !textarea_rect.is_empty() {
-            let mut prompt = if self.draft.input_enabled {
+            let prompt = if self.draft.input_enabled {
                 if self.draft.is_bash_mode {
                     Span::from("!").light_red().bold()
                 } else if self.luna_reserve_active {
@@ -4963,9 +4963,6 @@ impl ChatComposer {
             } else {
                 "›".dim()
             };
-            if self.mode != ComposerMode::Main {
-                prompt = prompt.magenta();
-            }
             buf.set_span(
                 textarea_rect.x - LIVE_PREFIX_COLS,
                 textarea_rect.y,
