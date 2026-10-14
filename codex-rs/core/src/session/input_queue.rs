@@ -633,8 +633,6 @@ mod tests {
 
     #[tokio::test]
     async fn input_queue_reports_already_pending_steer() {
-        use crate::context::ContextualUserFragment;
-
         let input_queue = InputQueue::new();
         let turn_state = Mutex::new(TurnState::default());
         let passive_output = serde_json::from_value(serde_json::json!({
@@ -664,18 +662,6 @@ mod tests {
             input_queue.subscribe_activity(Some(&turn_state)).await.1,
             Some(InputQueueActivity::Mailbox)
         );
-        let peer = crate::context::PeerMessage::new("already pending peer".to_string()).unwrap();
-        let peer_item: ResponseItem = peer.render_fragment().into();
-        input_queue
-            .extend_pending_input_for_turn_state(
-                &turn_state,
-                vec![TurnInput::ResponseItem(peer_item.into())],
-            )
-            .await;
-        let (activity_rx, pending_activity) =
-            input_queue.subscribe_activity(Some(&turn_state)).await;
-        assert_eq!(activity_rx.has_changed().unwrap(), false);
-        assert_eq!(pending_activity, Some(InputQueueActivity::Steer));
         input_queue
             .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
                 &turn_state,

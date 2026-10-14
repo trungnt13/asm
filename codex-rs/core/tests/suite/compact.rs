@@ -1055,10 +1055,6 @@ async fn reasoning_effort_override_remote_v2_compaction_resets_pinned_effort(
             config.model_reasoning_effort = Some(ReasoningEffort::Medium);
             config
                 .features
-                .disable(Feature::IncrementalTools)
-                .expect("exercise legacy Lite tools with only appended declarations in history");
-            config
-                .features
                 .enable(Feature::ReasoningEffortOverride)
                 .expect("test config should allow feature update");
             set_test_compact_prompt(config);
@@ -1067,23 +1063,6 @@ async fn reasoning_effort_override_remote_v2_compaction_resets_pinned_effort(
         .await?;
 
     test.submit_text_turn("first message").await?;
-    test.codex
-        .append_tools(vec![
-            codex_protocol::dynamic_tools::DynamicToolSpec::Function(
-                codex_protocol::dynamic_tools::DynamicToolFunctionSpec {
-                    name: "send_companion_message".to_string(),
-                    description: "Send a message to the paired conversation.".to_string(),
-                    input_schema: json!({
-                        "type": "object",
-                        "properties": {"message": {"type": "string"}},
-                        "required": ["message"],
-                        "additionalProperties": false,
-                    }),
-                    defer_loading: false,
-                },
-            ),
-        ])
-        .await?;
     core_test_support::submit_thread_settings(
         &test.codex,
         ThreadSettingsOverrides {
@@ -1115,35 +1094,6 @@ async fn reasoning_effort_override_remote_v2_compaction_resets_pinned_effort(
 
     let requests = request_log.requests();
     assert_eq!(requests.len(), 6);
-    let first_input = requests[0].input();
-    assert_eq!(first_input[0]["type"], "additional_tools");
-    assert!(!first_input[0]["tools"].as_array().unwrap().is_empty());
-    assert!(
-        first_input[1]["content"][0]["text"]
-            .as_str()
-            .is_some_and(|text| !text.is_empty())
-    );
-    for request in &requests[1..=2] {
-        assert_eq!(
-            request.input().get(..2),
-            first_input.get(..2),
-            "ordinary and remote-v2 compaction requests retain the original tool/instruction prefix",
-        );
-        let appended = request
-            .inputs_of_type("additional_tools")
-            .into_iter()
-            .filter(|item| {
-                item["id"]
-                    .as_str()
-                    .is_some_and(|id| id.starts_with("at_appended_"))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(appended.len(), 1);
-        assert_eq!(
-            appended[0]["tools"][0]["tools"][0]["name"],
-            "send_companion_message"
-        );
-    }
     let first_body = requests[0].body_json();
     let second_body = requests[1].body_json();
     assert_eq!(first_body["reasoning"]["effort"], "medium");

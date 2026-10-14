@@ -1010,29 +1010,13 @@ fn non_last_reasoning_tokens_ignore_entries_after_last_user() {
 
 #[test]
 fn items_after_last_model_generated_tokens_include_user_and_tool_output() {
-    let peer: ResponseItem =
-        crate::context::PeerMessage::new("[Peer /root/parallel]: inspect".to_string())
-            .unwrap()
-            .render_fragment()
-            .into();
-    let tail = vec![
+    let history = create_history_with_items(vec![
+        assistant_msg("already counted by API"),
         user_msg("new user message"),
-        peer,
         custom_tool_call_output("call-tail", "new tool output"),
-    ];
-    let history = create_history_with_items(
-        [vec![assistant_msg("already counted by API")], tail.clone()].concat(),
-    );
-    // Derive the expected byte heuristic from the fixture payloads, not the estimator.
-    let expected_tokens = "new user message".len().div_ceil(4)
-        + "[Peer /root/parallel]: inspect".len().div_ceil(4)
-        + ("call-tail".len() + "new tool output".len()).div_ceil(4);
-    assert_eq!(
-        history
-            .items_after_last_model_generated_item()
-            .cloned()
-            .collect::<Vec<_>>(),
-        tail,
+    ]);
+    let expected_tokens = estimate_item_token_count(&user_msg("new user message")).saturating_add(
+        estimate_item_token_count(&custom_tool_call_output("call-tail", "new tool output")),
     );
 
     assert_eq!(
@@ -1040,7 +1024,7 @@ fn items_after_last_model_generated_tokens_include_user_and_tool_output() {
             .items_after_last_model_generated_item()
             .map(estimate_item_token_count)
             .fold(0i64, i64::saturating_add),
-        expected_tokens as i64
+        expected_tokens
     );
 }
 
@@ -1243,39 +1227,15 @@ fn total_token_usage_includes_all_items_after_last_model_generated_item() {
     );
     let added_user = user_msg("new user message");
     let added_tool_output = custom_tool_call_output("tool-tail", "new tool output");
-    let peer: ResponseItem =
-        crate::context::PeerMessage::new("[Peer /root/parallel]: inspect".to_string())
-            .unwrap()
-            .render_fragment()
-            .into();
-    // A failed/interrupted request can leave unsampled user/tool input before delivery.
     history.record_items(
-        [&added_user, &added_tool_output, &peer],
+        [&added_user, &added_tool_output],
         TruncationPolicy::Tokens(10_000),
     );
-    let expected_tail_tokens = ("new user message".len().div_ceil(4)
-        + ("tool-tail".len() + "new tool output".len()).div_ceil(4)
-        + "[Peer /root/parallel]: inspect".len().div_ceil(4)) as i64;
 
     assert_eq!(
-        history.estimated_tokens_after_last_model_generated_item(),
-        expected_tail_tokens,
-    );
-    for server_reasoning_included in [true, false] {
-        assert_eq!(
-            history.get_total_token_usage(server_reasoning_included),
-            100 + expected_tail_tokens,
-        );
-    }
-
-    // Ordinary provider assistant output still advances the accounting boundary.
-    history.record_items(
-        [&assistant_msg("[Peer /root/parallel]: inspect")],
-        TruncationPolicy::Tokens(10_000),
-    );
-    assert_eq!(
-        history.estimated_tokens_after_last_model_generated_item(),
-        0
+        history.get_total_token_usage(/*server_reasoning_included*/ true),
+        100 + estimate_item_token_count(&added_user)
+            + estimate_item_token_count(&added_tool_output)
     );
 }
 

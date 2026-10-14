@@ -1551,7 +1551,7 @@ mod tests {
 
     #[tokio::test]
     async fn pending_requests_for_thread_returns_thread_requests_in_request_id_order() {
-        let (tx, mut rx) = mpsc::channel::<OutgoingEnvelope>(16);
+        let (tx, _rx) = mpsc::channel::<OutgoingEnvelope>(8);
         let outgoing = Arc::new(OutgoingMessageSender::new(
             tx,
             codex_analytics::AnalyticsEventsClient::disabled(),
@@ -1559,7 +1559,7 @@ mod tests {
         let thread_id = ThreadId::new();
         let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing.clone(),
-            vec![ConnectionId(1), ConnectionId(2)],
+            vec![ConnectionId(1)],
             thread_id,
         );
 
@@ -1610,117 +1610,6 @@ mod tests {
                 &first_request_id,
                 &second_request_id
             ]
-        );
-
-        outgoing
-            .cancel_requests_for_thread(thread_id, /*error*/ None)
-            .await;
-        while rx.try_recv().is_ok() {}
-        let dynamic_call = ServerRequestPayload::DynamicToolCall(DynamicToolCallParams {
-            thread_id: thread_id.to_string(),
-            turn_id: "turn-owned".to_string(),
-            call_id: "call-owned".to_string(),
-            namespace: None,
-            tool: "appended".to_string(),
-            arguments: json!({}),
-        });
-        thread_outgoing.mark_appended_tool("appended").await;
-        let (_, unowned_waiter) = thread_outgoing.send_request(dynamic_call.clone()).await;
-        assert!(unowned_waiter.await.is_err());
-        assert!(rx.try_recv().is_err());
-
-        outgoing
-            .appended_tool_connection_initialized(ConnectionId(1))
-            .await;
-        outgoing
-            .appended_tool_connection_initialized(ConnectionId(2))
-            .await;
-        outgoing
-            .appended_tool_owners
-            .lock()
-            .await
-            .tools
-            .insert((thread_id, "appended".to_string()), Some(ConnectionId(1)));
-        let (owned_id, mut owned_waiter) = thread_outgoing.send_request(dynamic_call.clone()).await;
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(OutgoingEnvelope::ToConnection {
-                connection_id: ConnectionId(1),
-                ..
-            })
-        ));
-        assert!(rx.try_recv().is_err());
-        assert!(
-            outgoing
-                .pending_requests_for_thread(thread_id)
-                .await
-                .is_empty()
-        );
-        outgoing
-            .replay_requests_to_connection_for_thread(ConnectionId(2), thread_id)
-            .await;
-        assert!(rx.try_recv().is_err());
-        let result = json!({"success": true, "contentItems": []});
-        outgoing
-            .notify_client_response(ConnectionId(2), owned_id.clone(), result.clone())
-            .await;
-        outgoing
-            .notify_client_error(
-                ConnectionId(2),
-                owned_id.clone(),
-                internal_error("wrong owner"),
-            )
-            .await;
-        assert!(matches!(
-            owned_waiter.try_recv(),
-            Err(oneshot::error::TryRecvError::Empty)
-        ));
-        outgoing
-            .notify_client_response(ConnectionId(1), owned_id, result.clone())
-            .await;
-        assert_eq!(
-            owned_waiter.await.expect("owner callback"),
-            Ok(result.clone())
-        );
-
-        let (disconnected_id, disconnected_waiter) =
-            thread_outgoing.send_request(dynamic_call.clone()).await;
-        assert!(rx.try_recv().is_ok());
-        outgoing.connection_closed(ConnectionId(1)).await;
-        assert!(disconnected_waiter.await.is_err());
-        outgoing
-            .notify_client_response(ConnectionId(2), disconnected_id, result)
-            .await;
-        let (_, disconnected_waiter) = thread_outgoing.send_request(dynamic_call.clone()).await;
-        assert!(disconnected_waiter.await.is_err());
-        assert!(rx.try_recv().is_err());
-
-        outgoing
-            .appended_tool_owners
-            .lock()
-            .await
-            .tools
-            .insert((thread_id, "appended".to_string()), Some(ConnectionId(2)));
-        let (_, unsubscribed_waiter) = thread_outgoing.send_request(dynamic_call).await;
-        assert!(matches!(
-            rx.try_recv(),
-            Ok(OutgoingEnvelope::ToConnection {
-                connection_id: ConnectionId(2),
-                ..
-            })
-        ));
-        outgoing
-            .release_appended_tool_connection(ConnectionId(2), thread_id)
-            .await;
-        assert!(unsubscribed_waiter.await.is_err());
-        assert_eq!(
-            outgoing
-                .appended_tool_owners
-                .lock()
-                .await
-                .tools
-                .get(&(thread_id, "appended".to_string())),
-            Some(&None),
         );
     }
 

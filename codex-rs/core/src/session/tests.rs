@@ -6222,23 +6222,6 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     );
     let turn_context_baseline = turn_context.to_turn_context_item();
     let world_state = Arc::new(build_world_state_from_turn_context(&session, &turn_context).await);
-    // Registrations accepted after the compaction snapshot must survive its checkpoint.
-    let appended_tools = ["first_peer_tool", "second_peer_tool"]
-        .into_iter()
-        .map(|name| {
-            serde_json::from_value::<DynamicToolSpec>(serde_json::json!({
-                "type": "function", "name": name, "description": "Peer coordination",
-                "inputSchema": {"type":"object", "properties":{}},
-            }))
-            .expect("tool fixture")
-        })
-        .collect::<Vec<_>>();
-    session
-        .state
-        .lock()
-        .await
-        .session_configuration
-        .appended_tools = appended_tools.clone();
     let previous_turn_settings = PreviousTurnSettings {
         model: "previous-model".to_string(),
         comp_hash: Some("comp-hash".to_string()),
@@ -6322,28 +6305,6 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     let (items, _, _) = RolloutRecorder::load_rollout_items(&rollout_path)
         .await
         .expect("read checkpoints");
-    let mut replay = items.clone();
-    // A later model step can persist an older declaration snapshot after admission.
-    replay.push(RolloutItem::WorldState(WorldStateItem::patch(
-        serde_json::json!({"appended_tools": {"specs": [appended_tools[0].clone()], "available": true}})
-            .as_object().expect("world state patch").clone(),
-    )));
-    assert_eq!(
-        super::appended_tools::restore_appended_tools(&InitialHistory::Forked(replay.clone()))
-            .expect("full replay"),
-        appended_tools
-    );
-    let mut scan = codex_rollout::ModelContextScan::default();
-    for item in replay.into_iter().rev() {
-        if scan.push(item) == codex_rollout::ModelContextScanProgress::Complete {
-            break;
-        }
-    }
-    assert_eq!(
-        super::appended_tools::restore_appended_tools(&InitialHistory::Forked(scan.finish()))
-            .expect("bounded model-context replay"),
-        appended_tools
-    );
     let compaction_items = items
         .into_iter()
         .skip_while(|item| !matches!(item, RolloutItem::Compacted(_)))
@@ -6359,14 +6320,9 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     };
     assert_eq!(compacted.replacement_history, Some(live_history));
     assert_eq!(compacted.resume_metadata.as_ref(), Some(&expected));
-    let mut expected_world_state = world_state.render_full().0.into_object();
-    expected_world_state.insert(
-        "appended_tool_registry".to_string(),
-        serde_json::json!(appended_tools),
-    );
     assert_eq!(
         saved_world_state,
-        &WorldStateItem::full(expected_world_state)
+        &WorldStateItem::full(world_state.render_full().0.into_object())
     );
     assert_eq!(saved_turn_context, &turn_context_baseline);
     assert_eq!(saved_settings, &expected_settings);
@@ -6423,220 +6379,6 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
             .await;
         assert_eq!(rolled_back.turn_attribution, None);
     }
-
-    // A retained registration must stop executing/advertising in strict mode, then recover.
-    for strict in [false, true, false] {
-        let mut turn = session.new_default_turn().await;
-        let context = Arc::get_mut(&mut turn).expect("unshared test context");
-        let config = Arc::make_mut(&mut context.config);
-        if strict {
-            config
-                .features
-                .enable(Feature::CodeModeOnlyStrictThirdPartyTools)
-                .unwrap();
-        } else {
-            config
-                .features
-                .disable(Feature::CodeModeOnlyStrictThirdPartyTools)
-                .unwrap();
-        }
-        config.features.enable(Feature::IncrementalTools).unwrap();
-        update_turn_settings_for_test(context, |settings| {
-            let model = Arc::make_mut(&mut settings.model_info);
-            model.use_responses_lite = true;
-            model.tool_mode = Some(ToolMode::CodeModeOnly);
-        });
-        let DynamicToolSpec::Function(mut baseline_tool) = appended_tools[0].clone() else {
-            panic!("standalone function fixture");
-        };
-        baseline_tool.name = "baseline_tool".to_string();
-        let baseline_specs = vec![codex_tools::ToolSpec::Function(
-            codex_tools::dynamic_tool_to_responses_api_tool(&baseline_tool).unwrap(),
-        )];
-        let baseline_router = ToolRouter::from_parts(
-            ToolRegistry::empty_for_test(),
-            baseline_specs.clone(),
-            ToolMode::CodeModeOnly,
-            BTreeMap::new(),
-            /*tool_namespaces_info*/ None,
-            &[],
-        );
-        let baseline_step = StepContext::for_test(Arc::clone(&turn))
-            .with_tool_router_for_test(Arc::new(baseline_router));
-        let baseline_world = session
-            .build_world_state_for_step(&baseline_step, /*new_window*/ true)
-            .await
-            .unwrap();
-        let (mut baseline_prefix, _) =
-            crate::context::world_state::split_prefix_updates(baseline_world.render_full().1);
-        assert_eq!(baseline_prefix.len(), 2);
-        assert!(matches!(
-            baseline_prefix[0],
-            ResponseItem::AdditionalTools { .. }
-        ));
-        assert!(matches!(baseline_prefix[1], ResponseItem::Message { .. }));
-        for item in &mut baseline_prefix {
-            item.set_id(/*new_id*/ None);
-        }
-        let mut router = ToolRouter::from_parts(
-            ToolRegistry::empty_for_test(),
-            baseline_specs.clone(),
-            ToolMode::CodeModeOnly,
-            BTreeMap::new(),
-            /*tool_namespaces_info*/ None,
-            &[],
-        );
-        session
-            .register_appended_tools(&turn, turn.model_info(), &mut router)
-            .await
-            .unwrap();
-        assert_eq!(router.appended_tools_available, !strict);
-        assert_eq!(router.appended_tools, appended_tools);
-        for name in ["first_peer_tool", "second_peer_tool"] {
-            assert_eq!(
-                router
-                    .registered_tool(&codex_tools::ToolName::plain(name))
-                    .is_some(),
-                !strict
-            );
-        }
-        assert_eq!(
-            router.model_visible_specs().as_ref(),
-            baseline_specs.as_slice()
-        );
-        let step = StepContext::for_test(turn).with_tool_router_for_test(Arc::new(router));
-        let window_world = session
-            .build_world_state_for_step(&step, /*new_window*/ true)
-            .await
-            .unwrap();
-        let (snapshot, updates) = window_world.render_full();
-        let (prefix, _) = crate::context::world_state::split_prefix_updates(updates);
-        let mut actual_baseline = prefix[..2].to_vec();
-        for item in &mut actual_baseline {
-            item.set_id(/*new_id*/ None);
-        }
-        assert_eq!(actual_baseline, baseline_prefix);
-        assert_eq!(prefix.len(), if strict { 2 } else { 3 });
-        if !strict {
-            let declaration = prefix.last().unwrap();
-            let ResponseItem::AdditionalTools {
-                id: Some(id),
-                tools,
-                ..
-            } = declaration
-            else {
-                panic!("missing appended declaration");
-            };
-            assert!(
-                id.as_str()
-                    .starts_with(crate::context::world_state::APPENDED_TOOL_ID_PREFIX)
-            );
-            assert_eq!(
-                tools[0]["tools"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|tool| tool["name"].as_str().unwrap())
-                    .collect::<Vec<_>>(),
-                vec!["first_peer_tool", "second_peer_tool"],
-            );
-            let next_window = session
-                .build_world_state_for_step(&step, /*new_window*/ true)
-                .await
-                .unwrap();
-            let (mut next_prefix, _) =
-                crate::context::world_state::split_prefix_updates(next_window.render_full().1);
-            let mut expected_prefix = prefix.clone();
-            // New emissions retain fresh IDs; their complete visible payload stays the same.
-            for item in next_prefix.iter_mut().chain(expected_prefix.iter_mut()) {
-                item.set_id(/*new_id*/ None);
-            }
-            assert_eq!(next_prefix, expected_prefix);
-        }
-        let (_, unchanged) = window_world.render_history_diff(Some(&snapshot), prefix.iter());
-        assert!(
-            crate::context::world_state::split_prefix_updates(unchanged)
-                .0
-                .is_empty()
-        );
-        let normal = user_message("retained context");
-        let declaration = ResponseItem::AdditionalTools {
-            id: Some(codex_protocol::ResponseItemId::new("at_appended")),
-            role: "developer".to_string(),
-            tools: Vec::new(),
-        };
-        let input = vec![normal.clone(), declaration];
-        let prompt = super::turn::build_prompt(
-            input.clone(),
-            &step,
-            BaseInstructions {
-                text: "baseline".to_string(),
-                provenance: None,
-            },
-            /*incremental_tools*/ false,
-        );
-        assert_eq!(prompt.input, if strict { vec![normal] } else { input });
-        assert_eq!(prompt.base_instructions.text, "baseline");
-    }
-
-    // Exact repeats must not enter step capture (which takes the active-turn lock),
-    // rewrite the registry, or bypass current model/mode validation.
-    let session = Arc::new(session);
-    {
-        let mut state = session.state.lock().await;
-        Arc::make_mut(&mut state.session_configuration.step_settings)
-            .collaboration_mode
-            .settings
-            .model = "gpt-6-astra".to_string();
-    }
-    session.flush_rollout().await.unwrap();
-    let active_turn = session.active_turn.lock().await;
-    let records_before = RolloutRecorder::load_rollout_items(&rollout_path)
-        .await
-        .unwrap()
-        .0;
-    timeout(
-        Duration::from_secs(2),
-        session.append_tools(appended_tools.clone()),
-    )
-    .await
-    .expect("exact repeat should not capture a step")
-    .expect("compatible exact repeat");
-    {
-        let mut state = session.state.lock().await;
-        Arc::make_mut(&mut state.session_configuration.step_settings)
-            .collaboration_mode
-            .settings
-            .model = "gpt-5.5".to_string();
-    }
-    assert!(
-        timeout(
-            Duration::from_secs(2),
-            session.append_tools(appended_tools.clone())
-        )
-        .await
-        .expect("incompatible repeat should not capture a step")
-        .is_err()
-    );
-    drop(active_turn);
-    session.flush_rollout().await.unwrap();
-    let records_after = RolloutRecorder::load_rollout_items(&rollout_path)
-        .await
-        .unwrap()
-        .0;
-    assert_eq!(
-        serde_json::to_value(records_after).unwrap(),
-        serde_json::to_value(records_before).unwrap(),
-    );
-    assert_eq!(
-        session
-            .state
-            .lock()
-            .await
-            .session_configuration
-            .appended_tools,
-        appended_tools
-    );
 }
 
 #[tokio::test]

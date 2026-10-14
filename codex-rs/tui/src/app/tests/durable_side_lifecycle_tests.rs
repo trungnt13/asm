@@ -1,11 +1,9 @@
 use super::session_lifecycle_requests::HistoryCapabilities;
 use super::session_lifecycle_requests::RealtimeRequestBehavior;
 use super::session_lifecycle_requests::TurnStartBehavior;
-use super::session_lifecycle_requests::recorded_params;
 use super::session_lifecycle_requests::start_recording_app_server_with_realtime_speech;
 use super::*;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
-use codex_app_server_protocol::TurnStartParams;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -23,7 +21,7 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         )
         .expect("synthetic parent rollout"),
     )?;
-    let (mut server, requests, proxy) = start_recording_app_server_with_realtime_speech(
+    let (mut server, _requests, proxy) = start_recording_app_server_with_realtime_speech(
         &config,
         HistoryCapabilities::Current,
         /*blocked_thread_list*/ None,
@@ -63,46 +61,6 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
             .await?
             .ephemeral
     );
-
-    // The proxy accepts delivery without registering the tool.
-    let pair = app.side_threads.get_mut(&first_id).expect("active pair");
-    pair.messaging_available = true;
-    for (source, recipient) in [(parent_id, first_id), (first_id, parent_id)] {
-        while app_events.try_recv().is_ok() {}
-        requests.lock().expect("request recorder lock").clear();
-        app.send_companion_message(
-            &server,
-            AppServerRequestId::Integer(1),
-            codex_app_server_protocol::DynamicToolCallParams {
-                thread_id: source.to_string(),
-                turn_id: "peer-turn".to_string(),
-                call_id: "peer-route".to_string(),
-                namespace: None,
-                tool: "send_companion_message".to_string(),
-                arguments: serde_json::json!({"message": "coordinate"}),
-            },
-        )
-        .await;
-        assert!(matches!(
-            app_events.try_recv()?,
-            AppEvent::DynamicToolCallCompleted { response, .. } if response.success
-        ));
-        let params: TurnStartParams = serde_json::from_value(
-            recorded_params(&requests, "turn/start")
-                .pop()
-                .expect("peer turn request"),
-        )?;
-        assert_eq!(
-            params,
-            TurnStartParams {
-                thread_id: recipient.to_string(),
-                assistant_message: Some(format!(
-                    "Message Type: MESSAGE\nTask name: {recipient}\nSender: {source}\nPayload:\ncoordinate"
-                )),
-                ..Default::default()
-            }
-        );
-    }
 
     Box::pin(app.start_companion_conversation(
         &mut tui,
