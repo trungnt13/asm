@@ -36,6 +36,7 @@ pub struct DecisionsClient {
     client: HttpClient,
     api_key: String,
     backend: DecisionBackend,
+    endpoint: Option<String>,
 }
 
 impl DecisionsClient {
@@ -47,6 +48,7 @@ impl DecisionsClient {
             client: client.without_request_logging(),
             api_key,
             backend: DecisionBackend::OpenAi,
+            endpoint: None,
         })
     }
 
@@ -54,6 +56,26 @@ impl DecisionsClient {
         let mut client = Self::new(client, api_key)?;
         client.backend = DecisionBackend::TypeSafe;
         Ok(client)
+    }
+
+    pub fn with_endpoint(mut self, endpoint: String) -> Result<Self, DecisionsError> {
+        let url = url::Url::parse(&endpoint).map_err(|_| DecisionsError::InvalidRequest)?;
+        let loopback = match url.host() {
+            Some(url::Host::Domain(host)) => host == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        };
+        if url.host().is_none()
+            || !(url.scheme() == "https" || (url.scheme() == "http" && loopback))
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(DecisionsError::InvalidRequest);
+        }
+        self.endpoint = Some(url.to_string());
+        Ok(self)
     }
 
     pub fn backend_name(&self) -> &'static str {
@@ -76,8 +98,14 @@ impl DecisionsClient {
             DecisionBackend::OpenAi => DECISIONS_URL,
             DecisionBackend::TypeSafe => TYPESAFE_URL,
         };
-        self.choose_effort_at(url, model, input, instructions, choices)
-            .await
+        self.choose_effort_at(
+            self.endpoint.as_deref().unwrap_or(url),
+            model,
+            input,
+            instructions,
+            choices,
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all)]

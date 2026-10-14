@@ -24,7 +24,10 @@ pub enum AdaptiveReasoningBackend {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AdaptiveReasoningProfile {
+    #[serde(rename = "protocol", alias = "backend")]
     pub backend: AdaptiveReasoningBackend,
+    #[serde(default)]
+    pub endpoint: Option<String>,
     pub model: String,
     /// Environment variable name, never the credential itself.
     pub api_key_env: String,
@@ -91,6 +94,7 @@ impl AdaptiveReasoningConfig {
         } else {
             AdaptiveReasoningProfile {
                 backend: AdaptiveReasoningBackend::Openai,
+                endpoint: None,
                 model: self
                     .decision_model
                     .clone()
@@ -164,6 +168,13 @@ impl AdaptiveReasoningConfig {
 
 impl AdaptiveReasoningProfile {
     fn validate(&self) -> Result<(), String> {
+        if self
+            .endpoint
+            .as_ref()
+            .is_some_and(|endpoint| endpoint.trim().is_empty())
+        {
+            return Err("adaptive_reasoning profile endpoint must not be blank".to_string());
+        }
         if self.model.trim().is_empty() {
             return Err("adaptive_reasoning decision model must not be blank".to_string());
         }

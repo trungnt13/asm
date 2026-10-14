@@ -288,7 +288,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in only |
 | `profile` | Absent: legacy OpenAI configuration | User-defined name in `profiles`; cannot mix with legacy model/key settings |
-| `profiles.<name>` | Empty map | Required `backend` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env` |
+| `profiles.<name>` | Empty map | Required `protocol` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env`; optional full `endpoint` URL |
 | `decision_model` | `"gpt-6-luna"` | Nonblank |
 | `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
 | `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
@@ -301,9 +301,10 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 
 Profiles name connection settings, not separate adaptation policies. Keep effort bounds,
 cadence, evidence limits, timeout, and rubric shared. Profile names have no built-in
-meaning. Require explicit backend, model, and credential-variable name in each
-profile; do not infer a backend from its name or credentials. Validate all defined
-profiles and reject unknown selections/backends rather than falling back. Without
+meaning. Require explicit protocol, model, and credential-variable name in each
+profile; do not infer a protocol from its name, endpoint, or credentials. Keep
+`backend` as a compatibility alias for `protocol`; specifying both is an error.
+Validate all defined profiles and reject unknown selections/protocols rather than falling back. Without
 `profile`, preserve legacy OpenAI defaults and explicit overrides. Selecting a
 profile together with either legacy `decision_model` or `decision_model_api_env`
 is an error, even if the legacy value matches its default.
@@ -314,22 +315,36 @@ enabled = true
 profile = "jev"
 
 [adaptive_reasoning.profiles.jev]
-backend = "typesafe"
+protocol = "typesafe"
 model = "jev-latest"
 api_key_env = "TYPESAFE_API_KEY"
 
 [adaptive_reasoning.profiles.decision_api]
-backend = "openai"
+protocol = "openai"
 model = "gpt-6-luna"
 api_key_env = "DECISION_API_KEY"
+
+[adaptive_reasoning.profiles.local_gateway]
+protocol = "openai"
+endpoint = "http://127.0.0.1:8080/v1/decisions"
+model = "my-decision-model"
+api_key_env = "LOCAL_DECISION_KEY"
 ```
 
 Resolve the connection profile once on first use in each session, including failed
-credential attempts. Keep its backend/model together across warm-up and decisions;
+credential attempts. Keep its protocol/endpoint/model together across warm-up and decisions;
 configuration reloads do not switch an active session's profile. Both adapters use
 the same cancellation, deadline, allowed-choice validation, and recovery policy.
-No automatic failover or adapter-internal retries. Selecting TypeSafe sends bounded
-conversation evidence to TypeSafe, not OpenAI. Use official fixed HTTPS endpoints;
+No automatic failover or adapter-internal retries. Without `endpoint`, use the
+official HTTPS endpoint for the selected protocol. An override is the full endpoint
+URL; append no path. It selects the destination, not the request/response format.
+Require HTTPS, except HTTP on loopback for local gateways. Reject URL credentials
+and fragments. Blank endpoints fail config validation; other invalid URLs fail
+client construction without exposing the URL in errors.
+
+The selected endpoint receives bounded conversation evidence and the credential
+from `api_key_env`. A custom endpoint does not necessarily belong to OpenAI or
+TypeSafe, even when it uses their protocol. Choose the destination deliberately;
 keep credentials separate from main-model authentication and diagnostics sanitized.
 
 - Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the selected decision backend to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.

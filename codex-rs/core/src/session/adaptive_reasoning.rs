@@ -184,11 +184,15 @@ impl AdaptiveSession {
                     ClientRouteClass::Api,
                 )
                 .into_client();
-                match profile.backend {
+                let client = match profile.backend {
                     AdaptiveReasoningBackend::Openai => DecisionsClient::new(client, key),
                     AdaptiveReasoningBackend::Typesafe => {
                         DecisionsClient::new_typesafe(client, key)
                     }
+                }?;
+                match &profile.endpoint {
+                    Some(endpoint) => client.with_endpoint(endpoint.clone()),
+                    None => Ok(client),
                 }
             });
         match result {

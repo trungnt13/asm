@@ -49,8 +49,9 @@ async fn basic_decisions_uses_custom_rubric_and_large_context() {
         .await;
     assert_eq!(
         client()
-            .choose_effort_at(
-                &format!("{}/v1/decisions", server.uri()),
+            .with_endpoint(format!("{}/v1/decisions", server.uri()))
+            .unwrap()
+            .choose_effort(
                 "gpt-6-luna",
                 &input,
                 rubric,
@@ -85,8 +86,9 @@ async fn basic_decisions_returns_low_effort() {
     client.backend = DecisionBackend::TypeSafe;
     assert_eq!(
         client
-            .choose_effort_at(
-                &server.uri(),
+            .with_endpoint(server.uri())
+            .unwrap()
+            .choose_effort(
                 "jev-latest",
                 "Greet the user.",
                 "Choose sufficient effort.",

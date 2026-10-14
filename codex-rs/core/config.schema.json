@@ -107,17 +107,21 @@
           "description": "Environment variable name, never the credential itself.",
           "type": "string"
         },
-        "backend": {
-          "$ref": "#/definitions/AdaptiveReasoningBackend"
+        "endpoint": {
+          "default": null,
+          "type": "string"
         },
         "model": {
           "type": "string"
+        },
+        "protocol": {
+          "$ref": "#/definitions/AdaptiveReasoningBackend"
         }
       },
       "required": [
         "api_key_env",
-        "backend",
-        "model"
+        "model",
+        "protocol"
       ],
       "type": "object"
     },
