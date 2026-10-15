@@ -550,13 +550,37 @@ async fn model_resolution_preserves_startup_overrides_and_instruction_provenance
         config.subagent_model_context_windows = mapped_window
             .map(|window| HashMap::from([("model-b".to_string(), window)]))
             .unwrap_or_default();
-        let overrides = ModelInfoOverrides::for_session(&config, &source, Some(version));
-        let resolved = settings
-            .resolve_model_info(&models_manager, &overrides)
-            .await;
-        let mut expected = baseline.clone();
-        expected.context_window = Some(expected_window);
-        assert_eq!(resolved, expected);
-        assert_eq!(config.model_context_window, scalar_window);
+        for role_window in [None, Some(24_000), Some(200_000)] {
+            config.role_model_context_window = role_window;
+            let is_child = matches!(
+                &source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            );
+            let expected_window = if is_child {
+                role_window
+                    .map(|window| window.min(/*other*/ 100_000))
+                    .unwrap_or(expected_window)
+            } else {
+                expected_window
+            };
+            let overrides = ModelInfoOverrides::for_session(&config, &source, Some(version));
+            let resolved = settings
+                .resolve_model_info(&models_manager, &overrides)
+                .await;
+            let mut expected = baseline.clone();
+            expected.context_window = Some(expected_window);
+            assert_eq!(resolved, expected);
+            assert_eq!(config.model_context_window, scalar_window);
+            assert_eq!(
+                overrides
+                    .models_manager_config("unmatched-model", config.personality)
+                    .model_context_window,
+                if is_child {
+                    role_window.or(scalar_window)
+                } else {
+                    scalar_window
+                },
+            );
+        }
     }
 }
