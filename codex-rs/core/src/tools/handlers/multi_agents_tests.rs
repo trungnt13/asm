@@ -908,7 +908,6 @@ async fn spawn_agent_full_history_fork_inherits_root_service_tier() {
         .await;
     let mut config = (*turn.config).clone();
     config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
-    config.role_model_context_window = Some(48_000);
     turn.config = Arc::new(config);
     let manager = thread_manager();
     let root = manager
@@ -940,16 +939,12 @@ async fn spawn_agent_full_history_fork_inherits_root_service_tier() {
     let (content, _) = expect_text_output(output);
     let result: SpawnAgentResult =
         serde_json::from_str(&content).expect("spawn_agent result should be json");
-    let child = manager
+    let snapshot = manager
         .get_thread(parse_agent_id(&result.agent_id))
         .await
-        .expect("spawned agent thread should exist");
-    let child_turn = child
-        .session
-        .new_turn_with_default_settings("role-window".to_string(), Default::default())
+        .expect("spawned agent thread should exist")
+        .config_snapshot()
         .await;
-    assert_eq!(child_turn.model_info().context_window, Some(48_000));
-    let snapshot = child.config_snapshot().await;
 
     assert_eq!(
         snapshot.service_tier,
@@ -4715,9 +4710,7 @@ async fn build_agent_spawn_config_uses_captured_step_settings_and_turn_context_v
         .token_budget
         .get_or_insert_default()
         .use_history_notes_extension = parent_enabled;
-    parent_config.role_model_context_window = Some(48_000);
     let mut expected = parent_config.clone();
-    expected.role_model_context_window = None;
     turn.configured_token_budget = expected.token_budget.clone();
     Arc::make_mut(&mut turn.config)
         .token_budget

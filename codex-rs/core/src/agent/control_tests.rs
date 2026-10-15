@@ -1222,24 +1222,15 @@ enum V2ReloadRoute {
 
 async fn spawn_v2_reload_test_child(
     control: &LocalAgentControl,
-    mut config: Config,
+    config: Config,
     parent: &CodexThread,
     task_name: &str,
 ) -> LiveAgent {
-    let role_name = config
-        .agent_roles
-        .contains_key(task_name)
-        .then_some(task_name);
-    if role_name.is_some() {
-        crate::agent::role::apply_role_to_config(&mut config, role_name)
-            .await
-            .expect("apply child role");
-    }
     let source = thread_spawn_source(
         parent.session.thread_id,
         &parent.session_source,
         next_thread_spawn_depth(&parent.session_source),
-        role_name,
+        /*agent_role*/ None,
         Some(task_name.to_string()),
     )
     .expect("child source");
@@ -1262,18 +1253,6 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     let _ = config.features.enable(Feature::MultiAgentV2);
     let _ = config.features.enable(Feature::Sqlite);
     config.model = Some("gpt-6-astra".to_string());
-    config
-        .subagent_model_context_windows
-        .insert("gpt-6.1-sol".to_string(), /*v*/ 32_000);
-    let role_path = config.codex_home.join("context-worker.toml");
-    std::fs::write(&role_path, "model_context_window = 48000\n").expect("write child role");
-    config.agent_roles.insert(
-        "worker".to_string(),
-        AgentRoleConfig {
-            config_file: Some(role_path.to_path_buf()),
-            ..Default::default()
-        },
-    );
     config.features.enable(Feature::StepModelSwitching).unwrap();
     config
         .features
@@ -1419,15 +1398,6 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             u64::from(born_adaptive)
         )
     );
-    assert_eq!(
-        child_thread
-            .session
-            .new_default_turn()
-            .await
-            .model_info()
-            .context_window,
-        Some(48_000)
-    );
     child_thread.session.mark_interrupted();
     *child_thread.session.active_turn.lock().await = None;
     assert_eq!(
@@ -1545,15 +1515,6 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             crate::ThreadEvictionOutcome::Busy,
         );
     }
-    assert_eq!(
-        reloaded_child
-            .session
-            .new_default_turn()
-            .await
-            .model_info()
-            .context_window,
-        Some(48_000)
-    );
     let restored_health = reloaded_child.config_snapshot().await;
     assert_eq!(
         (

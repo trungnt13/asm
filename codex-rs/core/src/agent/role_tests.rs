@@ -133,27 +133,21 @@ async fn apply_role_rejects_symlinked_role_file() {
 #[tokio::test]
 async fn apply_role_returns_unavailable_for_invalid_user_role_toml() {
     let (home, mut config) = test_config_with_cli_overrides(Vec::new()).await;
-    for contents in [
-        "model = [",
-        "model_context_window = 0",
-        "model_context_window = -1",
-    ] {
-        let role_path = write_role_config(&home, "invalid-role.toml", contents).await;
-        config.agent_roles.insert(
-            "custom".to_string(),
-            AgentRoleConfig {
-                description: None,
-                config_file: Some(role_path),
-                nickname_candidates: None,
-            },
-        );
+    let role_path = write_role_config(&home, "invalid-role.toml", "model = [").await;
+    config.agent_roles.insert(
+        "custom".to_string(),
+        AgentRoleConfig {
+            description: None,
+            config_file: Some(role_path),
+            nickname_candidates: None,
+        },
+    );
 
-        let err = apply_role_to_config(&mut config, Some("custom"))
-            .await
-            .expect_err("invalid role file should fail");
+    let err = apply_role_to_config(&mut config, Some("custom"))
+        .await
+        .expect_err("invalid role file should fail");
 
-        assert_eq!(err, AGENT_TYPE_UNAVAILABLE_ERROR);
-    }
+    assert_eq!(err, AGENT_TYPE_UNAVAILABLE_ERROR);
 }
 
 #[tokio::test]
@@ -168,7 +162,6 @@ description = "Role metadata"
 nickname_candidates = ["Hypatia"]
 developer_instructions = "Stay focused"
 model = "role-model"
-model_context_window = 48000
 "#,
     )
     .await;
@@ -186,16 +179,6 @@ model_context_window = 48000
         .expect("custom role should apply");
 
     assert_eq!(config.model.as_deref(), Some("role-model"));
-    assert_eq!(config.role_model_context_window, Some(48_000));
-    assert_eq!(config.model_context_window, None);
-    assert_eq!(
-        config
-            .config_layer_stack
-            .effective_config()
-            .get("model_context_window")
-            .and_then(TomlValue::as_integer),
-        Some(48_000),
-    );
 }
 
 #[tokio::test]
