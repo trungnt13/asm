@@ -858,7 +858,6 @@ async fn lookup_latest_session_target_with_app_server(
             .thread_list(latest_session_lookup_params(
                 uses_remote_filesystem,
                 model_provider.clone(),
-                config,
                 cwd_filter,
                 include_non_interactive,
                 lookup_mode,
@@ -894,7 +893,6 @@ enum LatestSessionLookupMode {
 fn latest_session_lookup_params(
     uses_remote_filesystem: bool,
     model_provider: Option<String>,
-    config: &Config,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
     lookup_mode: LatestSessionLookupMode,
@@ -913,13 +911,8 @@ fn latest_session_lookup_params(
         project_id: None,
         parent_thread_id: None,
         ancestor_thread_id: None,
-        cwd: cwd_filter.map(|cwd| {
-            resume_picker::repository_cwd_filter(
-                cwd,
-                uses_remote_filesystem,
-                config.features.enabled(codex_features::Feature::Worktrees),
-            )
-        }),
+        cwd: cwd_filter
+            .map(|cwd| resume_picker::repository_cwd_filter(cwd, uses_remote_filesystem)),
         use_state_db_only: match lookup_mode {
             LatestSessionLookupMode::StateDbOnly => true,
             LatestSessionLookupMode::ScanAndRepair => false,
@@ -3345,13 +3338,11 @@ requires_openai_auth = {requires_openai_auth}
     async fn latest_session_lookup_params_keep_local_filters_for_embedded_sessions()
     -> std::io::Result<()> {
         let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
         let cwd = temp_dir.path().join("project");
 
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ false,
             /*model_provider*/ None,
-            &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3367,7 +3358,6 @@ requires_openai_auth = {requires_openai_auth}
         let scan_params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ false,
             /*model_provider*/ None,
-            &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::ScanAndRepair,
@@ -3379,12 +3369,10 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_honor_explicit_provider() -> color_eyre::Result<()> {
         let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
         let cwd = temp_dir.path().join("project");
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ false,
             Some("selected-provider".to_string()),
-            &config,
             Some(cwd.as_path()),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3404,13 +3392,9 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_omit_local_filters_for_remote_sessions()
     -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ true,
             /*model_provider*/ None,
-            &config,
             /*cwd_filter*/ None,
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3424,13 +3408,9 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_can_include_non_interactive_sources()
     -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ true,
             /*model_provider*/ None,
-            &config,
             /*cwd_filter*/ None,
             /*include_non_interactive*/ true,
             LatestSessionLookupMode::StateDbOnly,
@@ -3451,14 +3431,11 @@ requires_openai_auth = {requires_openai_auth}
     #[tokio::test]
     async fn latest_session_lookup_params_keep_explicit_cwd_filter_for_remote_sessions()
     -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
         let cwd = Path::new("repo/on/server");
 
         let params = latest_session_lookup_params(
             /*uses_remote_filesystem*/ true,
             /*model_provider*/ None,
-            &config,
             Some(cwd),
             /*include_non_interactive*/ false,
             LatestSessionLookupMode::StateDbOnly,
@@ -3530,9 +3507,6 @@ requires_openai_auth = {requires_openai_auth}
             .await?;
         config
             .features
-            .set_enabled(codex_features::Feature::Worktrees, /*enabled*/ false)?;
-        config
-            .features
             .enable(codex_features::Feature::LocalThreadStoreCompression)?;
         let model_provider = config.model_provider_id.as_str();
         let project_thread_id = write_session_rollout(
@@ -3588,22 +3562,6 @@ requires_openai_auth = {requires_openai_auth}
             /*uses_remote_workspace*/ false, /*remote_cwd_override*/ None, &config,
             /*show_all*/ false,
         );
-        let disabled_target = lookup_latest_session_target_with_app_server(
-            /*uses_remote_filesystem*/ false,
-            &mut app_server,
-            &config,
-            filter_cwd,
-            /*include_non_interactive*/ false,
-        )
-        .await?
-        .expect("expected current-checkout target with worktrees disabled");
-        config
-            .features
-            .set_enabled(codex_features::Feature::Worktrees, /*enabled*/ true)?;
-        let filter_cwd = latest_session_cwd_filter(
-            /*uses_remote_workspace*/ false, /*remote_cwd_override*/ None, &config,
-            /*show_all*/ false,
-        );
         let scoped_target = lookup_latest_session_target_with_app_server(
             /*uses_remote_filesystem*/ false,
             &mut app_server,
@@ -3628,7 +3586,6 @@ requires_openai_auth = {requires_openai_auth}
         .expect("expected global fork --last target");
         app_server.shutdown().await?;
 
-        assert_eq!(disabled_target.thread_id, project_thread_id);
         assert_eq!(scoped_target.thread_id, linked_thread_id);
         assert_eq!(show_all_target.thread_id, other_thread_id);
         Ok(())

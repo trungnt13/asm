@@ -1,12 +1,25 @@
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//:defs.bzl", "WINDOWS_RUSTC_LINK_FLAGS", "codex_rust_crate")
-load("//bazel/rules:schema_bundle.bzl", "schema_generator_sources")
+load("//bazel/rules:schema_bundle.bzl", "schema_sources")
+
+schema_sources(
+    name = "schema-sources",
+    srcs = glob(["src/**/*.rs"]),
+    schema = "//bazel/schema:app-server",
+)
+
+filegroup(
+    name = "schema-precomputed",
+    srcs = [":schema-sources"],
+    output_group = "precomputed",
+)
 
 codex_rust_crate(
     name = "app-server-protocol",
-    compile_data = glob(["schema/precomputed/**"]),
+    compile_data = [":schema-precomputed"],
     crate_name = "codex_app_server_protocol",
+    crate_srcs = [":schema-sources"],
     test_data_extra = glob(
         ["schema/**"],
         allow_empty = True,
@@ -21,7 +34,7 @@ alias(
     visibility = ["//bazel/schema:__pkg__"],
 )
 
-schema_generator_sources(
+schema_sources(
     name = "schema-generator-sources",
     srcs = glob(["src/**/*.rs"]),
     tags = ["manual"],

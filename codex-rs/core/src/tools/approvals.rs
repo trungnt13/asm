@@ -86,6 +86,8 @@ pub(crate) enum ApprovalAction {
         tty: bool,
         sandbox_permissions: SandboxPermissions,
         additional_permissions: Option<AdditionalPermissionProfile>,
+        #[serde(skip)]
+        additional_permissions_preapproved: bool,
     },
     ApplyPatch {
         id: String,
@@ -167,6 +169,7 @@ impl ApprovalAction {
                 tty,
                 sandbox_permissions,
                 additional_permissions,
+                additional_permissions_preapproved: _,
             } => PermissionRequestPayload {
                 tool_name: HookToolName::new("write_stdin"),
                 tool_input: serde_json::json!({
@@ -299,6 +302,7 @@ impl ApprovalAction {
                 tty,
                 sandbox_permissions,
                 additional_permissions,
+                additional_permissions_preapproved: _,
             } => crate::guardian::GuardianApprovalRequest::WriteStdin {
                 id,
                 approval_id,
@@ -449,11 +453,12 @@ impl Session {
         action: ApprovalAction,
         ctx: ApprovalContext,
     ) -> ApprovalResult {
-        // Stdin that exceeds current permissions needs a fresh sandbox approval.
-        // Strict review of ordinary input follows the same routing as ordinary exec.
+        // Retained authority outside current grants needs a new sandbox approval.
+        // Current grants permit review of the input; they never approve the input itself.
         let policy = ctx.review_context.turn().approval_policy();
-        if matches!(&action, ApprovalAction::WriteStdin { sandbox_permissions, .. }
-            if sandbox_permissions.requests_sandbox_override())
+        if matches!(&action, ApprovalAction::WriteStdin { sandbox_permissions, additional_permissions_preapproved, .. }
+            if sandbox_permissions.requests_sandbox_override()
+                && (!additional_permissions_preapproved || matches!(policy, AskForApproval::Never)))
             && !(ctx.strict_auto_review && matches!(policy, AskForApproval::Never))
             && let Some(reason) =
                 prompt_is_rejected_by_policy(policy, /*prompt_is_rule*/ false)

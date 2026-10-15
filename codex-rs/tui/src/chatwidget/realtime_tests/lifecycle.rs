@@ -2,32 +2,7 @@
 
 use super::*;
 use crate::app_event::RealtimeWebrtcStartupFailure;
-use codex_features::Feature;
 use pretty_assertions::assert_eq;
-
-#[tokio::test]
-async fn enabling_voice_on_an_open_thread_snapshots_the_new_thread_notice() {
-    let (mut chat, _sender, mut events, _ops) = make_chatwidget_manual_with_sender().await;
-    chat.set_feature_enabled(
-        codex_features::Feature::RealtimeConversation,
-        /*enabled*/ true,
-    );
-    commit_realtime_history_events(&mut chat, &mut events);
-    let rendered = std::iter::from_fn(|| events.try_recv().ok())
-        .filter_map(|event| match event {
-            AppEvent::InsertHistoryCell(cell) => Some(
-                cell.display_lines(/*width*/ 80)
-                    .into_iter()
-                    .map(|line| line.to_string())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    insta::assert_snapshot!(rendered, @"• Voice conversations will be available in new threads.");
-}
 
 #[tokio::test]
 async fn voice_cannot_start_in_a_side_conversation() {
@@ -577,12 +552,8 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
 }
 
 #[tokio::test]
-async fn parallel_voice_keeps_normal_feature_gate() {
+async fn parallel_voice_requires_started_thread() {
     let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    chat.config
-        .features
-        .disable(Feature::RealtimeConversation)
-        .expect("test config should allow disabling realtime");
     chat.set_parallel_conversation_active(/*active*/ true);
 
     chat.toggle_realtime_conversation();
@@ -597,7 +568,12 @@ async fn parallel_voice_keeps_normal_feature_gate() {
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(rendered, "■ Voice conversations are not enabled.");
+    let expected = if codex_realtime_webrtc::RealtimeWebrtcSession::is_supported() {
+        "■ Start a conversation before using voice mode."
+    } else {
+        "■ Voice requires macOS, an MSVC-based Windows build, or a glibc-based Linux build."
+    };
+    assert_eq!(rendered, expected);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Inactive

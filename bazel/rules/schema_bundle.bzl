@@ -1,5 +1,7 @@
 """Generate API artifacts with the existing Rust and Python exporters."""
 
+load("@bazel_lib//lib:copy_file.bzl", "COPY_FILE_TOOLCHAINS", "copy_file_action")
+
 def _schema_bundle_impl(ctx):
     outputs = []
     for mode in ["stable", "experimental"]:
@@ -41,7 +43,7 @@ schema_bundle = rule(
     doc = "Generates both schema modes as cacheable actions with explicit tool dependencies.",
 )
 
-def _schema_generator_sources_impl(ctx):
+def _schema_sources_impl(ctx):
     sources = []
     crate_root = None
     prefix = ctx.label.package + "/"
@@ -57,22 +59,30 @@ def _schema_generator_sources_impl(ctx):
     if crate_root == None:
         fail("Schema generator sources must include src/lib.rs")
 
-    # The ignored generation function derives schemas from Rust. These embedded
-    # bundles are unused on that path, so do not read the committed artifacts.
+    # Runtime builds embed generated bundles. The generator needs only empty
+    # placeholders because its selected test derives the bundles from Rust.
     precomputed = [
         ctx.actions.declare_file(ctx.label.name + "/schema/precomputed/app-server-exports-" + mode + ".json.zst")
         for mode in ["stable", "experimental"]
     ]
-    for output in precomputed:
-        ctx.actions.write(output, "")
+    for mode, output in zip(["stable", "experimental"], precomputed):
+        if ctx.attr.schema:
+            directory = getattr(ctx.attr.schema[OutputGroupInfo], mode).to_list()[0]
+            copy_file_action(ctx, directory, output, dir_path = "precomputed/" + output.basename)
+        else:
+            ctx.actions.write(output, "")
     return [
         DefaultInfo(files = depset(sources)),
         OutputGroupInfo(crate_root = depset([crate_root]), precomputed = depset(precomputed)),
     ]
 
-schema_generator_sources = rule(
-    implementation = _schema_generator_sources_impl,
-    attrs = {"srcs": attr.label_list(allow_files = [".rs"])},
+schema_sources = rule(
+    implementation = _schema_sources_impl,
+    attrs = {
+        "srcs": attr.label_list(allow_files = [".rs"]),
+        "schema": attr.label(providers = [OutputGroupInfo]),
+    },
+    toolchains = COPY_FILE_TOOLCHAINS,
 )
 
 def _python_sdk_exports_impl(ctx):

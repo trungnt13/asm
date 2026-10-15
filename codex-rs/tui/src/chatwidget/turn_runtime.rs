@@ -75,6 +75,8 @@ impl ChatWidget {
     // Raw reasoning uses the same flow as summarized reasoning
 
     pub(super) fn on_task_started(&mut self) {
+        self.status_state.program_status_after_turn =
+            crate::terminal_program_status::ProgramStatus::Idle;
         self.bottom_pane.dismiss_composer_sparkle();
         self.clear_context_compaction();
         self.input_queue.user_turn_pending_start = false;
@@ -188,6 +190,11 @@ impl ChatWidget {
         self.clear_guardian_review_status();
         self.agent_wait_history.clear();
         self.turn_lifecycle.finish();
+        self.status_state.program_status_after_turn = if from_replay {
+            crate::terminal_program_status::ProgramStatus::Idle
+        } else {
+            crate::terminal_program_status::ProgramStatus::Done
+        };
         self.clear_safety_buffering();
         self.update_task_running_state();
         self.running_commands.clear();
@@ -349,6 +356,12 @@ impl ChatWidget {
         self.clear_guardian_review_status();
         self.agent_wait_history.clear();
         self.turn_lifecycle.finish();
+        self.status_state.program_status_after_turn = if self.thread_usage.replaying_turn_completion
+        {
+            crate::terminal_program_status::ProgramStatus::Idle
+        } else {
+            crate::terminal_program_status::ProgramStatus::Error
+        };
         self.update_task_running_state();
         self.running_commands.clear();
         self.suppressed_exec_calls.clear();
