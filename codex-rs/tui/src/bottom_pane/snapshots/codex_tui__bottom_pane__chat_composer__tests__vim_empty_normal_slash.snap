@@ -8,7 +8,7 @@ expression: terminal.backend()
 "  /ide            include current selection, open files, and"
 "                  other context from your IDE               "
 "  /permissions    choose what Codex is allowed to do        "
-"                                                            "
+"                                                       Main "
 "› /                                                         "
 "                                                            "
 "                           100% context left | Vim: Insert  "

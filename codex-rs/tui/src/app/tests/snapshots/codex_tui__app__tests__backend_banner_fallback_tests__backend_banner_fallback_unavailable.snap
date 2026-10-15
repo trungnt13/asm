@@ -2,6 +2,7 @@
 source: tui/src/app/tests/backend_banner_fallback_tests.rs
 expression: normalize_snapshot_paths(rendered)
 ---
+                                                                   Main
 › Ask ASM to do anything
 
   55 def·/tmp/project

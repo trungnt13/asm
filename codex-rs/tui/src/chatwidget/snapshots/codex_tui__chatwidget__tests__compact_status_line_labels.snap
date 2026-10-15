@@ -4,7 +4,7 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 GPT-6.1-Sol
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  sol61·med·sol61 med                                                           "
@@ -12,7 +12,7 @@ GPT-6.1-Sol
 
 GPT-6-Astra
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  ast6·hig·ast6 hig                                                             "
@@ -20,7 +20,7 @@ GPT-6-Astra
 
 GPT-6-Luna
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  lun6·xhi·lun6 xhi                                                             "
@@ -28,7 +28,7 @@ GPT-6-Luna
 
 GPT-5.6 Luna
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  lun56·low·lun56 low                                                           "
@@ -36,7 +36,7 @@ GPT-5.6 Luna
 
 GPT-5.2
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  52·def·52 def                                                                 "
@@ -44,7 +44,7 @@ GPT-5.2
 
 Luna Reserve
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  lun·dee·lun dee                                                               "
@@ -52,7 +52,7 @@ Luna Reserve
 
 Custom.V2
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "» Ask ASM to do anything                                                        "
 "                                                                                "
 "  cus2·ult·cus2 ult                                                             "

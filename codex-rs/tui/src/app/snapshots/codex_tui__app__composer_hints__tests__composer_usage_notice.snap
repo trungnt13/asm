@@ -8,7 +8,7 @@ Conversation
 ⚠ Heads up, you have less than 10% of your 5h limit left. Run /status for a
   breakdown.
                                                   ⚠ 5h limit: 8% left · /status
-
+                                                                           Main
 › Ask ASM to do anything
 
   sol56 def·/tmp/project
@@ -22,7 +22,7 @@ Conversation
 • Working (0s • esc to interrupt)
 
                                              ⚠ 5h limit: only 2% left · /status
-
+                                                                           Main
 › draft stays
 
   sol56 def·/tmp/project
@@ -34,7 +34,7 @@ Conversation
 • Working (0s • esc to interrup…
 
                   ⚠ 5h <1% left
-
+                           Main
 › draft stays
 
   sol56 def·/tmp/project
@@ -46,7 +46,7 @@ Conversation
 • Working (0s • e…
 
      ⚠ 5h 5% left
-
+             Main
 › draft stays
 
   sol56 def·/tmp/…
@@ -65,7 +65,7 @@ Conversation row 19
   ↳ queued follow-up
     ⇧← edit last queued message
                                              ⚠ 5h limit: only 2% left · /status
-
+                                                                           Main
 › draft stays
   second line
 
@@ -78,7 +78,7 @@ Conversation row 19
 • Queued follow-up inputs
   ↳ queued follow-up
     ⇧← edit last queued message
-
+                                                                           Main
 › draft stays
   second line
 
@@ -87,7 +87,7 @@ Conversation row 19
 
 80 columns, 6 rows, running=true, queued=false
 • Working (0s • esc to interrupt)
-
+                                                                           Main
 › draft stays
 
   sol56 def·/tmp/project
