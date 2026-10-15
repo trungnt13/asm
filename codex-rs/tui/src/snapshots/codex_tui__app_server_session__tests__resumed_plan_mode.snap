@@ -2,6 +2,7 @@
 source: tui/src/app_server_session.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(crate::chatwidget::tests::helpers::render_bottom_popup(&chat,\n40),)"
 ---
+                                   Main
 › Ask ASM to do anything
 
   55 def·auto·/tmp/project   Plan mode

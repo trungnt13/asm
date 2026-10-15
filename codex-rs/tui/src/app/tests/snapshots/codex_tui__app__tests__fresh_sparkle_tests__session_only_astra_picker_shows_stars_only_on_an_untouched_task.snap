@@ -3,9 +3,10 @@ source: tui/src/app/tests/fresh_sparkle_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 untouched:
-                            ⠈     ⢀     ⠁                 ⠂
+                            ⠈     ⢀     ⠁                 ⠂                Main
 ›⠁Ask ASM to do anything           ⠈      ⠁
        ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀
 
 typed then erased:
+                                                                           Main
 › Ask ASM to do anything

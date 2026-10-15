@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  54 xhi fast·Ctx0%·/tmp/project                                                "

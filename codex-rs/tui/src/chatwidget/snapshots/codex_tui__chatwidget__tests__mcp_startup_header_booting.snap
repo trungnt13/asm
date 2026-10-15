@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/mcp_startup.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  sol56 def·/tmp/project                                                        "

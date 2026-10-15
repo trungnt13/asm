@@ -1,5 +1,7 @@
 //! The chat composer is the bottom-pane text input state machine.
 //!
+//! The active destination appears in the top-right padding without changing input geometry.
+//! Companion labels use magenta; prompt markers and draft text keep their existing styling.
 //! It edits [`TextArea`] and attachments, routes popup keys, makes completed slash commands atomic,
 //! and handles Enter/newlines. It shows Luna Reserve's yellow arrow and detects unbracketed paste
 //! bursts, especially on Windows. Paste timing uses Tokio's clock so asynchronous flush deadlines
@@ -393,6 +395,8 @@ mod agents_navigation;
 mod attachment_state;
 mod completion_target;
 mod composer_layout;
+mod composer_mode;
+pub(crate) use composer_mode::ComposerMode;
 mod draft_state;
 mod footer_state;
 mod history_search;
@@ -671,6 +675,7 @@ pub(crate) struct ChatComposer {
     worktrees_enabled: bool,
     windows_degraded_sandbox_active: bool,
     side_conversation_active: bool,
+    pub(super) mode: ComposerMode,
     history_search: Option<HistorySearchSession>,
     vim_history: VimHistory,
     submit_keys: Vec<KeyBinding>,
@@ -848,6 +853,7 @@ impl ChatComposer {
             worktrees_enabled: false,
             windows_degraded_sandbox_active: false,
             side_conversation_active: false,
+            mode: ComposerMode::Main,
             history_search: None,
             vim_history: VimHistory::default(),
             submit_keys: vec![key_hint::plain(KeyCode::Enter)],
@@ -5090,6 +5096,7 @@ impl ChatComposer {
             self.cursor_pos_with_options(area, options),
             buf,
         );
+        self.mode.render(composer_rect, buf);
         if options.footer.is_some_and(|footer| footer.is_interactive) {
             buf.set_style(composer_rect, Style::default().dim());
         }

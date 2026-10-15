@@ -15,7 +15,7 @@ expression: terminal.backend()
 "  esc esc   Edit last message                                                                       "
 "                                                                                                    "
 "  /keymap customize                                                                                 "
-"                                                                                                    "
+"                                                                                               Main "
 "› Ask Codex to do anything                                                                          "
 "                                                                                                    "
 "                                                                                                    "

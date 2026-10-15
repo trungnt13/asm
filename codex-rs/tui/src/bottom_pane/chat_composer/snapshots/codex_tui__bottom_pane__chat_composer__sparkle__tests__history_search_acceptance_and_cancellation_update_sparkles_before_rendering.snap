@@ -3,13 +3,13 @@ source: tui/src/bottom_pane/chat_composer/sparkle_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 accept:
-
+                                                                           Main
 › Ask Codex to do anything
 
   ? for shortcuts                                            100% context left
 
 escape:
-                            ⠈     ⢀     ⠁                 ⠂
+                            ⠈     ⢀     ⠁                 ⠂                Main
 ›⠁Ask Codex to do anything         ⠈      ⠁
        ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀
   ? for shortcuts                                            100% context left

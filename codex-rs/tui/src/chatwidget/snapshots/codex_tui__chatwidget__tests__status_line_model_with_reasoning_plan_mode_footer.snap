@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: "format!(\"{baseline_footer}\\n\\nCaptured adaptive step:\\n{adaptive_footer}\\n\\nApplied status:\\n{status}\\n\\nError footer:\\n{error_footer}\\n\\nError details:\\n{error_lines}\\n\\nMode transitions:\\n{transitions}\")"
 ---
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  52 med                                             Plan mode (⇧tab to cycle)  "
@@ -11,7 +11,7 @@ expression: "format!(\"{baseline_footer}\\n\\nCaptured adaptive step:\\n{adaptiv
 
 Captured adaptive step:
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  52 low·auto                                        Plan mode (⇧tab to cycle)  "
@@ -22,7 +22,7 @@ Applied status:
 
 Error footer:
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  52 low·err                                         Plan mode (⇧tab to cycle)  "

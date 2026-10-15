@@ -2,6 +2,7 @@
 source: tui/src/chatwidget/tests/app_server.rs
 expression: normalize_snapshot_paths(popup)
 ---
+                                                                           Main
 › Ask ASM to do anything
 
   sol56 def·/tmp/project
