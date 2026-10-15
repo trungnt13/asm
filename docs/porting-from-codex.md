@@ -716,4 +716,4 @@ Vim Insert/Replace use the editor newline binding; Vim Normal retains its editin
 
 ### Composer destination
 
-Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, Chat, or Parallel. Main uses a neutral label; companion labels use magenta. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
+Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, Chat, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
