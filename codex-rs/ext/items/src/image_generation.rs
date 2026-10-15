@@ -29,7 +29,8 @@ pub struct ImageGenerationItem {
     pub id: String,
     pub status: String,
     pub revised_prompt: Option<String>,
-    pub result: String,
+    #[serde(flatten)]
+    pub image: GeneratedImageRef,
     #[serde(default)]
     #[ts(optional)]
     pub transparent_background: Option<bool>,
@@ -51,4 +52,22 @@ pub struct ImageGenerationItem {
     #[schemars(skip)]
     #[ts(skip)]
     pub generation_id: Option<String>,
+}
+
+/// Either inline generated-image data or its durable attachment-store identity.
+///
+/// `File` must remain first so rollouts written during the migration, which contain both an empty
+/// `result` and a `fileId`, retain the file reference when deserialized.
+#[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
+#[serde(untagged)]
+#[ts(untagged)]
+pub enum GeneratedImageRef {
+    File {
+        #[serde(rename = "fileId")]
+        #[ts(rename = "fileId")]
+        file_id: String,
+    },
+    Inline {
+        result: String,
+    },
 }

@@ -291,15 +291,16 @@ async fn reclaim_pages(
                         .is_none_or(|deadline| Instant::now() < deadline)
             });
 
-        let (mode, page_size, pages, free): (i64, i64, i64, i64) = sqlx::query_as(
-            "SELECT auto_vacuum, page_size, page_count, freelist_count \
-         FROM pragma_auto_vacuum, pragma_page_size, pragma_page_count, pragma_freelist_count",
+        let (journal, mode, page_size, pages, free): (String, i64, i64, i64, i64) = sqlx::query_as(
+            "SELECT journal_mode, auto_vacuum, page_size, page_count, freelist_count \
+         FROM pragma_journal_mode, pragma_auto_vacuum, pragma_page_size, pragma_page_count, pragma_freelist_count",
         )
         .fetch_one(&mut *connection)
         .await?;
 
+        // This worker's checkpoint and contention rules apply only to WAL mode.
         // Require incremental auto-vacuum and at least 64 MiB and 25% free space.
-        if mode != 2 || free * page_size < MIN_FREE_BYTES || free < pages / 4 {
+        if journal != "wal" || mode != 2 || free * page_size < MIN_FREE_BYTES || free < pages / 4 {
             outcome = PassOutcome::Idle;
             return Ok(());
         }

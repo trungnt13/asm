@@ -27,6 +27,7 @@ use crate::protocol::v2::UserInput;
 use crate::protocol::v2::WebSearchAction;
 use crate::protocol::v2::WebSearchItem;
 use crate::protocol::v2::web_search_action_from_core;
+use codex_extension_items::image_generation::GeneratedImageRef;
 use codex_extension_items::image_generation::ImageGenerationItem;
 use codex_protocol::items::parse_hook_prompt_message;
 use codex_protocol::protocol::AgentMessageEvent;
@@ -915,7 +916,9 @@ impl ThreadHistoryBuilder {
             id: payload.call_id.clone(),
             status: String::new(),
             revised_prompt: None,
-            result: String::new(),
+            image: GeneratedImageRef::Inline {
+                result: String::new(),
+            },
             transparent_background: None,
             failure: None,
             saved_path: None,
@@ -930,7 +933,7 @@ impl ThreadHistoryBuilder {
             id: payload.call_id.clone(),
             status: payload.status.clone(),
             revised_prompt: payload.revised_prompt.clone(),
-            result: payload.result.clone(),
+            image: payload.image.clone(),
             transparent_background: payload.transparent_background,
             failure: payload.failure.clone(),
             saved_path: payload.saved_path.clone(),
@@ -2368,7 +2371,9 @@ mod tests {
                         id: "image-1".to_string(),
                         status: "completed".to_string(),
                         revised_prompt: Some("A blue square".to_string()),
-                        result: "cG5n".to_string(),
+                        image: GeneratedImageRef::Inline {
+                            result: "cG5n".to_string(),
+                        },
                         transparent_background: Some(true),
                         failure: None,
                         saved_path: Some(saved_path.clone()),
@@ -2403,7 +2408,9 @@ mod tests {
                 id: "image-1".to_string(),
                 status: "completed".to_string(),
                 revised_prompt: Some("A blue square".to_string()),
-                result: "cG5n".to_string(),
+                image: GeneratedImageRef::Inline {
+                    result: "cG5n".to_string(),
+                },
                 transparent_background: Some(true),
                 failure: None,
                 saved_path: Some(saved_path),
@@ -2668,7 +2675,7 @@ mod tests {
     }
 
     #[test]
-    fn replays_image_generation_end_events_into_turn_history() {
+    fn replays_file_backed_image_generation_end_events_into_turn_history() {
         let items = vec![
             RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
                 turn_attribution: None,
@@ -2691,7 +2698,9 @@ mod tests {
                 call_id: "ig_123".into(),
                 status: "completed".into(),
                 revised_prompt: Some("final prompt".into()),
-                result: "Zm9v".into(),
+                image: GeneratedImageRef::File {
+                    file_id: "file_123".into(),
+                },
                 transparent_background: Some(true),
                 failure: Some(
                     codex_extension_items::image_generation::ImageGenerationFailure::UsageLimitExceeded {
@@ -2740,7 +2749,9 @@ mod tests {
                         id: "ig_123".into(),
                         status: "completed".into(),
                         revised_prompt: Some("final prompt".into()),
-                        result: "Zm9v".into(),
+                        image: GeneratedImageRef::File {
+                            file_id: "file_123".into(),
+                        },
                         transparent_background: Some(true),
                         failure: Some(
                             codex_extension_items::image_generation::ImageGenerationFailure::UsageLimitExceeded {

@@ -3,6 +3,7 @@ use serde_json::json;
 use ts_rs::TS;
 
 use super::ExtensionItem;
+use super::image_generation::GeneratedImageRef;
 use super::image_generation::ImageGenerationItem;
 use super::sleep::SleepItem;
 use super::web_search::WebSearchAction;
@@ -13,7 +14,9 @@ fn completed_image_generation_item() -> ExtensionItem {
         id: "image-1".to_string(),
         status: "completed".to_string(),
         revised_prompt: Some("A blue square".to_string()),
-        result: "cG5n".to_string(),
+        image: GeneratedImageRef::Inline {
+            result: "cG5n".to_string(),
+        },
         transparent_background: None,
         failure: None,
         saved_path: None,
@@ -54,6 +57,73 @@ fn image_generation_item_preserves_stable_wire_shape() {
         .expect("deserialize legacy image-generation item without transparency metadata"),
         item
     );
+    assert_eq!(
+        serde_json::from_value::<ExtensionItem>(json!({
+            "kind": "image_gen.generation",
+            "id": "image-1",
+            "status": "completed",
+            "revisedPrompt": "A blue square",
+            "result": "cG5n",
+            "fileId": null,
+        }))
+        .expect("deserialize transitional inline image-generation item"),
+        item
+    );
+}
+
+/// Transitional rollouts containing both fields must retain the durable file reference.
+#[test]
+fn image_generation_item_reads_transitional_file_wire_shape() {
+    let item = ExtensionItem::ImageGeneration(ImageGenerationItem {
+        id: "image-1".to_string(),
+        status: "completed".to_string(),
+        revised_prompt: Some("A blue square".to_string()),
+        image: GeneratedImageRef::File {
+            file_id: "file-1".to_string(),
+        },
+        transparent_background: None,
+        failure: None,
+        saved_path: None,
+        imagegen_request_id: None,
+        generation_id: None,
+    });
+
+    assert_eq!(
+        serde_json::from_value::<ExtensionItem>(json!({
+            "kind": "image_gen.generation",
+            "id": "image-1",
+            "status": "completed",
+            "revisedPrompt": "A blue square",
+            "result": "",
+            "fileId": "file-1",
+        }))
+        .expect("deserialize transitional file-backed image-generation item"),
+        item
+    );
+    assert_eq!(
+        serde_json::from_value::<ExtensionItem>(json!({
+            "kind": "image_gen.generation",
+            "id": "image-1",
+            "status": "completed",
+            "revisedPrompt": "A blue square",
+            "result": "stale-inline-bytes",
+            "fileId": "file-1",
+        }))
+        .expect("prefer file ID when both image representations are populated"),
+        item
+    );
+    assert_eq!(
+        serde_json::to_value(&item).expect("serialize file-backed extension item"),
+        json!({
+            "kind": "image_gen.generation",
+            "id": "image-1",
+            "status": "completed",
+            "revisedPrompt": "A blue square",
+            "fileId": "file-1",
+            "transparentBackground": null,
+            "failure": null,
+        })
+    );
 }
 
 #[test]
@@ -84,7 +154,12 @@ fn image_generation_item_preserves_authoritative_transparency() {
 }
 
 #[test]
-fn image_generation_transparency_is_optional_in_typescript() {
+fn image_generation_typescript_fields_preserve_wire_contracts() {
+    assert!(
+        ImageGenerationItem::inline().contains("{ fileId: string, } | { result: string, }")
+            || ImageGenerationItem::inline().contains("{ result: string, } | { fileId: string, }"),
+        "v2 image-generation items must require exactly one image reference"
+    );
     assert!(
         ImageGenerationItem::inline().contains("transparentBackground?: boolean"),
         "image-generation transparency must remain optional for existing TypeScript clients"

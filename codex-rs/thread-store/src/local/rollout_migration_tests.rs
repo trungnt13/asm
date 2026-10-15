@@ -9,6 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use codex_app_server_protocol::build_turns_from_rollout_items;
 use codex_extension_items::ExtensionItem;
+use codex_extension_items::image_generation::GeneratedImageRef;
 use codex_extension_items::image_generation::ImageGenerationFailure;
 use codex_extension_items::image_generation::ImageGenerationItem;
 use codex_protocol::AgentPath;
@@ -532,7 +533,9 @@ async fn migration_preserves_image_generation_failure_metadata() {
         id: "image-call".to_string(),
         status: "failed".to_string(),
         revised_prompt: Some("paint a blue whale".to_string()),
-        result: String::new(),
+        image: GeneratedImageRef::Inline {
+            result: String::new(),
+        },
         transparent_background: None,
         failure: Some(ImageGenerationFailure::UsageLimitExceeded {
             limit_id: "image_gen".to_string(),
@@ -547,7 +550,7 @@ async fn migration_preserves_image_generation_failure_metadata() {
             call_id: expected_item.id.clone(),
             status: expected_item.status.clone(),
             revised_prompt: expected_item.revised_prompt.clone(),
-            result: expected_item.result.clone(),
+            image: expected_item.image.clone(),
             transparent_background: expected_item.transparent_background,
             failure: expected_item.failure.clone(),
             saved_path: expected_item.saved_path.clone(),

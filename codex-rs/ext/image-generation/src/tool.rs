@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 
 use base64::Engine;
@@ -6,6 +7,8 @@ use codex_api::ImageBackground;
 use codex_api::ImageEditRequest;
 use codex_api::ImageGenerationRequest;
 use codex_api::ImageQuality;
+use codex_attachment_store::UploadRequest;
+use codex_attachment_store::UploadResult;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_exec_server::LOCAL_FS;
 use codex_extension_api::ExtensionTurnItem;
@@ -19,6 +22,7 @@ use codex_extension_api::ToolPayload;
 use codex_extension_api::ToolSpec;
 use codex_extension_api::parse_tool_input_schema;
 use codex_extension_items::ExtensionItem;
+use codex_extension_items::image_generation::GeneratedImageRef;
 use codex_extension_items::image_generation::ImageGenerationFailure;
 use codex_extension_items::image_generation::ImageGenerationItem;
 use codex_protocol::error::CodexErr;
@@ -102,7 +106,7 @@ fn legacy_end_event(item: &ImageGenerationItem) -> EventMsg {
         call_id: item.id.clone(),
         status: item.status.clone(),
         revised_prompt: item.revised_prompt.clone(),
-        result: item.result.clone(),
+        image: item.image.clone(),
         transparent_background: item.transparent_background,
         failure: item.failure.clone(),
         saved_path: item.saved_path.clone(),
@@ -156,7 +160,9 @@ impl ImageGenerationTool {
                     id: call.call_id.clone(),
                     status: "in_progress".to_string(),
                     revised_prompt: None,
-                    result: String::new(),
+                    image: GeneratedImageRef::Inline {
+                        result: String::new(),
+                    },
                     transparent_background: None,
                     failure: None,
                     saved_path: None,
@@ -214,7 +220,9 @@ impl ImageGenerationTool {
                     id: call.call_id.clone(),
                     status: "failed".to_string(),
                     revised_prompt: Some(args.prompt),
-                    result: String::new(),
+                    image: GeneratedImageRef::Inline {
+                        result: String::new(),
+                    },
                     transparent_background: None,
                     failure,
                     saved_path: None,
@@ -240,11 +248,45 @@ impl ImageGenerationTool {
             &result,
         )
         .await;
+        // The UI item retains its attachment-store reference, while the model-facing output keeps
+        // the original image so Core can prepare and upload it separately.
+        let image = match BASE64_STANDARD.decode(result.trim().as_bytes()) {
+            Ok(data) => {
+                let request = UploadRequest {
+                    thread_id: self.thread_id.clone(),
+                    ephemeral: call.ephemeral,
+                    file_name: None,
+                    tags: HashMap::from([("usage".to_string(), "image_gen".to_string())]),
+                    data,
+                };
+                match call.attachment_store.upload(request).await {
+                    Ok(UploadResult::File { file_id }) => GeneratedImageRef::File { file_id },
+                    Ok(UploadResult::Inline { bytes }) => GeneratedImageRef::Inline {
+                        result: BASE64_STANDARD.encode(bytes),
+                    },
+                    Err(error) => {
+                        tracing::warn!(
+                            kind = ?error.kind(),
+                            "failed to upload generated image"
+                        );
+                        GeneratedImageRef::Inline {
+                            result: result.clone(),
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::warn!("failed to decode generated image for upload: {error}");
+                GeneratedImageRef::Inline {
+                    result: result.clone(),
+                }
+            }
+        };
         let item = ImageGenerationItem {
             id: call.call_id.clone(),
             status: "completed".to_string(),
             revised_prompt: Some(args.prompt),
-            result: result.clone(),
+            image,
             transparent_background,
             failure: None,
             saved_path: saved_path.clone(),
