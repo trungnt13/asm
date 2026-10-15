@@ -5,7 +5,7 @@ expression: normalized_backend_snapshot(terminal.backend())
 "                                                                                "
 "• Checking files and preparing a response (0s • esc to interrupt) · 1 backgroun…"
 "                                                                                "
-"                                                                                "
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  sol56 def·/tmp/project                                                        "

@@ -8,7 +8,7 @@ before:
   >_ ASM (v<VERSION>)
      loading
   Resuming session…
-
+                                           Main
 › draft while loading
 
 
@@ -17,7 +17,7 @@ after:
   >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › draft while loading
 
 
@@ -28,7 +28,7 @@ before:
   >_ ASM (v<VERSION>)
      loading
   Forking session…
-
+                                           Main
 › draft while loading
 
 
@@ -37,7 +37,7 @@ after:
   >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › draft while loading
 
 
@@ -50,7 +50,7 @@ after:
   >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › Ask ASM to do anything
 
   ? for shortcuts
@@ -63,7 +63,7 @@ after:
   >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › Ask ASM to do anything
 
   ? for shortcuts

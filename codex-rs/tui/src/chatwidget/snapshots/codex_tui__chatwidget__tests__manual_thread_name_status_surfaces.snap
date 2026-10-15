@@ -5,6 +5,7 @@ expression: "normalize_snapshot_paths(format!(\"transcript:\\n{transcript}\\nfoo
 transcript:
 
 footer:
+                                                                           Main
 › Ask ASM to do anything
 
   sol56 def·/tmp/project·review-fix

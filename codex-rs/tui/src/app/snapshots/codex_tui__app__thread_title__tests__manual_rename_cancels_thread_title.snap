@@ -2,6 +2,7 @@
 source: tui/src/app/thread_title_tests.rs
 expression: normalize_snapshot_paths(popup)
 ---
+                                                                                                                   Main
 › Ask ASM to do anything
 
   52 def·/tmp/project·Keep this title

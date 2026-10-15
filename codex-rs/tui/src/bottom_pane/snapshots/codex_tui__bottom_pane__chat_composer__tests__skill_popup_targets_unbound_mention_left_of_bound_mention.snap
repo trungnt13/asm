@@ -6,7 +6,7 @@ expression: terminal.backend()
 "› unbound-skill  [Skill] Example skill used in tests.                                               "
 "                                                                                                    "
 "  enter insert · esc close                                                                          "
-"                                                                                                    "
+"                                                                                               Main "
 "› $unbound-skill  $bound-skill continue                                                             "
 "                                                                                                    "
 "                                                                                                    "

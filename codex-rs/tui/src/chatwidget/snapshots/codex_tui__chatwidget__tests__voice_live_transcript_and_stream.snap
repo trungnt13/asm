@@ -9,7 +9,7 @@ expression: normalized_backend_snapshot(terminal.backend())
 "› pick a number                                             "
 "                                                            "
 "                                                            "
-"                                                            "
+"                                                       Main "
 " voice ● listening                  f9 mute     /voice stop "
 "                                                            "
 "› Ask ASM to do anything                                    "

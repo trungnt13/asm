@@ -8,7 +8,7 @@ empty (48 columns):
   >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › Ask ASM to do anything
 
   ? for shortcuts
@@ -18,7 +18,7 @@ configured (48 columns):
   >_ OpenAI Codex (v<VERSION>)
      workspace
 
-
+                                           Main
 › Ask Codex to do anything
 
   ? for shortcuts
@@ -28,7 +28,7 @@ resuming (48 columns):
   >_ ASM (v<VERSION>)
      loading
   Resuming session…
-
+                                           Main
 › Ask ASM to do anything
 
   ? for shortcuts
@@ -38,7 +38,7 @@ forking (48 columns):
   >_ ASM (v<VERSION>)
      loading
   Forking session…
-
+                                           Main
 › draft while loading
 
 
@@ -48,7 +48,7 @@ multiline (48 columns):
   >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › first startup line
   second startup line
 
@@ -59,7 +59,7 @@ narrow (18 columns):
   >_ ASM (v0.159.…
      loading
 
-
+             Main
 › first startup
   line
   second startup

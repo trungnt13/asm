@@ -8,7 +8,7 @@ History 20
   ↳ Recap: The draft is ready.
 
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -20,7 +20,7 @@ History 20
 
 • Follow-up response.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -32,7 +32,7 @@ History 20
 
 • Streaming response.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -46,7 +46,7 @@ History 20
            Next: Review the changes.
 
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -60,7 +60,7 @@ History 20
 
 • Follow-up response.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -74,7 +74,7 @@ History 20
 
 • Streaming response.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -88,7 +88,7 @@ History 20
            changes.
 
 
-
+                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -102,7 +102,7 @@ History 20
 
 • Follow-up response.
 
-
+                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -116,7 +116,7 @@ History 20
 
 • Streaming response.
 
-
+                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -125,7 +125,7 @@ History 20
 80x7, Recap at tail
            Next: Review the changes.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -134,7 +134,7 @@ History 20
 80x7, Message after recap
 • Follow-up response.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -143,7 +143,7 @@ History 20
 80x7, Live message after recap
 • Streaming response.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -151,7 +151,7 @@ History 20
 
 32x6, Recap at tail
 
-
+                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -159,7 +159,7 @@ History 20
 
 32x6, Message after recap
 
-
+                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
@@ -167,7 +167,7 @@ History 20
 
 32x6, Live message after recap
 
-
+                           Main
 › Ask ASM to do anything
 
   test def·/tmp/project
