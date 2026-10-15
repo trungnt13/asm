@@ -2,31 +2,7 @@
 
 use super::*;
 use crate::app_event::RealtimeWebrtcStartupFailure;
-use codex_features::Feature;
 use pretty_assertions::assert_eq;
-
-#[tokio::test]
-async fn voice_cannot_start_in_a_side_conversation() {
-    let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    chat.set_side_conversation_active(/*active*/ true);
-
-    chat.toggle_realtime_conversation();
-
-    commit_realtime_history_events(&mut chat, &mut events);
-    let Ok(AppEvent::InsertHistoryCell(cell)) = events.try_recv() else {
-        panic!("voice should report that side conversations are unsupported");
-    };
-    assert!(
-        cell.display_lines(/*width*/ 80)
-            .iter()
-            .any(|line| line.to_string().contains("side conversations"))
-    );
-    assert!(ops.try_recv().is_err());
-    assert_eq!(
-        chat.realtime_conversation.phase,
-        RealtimeConversationPhase::Inactive
-    );
-}
 
 #[tokio::test]
 async fn voice_cannot_start_in_a_side_conversation() {
@@ -576,12 +552,8 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
 }
 
 #[tokio::test]
-async fn parallel_voice_keeps_normal_feature_gate() {
+async fn parallel_voice_requires_started_thread() {
     let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    chat.config
-        .features
-        .disable(Feature::RealtimeConversation)
-        .expect("test config should allow disabling realtime");
     chat.set_parallel_conversation_active(/*active*/ true);
 
     chat.toggle_realtime_conversation();
@@ -596,7 +568,12 @@ async fn parallel_voice_keeps_normal_feature_gate() {
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(rendered, "■ Voice conversations are not enabled.");
+    let expected = if codex_realtime_webrtc::RealtimeWebrtcSession::is_supported() {
+        "■ Start a conversation before using voice mode."
+    } else {
+        "■ Voice requires macOS, an MSVC-based Windows build, or a glibc-based Linux build."
+    };
+    assert_eq!(rendered, expected);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Inactive
