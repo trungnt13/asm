@@ -42,7 +42,9 @@ pub(super) fn activity_layout(
     }
     let label = match (expanded, lines.disclosure) {
         (true, Some(ActivityDisclosure::OutputLines(_))) => "− Show less".to_owned(),
-        (true, Some(ActivityDisclosure::Generic) | None) => "− Hide details".to_owned(),
+        (true, Some(ActivityDisclosure::Generic | ActivityDisclosure::ToolGroup) | None) => {
+            "− Hide details".to_owned()
+        }
         (false, Some(ActivityDisclosure::OutputLines(count))) => {
             let noun = if count == 1 { "line" } else { "lines" };
             let mut label = format!("+ {count} {noun}");
