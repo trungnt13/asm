@@ -96,17 +96,18 @@ After approved integration, reuse PR checks and the verified binary pair only wh
 
 Use PRs for implementation, documentation, and syncs. The lead owns delegated work too. After validation and owner decisions, commit the task branch, push, and open a PR against `main`.
 
-**Done means validated changes are committed, pushed, and ready for PR review.** A worktree or binary handoff alone is not completion.
+**Done means validated changes are committed, pushed, and ready for PR review. Complete authorized merges before reporting done.** A worktree or binary handoff alone is not completion.
 
 - Stage only finished task changes, tests, generated files, and intent. Inspect the staged diff.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`; fix local config if needed. Ask before attribution-only published-history rewrites.
 - Before branch updates, recheck the PR base. Resolve against base, fork, upstream, and this guide; verify affected behavior. For owner decisions, inspect all exposed conflicts and ask one question with recommendations. Later commits can expose more.
 - Reconcile task-owned duplicate edits without losing other work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
-- Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference it in later handoffs and integration reports instead of repeating unchanged checks. Refresh changed results/status. PR readiness does not authorize merging.
+- Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference it in later handoffs and integration reports instead of repeating unchanged checks. Refresh changed results/status. PR readiness alone does not authorize merging.
 
 ### Push permissions
 
-- Implementation requests authorize task-branch commits, pushes, and PR creation, not merges or direct implementation on `main`. Do not commit directly to `main` or merge PRs without explicit approval.
+- Implementation requests authorize task-branch commits, pushes, and PR creation, not direct implementation on `main`.
+- An explicit upstream rebase request also authorizes merging its sync PR after required checks pass. Do not ask again for that merge. Other PRs, including feature PRs, still need explicit merge approval.
 - Always allow `--force-with-lease` for fork branches, including `main`, within the requested task. Do not ask for separate force-push approval. Plain `--force`, tag moves, discarding work, and releases still need explicit approval.
 - An explicit release request authorizes the existing workflow's candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes still require PRs.
 - Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited workflow tags, require publication approval.
