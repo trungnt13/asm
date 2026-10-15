@@ -337,6 +337,19 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
+        let current_claude =
+            crate::claude_runtime::is_claude_model(self.collaboration_mode.model());
+        if (current_claude && next != *self)
+            || (!current_claude
+                && crate::claude_runtime::is_claude_model(next.collaboration_mode.model()))
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Claude runtime settings (start a fresh thread to change)",
+                candidate: next.collaboration_mode.model().to_string(),
+                allowed: self.collaboration_mode.model().to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         next.validate(constraints)?;
         Ok(next)
     }

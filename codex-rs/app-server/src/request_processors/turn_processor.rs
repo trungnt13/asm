@@ -704,7 +704,9 @@ impl TurnRequestProcessor {
 
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
-            if config_snapshot.is_primary_environment_configured() {
+            if config_snapshot.is_primary_environment_configured()
+                && !config_snapshot.model.starts_with("claude-code/")
+            {
                 codex_memories_write::start_memories_startup_task(
                     Arc::clone(&self.thread_manager),
                     Arc::clone(&self.auth_manager),

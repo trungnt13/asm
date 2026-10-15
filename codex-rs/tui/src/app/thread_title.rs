@@ -84,6 +84,17 @@ impl App {
         prompt: String,
         auto_rename: AutoRenameRequest,
     ) {
+        if self.chat_widget.current_model().starts_with("claude-code/") {
+            if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
+                self.chat_widget
+                    .apply_thread_name_suggestion(thread_id, request_id, /*suggestion*/ None);
+            } else {
+                self.chat_widget.add_error_message(
+                    "Claude runtime does not support generated session names; rename the session manually.".to_string(),
+                );
+            }
+            return;
+        }
         let std::collections::hash_map::Entry::Vacant(entry) =
             self.pending_thread_titles.entry((thread_id, destination))
         else {

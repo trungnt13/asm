@@ -13,7 +13,7 @@ use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 
 impl Session {
-    pub(super) async fn emit_turn_start_lifecycle(
+    pub(crate) async fn emit_turn_start_lifecycle(
         self: &Arc<Self>,
         turn_context: &TurnContext,
         token_usage_at_turn_start: Option<&TokenUsage>,

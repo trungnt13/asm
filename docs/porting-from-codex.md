@@ -273,6 +273,63 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### Claude Code thread runtime
+
+Explicit model IDs `claude-code/<model>` select the official `claude -p` runtime for
+ordinary main threads and native subagents. Other model IDs retain upstream inference.
+Do not edit the upstream built-in model catalog to advertise these entries. Use an
+explicit model argument or an existing custom catalog/role. Example:
+
+```bash
+codex --no-daemon --model claude-code/claude-sonnet-5-5
+```
+
+- Keep native thread IDs, task queues, agent ownership, approvals, sandboxed tool
+  execution, and completion reporting. Claude's built-in tools/delegation are disabled;
+  an authenticated, per-thread loopback MCP bridge dispatches existing ASM tools.
+- Keep one persistent official CLI process per loaded Claude thread. The executable
+  resolves through `PATH`; do not extract credentials or proxy subscription tokens.
+  Authentication remains with Claude Code. Never use bare mode to preserve sign-in:
+  that mode disables subscription authentication.
+- Launch with restricted settings, no built-in tools/skills, no hooks, and only the
+  explicit MCP bridge. Ignore ambient API-key and cloud-provider billing selectors;
+  use the existing official subscription sign-in. The installed CLI must support the
+  launch flags; CLI 2.1.296 help was inspected, not proven by live integration.
+- Isolate transport and framing in `ext/claude-runtime`; keep the shared session/task
+  integration small. Do not introduce a second agent registry or pretend CLI events
+  implement the Responses API. Root and child threads use the same execution path.
+- Persist external session identity and unfinished-turn state privately. Resume only
+  a known clean session with matching configuration. Do not automatically retry or
+  replay an ambiguous interrupted/crashed turn: tools may already have had effects.
+- Separate turn interruption from process shutdown. Bound frame size, stderr retention,
+  and cleanup waits. Kill task-owned process groups on aborted futures; never kill
+  unrelated Claude sessions. Preserve the primary error when cleanup also fails.
+- A submitted turn that fails or is interrupted makes the external session uncertain;
+  require a fresh chat rather than promise interrupt-and-resume parity. Clean successful
+  sessions may resume only after identity, context-prefix, policy, tool-schema and
+  effort checks. Keep private error details only when diagnostic capture is enabled.
+- Reject unsupported history forks, rollback, native compaction/review, runtime/model
+  switching, input kinds and execution environments explicitly. Do not silently omit
+  instructions or weaken permissions to make a session start. Claude owns its private
+  conversation context; ASM owns the observable transcript and tool authority.
+- Support text-only submitted input and local Linux/macOS execution. Freeze executable
+  tool schemas and serialize bridge calls; unsupported media fails explicitly.
+  Native Responses-hosted tools, adaptive reasoning, realtime and native service tiers
+  are unavailable. Suppress native title generation and memory extraction/consolidation
+  for these threads. Matching configured pre/post-tool hooks are rejected before tool
+  execution because their dynamic developer context cannot be applied at native priority.
+- Put initial developer/role policy into the CLI system prompt, not user-text role tags.
+  Track delivered history separately from the observable transcript, preserving pending
+  input without replaying completed tools. Bound composed prompt/system inputs to
+  10,000 approximate tokens and fail rather than truncate. **P0 manual review:** these
+  items can exceed 1,000 tokens. The heuristic does not establish the hard 10K-token
+  item limit; a verified counter or explicitly approved exception is a merge gate.
+  Exact cross-runtime context parity is not established.
+- Keep this opt-in until real root/child turns, tool approvals, cancellation and cold
+  resume are verified with the intended installed CLI. Successful compilation or an
+  older streaming benchmark does not prove integrated lifecycle behavior. Do not
+  install a binary, change global profiles, or spend live model usage automatically.
+
 ### Minimal diagnostics
 
 - Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. Disabled capture cannot be enabled by `RUST_LOG`, `log_dir`, or recorder environment variables.

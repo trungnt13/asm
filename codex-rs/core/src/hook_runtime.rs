@@ -208,6 +208,31 @@ pub(crate) async fn run_pre_tool_use_hooks(
     };
     let hooks = sess.hooks();
     let preview_runs = hooks.preview_pre_tool_use(&request);
+    if crate::claude_runtime::is_claude_model(&step_context.settings.model_info.slug) {
+        // Post-hook selection uses only the canonical name and matcher aliases.
+        // Check it before execution: hook context cannot retain its native priority
+        // inside a persistent external conversation, even between tool calls.
+        let post_request = PostToolUseRequest {
+            session_id: request.session_id,
+            turn_id: request.turn_id.clone(),
+            subagent: request.subagent.clone(),
+            cwd: request.cwd.clone(),
+            transcript_path: request.transcript_path.clone(),
+            model: request.model.clone(),
+            permission_mode: request.permission_mode.clone(),
+            tool_name: request.tool_name.clone(),
+            matcher_aliases: request.matcher_aliases.clone(),
+            tool_use_id: request.tool_use_id.clone(),
+            tool_input: request.tool_input.clone(),
+            tool_response: Value::Null,
+        };
+        if !preview_runs.is_empty() || !hooks.preview_post_tool_use(&post_request).is_empty() {
+            return PreToolUseHookResult::Blocked(format!(
+                "Claude runtime does not support configured PreToolUse/PostToolUse hooks for {}; neither the tool nor its hooks were executed",
+                tool_name.name()
+            ));
+        }
+    }
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
     let PreToolUseOutcome {
