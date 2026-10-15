@@ -557,6 +557,7 @@ async fn turn_event_counts_completed_tool_items() {
             transparent_background: None,
             failure: None,
             saved_path: None,
+            input_images: Vec::new(),
             imagegen_request_id: Some("req-imagegen-123".to_string()),
             generation_id: Some("gen-image-123".to_string()),
         }),

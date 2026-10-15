@@ -576,6 +576,7 @@ mod tests {
             transparent_background: None,
             failure: None,
             saved_path: None,
+            input_images: Vec::new(),
             imagegen_request_id: None,
             generation_id: None,
         });
@@ -589,6 +590,7 @@ mod tests {
             transparent_background: Some(true),
             failure: None,
             saved_path: Some(expected_path.clone()),
+            input_images: Vec::new(),
             imagegen_request_id: None,
             generation_id: None,
         });
@@ -616,6 +618,7 @@ mod tests {
                     transparent_background: Some(true),
                     failure: None,
                     saved_path: Some(expected_path.clone()),
+                    input_images: Vec::new(),
                 })],
             },
         )

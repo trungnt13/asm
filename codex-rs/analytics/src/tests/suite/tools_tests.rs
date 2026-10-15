@@ -882,6 +882,7 @@ async fn image_generation_events_preserve_transparent_background_metadata() {
             transparent_background,
             failure: None,
             saved_path: None,
+            input_images: Vec::new(),
             imagegen_request_id: None,
             generation_id: None,
         });

@@ -1,4 +1,5 @@
 //! Reclaims unused SQLite pages in opted-in databases, reducing batches after stalled passes.
+//! NFS on Linux skips opening a maintenance connection.
 use crate::RuntimeDbPath;
 use crate::SqliteConfig;
 use log::LevelFilter;
@@ -64,7 +65,7 @@ impl SqliteReclamationWorker {
                 if owner.is_none() {
                     continue;
                 }
-                delay = visit(&mut scheduled, &receiver).await;
+                delay = visit(&sqlite, &mut scheduled, &receiver).await;
             }
         });
 
@@ -79,6 +80,7 @@ impl SqliteReclamationWorker {
 }
 
 async fn visit(
+    sqlite: &SqliteConfig,
     scheduled: &mut [(RuntimeDbPath, Instant, ReclamationState)],
     shutdown: &watch::Receiver<()>,
 ) -> Duration {
@@ -91,6 +93,7 @@ async fn visit(
             continue;
         }
         let result = reclaim(
+            sqlite,
             &db.path,
             ReclamationOptions {
                 budget: Budget {
@@ -206,10 +209,18 @@ impl From<Budget> for ReclamationOptions {
 }
 
 async fn reclaim(
+    sqlite: &SqliteConfig,
     path: &Path,
     options: impl Into<ReclamationOptions>,
     shutdown: &watch::Receiver<()>,
 ) -> anyhow::Result<ReclamationPass> {
+    // do not perform autovacuum and cleanup on NFS as it creates a lot of load and contention on IO
+    if sqlite.is_nfs().await? {
+        return Ok(ReclamationPass {
+            pages: 0,
+            outcome: PassOutcome::Idle,
+        });
+    }
     if !tokio::fs::try_exists(path).await? {
         return Ok(ReclamationPass {
             pages: 0,

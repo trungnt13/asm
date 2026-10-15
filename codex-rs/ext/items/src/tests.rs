@@ -4,10 +4,12 @@ use ts_rs::TS;
 
 use super::ExtensionItem;
 use super::image_generation::GeneratedImageRef;
+use super::image_generation::ImageGenerationInputImage;
 use super::image_generation::ImageGenerationItem;
 use super::sleep::SleepItem;
 use super::web_search::WebSearchAction;
 use super::web_search::WebSearchItem;
+use codex_utils_absolute_path::AbsolutePathBuf;
 
 fn completed_image_generation_item() -> ExtensionItem {
     ExtensionItem::ImageGeneration(ImageGenerationItem {
@@ -20,6 +22,7 @@ fn completed_image_generation_item() -> ExtensionItem {
         transparent_background: None,
         failure: None,
         saved_path: None,
+        input_images: Vec::new(),
         imagegen_request_id: None,
         generation_id: None,
     })
@@ -84,6 +87,7 @@ fn image_generation_item_reads_transitional_file_wire_shape() {
         transparent_background: None,
         failure: None,
         saved_path: None,
+        input_images: Vec::new(),
         imagegen_request_id: None,
         generation_id: None,
     });
@@ -123,6 +127,30 @@ fn image_generation_item_reads_transitional_file_wire_shape() {
             "transparentBackground": null,
             "failure": null,
         })
+    );
+}
+
+#[test]
+fn image_generation_input_images_survive_serialization() {
+    let ExtensionItem::ImageGeneration(mut image) = completed_image_generation_item() else {
+        panic!("expected image-generation item");
+    };
+    let path = AbsolutePathBuf::current_dir()
+        .expect("absolute cwd")
+        .join("reference.png");
+    image.input_images = vec![ImageGenerationInputImage {
+        path: path.clone(),
+        sha256: "ab".repeat(32),
+    }];
+    let item = ExtensionItem::ImageGeneration(image);
+    let value = serde_json::to_value(&item).expect("serialize image generation");
+    assert_eq!(
+        value["inputImages"],
+        json!([{"path": path, "sha256": "ab".repeat(32)}])
+    );
+    assert_eq!(
+        serde_json::from_value::<ExtensionItem>(value).expect("deserialize image generation"),
+        item
     );
 }
 

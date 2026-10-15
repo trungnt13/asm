@@ -1,4 +1,4 @@
-//! Regression coverage for SQLite initialization under competing database locks.
+//! Regression coverage for SQLite initialization, cached filesystem detection, and competing locks.
 
 use super::SqliteConfig;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -7,6 +7,60 @@ use sqlx::sqlite::SqliteAutoVacuum;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::sqlite::SqliteJournalMode;
 use sqlx::sqlite::SqlitePoolOptions;
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn sqlite_home_filesystem_probe_is_shared_by_clones_until_config_replacement()
+-> anyhow::Result<()> {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home).await?;
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let clone = sqlite.clone();
+    let is_nfs = sqlite.is_nfs().await?;
+    tokio::fs::remove_dir(&sqlite_home).await?;
+    // This clone has never queried the home. It must reuse the original's probe,
+    // because a fresh filesystem lookup would fail now that the home is absent.
+    assert_eq!(clone.is_nfs().await?, is_nfs);
+
+    let fresh = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    assert_eq!(
+        fresh
+            .is_nfs()
+            .await
+            .unwrap_err()
+            .downcast_ref::<std::io::Error>()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn failed_sqlite_home_filesystem_probe_recovers_after_home_creation() -> anyhow::Result<()> {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    assert_eq!(
+        sqlite
+            .is_nfs()
+            .await
+            .unwrap_err()
+            .downcast_ref::<std::io::Error>()
+            .unwrap()
+            .kind(),
+        std::io::ErrorKind::NotFound
+    );
+    tokio::fs::create_dir_all(&sqlite_home).await?;
+    sqlite.is_nfs().await?;
+    Ok(())
+}
 
 #[tokio::test]
 async fn open_read_write_pool_initializes_fresh_database_settings() -> anyhow::Result<()> {

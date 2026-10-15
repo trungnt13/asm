@@ -3488,6 +3488,7 @@ dependencies = [
  "codex-utils-absolute-path",
  "codex-utils-path-uri",
  "futures",
+ "rustix 1.1.4",
  "serde",
 ]
 
@@ -3777,10 +3778,13 @@ dependencies = [
  "codex-utils-image",
  "codex-utils-path-uri",
  "http 1.4.0",
+ "image",
  "pretty_assertions",
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "tracing",
 ]
@@ -4661,6 +4665,7 @@ version = "0.163.1-alpha.13.1"
 dependencies = [
  "anyhow",
  "chrono",
+ "codex-file-system",
  "codex-git-utils",
  "codex-history",
  "codex-protocol",

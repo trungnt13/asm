@@ -116,6 +116,7 @@ mod tests {
                 transparent_background: None,
                 failure: None,
                 saved_path: Some(test_path_buf("/tmp/ig-1.png").abs()),
+                input_images: Vec::new(),
                 imagegen_request_id: None,
                 generation_id: None,
             }),

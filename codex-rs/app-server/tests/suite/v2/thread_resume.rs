@@ -2900,6 +2900,7 @@ fn append_resume_redaction_history(
             transparent_background: None,
             failure: None,
             saved_path: Some(test_absolute_path("/tmp/ig-1.png")),
+            input_images: Vec::new(),
         }),
     ]
     .into_iter()

@@ -17,6 +17,7 @@ use codex_experimental_api_macros::ExperimentalApi;
 use codex_extension_items::ExtensionItem;
 pub use codex_extension_items::image_generation::GeneratedImageRef;
 pub use codex_extension_items::image_generation::ImageGenerationFailure;
+pub use codex_extension_items::image_generation::ImageGenerationInputImage;
 pub use codex_extension_items::image_generation::ImageGenerationItem;
 pub use codex_extension_items::sleep::SleepItem;
 pub use codex_extension_items::web_search::WebSearchAction;
@@ -1016,6 +1017,7 @@ impl From<CoreTurnItem> for ThreadItem {
                     transparent_background: None,
                     failure: None,
                     saved_path: image.saved_path,
+                    input_images: Vec::new(),
                     imagegen_request_id: None,
                     generation_id: None,
                 })

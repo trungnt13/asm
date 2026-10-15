@@ -19,6 +19,7 @@ fn image_item(image: GeneratedImageRef) -> ImageGenerationItem {
         transparent_background: Some(false),
         failure: None,
         saved_path: None,
+        input_images: Vec::new(),
         imagegen_request_id: None,
         generation_id: None,
     }
@@ -67,6 +68,7 @@ fn legacy_image_generation_preserves_file_reference() {
         transparent_background: Some(false),
         failure: None,
         saved_path: None,
+        input_images: Vec::new(),
     });
 
     let persisted = persisted_event_msg(&event, ThreadHistoryMode::Legacy)

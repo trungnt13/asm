@@ -221,6 +221,7 @@ pub(super) fn completed_item(
                 transparent_background: event.transparent_background,
                 failure: event.failure.clone(),
                 saved_path: event.saved_path.clone(),
+                input_images: event.input_images.clone(),
                 imagegen_request_id: None,
                 generation_id: None,
             })),
