@@ -2178,6 +2178,25 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
+        let stored = self
+            .thread_store
+            .read_thread(StoreReadThreadParams {
+                thread_id,
+                include_archived: false,
+                include_history: false,
+            })
+            .await
+            .map_err(|err| thread_store_mutation_error("read thread before revert", err))?;
+        if config_snapshot.model.starts_with("claude-code/")
+            || stored
+                .model
+                .as_deref()
+                .is_some_and(|model| model.starts_with("claude-code/"))
+        {
+            return Err(invalid_request(
+                "Claude runtime history cannot be reverted; start a fresh thread",
+            ));
+        }
         let runtime_snapshot = ThreadRevertRuntimeSnapshot {
             config: thread.config().await.as_ref().clone(),
             settings: thread.restorable_thread_settings().await,

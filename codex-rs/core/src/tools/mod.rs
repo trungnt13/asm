@@ -62,6 +62,9 @@ pub(crate) fn flat_tool_name(tool_name: &ToolName) -> Cow<'_, str> {
 }
 
 pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
+    if crate::claude_runtime::is_claude_model(&model_info.slug) {
+        return ToolMode::Direct;
+    }
     model_info.tool_mode.unwrap_or_else(|| {
         if turn_context.config.features.enabled(Feature::CodeModeOnly) {
             ToolMode::CodeModeOnly

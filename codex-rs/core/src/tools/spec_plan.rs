@@ -373,7 +373,11 @@ pub(crate) fn finalize_tool_router(
     tool_search_handler_cache: &ToolSearchHandlerCache,
 ) -> CodexResult<ToolRouter> {
     let model_messages = ResolvedModelMessages::from_model(model_info);
-    hosted_specs.retain(|spec| registry.tool_policy.allows(&ToolName::plain(spec.name())));
+    // Hosted Responses tools have no local executor for the Claude MCP bridge.
+    hosted_specs.retain(|spec| {
+        !crate::claude_runtime::is_claude_model(&model_info.slug)
+            && registry.tool_policy.allows(&ToolName::plain(spec.name()))
+    });
     apply_direct_model_only_namespace_overrides(turn_context, &mut registry);
     enforce_strict_3p_tools(turn_context, model_info, &mut registry);
     let tool_mode = effective_tool_mode(turn_context, model_info);

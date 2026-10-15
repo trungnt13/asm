@@ -562,6 +562,16 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
+pub(crate) fn history_uses_claude(history: &InitialHistory) -> bool {
+    history.get_rollout_items().iter().any(|item| match item {
+        RolloutItem::TurnContext(context) => crate::claude_runtime::is_claude_model(&context.model),
+        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+            crate::claude_runtime::is_claude_model(&event.thread_settings.model)
+        }
+        _ => false,
+    })
+}
+
 impl Session {
     /// Spawn and initialize a new session.
     /// Hide the concrete startup future from callers while keeping initialization lazy.
@@ -729,29 +739,60 @@ impl Session {
         };
 
         let mut config = Arc::new(config);
-        let refresh_strategy = if session_source.is_non_root_agent() {
+        let uses_claude = config
+            .model
+            .as_deref()
+            .is_some_and(crate::claude_runtime::is_claude_model);
+        if uses_claude
+            && config
+                .service_tier
+                .as_deref()
+                .is_some_and(|tier| tier != "default")
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Claude runtime does not support native service tiers; select the default tier"
+                    .to_string(),
+            ));
+        }
+        if (matches!(&conversation_history, InitialHistory::Forked(_))
+            && (uses_claude || history_uses_claude(&conversation_history)))
+            || (matches!(&conversation_history, InitialHistory::Resumed(_))
+                && history_uses_claude(&conversation_history) != uses_claude)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Claude runtime does not support history forks or cross-runtime resume; start a fresh thread".to_string(),
+            ));
+        }
+        let refresh_strategy = if uses_claude || session_source.is_non_root_agent() {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        if config.model.is_none()
-            || !matches!(
-                refresh_strategy,
-                codex_models_manager::manager::RefreshStrategy::Offline
-            )
+        if !uses_claude
+            && (config.model.is_none()
+                || !matches!(
+                    refresh_strategy,
+                    codex_models_manager::manager::RefreshStrategy::Offline
+                ))
         {
             let _ = models_manager
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = models_manager
-            .get_default_model(
-                &config.model,
-                allow_provider_model_fallback,
-                refresh_strategy,
-                config.http_client_factory(),
-            )
-            .await;
+        let model = if uses_claude {
+            config.model.clone().ok_or_else(|| {
+                CodexErr::InvalidRequest("Claude runtime requires an explicit model".to_owned())
+            })?
+        } else {
+            models_manager
+                .get_default_model(
+                    &config.model,
+                    allow_provider_model_fallback,
+                    refresh_strategy,
+                    config.http_client_factory(),
+                )
+                .await
+        };
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),

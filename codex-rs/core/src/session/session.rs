@@ -58,6 +58,7 @@ type McpToolApprovalMetadataMap =
 ///
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
+    pub(crate) claude_runtime: crate::claude_runtime::RuntimeSlot,
     pub(crate) thread_id: ThreadId,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
@@ -565,6 +566,20 @@ impl SessionConfiguration {
             &updates.step_settings,
             &next_configuration.step_settings_constraints(next_environments),
         )?);
+        if crate::claude_runtime::is_claude_model(self.step_settings.collaboration_mode.model())
+            && (next_configuration.cwd() != self.cwd()
+                || next_configuration.environments != self.environments
+                || next_configuration.permission_profile() != self.permission_profile()
+                || next_configuration.runtime_workspace_roots != self.runtime_workspace_roots
+                || next_configuration.disabled_plugin_ids != self.disabled_plugin_ids)
+        {
+            return Err(crate::config::ConstraintError::InvalidValue {
+                field_name: "Claude runtime environment (start a fresh thread to change)",
+                candidate: "changed environment or permissions".to_string(),
+                allowed: "original environment and permissions".to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         Ok(next_configuration)
     }
 
@@ -1871,6 +1886,7 @@ impl Session {
                     == ThreadHistoryMode::Paginated
                     && services.live_thread.is_some())
                 .then(|| Mutex::new(Default::default())),
+                claude_runtime: Default::default(),
                 active_turn: Mutex::new(None),
                 async_hook_results,
                 input_queue: InputQueue::with_controller(
@@ -1889,6 +1905,12 @@ impl Session {
                 next_internal_sub_id: AtomicU64::new(0),
             });
             let initial_system1 = config.system1.enabled
+                && !crate::claude_runtime::is_claude_model(
+                    session_configuration
+                        .step_settings
+                        .collaboration_mode
+                        .model(),
+                )
                 && super::system1::ordinary_agent_session(
                     &session_configuration.session_source,
                     session_configuration.thread_source.as_ref(),
