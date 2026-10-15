@@ -12,6 +12,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
+axum = { workspace = true, features = ["http1", "json", "tokio"] }
 codex-utils-process = { workspace = true }
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
@@ -36,6 +37,7 @@ codex-core-plugins = { workspace = true }
 codex-diagnostics = { workspace = true }
 codex-exec-server = { workspace = true }
 codex-extension-api = { workspace = true }
+codex-claude-runtime = { workspace = true }
 codex-extension-items = { workspace = true }
 codex-features = { workspace = true }
 codex-feedback = { workspace = true }
