@@ -61,6 +61,7 @@ pub(crate) async fn prepare_agent_spawn_config(
         build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
+        config.role_model_context_window = turn.config.role_model_context_window;
     }
     apply_requested_spawn_agent_model_overrides(
         session,
@@ -134,6 +135,7 @@ pub(crate) fn build_agent_resume_config(turn: &TurnContext) -> Result<Config, St
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
+    config.role_model_context_window = None;
     if config
         .features
         .enabled(Feature::SubagentDefaultContextLimits)

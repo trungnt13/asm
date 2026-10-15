@@ -658,6 +658,9 @@ pub struct Config {
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
 
+    /// Keeps a child role limit separate from the inherited scalar fallback.
+    pub(crate) role_model_context_window: Option<i64>,
+
     /// Model-specific context windows for V2 spawned children, in tokens.
     pub subagent_model_context_windows: HashMap<String, i64>,
 
@@ -4505,6 +4508,7 @@ impl Config {
             subagent_service_tiers: cfg.subagent_service_tiers,
             review_model,
             model_context_window: cfg.model_context_window,
+            role_model_context_window: None,
             subagent_model_context_windows,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: cfg
