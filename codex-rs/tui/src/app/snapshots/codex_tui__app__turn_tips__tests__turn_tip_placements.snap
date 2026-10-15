@@ -10,7 +10,7 @@ Response row 0
 • Working (0s • esc to interrupt)
   └ Tip: Try /help.
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -18,7 +18,7 @@ Response row 0
 
 working=true, response rows=1, 80x6
 • Working (0s • esc to interrupt)
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -32,7 +32,7 @@ working=false, response rows=1, 80x12
 
   Worked for [duration] • [completion time] • 019abc12-3456-7890-abcd-1234567890ab
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -58,7 +58,7 @@ Response row 0
 
 
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -84,7 +84,7 @@ Response row 0
 
 
                                                                Copying 5 chars…
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -98,7 +98,7 @@ working=false, response rows=30, 80x12
 
   Worked for [duration] • [completion time] • 019abc12-3456-7890-abcd-1234567890ab
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -109,7 +109,7 @@ working=false, response rows=1, 80x9
 
   Worked for [duration] • [completion time] • 019abc12-3456-7890-abcd-1234567890ab
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -121,7 +121,7 @@ working=false, response rows=1, 80x10
 
   Worked for [duration] • [completion time] • 019abc12-3456-7890-abcd-1234567890ab
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -134,7 +134,7 @@ working=false, response rows=1, 80x11
 
   Worked for [duration] • [completion time] • 019abc12-3456-7890-abcd-1234567890ab
 
-
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
@@ -148,14 +148,14 @@ working=false, response rows=1, 12x12
   1234567890
   ab
 
-
+       Main
 › Ask ASM t
 
   tes def·/…
   ? for shor
 
 working=false, response rows=1, 80x4
-
+                                                                           Main
 › Ask ASM to do anything
 
   ? for shortcuts

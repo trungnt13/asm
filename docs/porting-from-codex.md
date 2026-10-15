@@ -564,6 +564,8 @@ For all three visibility/tool settings above, do not update setup-managed profil
 
 ### Saved forks, upstream sides, and parallel conversations
 
+- Stack-budget exception to async instrumentation: leave `start_companion_conversation` and `select_agent_thread_and_discard_side` uninstrumented. Their tracing wrappers duplicate large futures in unoptimized poll frames and exhaust the unchanged 16 MiB UI stack. Keep companion event-dispatch futures boxed; do not increase stack limits.
+
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
 - `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only instructions, no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
 - `/chat [message]` shares Side lifecycle/restrictions:
@@ -711,3 +713,7 @@ insert_newline = ["enter", "shift-enter"]
 Use Shift+Enter to start a multiline draft, Ctrl+Enter to send it. Terminals must support
 the configured modified keys. Queue bindings retain their existing behavior.
 Vim Insert/Replace use the editor newline binding; Vim Normal retains its editing semantics.
+
+### Composer destination
+
+Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, Chat, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.

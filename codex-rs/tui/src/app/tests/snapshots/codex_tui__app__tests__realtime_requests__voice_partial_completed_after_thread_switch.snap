@@ -3,10 +3,12 @@ source: tui/src/app/tests/realtime_requests.rs
 expression: "normalize_voice_snapshot_directory(&format!(\"Other task:\\n{other_ui}\\nRestored owner:\\n{}\\n{rendered}\",\nrender_bottom_popup(&app.chat_widget, 80)), &app.config.cwd,)"
 ---
 Other task:
+                                                                           Main
 › Ask ASM to do anything
 
   tes def·/tmp/project
 Restored owner:
+                                                                           Main
  voice ● listening                                      f9 mute     /voice stop
    mic ▁▁▁▁▁▁  ASM ▁▁▁▁▁▁
 

@@ -5,7 +5,7 @@ expression: normalize_snapshot_paths(rendered)
 • Reviewing approval request (0s • esc to interrupt)
   └ rm -rf '/tmp/current-review'
 
-
+                                                                   Main
 › Ask ASM to do anything
 
   sol56 def·/tmp/project

@@ -145,6 +145,7 @@ pub(crate) struct MentionBinding {
     pub(crate) path: String,
 }
 mod chat_composer;
+pub(crate) use chat_composer::ComposerMode;
 mod chat_composer_history;
 mod command_popup;
 pub(crate) mod custom_prompt_view;
@@ -654,6 +655,13 @@ impl BottomPane {
     pub fn set_voice_command_enabled(&mut self, enabled: bool) {
         self.composer.set_voice_command_enabled(enabled);
         self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_mode(&mut self, mode: ComposerMode) {
+        if self.composer.mode != mode {
+            self.composer.mode = mode;
+            self.request_redraw();
+        }
     }
 
     pub(crate) fn set_side_conversation_active(&mut self, active: bool) {

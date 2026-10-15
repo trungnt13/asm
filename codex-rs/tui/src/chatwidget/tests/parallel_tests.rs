@@ -123,6 +123,7 @@ async fn parallel_context_label_preserves_status_line_snapshot() {
     chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
     chat.refresh_status_line();
     chat.set_parallel_conversation_active(/*active*/ true);
+    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Parallel);
     chat.set_side_conversation_context_label(Some(
         "Parallel from main thread · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
