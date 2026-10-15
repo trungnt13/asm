@@ -208,13 +208,15 @@ impl ModelInfoOverrides {
         multi_agent_version: Option<MultiAgentVersion>,
     ) -> Self {
         let mut overrides = Self::from(config.to_models_manager_config());
-        if multi_agent_version == Some(MultiAgentVersion::V2)
-            && matches!(
-                source,
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-            )
-        {
-            overrides.subagent_context_windows = config.subagent_model_context_windows.clone();
+        if matches!(
+            source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            if let Some(window) = config.role_model_context_window {
+                overrides.context_window = Some(window);
+            } else if multi_agent_version == Some(MultiAgentVersion::V2) {
+                overrides.subagent_context_windows = config.subagent_model_context_windows.clone();
+            }
         }
         overrides
     }
