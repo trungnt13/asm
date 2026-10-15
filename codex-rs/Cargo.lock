@@ -1970,6 +1970,7 @@ dependencies = [
  "base64 0.22.1",
  "caseless",
  "chrono",
+ "codex-attachment-store",
  "codex-extension-api",
  "codex-protocol",
  "codex-state",
@@ -2226,6 +2227,7 @@ dependencies = [
  "codex-uds",
  "codex-utils-cargo-bin",
  "codex-utils-home-dir",
+ "codex-utils-process",
  "futures",
  "libc",
  "pretty_assertions",
@@ -3760,6 +3762,7 @@ version = "0.163.1-alpha.13"
 dependencies = [
  "base64 0.22.1",
  "codex-api",
+ "codex-attachment-store",
  "codex-core",
  "codex-exec-server",
  "codex-extension-api",
@@ -4339,6 +4342,7 @@ dependencies = [
  "icu_locale_core",
  "icu_provider",
  "landlock",
+ "libc",
  "pretty_assertions",
  "quick-xml 0.41.0",
  "schemars 0.8.22",
@@ -4620,6 +4624,7 @@ dependencies = [
  "assert_matches",
  "blake3",
  "codex-analytics",
+ "codex-attachment-store",
  "codex-config",
  "codex-exec-server",
  "codex-extension-api",
@@ -4773,6 +4778,7 @@ name = "codex-tools"
 version = "0.163.1-alpha.13"
 dependencies = [
  "bitflags 2.13.1",
+ "codex-attachment-store",
  "codex-code-mode",
  "codex-connectors",
  "codex-extension-items",

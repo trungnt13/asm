@@ -10,26 +10,45 @@ use sqlx::sqlite::SqlitePoolOptions;
 
 #[tokio::test]
 async fn open_read_write_pool_initializes_fresh_database_settings() -> anyhow::Result<()> {
-    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
-    tokio::fs::create_dir_all(&sqlite_home).await?;
-    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
-        let _ = std::fs::remove_dir_all(sqlite_home);
-    });
-    let sqlite = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
-    let pool = sqlite.open_read_write_pool(&sqlite.logs_db_path()).await?;
-
-    let journal_mode = sqlx::query_scalar::<_, String>("PRAGMA journal_mode")
-        .fetch_one(&pool)
-        .await?;
-    let auto_vacuum = sqlx::query_scalar::<_, i64>("PRAGMA auto_vacuum")
-        .fetch_one(&pool)
-        .await?;
-
-    assert_eq!(
-        (journal_mode, auto_vacuum),
-        ("wal".to_string(), SqliteAutoVacuum::Incremental as i64)
-    );
-    pool.close().await;
+    for interrupted in [false, true] {
+        let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+        tokio::fs::create_dir_all(&sqlite_home).await?;
+        let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+            let _ = std::fs::remove_dir_all(sqlite_home);
+        });
+        let sqlite = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+        let path = sqlite.logs_db_path();
+        if interrupted {
+            // Auto-vacuum writes a header before WAL setup.
+            // Startup must initialize the database even if the file is not empty.
+            let partial = SqlitePoolOptions::new()
+                .max_connections(/*max*/ 1)
+                .connect_with(
+                    SqliteConnectOptions::new()
+                        .filename(&path)
+                        .create_if_missing(/*create*/ true)
+                        .auto_vacuum(SqliteAutoVacuum::Incremental),
+                )
+                .await?;
+            partial.close().await;
+            assert!(tokio::fs::metadata(&path).await?.len() > 0);
+        }
+        let pool = sqlite.open_read_write_pool(&path).await?;
+        let journal_mode = sqlx::query_scalar::<_, String>("PRAGMA journal_mode")
+            .fetch_one(&pool)
+            .await?;
+        let auto_vacuum = sqlx::query_scalar::<_, i64>("PRAGMA auto_vacuum")
+            .fetch_one(&pool)
+            .await?;
+        let synchronous = sqlx::query_scalar::<_, i64>("PRAGMA synchronous")
+            .fetch_one(&pool)
+            .await?;
+        assert_eq!(
+            (journal_mode, auto_vacuum, synchronous),
+            ("wal".to_string(), SqliteAutoVacuum::Incremental as i64, 1)
+        );
+        pool.close().await;
+    }
     Ok(())
 }
 
@@ -75,7 +94,7 @@ async fn open_read_write_pool_preserves_existing_settings_under_write_lock() -> 
 }
 
 #[tokio::test]
-async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::Result<()> {
+async fn open_read_write_pool_preserves_delete_under_write_lock() -> anyhow::Result<()> {
     let sqlite_home = crate::runtime::test_support::unique_temp_dir();
     tokio::fs::create_dir_all(&sqlite_home).await?;
     let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
@@ -100,12 +119,72 @@ async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::R
         .execute(&mut *lock_holder)
         .await?;
 
-    let result = sqlite.open_read_write_pool(&database_path).await;
+    let pool = sqlite.open_read_write_pool(&database_path).await?;
+    // Keep each acquired connection open to test connections that the pool initializes later.
+    let mut connections = Vec::new();
+    let mut settings = Vec::new();
+    for _ in 0..5 {
+        let mut connection = pool.acquire().await?;
+        let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&mut *connection)
+            .await?;
+        let synchronous: i64 = sqlx::query_scalar("PRAGMA synchronous")
+            .fetch_one(&mut *connection)
+            .await?;
+        settings.push((journal, synchronous));
+        connections.push(connection);
+    }
+    assert_eq!(settings, vec![("delete".to_string(), 3); 5]);
+    drop(connections);
     sqlx::query("ROLLBACK").execute(&mut *lock_holder).await?;
     drop(lock_holder);
     existing_pool.close().await;
 
-    let error = result.expect_err("WAL conversion requires the writer lock");
+    sqlx::query("INSERT INTO existing VALUES(42)")
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+    let reopened = sqlite.open_read_write_pool(&database_path).await?;
+    let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&reopened)
+        .await?;
+    let rows: Vec<i64> = sqlx::query_scalar("SELECT id FROM existing")
+        .fetch_all(&reopened)
+        .await?;
+    assert_eq!((journal, rows), ("delete".into(), vec![42]));
+    reopened.close().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn open_read_write_pool_preserves_empty_database_lock_error() -> anyhow::Result<()> {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home).await?;
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let database_path = sqlite.logs_db_path();
+    let existing_pool = SqlitePoolOptions::new()
+        .max_connections(/*max*/ 1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&database_path)
+                .create_if_missing(/*create*/ true)
+                .auto_vacuum(SqliteAutoVacuum::Incremental)
+                .journal_mode(SqliteJournalMode::Delete),
+        )
+        .await?;
+    // Leave the schema empty so startup must initialize WAL.
+    let mut lock_holder = existing_pool.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *lock_holder)
+        .await?;
+
+    let error = sqlite
+        .open_read_write_pool(&database_path)
+        .await
+        .expect_err("WAL setup must fail while another connection holds the writer lock");
     assert_eq!(
         error
             .downcast_ref::<sqlx::Error>()
@@ -114,11 +193,24 @@ async fn open_read_write_pool_preserves_wal_conversion_lock_error() -> anyhow::R
         Some("5".into())
     );
     assert!(crate::sqlite_error_detail_is_lock(&error.to_string()));
-    // Failure must release the connection so a later startup can succeed.
-    sqlite
-        .open_read_write_pool(&database_path)
-        .await?
-        .close()
-        .await;
+
+    sqlx::query("ROLLBACK").execute(&mut *lock_holder).await?;
+    // A failed opener must release its locks before another writer can proceed.
+    sqlx::query("BEGIN EXCLUSIVE")
+        .execute(&mut *lock_holder)
+        .await?;
+    sqlx::query("ROLLBACK").execute(&mut *lock_holder).await?;
+    drop(lock_holder);
+    existing_pool.close().await;
+
+    let pool = sqlite.open_read_write_pool(&database_path).await?;
+    sqlx::query("CREATE TABLE initialized (id INTEGER PRIMARY KEY)")
+        .execute(&pool)
+        .await?;
+    let journal: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(journal, "wal");
+    pool.close().await;
     Ok(())
 }

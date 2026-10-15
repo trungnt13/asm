@@ -7,6 +7,7 @@ use app_test_support::ChatGptAuthFixture;
 use app_test_support::MockResponsesConfig;
 use app_test_support::TestAppServer;
 use app_test_support::write_chatgpt_auth;
+use codex_app_server_protocol::GeneratedImageRef;
 use codex_app_server_protocol::ImageGenerationFailure;
 use codex_app_server_protocol::ImageGenerationItem;
 use codex_app_server_protocol::ImageReference as V2ImageReference;
@@ -159,7 +160,7 @@ async fn standalone_image_generation_returns_saved_path_hint_to_model(
     let ThreadItem::ImageGeneration(ImageGenerationItem {
         status,
         revised_prompt,
-        result,
+        image,
         transparent_background,
         saved_path: Some(saved_path),
         ..
@@ -169,7 +170,12 @@ async fn standalone_image_generation_returns_saved_path_hint_to_model(
     };
     assert_eq!(status, "completed");
     assert_eq!(revised_prompt.as_deref(), Some("paint a blue whale"));
-    assert_eq!(result, RESULT);
+    assert_eq!(
+        image,
+        GeneratedImageRef::Inline {
+            result: RESULT.to_string(),
+        }
+    );
     assert_eq!(transparent_background, Some(false));
     assert_eq!(std::fs::read(&saved_path)?, TINY_PNG_BYTES);
 
@@ -315,7 +321,7 @@ async fn transparent_image_preserves_output_metadata_and_persisted_history() -> 
     let thread_id = completed.thread_id.clone();
     let ThreadItem::ImageGeneration(ImageGenerationItem {
         status,
-        result,
+        image,
         transparent_background,
         ..
     }) = completed.item
@@ -323,7 +329,12 @@ async fn transparent_image_preserves_output_metadata_and_persisted_history() -> 
         panic!("expected completed image-generation item");
     };
     assert_eq!(status, "completed");
-    assert_eq!(result, RESULT);
+    assert_eq!(
+        image,
+        GeneratedImageRef::Inline {
+            result: RESULT.to_string(),
+        }
+    );
     assert_eq!(transparent_background, Some(true));
 
     drop(mcp);
@@ -568,7 +579,9 @@ async fn standalone_image_generation_failure_emits_terminal_item() -> Result<()>
             id: call_id.to_string(),
             status: "failed".to_string(),
             revised_prompt: Some("paint a blue whale".to_string()),
-            result: String::new(),
+            image: GeneratedImageRef::Inline {
+                result: String::new(),
+            },
             transparent_background: None,
             failure: None,
             saved_path: None,

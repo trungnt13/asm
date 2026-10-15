@@ -217,7 +217,7 @@ pub(super) fn completed_item(
                 id: event.call_id.clone(),
                 status: event.status.clone(),
                 revised_prompt: event.revised_prompt.clone(),
-                result: event.result.clone(),
+                image: event.image.clone(),
                 transparent_background: event.transparent_background,
                 failure: event.failure.clone(),
                 saved_path: event.saved_path.clone(),
