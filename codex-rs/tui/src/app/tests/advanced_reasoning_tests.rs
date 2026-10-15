@@ -136,10 +136,14 @@ async fn switching_threads_restores_session_speed_for_the_next_turn() {
     let snapshot = |session| ThreadEventSnapshot {
         delegated_turns: Vec::new(),
         session: Some(session),
+        inferred_session: false,
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
+        output_tps: None,
     };
 
     app.replay_thread_snapshot(
