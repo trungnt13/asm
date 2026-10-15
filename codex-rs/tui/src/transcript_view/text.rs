@@ -42,6 +42,7 @@ use ratatui::text::Line;
 
 /// One cell's logical text and its width-dependent display rows.
 pub(super) struct TextLayout {
+    pub(super) image: Option<std::sync::Arc<crate::transcript_image::TranscriptImage>>,
     logical: Vec<LogicalLine>,
     text: String,
     rows: Vec<TextRow>,
@@ -138,6 +139,7 @@ impl TextLayout {
                 layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
         }
         layout.disclosure |= self.disclosure;
+        layout.image = self.image.clone();
         if self.separated {
             layout.with_leading_separator()
         } else {
@@ -272,7 +274,26 @@ impl TextLayout {
     }
 
     pub(super) fn row_count(&self) -> usize {
+        // Images occupy visual space, but have no searchable or selectable text rows.
+        self.text_row_count()
+            + self
+                .visible_image()
+                .map_or(0, |image| usize::from(image.rows))
+    }
+
+    pub(super) fn text_row_count(&self) -> usize {
         self.rows.len()
+    }
+
+    pub(super) fn visible_image(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::transcript_image::TranscriptImage>> {
+        self.image.as_ref().filter(|image| {
+            image.columns + 2 <= self.width
+                && (image.protocol != crate::pets::ImageProtocol::Sixel
+                    || crate::transcript_image::terminal_cell_size()
+                        == Some((image.cell_width, image.cell_height)))
+        })
     }
 
     pub(super) fn disclosure_row(&self) -> Option<usize> {
@@ -367,6 +388,9 @@ impl TextLayout {
 
     /// Find the display row containing a source position, including omitted wrapping whitespace.
     pub(super) fn row_for_offset(&self, offset: usize) -> usize {
+        if self.visible_image().is_some() && offset >= self.text.len() {
+            return self.row_count().saturating_sub(1);
+        }
         let before_control = if let Some(control_row) =
             self.disclosure_control.as_ref().map(|control| control.row)
         {
@@ -506,6 +530,7 @@ impl TextLayout {
             }
         }
         Self {
+            image: None,
             logical,
             text,
             rows,
