@@ -864,6 +864,7 @@ pub(super) fn handle_image_generation_end(
                 transparent_background: None,
                 failure: None,
                 saved_path,
+                input_images: Vec::new(),
                 imagegen_request_id: None,
                 generation_id: None,
             }),

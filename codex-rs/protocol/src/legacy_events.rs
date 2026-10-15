@@ -470,6 +470,7 @@ impl ImageGenerationItem {
             transparent_background: None,
             failure: None,
             saved_path: self.saved_path.clone(),
+            input_images: Vec::new(),
         })
     }
 }

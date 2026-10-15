@@ -4,46 +4,42 @@ expression: "stages.join(\"\\n\\n---\\n\\n\")"
 ---
 Before.
 
-
 ---
 
 Before.
-
 flowchart LR
-A[Request] --> B[Reply]
+A["Codex reply<br/>completed"] --> B["Rendered in Ghostty"]
 
 ---
 
 Before.
-
-┌─────────┐  ┌───────┐
-│ Request │  │ Reply │
-└┬────────┘  └┬──────┘
- │            ▲
- │            │
- │            │
- │            │
- └────────────┘
+┌─────────────┐  ┌─────────────────────┐
+│ Codex reply │  │ Rendered in Ghostty │
+│ completed   │  │                     │
+└┬────────────┘  └┬────────────────────┘
+ │                ▲
+ │                │
+ │                │
+ │                │
+ └────────────────┘
 
 ---
 
 Before.
-
-┌─────────┐  ┌───────┐
-│ Request │  │ Reply │
-└┬────────┘  └┬──────┘
- │            ▲
- │            │
- │            │
- │            │
- └────────────┘
-
+┌─────────────┐  ┌─────────────────────┐
+│ Codex reply │  │ Rendered in Ghostty │
+│ completed   │  │                     │
+└┬────────────┘  └┬────────────────────┘
+ │                ▲
+ │                │
+ │                │
+ │                │
+ └────────────────┘
 After.
 
 ---
 
 Before.
-
 This
 Mermaid
 diagram
@@ -53,8 +49,7 @@ current
 terminal
 width.
 flowchart LR
-A[Request] --> B[Reply]
-
+A["Codex reply<br/>completed"] --> B["Rendered in Ghostty"]
 After.
 
 ---
@@ -63,7 +58,7 @@ Before.
 
 ```mermaid
 flowchart LR
-A[Request] --> B[Reply]
+A["Codex reply<br/>completed"] --> B["Rendered in Ghostty"]
 ```
 
 After.
@@ -71,14 +66,13 @@ After.
 ---
 
 Before.
-
-┌─────────┐  ┌───────┐
-│ Request │  │ Reply │
-└┬────────┘  └┬──────┘
- │            ▲
- │            │
- │            │
- │            │
- └────────────┘
-
+┌─────────────┐  ┌─────────────────────┐
+│ Codex reply │  │ Rendered in Ghostty │
+│ completed   │  │                     │
+└┬────────────┘  └┬────────────────────┘
+ │                ▲
+ │                │
+ │                │
+ │                │
+ └────────────────┘
 After.

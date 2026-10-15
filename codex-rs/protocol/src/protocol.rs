@@ -67,6 +67,7 @@ use crate::turn_input::TurnInputSubmission;
 use crate::turn_input::TurnStartOptions;
 use codex_extension_items::image_generation::GeneratedImageRef;
 use codex_extension_items::image_generation::ImageGenerationFailure;
+use codex_extension_items::image_generation::ImageGenerationInputImage;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use schemars::JsonSchema;
@@ -3001,6 +3002,9 @@ pub struct ImageGenerationEndEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub saved_path: Option<AbsolutePathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<_>", optional)]
+    pub input_images: Vec<ImageGenerationInputImage>,
 }
 
 // Conversation kept for backward compatibility.
