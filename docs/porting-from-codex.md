@@ -117,9 +117,9 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `e89b7c442c0433ad5167e72a5a25bb6d0712766a`.
+- Last incorporated commit: `97ebf2d94d62e2ff2045f3ea17b6e11eae9a21fb`.
 - Date: 2026-10-15.
-- Subject: Apply syntax theme colors to Markdown prose in the TUI (#54217).
+- Subject: Run managed daemon processes at background priority on macOS (#54401).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
