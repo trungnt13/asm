@@ -394,7 +394,7 @@ impl PtyCodex {
             self.read_output(Duration::from_millis(/*millis*/ 50))?;
             self.answer_startup_queries()?;
 
-            if self.palette_answered && self.screen_contains("OpenAI Codex") {
+            if self.palette_answered && self.screen_contains("ASM") {
                 return Ok(());
             }
 
@@ -516,10 +516,33 @@ impl PtyCodex {
                 return Ok(());
             }
             if let Some(status) = self.child.try_wait()? {
-                bail!("Codex exited while waiting for {text:?} ({status})");
+                bail!(
+                    "Codex exited while waiting for {text:?} ({status}); screen:\n{}",
+                    self.screen_contents()
+                );
             }
         }
         bail!("missing {text:?}; screen:\n{}", self.screen_contents())
+    }
+
+    pub(super) fn wait_for_composer_label(&mut self, label: &str) -> Result<()> {
+        let deadline = Instant::now() + STARTUP_TIMEOUT;
+        while Instant::now() < deadline {
+            self.read_output(Duration::from_millis(/*millis*/ 50))?;
+            self.answer_startup_queries()?;
+            self.ensure_running()?;
+            if self
+                .screen_contents()
+                .lines()
+                .any(|line| line.trim() == label)
+            {
+                return Ok(());
+            }
+        }
+        bail!(
+            "missing composer label {label:?}; screen:\n{}",
+            self.screen_contents()
+        )
     }
 
     pub(super) fn ensure_running(&mut self) -> Result<()> {

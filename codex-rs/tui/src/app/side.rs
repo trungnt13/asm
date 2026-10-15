@@ -874,7 +874,8 @@ impl App {
         store.set_session(session, Vec::new());
     }
 
-    #[tracing::instrument(skip_all)]
+    // Stack-budget exception: tracing instrumentation duplicates this large future in
+    // unoptimized poll frames, overflowing the unchanged 16 MiB UI stack.
     pub(super) async fn select_agent_thread_and_discard_side(
         &mut self,
         tui: &mut tui::Tui,
@@ -894,7 +895,8 @@ impl App {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all)]
+    // Stack-budget exception: tracing instrumentation duplicates this large future in
+    // unoptimized poll frames, overflowing the unchanged 16 MiB UI stack.
     pub(super) async fn start_companion_conversation(
         &mut self,
         tui: &mut tui::Tui,
