@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/side.rs
 expression: terminal.backend()
 ---
 "                                                                                "
-"                                                                            Side"
+"                                                                           Side "
 "› Ask a follow-up question                                                      "
 "                                                                                "
 "  sol56             Side from main thread · ctrl+/ to switch · ctrl+c to close  "

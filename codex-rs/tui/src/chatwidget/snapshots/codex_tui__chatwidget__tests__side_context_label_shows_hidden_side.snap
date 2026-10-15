@@ -4,7 +4,7 @@ expression: "format!(\"Side:\\n{side}\\n\\nChat:\\n{chat}\")"
 ---
 Side:
 "                                                                                "
-"                                                                            Main"
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  sol56                                                        ctrl+/ for side  "
@@ -12,7 +12,7 @@ Side:
 
 Chat:
 "                                                                                "
-"                                                                            Main"
+"                                                                           Main "
 "› Ask ASM to do anything                                                        "
 "                                                                                "
 "  sol56                                                        ctrl+/ for chat  "
