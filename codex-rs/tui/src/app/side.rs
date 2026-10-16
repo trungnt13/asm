@@ -4,13 +4,11 @@
 //! Saved-only policy belongs in `app::parallel`.
 
 use super::*;
-use crate::app_event::SideConversationMode;
 use crate::chatwidget::InterruptedTurnNoticeMode;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
-use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 
@@ -214,7 +212,6 @@ pub(super) struct SideThreadState {
     /// Thread to return to when the current side conversation is dismissed.
     pub(super) parent_thread_id: ThreadId,
     pub(super) kind: CompanionKind,
-    pub(super) mode: SideConversationMode,
     /// Parent-thread condition that changed while this side thread is visible.
     pub(super) parent_status: Option<SideParentStatus>,
 }
@@ -224,7 +221,6 @@ impl SideThreadState {
         Self {
             parent_thread_id,
             kind: CompanionKind::Side,
-            mode: SideConversationMode::Side,
             parent_status: None,
         }
     }
@@ -270,11 +266,7 @@ impl App {
                     .set_side_conversation_context_label(Some(format!(
                         "{} for {}",
                         binding.display_label(),
-                        if state.mode == SideConversationMode::Chat {
-                            "chat"
-                        } else {
-                            state.kind.name()
-                        }
+                        state.kind.name()
                     )));
             }
             return;
@@ -317,11 +309,6 @@ impl App {
             crate::key_hint::ctrl(KeyCode::Char('c')).display_label()
         ));
         let mode = match kind {
-            CompanionKind::Side
-                if self.side_threads[&active_thread_id].mode == SideConversationMode::Chat =>
-            {
-                crate::bottom_pane::ComposerMode::Chat
-            }
             CompanionKind::Side => crate::bottom_pane::ComposerMode::Side,
             CompanionKind::Parallel => crate::bottom_pane::ComposerMode::Parallel,
         };
@@ -777,11 +764,7 @@ impl App {
         fork_config
     }
 
-    pub(super) fn side_fork_config(
-        &self,
-        kind: CompanionKind,
-        mode: SideConversationMode,
-    ) -> Config {
+    pub(super) fn side_fork_config(&self, kind: CompanionKind) -> Config {
         let mut fork_config = self.current_thread_fork_config();
         fork_config.ephemeral = kind == CompanionKind::Side;
         if kind == CompanionKind::Side {
@@ -791,15 +774,6 @@ impl App {
             fork_config.developer_instructions.as_deref(),
             kind,
         ));
-        if mode == SideConversationMode::Chat {
-            if let Some(model) = &self.config.chat_model {
-                fork_config.model = Some(model.clone());
-            }
-            if let Some(effort) = self.config.chat_reasoning.clone() {
-                fork_config.model_reasoning_effort = Some(effort);
-            }
-            fork_config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
-        }
         fork_config
     }
 
@@ -903,7 +877,6 @@ impl App {
         app_server: &mut AppServerSession,
         mut parent_thread_id: ThreadId,
         kind: CompanionKind,
-        mode: SideConversationMode,
         mut user_message: Option<crate::chatwidget::UserMessage>,
     ) -> Result<AppRunControl> {
         if let Some(message) = self.side_start_block_message(kind) {
@@ -935,15 +908,7 @@ impl App {
         ))
         .await;
 
-        let fork_config = self.side_fork_config(kind, mode);
-        if mode == SideConversationMode::Chat
-            && let Err(error) = app_server.require_fast_service_tier(&fork_config)
-        {
-            self.restore_side_user_message(user_message.take());
-            self.sync_side_thread_ui();
-            self.chat_widget.add_error_message(error.to_string());
-            return Ok(AppRunControl::Continue);
-        }
+        let fork_config = self.side_fork_config(kind);
 
         if let Some((&side_thread_id, state)) = self.side_threads.iter().next() {
             let previous_parallel_parent =
@@ -987,18 +952,6 @@ impl App {
         {
             Ok(forked) => {
                 let child_thread_id = forked.session.thread_id;
-                if mode == SideConversationMode::Chat
-                    && forked.session.service_tier.as_deref()
-                        != Some(ServiceTier::Fast.request_value())
-                {
-                    self.discard_side_thread(app_server, child_thread_id).await;
-                    self.restore_side_user_message(user_message.take());
-                    self.sync_side_thread_ui();
-                    self.chat_widget.add_error_message(
-                        "The server did not retain Fast; /chat was not opened.".into(),
-                    );
-                    return Ok(AppRunControl::Continue);
-                }
                 if kind == CompanionKind::Parallel
                     && let Err(error) = app_server
                         .save_side_conversation(parent_thread_id, child_thread_id)
@@ -1019,10 +972,7 @@ impl App {
                 self.side_threads.insert(
                     child_thread_id,
                     match kind {
-                        CompanionKind::Side => SideThreadState {
-                            mode,
-                            ..SideThreadState::new(parent_thread_id)
-                        },
+                        CompanionKind::Side => SideThreadState::new(parent_thread_id),
                         CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
                     },
                 );

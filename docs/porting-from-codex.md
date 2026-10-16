@@ -519,7 +519,7 @@ allowed_agent_roles = ["reviewer"]
 ```
 
 - Match the current child's explicit role, never an ancestor's role or the displayed TUI view. Omission keeps existing visibility; an empty list hides the matching skills from every role.
-- Root, ordinary Side/Chat/Parallel, saved user forks, and unnamed/nonmatching children do not match. Explicit reviewer children match with fresh or V2 full-history context; resume restores their own role. Preserve V1 full-history role restrictions.
+- Root, ordinary Side/Parallel, saved user forks, and unnamed/nonmatching children do not match. Explicit reviewer children match with fresh or V2 full-history context; resume restores their own role. Preserve V1 full-history role restrictions.
 - Keep parent enablement and permission boundaries. Roles remain deny-only for skill overrides; a matching role cannot re-enable an otherwise disabled skill. Scope restrictions also survive enables using another matching selector.
 - Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Respect scope in both config-aware and cwd cache paths. Keep prompt lists stable and use existing append-only availability updates and context budgets.
 - This is visibility, not access isolation. Do not change filesystem, script execution, sandbox, network, or approval permissions. Inherited history can retain old lists or previously read skill content; never scrub history to conceal it.
@@ -568,13 +568,9 @@ For all three visibility/tool settings above, do not update setup-managed profil
 
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
 - `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only instructions, no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
-- `/chat [message]` shares Side lifecycle/restrictions:
-  - Top-level `chat_model`/`chat_reasoning` select initial settings; empty/omitted values inherit current parent selection.
-  - Require model Fast tier/feature permission. Reject unavailable startup/submission, not downgrade. Reject automatic fallback without Fast.
-  - Keep explicit Fast across view switches/catalog refresh/sync. Block Fast-toggle shortcut. Preserve Side/Btw/Parallel settings.
-- In temporary Side/Chat, `/sendlast [extra message]` forwards raw last completed assistant reply plus optional text as main user input. No prefix/navigation/settings change; atomically start or steer main. Reject complete items above 10,000 UTF-8 bytes, never truncate. Explicit item can exceed 1K tokens; require manual review when changed.
-- `/sync` replaces idle temporary Side/Chat with main's latest context, retaining model/effort/tier. Discard old history only after replacement setup/selection succeeds. Keep Side pairing/boundaries. Context refresh does not guarantee cache hits.
-- In idle temporary Side/Chat, `/fork [name]` saves an independent ordinary conversation:
+- In temporary Side, `/sendlast [extra message]` forwards raw last completed assistant reply plus optional text as main user input. No prefix/navigation/settings change; atomically start or steer main. Reject complete items above 10,000 UTF-8 bytes, never truncate. Explicit item can exceed 1K tokens; require manual review when changed.
+- `/sync` replaces idle temporary Side with main's latest context, retaining model/effort/tier. Discard old history only after replacement setup/selection succeeds. Keep Side pairing/boundaries. Context refresh does not guarantee cache hits.
+- In idle temporary Side, `/fork [name]` saves an independent ordinary conversation:
   - No navigation, pairing changes, or automatic work. Copy retained inherited replay/temporary history. After paginated main compacts, do not recover older raw entries outside model context.
   - Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history.
   - Default `<main title> (fork)` or `Untitled (fork)`; keep explicit names.
@@ -725,4 +721,4 @@ Vim Insert/Replace use the editor newline binding; Vim Normal retains its editin
 
 ### Composer destination
 
-Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, Chat, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
+Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
