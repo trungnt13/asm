@@ -339,7 +339,32 @@ impl StepSettings {
         }
         let current_claude =
             crate::claude_runtime::is_claude_model(self.collaboration_mode.model());
-        if (current_claude && next != *self)
+        let claude_settings_changed = current_claude && {
+            // Clients materialize default tiers and collaboration instructions on first input.
+            // The runtime checks effective instructions before each submission; other settings stay frozen.
+            let mut retained_settings = self.clone();
+            retained_settings
+                .collaboration_mode
+                .settings
+                .developer_instructions = next
+                .collaboration_mode
+                .settings
+                .developer_instructions
+                .clone();
+            if self
+                .service_tier
+                .as_deref()
+                .unwrap_or(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+                == next
+                    .service_tier
+                    .as_deref()
+                    .unwrap_or(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+            {
+                retained_settings.service_tier = next.service_tier.clone();
+            }
+            next != retained_settings
+        };
+        if claude_settings_changed
             || (!current_claude
                 && crate::claude_runtime::is_claude_model(next.collaboration_mode.model()))
         {
