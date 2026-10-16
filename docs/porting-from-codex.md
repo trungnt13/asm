@@ -626,6 +626,15 @@ Preserve initial/nonempty waits and Code Mode outer `exec`/`wait` limits. Exit a
 
 Optional `[memories]` `extract_reasoning_effort` / `consolidation_reasoning_effort` for V1/V2 use existing effort type. Defaults `low` / `medium`, independent of parent. Preserve models/other memory behavior.
 
+### Compact Markdown links
+
+- Render named web and resolvable local file links as OSC 8 labels, without destination suffixes.
+- Keep bare URLs visible. Do not require terminal detection for compact labels.
+- Resolve relative paths against the session cwd lexically; never read the filesystem or frontend home.
+- Preserve path encoding and location fragments. Opening a line depends on the terminal/editor.
+- Keep unsupported or unresolved destinations visible, and retain destinations in text-only output.
+- Reuse existing hyperlink layout and output transport; keep trusted artifact capabilities separate.
+
 ### Transcript spacing
 
 Keep Markdown paragraphs/code blocks/list items adjacent while streaming and completed. Preserve blanks inside code blocks, raw output, message boundaries, and user padding.
