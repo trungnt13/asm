@@ -1,4 +1,3 @@
-mod adaptive_reasoning;
 mod application_requirements;
 mod auth_policy;
 mod auto_rename;
@@ -43,6 +42,7 @@ mod shell_environment_policy;
 mod skills_config;
 mod state;
 mod strict_config;
+mod system1;
 pub mod test_support;
 mod thread_config;
 mod tui_effects;
@@ -53,10 +53,6 @@ pub mod types;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 
-pub use adaptive_reasoning::AdaptiveReasoningBackend;
-pub use adaptive_reasoning::AdaptiveReasoningConfig;
-pub use adaptive_reasoning::AdaptiveReasoningProfile;
-pub use adaptive_reasoning::AdaptiveReasoningTrigger;
 pub use application_requirements::ApplicationNetworkRequirementsToml;
 pub use application_requirements::ApplicationRequirementsToml;
 pub use auth_policy::ManagedAuthPolicy;
@@ -235,6 +231,10 @@ pub use state::ConfigLayerStack;
 pub use state::ConfigLoadOptions;
 pub use state::LoaderOverrides;
 pub use strict_config::config_error_from_ignored_toml_fields;
+pub use system1::System1Backend;
+pub use system1::System1Config;
+pub use system1::System1Profile;
+pub use system1::System1Trigger;
 pub use thread_config::NoopThreadConfigLoader;
 pub use thread_config::RemoteThreadConfigLoader;
 pub use thread_config::SessionThreadConfig;

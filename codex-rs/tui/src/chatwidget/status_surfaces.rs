@@ -1050,10 +1050,10 @@ impl ChatWidget {
             .map(|step| step.reasoning_effort.clone())
             .unwrap_or_else(|| self.effective_reasoning_effort());
         let label = Self::status_line_reasoning_effort_label(effort.as_ref());
-        if self.adaptive_reasoning_enabled() {
+        if self.system1_enabled() {
             format!(
                 "{label}·{}",
-                if self.status_state.adaptive_reasoning_error.is_some() {
+                if self.status_state.system1_error.is_some() {
                     "err"
                 } else {
                     "auto"

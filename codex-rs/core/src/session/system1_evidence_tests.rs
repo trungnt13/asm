@@ -63,7 +63,7 @@ fn basic_evidence_includes_task_and_conversation_history() {
         }
         .into(),
     ];
-    let mut evidence = AdaptiveEvidence::default();
+    let mut evidence = System1Evidence::default();
     evidence.collect(&[input("Review performance.")], &[], /*limit*/ 8192);
     assert_eq!(
         evidence.collect(
@@ -105,7 +105,7 @@ fn basic_evidence_respects_configured_context_budget() {
         }],
         /*metadata*/ None,
     )];
-    let text = AdaptiveEvidence::default().collect(&[input], &history, /*limit*/ 32768);
+    let text = System1Evidence::default().collect(&[input], &history, /*limit*/ 32768);
     assert!(text.len() <= 32768);
     assert!(text.starts_with("Current user task:\n界"));
     assert!(text.contains("\nassistant: é"));
@@ -164,7 +164,7 @@ fn basic_evidence_respects_configured_context_budget() {
             ..user_metadata.unwrap()
         }),
     ));
-    let mut evidence = AdaptiveEvidence {
+    let mut evidence = System1Evidence {
         task: "Current task.".to_string(),
         ..Default::default()
     };

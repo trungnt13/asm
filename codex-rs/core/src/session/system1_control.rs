@@ -1,38 +1,38 @@
-use super::AdaptiveReasoningState;
-use super::AdaptiveSession;
 use super::ORDINARY_EFFORTS;
+use super::System1Session;
+use super::System1State;
 use super::allowed_efforts;
 use super::ordinary_agent_session;
 use crate::session::session::Session;
 use codex_features::Feature;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::protocol::AdaptiveReasoningUpdatedEvent;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::System1UpdatedEvent;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 impl Session {
-    pub(crate) fn adaptive_reasoning_enabled(&self, initial_enabled: bool) -> bool {
-        self.adaptive_reasoning_state(initial_enabled, /*initial_revision*/ 0)
+    pub(crate) fn system1_enabled(&self, initial_enabled: bool) -> bool {
+        self.system1_state(initial_enabled, /*initial_revision*/ 0)
             .enabled
     }
 
-    pub(crate) fn adaptive_reasoning_state(
+    pub(crate) fn system1_state(
         &self,
         initial_enabled: bool,
         initial_revision: u64,
-    ) -> AdaptiveReasoningState {
+    ) -> System1State {
         let state = self
             .services
             .thread_extension_data
-            .get_or_init(AdaptiveSession::default);
+            .get_or_init(System1Session::default);
         let mode = state.mode.get_or_init(|| {
             tracing::info!(thread_id = %self.thread_id(), enabled = initial_enabled,
-                revision = initial_revision, reason = "initial", "adaptive reasoning mode changed");
+                revision = initial_revision, reason = "initial", "System1 mode changed");
             state.ever_enabled.store(initial_enabled, Ordering::Release);
-            Mutex::new(AdaptiveReasoningState {
+            Mutex::new(System1State {
                 enabled: initial_enabled,
                 revision: initial_revision,
                 error: None,
@@ -44,10 +44,10 @@ impl Session {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    pub(in crate::session) fn adaptive_reasoning_paused(&self) -> bool {
+    pub(in crate::session) fn system1_paused(&self) -> bool {
         self.services
             .thread_extension_data
-            .get::<AdaptiveSession>()
+            .get::<System1Session>()
             .is_some_and(|state| {
                 state.shutdown.is_cancelled()
                     || state.mode.get().is_some_and(|mode| {
@@ -60,19 +60,19 @@ impl Session {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(in crate::session) async fn pause_adaptive_reasoning(&self) {
-        self.publish_adaptive_reasoning_enabled(/*enabled*/ false, "manual_override")
+    pub(in crate::session) async fn pause_system1(&self) {
+        self.publish_system1_enabled(/*enabled*/ false, "manual_override")
             .await;
     }
 
     #[tracing::instrument(skip_all)]
-    pub(crate) async fn set_adaptive_reasoning_enabled(&self, enabled: bool) -> CodexResult<()> {
+    pub(crate) async fn set_system1_enabled(&self, enabled: bool) -> CodexResult<()> {
         let _settings_guard = super::super::thread_settings::acquire_persistence_lock(self).await;
-        self.set_adaptive_reasoning_enabled_locked(enabled).await
+        self.set_system1_enabled_locked(enabled).await
     }
 
     #[tracing::instrument(skip_all)]
-    async fn set_adaptive_reasoning_enabled_locked(&self, enabled: bool) -> CodexResult<()> {
+    async fn set_system1_enabled_locked(&self, enabled: bool) -> CodexResult<()> {
         if enabled {
             let (config, source, thread_source, model, effort) = {
                 let state = self.state.lock().await;
@@ -99,13 +99,16 @@ impl Session {
             };
             if !ordinary_agent_session(&source, thread_source.as_ref()) {
                 return Err(CodexErr::InvalidRequest(
-                    "adaptive reasoning is unavailable for internal worker sessions".to_string(),
+                    "System1 is unavailable for internal worker sessions".to_string(),
                 ));
             }
             if !config.features.enabled(Feature::StepModelSwitching)
                 || !config.features.enabled(Feature::ReasoningEffortOverride)
             {
-                return Err(CodexErr::InvalidRequest("adaptive reasoning requires step_model_switching and reasoning_effort_override".to_string()));
+                return Err(CodexErr::InvalidRequest(
+                    "System1 requires step_model_switching and reasoning_effort_override"
+                        .to_string(),
+                ));
             }
             let active = self
                 .active_turn
@@ -123,7 +126,7 @@ impl Session {
                     .is_some_and(|effort| !ORDINARY_EFFORTS.contains(&effort))
             {
                 return Err(CodexErr::InvalidRequest(
-                    "adaptive reasoning cannot replace Ultra or Persistent effort".to_string(),
+                    "System1 cannot replace Ultra or Persistent effort".to_string(),
                 ));
             }
             if active.as_ref().is_some_and(|settings| {
@@ -131,10 +134,10 @@ impl Session {
                     .services
                     .model_client
                     .reasoning_effort_override_enabled(&settings.model_info)
-                    || allowed_efforts(&config.adaptive_reasoning, &settings.model_info).len() < 2
+                    || allowed_efforts(&config.system1, &settings.model_info).len() < 2
             }) {
                 return Err(CodexErr::InvalidRequest(
-                    "the active model does not support adaptive reasoning".to_string(),
+                    "the active model does not support System1".to_string(),
                 ));
             }
             let model_info = self
@@ -146,28 +149,27 @@ impl Session {
                 .services
                 .model_client
                 .reasoning_effort_override_enabled(&model_info)
-                || allowed_efforts(&config.adaptive_reasoning, &model_info).len() < 2
-                || config.adaptive_reasoning.update_on.is_empty()
+                || allowed_efforts(&config.system1, &model_info).len() < 2
+                || config.system1.update_on.is_empty()
             {
-                return Err(CodexErr::InvalidRequest("adaptive reasoning requires a supported OpenAI model, at least two allowed efforts, and a configured update trigger".to_string()));
+                return Err(CodexErr::InvalidRequest("System1 requires a supported OpenAI model, at least two allowed efforts, and a configured update trigger".to_string()));
             }
         }
-        self.publish_adaptive_reasoning_enabled(enabled, "user_toggle")
-            .await;
+        self.publish_system1_enabled(enabled, "user_toggle").await;
         Ok(())
     }
 
     #[tracing::instrument(skip_all)]
-    async fn publish_adaptive_reasoning_enabled(&self, enabled: bool, reason: &'static str) {
+    async fn publish_system1_enabled(&self, enabled: bool, reason: &'static str) {
         let state = self
             .services
             .thread_extension_data
-            .get_or_init(AdaptiveSession::default);
+            .get_or_init(System1Session::default);
         if enabled {
             state.ever_enabled.store(/*val*/ true, Ordering::Release);
         }
         let mode = state.mode.get_or_init(|| {
-            Mutex::new(AdaptiveReasoningState {
+            Mutex::new(System1State {
                 enabled: false,
                 revision: 0,
                 error: None,
@@ -186,7 +188,7 @@ impl Session {
                     .recovery
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                    super::AdaptiveRecovery::default();
+                    super::System1Recovery::default();
                 state
                     .decision_due_after_enable
                     .store(enabled, Ordering::Release);
@@ -196,13 +198,13 @@ impl Session {
             }
         };
         if let Some(updated) = updated {
-            self.invalidate_adaptive_reasoning();
-            tracing::info!(thread_id = %self.thread_id(), enabled, revision = updated.revision, reason, "adaptive reasoning mode changed");
+            self.invalidate_system1();
+            tracing::info!(thread_id = %self.thread_id(), enabled, revision = updated.revision, reason, "System1 mode changed");
             self.send_event_raw_without_materializing_rollout(Event {
                 id: super::super::new_submission_id(),
-                msg: EventMsg::AdaptiveReasoningUpdated(AdaptiveReasoningUpdatedEvent {
+                msg: EventMsg::System1Updated(System1UpdatedEvent {
                     enabled,
-                    adaptive_reasoning_revision: updated.revision,
+                    system1_revision: updated.revision,
                     error: updated.error,
                     failure_episode: updated.failure_episode,
                 }),

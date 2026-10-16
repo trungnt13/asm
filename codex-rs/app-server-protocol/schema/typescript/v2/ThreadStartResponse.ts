@@ -4,19 +4,19 @@
 import type { AbsolutePathBuf } from "../AbsolutePathBuf";
 import type { LegacyAppPathString } from "../LegacyAppPathString";
 import type { ReasoningEffort } from "../ReasoningEffort";
-import type { AdaptiveReasoningError } from "./AdaptiveReasoningError";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { SandboxPolicy } from "./SandboxPolicy";
+import type { System1Error } from "./System1Error";
 import type { Thread } from "./Thread";
 
 export type ThreadStartResponse = {/**
  * Current session-only automatic reasoning mode; never a saved preference.
  */
-adaptiveReasoningEnabled: boolean, /**
+system1Enabled: boolean, /**
  * Monotonic session revision for ordering mode updates.
  */
-adaptiveReasoningRevision: bigint, adaptiveReasoningError: AdaptiveReasoningError | null, adaptiveReasoningFailureEpisode: bigint, thread: Thread, model: string, modelProvider: string, serviceTier: string | null, /**
+system1Revision: bigint, system1Error: System1Error | null, system1FailureEpisode: bigint, thread: Thread, model: string, modelProvider: string, serviceTier: string | null, /**
  * Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
  */
 disabledPluginIds: Array<string>, cwd: AbsolutePathBuf, /**

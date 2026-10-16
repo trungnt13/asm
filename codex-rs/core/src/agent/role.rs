@@ -45,14 +45,14 @@ struct AgentRoleOverrides {
     personality: Option<Personality>,
     service_tier: Option<String>,
     web_search: Option<WebSearchMode>,
-    adaptive_reasoning: Option<AdaptiveReasoningRoleOverride>,
+    system1: Option<System1RoleOverride>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     features: BTreeMap<String, bool>,
     skills: Option<SkillsConfig>,
 }
 
 #[derive(Serialize)]
-struct AdaptiveReasoningRoleOverride {
+struct System1RoleOverride {
     enabled: bool,
 }
 
@@ -86,9 +86,10 @@ async fn apply_role_to_config_inner(
     };
     let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
     // Check the raw field: the typed table defaults an omitted `enabled` to false.
-    let disables_adaptive_reasoning = role_layer_toml
-        .get("adaptive_reasoning")
-        .and_then(|adaptive| adaptive.get("enabled"))
+    let disables_system1 = role_layer_toml
+        .get("system1")
+        .or_else(|| role_layer_toml.get("adaptive_reasoning"))
+        .and_then(|system1| system1.get("enabled"))
         .and_then(TomlValue::as_bool)
         == Some(false);
     let role_config = deserialize_config_toml_with_base(role_layer_toml, &config.codex_home)?;
@@ -104,8 +105,7 @@ async fn apply_role_to_config_inner(
         web_search: role_config
             .web_search
             .filter(|mode| *mode == WebSearchMode::Disabled),
-        adaptive_reasoning: disables_adaptive_reasoning
-            .then_some(AdaptiveReasoningRoleOverride { enabled: false }),
+        system1: disables_system1.then_some(System1RoleOverride { enabled: false }),
         ..Default::default()
     };
 
@@ -247,9 +247,9 @@ mod role_overrides {
         if let Some(mode) = overrides.web_search {
             next_config.web_search_mode.set(mode)?;
         }
-        if overrides.adaptive_reasoning.is_some() {
-            next_config.adaptive_reasoning.enabled = false;
-            next_config.role_adaptive_reasoning_disabled = true;
+        if overrides.system1.is_some() {
+            next_config.system1.enabled = false;
+            next_config.role_system1_disabled = true;
         }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {

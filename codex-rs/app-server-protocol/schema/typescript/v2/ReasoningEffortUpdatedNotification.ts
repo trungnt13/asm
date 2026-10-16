@@ -10,4 +10,4 @@ export type ReasoningEffortUpdatedNotification = { threadId: string, turnId: str
 /**
  * Automatic mode is active, including when a decision falls back to current effort.
  */
-adaptive: boolean, };
+system1: boolean, };

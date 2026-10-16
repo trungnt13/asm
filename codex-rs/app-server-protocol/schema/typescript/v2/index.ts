@@ -8,8 +8,6 @@ export type { AccountTokenUsageDailyBucket } from "./AccountTokenUsageDailyBucke
 export type { AccountTokenUsageSummary } from "./AccountTokenUsageSummary";
 export type { AccountUpdatedNotification } from "./AccountUpdatedNotification";
 export type { ActivePermissionProfile } from "./ActivePermissionProfile";
-export type { AdaptiveReasoningError } from "./AdaptiveReasoningError";
-export type { AdaptiveReasoningUpdatedNotification } from "./AdaptiveReasoningUpdatedNotification";
 export type { AddCreditsNudgeCreditType } from "./AddCreditsNudgeCreditType";
 export type { AddCreditsNudgeEmailStatus } from "./AddCreditsNudgeEmailStatus";
 export type { AdditionalContextEntry } from "./AdditionalContextEntry";
@@ -474,6 +472,8 @@ export type { SpendControlLimitSnapshot } from "./SpendControlLimitSnapshot";
 export type { StrictReviewRequiredNotification } from "./StrictReviewRequiredNotification";
 export type { SubAgentActivityKind } from "./SubAgentActivityKind";
 export type { SubagentMigration } from "./SubagentMigration";
+export type { System1Error } from "./System1Error";
+export type { System1UpdatedNotification } from "./System1UpdatedNotification";
 export type { TerminalInteractionNotification } from "./TerminalInteractionNotification";
 export type { TextElement } from "./TextElement";
 export type { TextPosition } from "./TextPosition";

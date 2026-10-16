@@ -9,23 +9,23 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum AdaptiveReasoningTrigger {
+pub enum System1Trigger {
     TurnStart,
     ToolResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum AdaptiveReasoningBackend {
+pub enum System1Backend {
     Openai,
     Typesafe,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AdaptiveReasoningProfile {
+pub struct System1Profile {
     #[serde(rename = "protocol", alias = "backend")]
-    pub backend: AdaptiveReasoningBackend,
+    pub backend: System1Backend,
     #[serde(default)]
     pub endpoint: Option<String>,
     pub model: String,
@@ -35,7 +35,7 @@ pub struct AdaptiveReasoningProfile {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub struct AdaptiveReasoningConfig {
+pub struct System1Config {
     pub enabled: bool,
     /// Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.
     #[schemars(range(min = 1))]
@@ -46,7 +46,7 @@ pub struct AdaptiveReasoningConfig {
     #[schemars(range(min = 1))]
     pub decision_every_n_steps: u64,
     pub profile: Option<String>,
-    pub profiles: BTreeMap<String, AdaptiveReasoningProfile>,
+    pub profiles: BTreeMap<String, System1Profile>,
     pub decision_model: Option<String>,
     pub decision_model_api_env: Option<String>,
     pub min_effort: ReasoningEffort,
@@ -55,11 +55,11 @@ pub struct AdaptiveReasoningConfig {
     pub decision_timeout_ms: u64,
     #[schemars(range(min = 128, max = 32768))]
     pub max_context_bytes: usize,
-    pub update_on: Vec<AdaptiveReasoningTrigger>,
+    pub update_on: Vec<System1Trigger>,
     pub rubric_instructions: Option<String>,
 }
 
-impl Default for AdaptiveReasoningConfig {
+impl Default for System1Config {
     fn default() -> Self {
         Self {
             enabled: false,
@@ -73,27 +73,25 @@ impl Default for AdaptiveReasoningConfig {
             max_effort: ReasoningEffort::Max,
             decision_timeout_ms: 200,
             max_context_bytes: 8192,
-            update_on: vec![
-                AdaptiveReasoningTrigger::TurnStart,
-                AdaptiveReasoningTrigger::ToolResult,
-            ],
+            update_on: vec![System1Trigger::TurnStart, System1Trigger::ToolResult],
             rubric_instructions: None,
         }
     }
 }
 
-impl AdaptiveReasoningConfig {
-    pub fn resolved_profile(&self) -> Result<AdaptiveReasoningProfile, String> {
+impl System1Config {
+    pub fn resolved_profile(&self) -> Result<System1Profile, String> {
         let profile = if let Some(name) = &self.profile {
             if self.decision_model.is_some() || self.decision_model_api_env.is_some() {
-                return Err("adaptive_reasoning.profile cannot be combined with decision_model or decision_model_api_env".to_string());
+                return Err("system1.profile cannot be combined with decision_model or decision_model_api_env".to_string());
             }
-            self.profiles.get(name).cloned().ok_or_else(|| {
-                format!("adaptive_reasoning.profile references unknown profile {name:?}")
-            })?
+            self.profiles
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("system1.profile references unknown profile {name:?}"))?
         } else {
-            AdaptiveReasoningProfile {
-                backend: AdaptiveReasoningBackend::Openai,
+            System1Profile {
+                backend: System1Backend::Openai,
                 endpoint: None,
                 model: self
                     .decision_model
@@ -111,7 +109,7 @@ impl AdaptiveReasoningConfig {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.decision_every_n_turns == 0 || self.decision_every_n_steps == 0 {
-            return Err("adaptive_reasoning decision_every_n_turns and decision_every_n_steps must be positive integers".to_string());
+            return Err("system1 decision_every_n_turns and decision_every_n_steps must be positive integers".to_string());
         }
         let ordinary_efforts = [
             ReasoningEffort::None,
@@ -129,36 +127,31 @@ impl AdaptiveReasoningConfig {
             .iter()
             .position(|effort| effort == &self.max_effort);
         let (Some(min), Some(max)) = (min, max) else {
-            return Err("adaptive_reasoning effort bounds must be ordinary levels: none, minimal, low, medium, high, xhigh, max".to_string());
+            return Err("system1 effort bounds must be ordinary levels: none, minimal, low, medium, high, xhigh, max".to_string());
         };
         if min > max {
-            return Err("adaptive_reasoning.min_effort must not exceed max_effort".to_string());
+            return Err("system1.min_effort must not exceed max_effort".to_string());
         }
         self.resolved_profile()?;
         for (name, profile) in &self.profiles {
             if name.trim().is_empty() {
-                return Err("adaptive_reasoning profile names must not be blank".to_string());
+                return Err("system1 profile names must not be blank".to_string());
             }
             profile.validate()?;
         }
         if !(1..=5000).contains(&self.decision_timeout_ms) {
-            return Err(
-                "adaptive_reasoning.decision_timeout_ms must be between 1 and 5000".to_string(),
-            );
+            return Err("system1.decision_timeout_ms must be between 1 and 5000".to_string());
         }
         if !(128..=32768).contains(&self.max_context_bytes) {
-            return Err(
-                "adaptive_reasoning.max_context_bytes must be between 128 and 32768".to_string(),
-            );
+            return Err("system1.max_context_bytes must be between 128 and 32768".to_string());
         }
         if let Some(rubric) = &self.rubric_instructions {
             if rubric.trim().is_empty() {
-                return Err("adaptive_reasoning.rubric_instructions must not be blank".to_string());
+                return Err("system1.rubric_instructions must not be blank".to_string());
             }
             if rubric.len() > 4096 {
                 return Err(
-                    "adaptive_reasoning.rubric_instructions must not exceed 4096 UTF-8 bytes"
-                        .to_string(),
+                    "system1.rubric_instructions must not exceed 4096 UTF-8 bytes".to_string(),
                 );
             }
         }
@@ -166,17 +159,17 @@ impl AdaptiveReasoningConfig {
     }
 }
 
-impl AdaptiveReasoningProfile {
+impl System1Profile {
     fn validate(&self) -> Result<(), String> {
         if self
             .endpoint
             .as_ref()
             .is_some_and(|endpoint| endpoint.trim().is_empty())
         {
-            return Err("adaptive_reasoning profile endpoint must not be blank".to_string());
+            return Err("system1 profile endpoint must not be blank".to_string());
         }
         if self.model.trim().is_empty() {
-            return Err("adaptive_reasoning decision model must not be blank".to_string());
+            return Err("system1 decision model must not be blank".to_string());
         }
         let mut name = self.api_key_env.bytes();
         if !name
@@ -184,7 +177,7 @@ impl AdaptiveReasoningProfile {
             .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
             || !name.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
         {
-            return Err("adaptive_reasoning API key environment variable must be an ASCII environment variable identifier".to_string());
+            return Err("system1 API key environment variable must be an ASCII environment variable identifier".to_string());
         }
         Ok(())
     }

@@ -7,13 +7,13 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::user_input::UserInput;
 
 #[derive(Default)]
-pub(super) struct AdaptiveEvidence {
+pub(super) struct System1Evidence {
     pub(super) task: String,
     pub(super) encrypted_task_unavailable: bool,
     steer: String,
 }
 
-impl AdaptiveEvidence {
+impl System1Evidence {
     pub(super) fn collect(
         &mut self,
         input: &[TurnInput],
@@ -163,5 +163,5 @@ fn append_item(
 }
 
 #[cfg(test)]
-#[path = "adaptive_reasoning_evidence_tests.rs"]
+#[path = "system1_evidence_tests.rs"]
 mod tests;

@@ -4,9 +4,9 @@ expression: terminal.backend()
 ---
 "› /model          choose what model and reasoning effort to "
 "                  use                                       "
-"  /adapt          turn adaptive reasoning on or off for this"
-"                  session                                   "
+"  /system1        turn System1 on or off for this session   "
 "  /presets        run or save reusable prompts and slash    "
+"                  commands                                  "
 "                                                       Main "
 "› /                                                         "
 "                                                            "

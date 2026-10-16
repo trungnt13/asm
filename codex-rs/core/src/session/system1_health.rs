@@ -1,51 +1,49 @@
-use super::AdaptiveReasoningState;
-use super::AdaptiveSession;
+use super::System1Session;
+use super::System1State;
 use crate::config::Config;
 use crate::session::session::Session;
 use codex_api::DecisionsError;
-use codex_protocol::protocol::AdaptiveReasoningError;
-use codex_protocol::protocol::AdaptiveReasoningUpdatedEvent;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::System1Error;
+use codex_protocol::protocol::System1UpdatedEvent;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-pub(in crate::session) struct AdaptiveDecisionHealthGuard<'a> {
+pub(in crate::session) struct System1DecisionHealthGuard<'a> {
     pub(in crate::session) freshness: &'a CancellationToken,
     pub(in crate::session) cancellation: &'a CancellationToken,
 }
 
-pub(in crate::session) fn classify_error(error: DecisionsError) -> AdaptiveReasoningError {
+pub(in crate::session) fn classify_error(error: DecisionsError) -> System1Error {
     match error {
-        DecisionsError::Credentials => AdaptiveReasoningError::Credentials,
-        DecisionsError::InvalidRequest => AdaptiveReasoningError::InvalidRequest,
-        DecisionsError::Transport => AdaptiveReasoningError::Transport,
-        DecisionsError::Http(status) => AdaptiveReasoningError::Http { status },
-        DecisionsError::ResponseTooLarge => AdaptiveReasoningError::ResponseTooLarge,
-        DecisionsError::InvalidResponse => AdaptiveReasoningError::InvalidResponse,
+        DecisionsError::Credentials => System1Error::Credentials,
+        DecisionsError::InvalidRequest => System1Error::InvalidRequest,
+        DecisionsError::Transport => System1Error::Transport,
+        DecisionsError::Http(status) => System1Error::Http { status },
+        DecisionsError::ResponseTooLarge => System1Error::ResponseTooLarge,
+        DecisionsError::InvalidResponse => System1Error::InvalidResponse,
     }
 }
 
 // Request/credential faults need explicit recovery rather than repeated identical requests.
-pub(super) fn permanent_error(error: AdaptiveReasoningError) -> bool {
+pub(super) fn permanent_error(error: System1Error) -> bool {
     match error {
-        AdaptiveReasoningError::Credentials
-        | AdaptiveReasoningError::InvalidRequest
-        | AdaptiveReasoningError::Rejected => true,
-        AdaptiveReasoningError::Http { status } => {
+        System1Error::Credentials | System1Error::InvalidRequest | System1Error::Rejected => true,
+        System1Error::Http { status } => {
             (400..500).contains(&status) && !matches!(status, 408 | 429)
         }
-        AdaptiveReasoningError::Transport
-        | AdaptiveReasoningError::Timeout
-        | AdaptiveReasoningError::ResponseTooLarge
-        | AdaptiveReasoningError::InvalidResponse => false,
+        System1Error::Transport
+        | System1Error::Timeout
+        | System1Error::ResponseTooLarge
+        | System1Error::InvalidResponse => false,
     }
 }
 
 impl Session {
-    pub(in crate::session) fn initialize_adaptive_reasoning_health(
+    pub(in crate::session) fn initialize_system1_health(
         &self,
         config: &Config,
         source: &super::super::session::SessionConfiguration,
@@ -53,7 +51,7 @@ impl Session {
         let state = self
             .services
             .thread_extension_data
-            .get_or_init(AdaptiveSession::default);
+            .get_or_init(System1Session::default);
         let Some(mode) = state.mode.get() else {
             return;
         };
@@ -61,18 +59,18 @@ impl Session {
             let mut mode = mode
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            mode.error = config.adaptive_reasoning_initial_error;
-            mode.failure_episode = config.adaptive_reasoning_initial_failure_episode;
+            mode.error = config.system1_initial_error;
+            mode.failure_episode = config.system1_initial_failure_episode;
             state
                 .recovery
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .blocked = mode.error.is_some_and(permanent_error);
         }
-        if self.adaptive_warmup_eligible(config, source)
+        if self.system1_warmup_eligible(config, source)
             && let Err(error) = state.client(config)
         {
-            self.update_adaptive_reasoning_error(
+            self.update_system1_error(
                 Some(classify_error(error)),
                 /*generation*/ None,
                 /*guard*/ None,
@@ -80,16 +78,16 @@ impl Session {
         }
     }
 
-    fn update_adaptive_reasoning_error(
+    fn update_system1_error(
         &self,
-        error: Option<AdaptiveReasoningError>,
+        error: Option<System1Error>,
         generation: Option<u64>,
-        guard: Option<AdaptiveDecisionHealthGuard<'_>>,
-    ) -> Option<AdaptiveReasoningState> {
+        guard: Option<System1DecisionHealthGuard<'_>>,
+    ) -> Option<System1State> {
         let state = self
             .services
             .thread_extension_data
-            .get::<AdaptiveSession>()?;
+            .get::<System1Session>()?;
         let mode = state.mode.get()?;
         let mut mode = mode
             .lock()
@@ -133,22 +131,22 @@ impl Session {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(in crate::session) async fn publish_adaptive_reasoning_error(
+    pub(in crate::session) async fn publish_system1_error(
         &self,
-        error: Option<AdaptiveReasoningError>,
+        error: Option<System1Error>,
         generation: Option<u64>,
-        guard: Option<AdaptiveDecisionHealthGuard<'_>>,
+        guard: Option<System1DecisionHealthGuard<'_>>,
     ) {
-        let Some(updated) = self.update_adaptive_reasoning_error(error, generation, guard) else {
+        let Some(updated) = self.update_system1_error(error, generation, guard) else {
             return;
         };
         tracing::info!(thread_id = %self.thread_id(), ?error, revision = updated.revision,
-            failure_episode = updated.failure_episode, "adaptive reasoning health changed");
+            failure_episode = updated.failure_episode, "System1 health changed");
         self.deliver_event_raw(Event {
             id: super::super::new_submission_id(),
-            msg: EventMsg::AdaptiveReasoningUpdated(AdaptiveReasoningUpdatedEvent {
+            msg: EventMsg::System1Updated(System1UpdatedEvent {
                 enabled: updated.enabled,
-                adaptive_reasoning_revision: updated.revision,
+                system1_revision: updated.revision,
                 error: updated.error,
                 failure_episode: updated.failure_episode,
             }),

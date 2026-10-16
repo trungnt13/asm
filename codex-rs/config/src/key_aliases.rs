@@ -11,6 +11,10 @@ struct ConfigKeyAlias {
 
 const CONFIG_KEY_ALIASES: &[ConfigKeyAlias] = &[
     ConfigKeyAlias {
+        legacy: &["adaptive_reasoning"],
+        canonical: &["system1"],
+    },
+    ConfigKeyAlias {
         legacy: &["tui", "whimsy"],
         canonical: &["tui", "effects", "starfield"],
     },
@@ -26,6 +30,10 @@ const CONFIG_KEY_ALIASES: &[ConfigKeyAlias] = &[
 
 fn normalize_table_key_aliases(path: &[String], table: &mut TomlMap<String, TomlValue>) {
     'aliases: for alias in CONFIG_KEY_ALIASES {
+        // Preserve conflicting root tables so deserialization rejects the duplicate.
+        if alias.canonical.len() == 1 && table.contains_key(alias.canonical[0]) {
+            continue;
+        }
         // Destinations stay within the legacy key's containing table.
         let Some((legacy_key, table_path)) = alias.legacy.split_last() else {
             continue;
@@ -114,7 +122,12 @@ pub(crate) fn normalize_base_key_aliases(
     if let TomlValue::Table(base) = base
         && let TomlValue::Table(overlay) = overlay
     {
-        normalize_table_key_aliases(path, base);
+        // Root aliases rename entire tables. Keep them in raw edit bases: persisting only
+        // an edited subtree cannot also persist a rename of a different root table.
+        // Effective config bases already use canonical keys from normalized overlays.
+        if !path.is_empty() {
+            normalize_table_key_aliases(path, base);
+        }
         for (key, value) in overlay {
             if let Some(existing) = base.get_mut(key) {
                 path.push(key.clone());

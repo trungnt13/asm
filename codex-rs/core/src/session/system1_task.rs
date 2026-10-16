@@ -6,7 +6,7 @@ use super::step_settings::ResolvedStepSettings;
 use super::turn_context::TurnContext;
 use codex_api::DecisionsClient;
 use codex_protocol::openai_models::ReasoningEffort;
-use codex_protocol::protocol::AdaptiveReasoningError;
+use codex_protocol::protocol::System1Error;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use std::sync::Arc;
 use std::sync::Weak;
@@ -26,7 +26,7 @@ pub(super) enum DecisionTarget {
         session: Weak<Session>,
         generation: u64,
     },
-    Adaptive {
+    System1 {
         session: Weak<Session>,
         turn: Weak<TurnContext>,
         expected: Arc<ResolvedStepSettings>,
@@ -35,7 +35,7 @@ pub(super) enum DecisionTarget {
     },
 }
 
-pub(super) struct AdaptiveDecisionGuard {
+pub(super) struct System1DecisionGuard {
     pub(super) freshness: CancellationToken,
     pub(super) deadline: Instant,
 }
@@ -45,7 +45,7 @@ pub(super) async fn run_decision(
     client: Arc<DecisionsClient>,
     request: DecisionRequest,
     cancellation: CancellationToken,
-    guard: AdaptiveDecisionGuard,
+    guard: System1DecisionGuard,
     target: DecisionTarget,
     mut attempt: Option<DecisionAttempt>,
 ) {
@@ -58,7 +58,7 @@ pub(super) async fn run_decision(
             span.record("kind", "warmup");
             (session.clone(), Some(*generation))
         }
-        DecisionTarget::Adaptive {
+        DecisionTarget::System1 {
             session,
             turn,
             generation,
@@ -78,7 +78,7 @@ pub(super) async fn run_decision(
     tracing::debug!(
         input_bytes = request.input.len(),
         instructions_bytes = request.instructions.len(),
-        "adaptive reasoning request started"
+        "System1 request started"
     );
     let (api, disposition, selected, error) = tokio::select! {
         biased;
@@ -92,29 +92,29 @@ pub(super) async fn run_decision(
                 client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices).await
             }
         ) => match result {
-            Err(_) => (DecisionApiOutcome::Timeout, DecisionDisposition::TargetUnavailable, None, Some(AdaptiveReasoningError::Timeout)),
-            Ok(Err(error)) => (DecisionApiOutcome::Error(error), DecisionDisposition::TargetUnavailable, None, Some(super::adaptive_reasoning::health::classify_error(error))),
+            Err(_) => (DecisionApiOutcome::Timeout, DecisionDisposition::TargetUnavailable, None, Some(System1Error::Timeout)),
+            Ok(Err(error)) => (DecisionApiOutcome::Error(error), DecisionDisposition::TargetUnavailable, None, Some(super::system1::health::classify_error(error))),
             Ok(Ok(selected)) => {
                 tracing::debug!(selected_effort = %selected, latency_ms = started.elapsed().as_millis(),
-                    "adaptive reasoning request completed");
+                    "System1 request completed");
                 let effort = selected.parse::<ReasoningEffort>().ok().filter(|effort|
                     !matches!(effort, ReasoningEffort::Ultra | ReasoningEffort::Persistent)
                 );
                 match &target {
                     DecisionTarget::Warmup { .. } => (DecisionApiOutcome::Success, DecisionDisposition::Warmup, effort, None),
-                    DecisionTarget::Adaptive { turn, expected, task_done, .. } => {
+                    DecisionTarget::System1 { turn, expected, task_done, .. } => {
                         if let (Some(session), Some(turn), Some(effort)) = (session.upgrade(), turn.upgrade(), effort) {
                             let unchanged = expected.effective_reasoning_effort().as_ref() == Some(&effort);
-                            let outcome = session.apply_adaptive_turn_settings(
+                            let outcome = session.apply_system1_turn_settings(
                                 &turn, expected, task_done, &guard, effort.clone(),
                             ).await;
                             tracing::debug!(%effort, applied = outcome == TurnSettingsUpdateOutcome::Applied,
-                                latency_ms = started.elapsed().as_millis(), "adaptive reasoning decision");
+                                latency_ms = started.elapsed().as_millis(), "System1 decision");
                             let (disposition, error) = match outcome {
                                 TurnSettingsUpdateOutcome::Applied => (if unchanged { DecisionDisposition::Unchanged } else { DecisionDisposition::Applied }, None),
-                                TurnSettingsUpdateOutcome::Rejected { .. } => (DecisionDisposition::Rejected, Some(AdaptiveReasoningError::Rejected)),
+                                TurnSettingsUpdateOutcome::Rejected { .. } => (DecisionDisposition::Rejected, Some(System1Error::Rejected)),
                                 TurnSettingsUpdateOutcome::TargetUnavailable => (DecisionDisposition::TargetUnavailable,
-                                    (Instant::now() >= guard.deadline).then_some(AdaptiveReasoningError::Timeout)),
+                                    (Instant::now() >= guard.deadline).then_some(System1Error::Timeout)),
                             };
                             (DecisionApiOutcome::Success, disposition, Some(effort), error)
                         } else {
@@ -130,15 +130,13 @@ pub(super) async fn run_decision(
         && let Some(error) = error
     {
         session
-            .publish_adaptive_reasoning_error(
+            .publish_system1_error(
                 Some(error),
                 generation,
-                Some(
-                    super::adaptive_reasoning::health::AdaptiveDecisionHealthGuard {
-                        freshness: &guard.freshness,
-                        cancellation: &cancellation,
-                    },
-                ),
+                Some(super::system1::health::System1DecisionHealthGuard {
+                    freshness: &guard.freshness,
+                    cancellation: &cancellation,
+                }),
             )
             .await;
     }

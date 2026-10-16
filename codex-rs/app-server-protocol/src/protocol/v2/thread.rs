@@ -32,7 +32,7 @@ pub use codex_protocol::dynamic_tools::DynamicToolNamespaceTool;
 pub use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
-pub use codex_protocol::protocol::AdaptiveReasoningError;
+pub use codex_protocol::protocol::System1Error;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
 use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
@@ -189,14 +189,14 @@ pub struct MockExperimentalMethodResponse {
 pub struct ThreadStartResponse {
     /// Current session-only automatic reasoning mode; never a saved preference.
     #[serde(default)]
-    pub adaptive_reasoning_enabled: bool,
+    pub system1_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
-    pub adaptive_reasoning_revision: u64,
+    pub system1_revision: u64,
     #[serde(default)]
-    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub system1_error: Option<System1Error>,
     #[serde(default)]
-    pub adaptive_reasoning_failure_episode: u64,
+    pub system1_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -247,7 +247,7 @@ impl ThreadStartResponse {
 pub struct ThreadSettingsUpdateParams {
     /// Changes only this live session. Omitted/null preserves the mode.
     #[ts(optional = nullable)]
-    pub adaptive_reasoning_enabled: Option<bool>,
+    pub system1_enabled: Option<bool>,
     pub thread_id: String,
     /// Replace this thread's disabled plugin IDs.
     /// Omitted/null preserves the list; [] clears it.
@@ -313,14 +313,14 @@ pub struct ThreadSettingsUpdateParams {
 pub struct ThreadSettingsUpdateResponse {
     /// Confirms runtime mode after a mode-only update; absent on older servers.
     #[serde(default)]
-    pub adaptive_reasoning_enabled: Option<bool>,
+    pub system1_enabled: Option<bool>,
     /// Revision of the confirmed mode; absent on older servers.
     #[serde(default)]
-    pub adaptive_reasoning_revision: Option<u64>,
+    pub system1_revision: Option<u64>,
     #[serde(default)]
-    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub system1_error: Option<System1Error>,
     #[serde(default)]
-    pub adaptive_reasoning_failure_episode: Option<u64>,
+    pub system1_failure_episode: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
@@ -329,14 +329,14 @@ pub struct ThreadSettingsUpdateResponse {
 pub struct ThreadSettings {
     /// Current session-only automatic reasoning mode; never a saved preference.
     #[serde(default)]
-    pub adaptive_reasoning_enabled: bool,
+    pub system1_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
-    pub adaptive_reasoning_revision: u64,
+    pub system1_revision: u64,
     #[serde(default)]
-    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub system1_error: Option<System1Error>,
     #[serde(default)]
-    pub adaptive_reasoning_failure_episode: u64,
+    pub system1_failure_episode: u64,
     /// Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
     #[serde(default)]
     pub disabled_plugin_ids: Vec<String>,
@@ -363,13 +363,13 @@ pub struct ThreadSettings {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct AdaptiveReasoningUpdatedNotification {
+pub struct System1UpdatedNotification {
     pub thread_id: String,
     pub enabled: bool,
     #[serde(default)]
-    pub adaptive_reasoning_revision: u64,
+    pub system1_revision: u64,
     #[serde(default)]
-    pub error: Option<AdaptiveReasoningError>,
+    pub error: Option<System1Error>,
     #[serde(default)]
     pub failure_episode: u64,
 }
@@ -486,14 +486,14 @@ pub struct ThreadResumeParams {
 pub struct ThreadResumeResponse {
     /// Current session-only automatic reasoning mode; never a saved preference.
     #[serde(default)]
-    pub adaptive_reasoning_enabled: bool,
+    pub system1_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
-    pub adaptive_reasoning_revision: u64,
+    pub system1_revision: u64,
     #[serde(default)]
-    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub system1_error: Option<System1Error>,
     #[serde(default)]
-    pub adaptive_reasoning_failure_episode: u64,
+    pub system1_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -701,14 +701,14 @@ pub struct ThreadForkParams {
 pub struct ThreadForkResponse {
     /// Current session-only automatic reasoning mode; never a saved preference.
     #[serde(default)]
-    pub adaptive_reasoning_enabled: bool,
+    pub system1_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
     #[serde(default)]
-    pub adaptive_reasoning_revision: u64,
+    pub system1_revision: u64,
     #[serde(default)]
-    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+    pub system1_error: Option<System1Error>,
     #[serde(default)]
-    pub adaptive_reasoning_failure_episode: u64,
+    pub system1_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,

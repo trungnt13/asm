@@ -9,10 +9,6 @@
   },
   "description": "Reports captured step effort without changing the thread's saved settings.",
   "properties": {
-    "adaptive": {
-      "description": "Automatic mode is active, including when a decision falls back to current effort.",
-      "type": "boolean"
-    },
     "reasoningEffort": {
       "anyOf": [
         {
@@ -23,6 +19,10 @@
         }
       ]
     },
+    "system1": {
+      "description": "Automatic mode is active, including when a decision falls back to current effort.",
+      "type": "boolean"
+    },
     "threadId": {
       "type": "string"
     },
@@ -31,7 +31,7 @@
     }
   },
   "required": [
-    "adaptive",
+    "system1",
     "threadId",
     "turnId"
   ],

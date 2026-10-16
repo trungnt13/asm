@@ -281,9 +281,11 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 - Preserve direct errors/warnings, exit status, protocol events, saved conversation/tool history, subagent relationships, memory, and operational state. Detached-daemon startup/fatal stderr and Windows sandbox security-audit logs remain separate. Do not suppress them or weaken security. Keep product analytics/account usage unchanged.
 - Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Opt-in `runtime_metrics` uses a manual reader without timer/network exporter when none is configured. No unsolicited session-storage size telemetry scan. Check fork-disabled paths with existing focused tests, not broad upstream retesting.
 
-### Adaptive reasoning
+### System1
 
-Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
+The canonical feature name is System1, configured with `[system1]` and toggled with `/system1`. Accept the former `[adaptive_reasoning]` table when reading existing configuration, including deny-only roles, and former rollout fields when resuming saved sessions. Emit only canonical names. Preserve layer precedence across old and new spellings, but reject both tables in one layer. Before writing canonical settings into a file that still uses the old table, rename that table; reject conflicting writes without changing the file.
+
+Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
@@ -311,21 +313,21 @@ profile together with either legacy `decision_model` or `decision_model_api_env`
 is an error, even if the legacy value matches its default.
 
 ```toml
-[adaptive_reasoning]
+[system1]
 enabled = true
 profile = "jev"
 
-[adaptive_reasoning.profiles.jev]
+[system1.profiles.jev]
 protocol = "typesafe"
 model = "jev-latest"
 api_key_env = "TYPESAFE_API_KEY"
 
-[adaptive_reasoning.profiles.decision_api]
+[system1.profiles.decision_api]
 protocol = "openai"
 model = "gpt-6-luna"
 api_key_env = "DECISION_API_KEY"
 
-[adaptive_reasoning.profiles.local_gateway]
+[system1.profiles.local_gateway]
 protocol = "openai"
 endpoint = "http://127.0.0.1:8080/v1/decisions"
 model = "my-decision-model"
@@ -362,7 +364,7 @@ keep credentials separate from main-model authentication and diagnostics sanitiz
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
 - Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
 - In the shared history-to-request projection, exclude effort updates without harness provenance and keep the last complete envelope in each adjacent update run after filtering. Preserve retained messages, reasoning, tool declarations, and tool results as separators. Do not change stored history or the request-effort pin. This repairs filtered forks and replayed checkpoints without a separate transport workaround. A changed projected tail can lose prefix/cache reuse; let existing incremental-request checks choose full input rather than force a session reset.
-- Turn adaptation off after a successful manual model or effort change. Log the transition. Ordinary turn-start and spawn settings do not turn it off. Use `/adapt` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
+- Turn adaptation off after a successful manual model or effort change. Log the transition. Ordinary turn-start and spawn settings do not turn it off. Use `/system1` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
 - Report runtime mode and its revision at thread attachment and on each transition. Ignore older revisions so delayed notifications cannot restore old mode. Show `<effort>·auto` when adaptation is on without an outstanding error, including startup and the wait before a decision. Show `<effort>·err` after a Decisions error; keep adaptation on and retain current effort. When off, show only effort. Use the baseline before the first captured step. The marker reports runtime health, not a promised effort change. Unsupported steps keep their effort without a Decisions call. Before each eligible main request, report captured effort through `turn/reasoningEffortUpdated`, including fallback steps. Keep mode and captured effort separate; toggles do not change already-running steps.
 - A spawned subagent copies its parent’s runtime mode once at spawn. Later parent toggles do not change that child. Preserve the child’s own mode across live eviction and reload, not backend restarts. Do not apply this rule to internal workers. If the assigned task is encrypted and no readable task is available, log the fallback and keep current effort; never forward ciphertext or guess the task.
 - Retain captured effort and turn identity in live TUI thread snapshots, outside saved history. Restore them after switching threads without accepting stale history settings. Clear them for a new turn or manual settings change.
@@ -380,7 +382,7 @@ accepted decisions by two steps. With eligible steps and no failures, decide bef
 steps 1, 3, 5, ... . Set `decision_every_n_steps = 1` for every eligible step.
 
 ```toml
-[adaptive_reasoning]
+[system1]
 enabled = true
 decision_every_n_turns = 1
 decision_every_n_steps = 2
@@ -527,11 +529,10 @@ allowed_agent_roles = ["reviewer"]
 
 ### Role configuration restrictions
 
-Role TOML files may disable web search with `web_search = "disabled"` and adaptive
-reasoning with `[adaptive_reasoning] enabled = false`. Only explicit disabling is
-applied; omitted fields retain inheritance, including the parent's live adaptive toggle.
-Role settings cannot enable either capability against parent restrictions. Adaptive
-restrictions survive child spawn and reload; other adaptive settings remain inherited.
+Role TOML files may disable web search with `web_search = "disabled"` and System1 with `[system1] enabled = false`. Only explicit disabling is
+applied; omitted fields retain inheritance, including the parent's live System1 toggle.
+Role settings cannot enable either capability against parent restrictions. System1
+restrictions survive child spawn and reload; other System1 settings remain inherited.
 Keep the projected role layer aligned with runtime settings. This does not add support
 for arbitrary role configuration fields or change session authority.
 

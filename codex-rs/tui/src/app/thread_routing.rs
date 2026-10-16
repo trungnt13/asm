@@ -1059,11 +1059,11 @@ impl App {
         {
             return Ok(());
         }
-        if let ServerNotification::AdaptiveReasoningUpdated(mode) = &notification {
-            self.apply_adaptive_reasoning_to_cached_session(
+        if let ServerNotification::System1Updated(mode) = &notification {
+            self.apply_system1_to_cached_session(
                 thread_id,
                 mode.enabled,
-                mode.adaptive_reasoning_revision,
+                mode.system1_revision,
                 mode.error,
                 mode.failure_episode,
             )
@@ -1188,13 +1188,13 @@ impl App {
         }
 
         // Settings snapshots do not belong in the transcript queue: apply them in receive order.
-        if let Some(ServerNotification::AdaptiveReasoningUpdated(mode)) = notification.as_ref()
+        if let Some(ServerNotification::System1Updated(mode)) = notification.as_ref()
             && self.active_thread_id == Some(thread_id)
             && self.chat_widget.thread_id() == Some(thread_id)
         {
-            self.chat_widget.set_adaptive_reasoning_state(
+            self.chat_widget.set_system1_state(
                 mode.enabled,
-                mode.adaptive_reasoning_revision,
+                mode.system1_revision,
                 mode.error,
                 mode.failure_episode,
             );
@@ -1322,10 +1322,10 @@ impl App {
         };
         let mut session = parent_session.or_else(|| self.primary_session_configured.clone())?;
         session.thread_id = thread_id;
-        session.adaptive_reasoning_enabled = false;
-        session.adaptive_reasoning_revision = 0;
-        session.adaptive_reasoning_error = None;
-        session.adaptive_reasoning_failure_episode = 0;
+        session.system1_enabled = false;
+        session.system1_revision = 0;
+        session.system1_error = None;
+        session.system1_failure_episode = 0;
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),

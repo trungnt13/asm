@@ -1066,13 +1066,13 @@ pub struct Config {
     /// Value to use for `reasoning.effort` when making a request using the
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
-    pub adaptive_reasoning: codex_config::AdaptiveReasoningConfig,
+    pub system1: codex_config::System1Config,
     /// Retains role restrictions across live-toggle inheritance and child reloads.
-    pub(crate) role_adaptive_reasoning_disabled: bool,
+    pub(crate) role_system1_disabled: bool,
     /// Runtime-only revision seed when an evicted child session is reloaded.
-    pub adaptive_reasoning_initial_revision: u64,
-    pub adaptive_reasoning_initial_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
-    pub adaptive_reasoning_initial_failure_episode: u64,
+    pub system1_initial_revision: u64,
+    pub system1_initial_error: Option<codex_protocol::protocol::System1Error>,
+    pub system1_initial_failure_episode: u64,
     /// Optional Plan-mode-specific reasoning effort override used by the TUI.
     ///
     /// When unset, Plan mode uses the built-in Plan preset default (currently
@@ -3556,17 +3556,17 @@ impl Config {
             feature_requirements,
             &mut startup_warnings,
         )?;
-        let adaptive_reasoning = cfg.adaptive_reasoning.clone().unwrap_or_default();
-        adaptive_reasoning
+        let system1 = cfg.system1.clone().unwrap_or_default();
+        system1
             .validate()
             .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
-        if adaptive_reasoning.enabled
+        if system1.enabled
             && (!features.enabled(Feature::ReasoningEffortOverride)
                 || !features.enabled(Feature::StepModelSwitching))
         {
             return Err(std::io::Error::new(
                 ErrorKind::InvalidInput,
-                "adaptive_reasoning.enabled requires features.reasoning_effort_override and features.step_model_switching",
+                "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
             ));
         }
         let mcp_enterprise_managed_auth = McpEnterpriseManagedAuthConfig::resolve(
@@ -4667,11 +4667,11 @@ impl Config {
                 .and_then(|auto_review| auto_review.circuit_break_action)
                 .unwrap_or_default(),
             model_reasoning_effort: cfg.model_reasoning_effort,
-            adaptive_reasoning,
-            role_adaptive_reasoning_disabled: false,
-            adaptive_reasoning_initial_revision: 0,
-            adaptive_reasoning_initial_error: None,
-            adaptive_reasoning_initial_failure_episode: 0,
+            system1,
+            role_system1_disabled: false,
+            system1_initial_revision: 0,
+            system1_initial_error: None,
+            system1_initial_failure_episode: 0,
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_catalog,
