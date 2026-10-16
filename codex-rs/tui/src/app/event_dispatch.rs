@@ -466,8 +466,11 @@ impl App {
                 )
                 .await;
             }
-            AppEvent::SetAdaptiveReasoning { thread_id, action } => {
-                self.change_adaptive_reasoning(app_server, thread_id, action).await;
+            AppEvent::ShowSystem1Status { thread_id } => {
+                self.show_system1_status(app_server, thread_id).await;
+            }
+            AppEvent::SetSystem1 { thread_id, action } => {
+                self.change_system1(app_server, thread_id, action).await;
             }
             AppEvent::RawOutputModeChanged { enabled } => {
                 self.apply_raw_output_mode(tui, enabled, /*notify*/ false);

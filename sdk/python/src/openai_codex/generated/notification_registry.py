@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from .v2_all import AccountLoginCompletedNotification
 from .v2_all import AccountRateLimitsUpdatedNotification
 from .v2_all import AccountUpdatedNotification
-from .v2_all import AdaptiveReasoningUpdatedNotification
 from .v2_all import AgentMessageDeltaNotification
 from .v2_all import AppListUpdatedNotification
 from .v2_all import AuthRecoveryNotification
@@ -55,6 +54,7 @@ from .v2_all import RemoteControlStatusChangedNotification
 from .v2_all import ServerRequestResolvedNotification
 from .v2_all import SkillsChangedNotification
 from .v2_all import StrictReviewRequiredNotification
+from .v2_all import System1UpdatedNotification
 from .v2_all import TerminalInteractionNotification
 from .v2_all import ThreadArchivedNotification
 from .v2_all import ThreadAttachmentUpdatedNotification
@@ -97,7 +97,6 @@ KnownNotificationPayload: TypeAlias = (
     AccountLoginCompletedNotification
     | AccountRateLimitsUpdatedNotification
     | AccountUpdatedNotification
-    | AdaptiveReasoningUpdatedNotification
     | AgentMessageDeltaNotification
     | AppListUpdatedNotification
     | AuthRecoveryNotification
@@ -142,6 +141,7 @@ KnownNotificationPayload: TypeAlias = (
     | ServerRequestResolvedNotification
     | SkillsChangedNotification
     | StrictReviewRequiredNotification
+    | System1UpdatedNotification
     | TerminalInteractionNotification
     | ThreadArchivedNotification
     | ThreadAttachmentUpdatedNotification
@@ -228,7 +228,6 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "remoteControl/status/changed": RemoteControlStatusChangedNotification,
     "serverRequest/resolved": ServerRequestResolvedNotification,
     "skills/changed": SkillsChangedNotification,
-    "thread/adaptiveReasoningUpdated": AdaptiveReasoningUpdatedNotification,
     "thread/archived": ThreadArchivedNotification,
     "thread/attachment/updated": ThreadAttachmentUpdatedNotification,
     "thread/closed": ThreadClosedNotification,
@@ -258,6 +257,7 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "thread/settings/updated": ThreadSettingsUpdatedNotification,
     "thread/started": ThreadStartedNotification,
     "thread/status/changed": ThreadStatusChangedNotification,
+    "thread/system1Updated": System1UpdatedNotification,
     "thread/tokenUsage/updated": ThreadTokenUsageUpdatedNotification,
     "thread/unarchived": ThreadUnarchivedNotification,
     "turn/completed": TurnCompletedNotification,

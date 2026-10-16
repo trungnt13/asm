@@ -573,7 +573,7 @@ pub struct ReasoningEffortUpdatedNotification {
     pub turn_id: String,
     pub reasoning_effort: Option<ReasoningEffort>,
     /// Automatic mode is active, including when a decision falls back to current effort.
-    pub adaptive: bool,
+    pub system1: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

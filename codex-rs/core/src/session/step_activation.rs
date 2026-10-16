@@ -231,28 +231,28 @@ impl Session {
         let manual_reasoning = update.model.is_some() || update.effort.is_some();
         let outcome = self
             .apply_turn_settings_locked(
-                turn_id, update, /*expected_task_done*/ None, /*adaptive_guard*/ None,
+                turn_id, update, /*expected_task_done*/ None, /*system1_guard*/ None,
             )
             .await;
         if manual_reasoning && outcome == TurnSettingsUpdateOutcome::Applied {
-            self.pause_adaptive_reasoning().await;
+            self.pause_system1().await;
         }
         outcome
     }
 
     #[tracing::instrument(skip_all)]
-    pub(super) async fn apply_adaptive_turn_settings(
+    pub(super) async fn apply_system1_turn_settings(
         &self,
         turn: &TurnContext,
         expected: &Arc<ResolvedStepSettings>,
         expected_task_done: &Arc<tokio::sync::Notify>,
-        guard: &super::adaptive_reasoning_task::AdaptiveDecisionGuard,
+        guard: &super::system1_task::System1DecisionGuard,
         effort: codex_protocol::openai_models::ReasoningEffort,
     ) -> TurnSettingsUpdateOutcome {
         let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
-        if self.adaptive_reasoning_paused()
+        if self.system1_paused()
             || guard.freshness.is_cancelled()
             || tokio::time::Instant::now() >= guard.deadline
             || !Arc::ptr_eq(&turn.next_step_settings.load_full(), expected)
@@ -279,8 +279,8 @@ impl Session {
         .await
         .unwrap_or(TurnSettingsUpdateOutcome::TargetUnavailable);
         if outcome == TurnSettingsUpdateOutcome::Applied {
-            self.accept_adaptive_decision(turn);
-            self.publish_adaptive_reasoning_error(
+            self.accept_system1_decision(turn);
+            self.publish_system1_error(
                 /*error*/ None, /*generation*/ None, /*guard*/ None,
             )
             .await;
@@ -298,7 +298,7 @@ impl Session {
         turn_id: &str,
         update: TurnSettingsUpdate,
         expected_task_done: Option<&Arc<tokio::sync::Notify>>,
-        adaptive_guard: Option<&super::adaptive_reasoning_task::AdaptiveDecisionGuard>,
+        system1_guard: Option<&super::system1_task::System1DecisionGuard>,
     ) -> TurnSettingsUpdateOutcome {
         let updates_model_settings = update.model.is_some()
             || update.effort.is_some()
@@ -403,7 +403,7 @@ impl Session {
         // safety checks together with applying the update under state and active_turn; no model
         // lookup or other preparation runs under these locks.
         let state = self.state.lock().await;
-        if adaptive_guard.is_some_and(|guard| {
+        if system1_guard.is_some_and(|guard| {
             state.shutting_down
                 || guard.freshness.is_cancelled()
                 || tokio::time::Instant::now() >= guard.deadline

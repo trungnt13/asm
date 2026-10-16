@@ -83,18 +83,18 @@ impl App {
                 // thread-scoped state from the currently active session.
                 session.collaboration_mode = None;
                 session.daybreak_enabled = false;
-                session.adaptive_reasoning_enabled = false;
-                session.adaptive_reasoning_revision = 0;
-                session.adaptive_reasoning_error = None;
-                session.adaptive_reasoning_failure_episode = 0;
+                session.system1_enabled = false;
+                session.system1_revision = 0;
+                session.system1_error = None;
+                session.system1_failure_episode = 0;
             }
             session
         } else {
             ThreadSessionState {
-                adaptive_reasoning_enabled: false,
-                adaptive_reasoning_revision: 0,
-                adaptive_reasoning_error: None,
-                adaptive_reasoning_failure_episode: 0,
+                system1_enabled: false,
+                system1_revision: 0,
+                system1_error: None,
+                system1_failure_episode: 0,
                 thread_source: None,
                 daybreak_enabled: false,
                 windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -183,10 +183,10 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
-            adaptive_reasoning_enabled: false,
-            adaptive_reasoning_revision: 0,
-            adaptive_reasoning_error: None,
-            adaptive_reasoning_failure_episode: 0,
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

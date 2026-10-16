@@ -4290,15 +4290,13 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     chat.thread_id = Some(thread_id);
     chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
     chat.handle_server_notification(
-        ServerNotification::AdaptiveReasoningUpdated(
-            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
-                thread_id: thread_id.to_string(),
-                enabled: true,
-                adaptive_reasoning_revision: 5,
-                error: None,
-                failure_episode: 0,
-            },
-        ),
+        ServerNotification::System1Updated(codex_app_server_protocol::System1UpdatedNotification {
+            thread_id: thread_id.to_string(),
+            enabled: true,
+            system1_revision: 5,
+            error: None,
+            failure_episode: 0,
+        }),
         /*replay_kind*/ None,
     );
     chat.handle_server_notification(
@@ -4307,15 +4305,15 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
                 thread_id: thread_id.to_string(),
                 turn_id: "captured-turn".to_string(),
                 reasoning_effort: Some(ReasoningEffortConfig::Low),
-                adaptive: true,
+                system1: true,
             },
         ),
         /*replay_kind*/ None,
     );
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
-        .expect("draw adaptive footer");
-    let adaptive_footer = normalized_backend_snapshot(terminal.backend());
+        .expect("draw system1 footer");
+    let system1_footer = normalized_backend_snapshot(terminal.backend());
     chat.add_status_output(
         /*refreshing_rate_limits*/ false, /*request_id*/ None,
     );
@@ -4331,15 +4329,13 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
         .collect::<Vec<_>>()
         .join("\n");
     chat.handle_server_notification(
-        ServerNotification::AdaptiveReasoningUpdated(
-            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
-                thread_id: thread_id.to_string(),
-                enabled: true,
-                adaptive_reasoning_revision: 6,
-                error: Some(codex_protocol::protocol::AdaptiveReasoningError::Credentials),
-                failure_episode: 1,
-            },
-        ),
+        ServerNotification::System1Updated(codex_app_server_protocol::System1UpdatedNotification {
+            thread_id: thread_id.to_string(),
+            enabled: true,
+            system1_revision: 6,
+            error: Some(codex_protocol::protocol::System1Error::Credentials),
+            failure_episode: 1,
+        }),
         /*replay_kind*/ None,
     );
     terminal
@@ -4357,15 +4353,13 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
         .join("\n");
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
     chat.handle_server_notification(
-        ServerNotification::AdaptiveReasoningUpdated(
-            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
-                thread_id: thread_id.to_string(),
-                enabled: false,
-                adaptive_reasoning_revision: 7,
-                error: None,
-                failure_episode: 0,
-            },
-        ),
+        ServerNotification::System1Updated(codex_app_server_protocol::System1UpdatedNotification {
+            thread_id: thread_id.to_string(),
+            enabled: false,
+            system1_revision: 7,
+            error: None,
+            failure_episode: 0,
+        }),
         /*replay_kind*/ None,
     );
     let transitions = lines
@@ -4376,16 +4370,16 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
                 .flatten()
                 .map(|line| line.to_string()),
         )
-        .filter(|line| line.contains("Adaptive reasoning turned"))
+        .filter(|line| line.contains("System1 turned"))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(transitions.contains("Adaptive reasoning turned on."));
-    assert!(transitions.contains("Adaptive reasoning turned off."));
-    assert!(status.contains("low (adaptive; baseline medium)"));
+    assert!(transitions.contains("System1 turned on."));
+    assert!(transitions.contains("System1 turned off."));
+    assert!(status.contains("low (system1; baseline medium)"));
     assert_chatwidget_snapshot!(
         "status_line_model_with_reasoning_plan_mode_footer",
         format!(
-            "{baseline_footer}\n\nCaptured adaptive step:\n{adaptive_footer}\n\nApplied status:\n{status}\n\nError footer:\n{error_footer}\n\nError details:\n{error_lines}\n\nMode transitions:\n{transitions}"
+            "{baseline_footer}\n\nCaptured System1 step:\n{system1_footer}\n\nApplied status:\n{status}\n\nError footer:\n{error_footer}\n\nError details:\n{error_lines}\n\nMode transitions:\n{transitions}"
         )
     );
 }
@@ -4602,10 +4596,10 @@ async fn session_configured_clears_goal_status_footer() {
 
     let rollout_file = NamedTempFile::new().unwrap();
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
-        adaptive_reasoning_enabled: false,
-        adaptive_reasoning_revision: 0,
-        adaptive_reasoning_error: None,
-        adaptive_reasoning_failure_episode: 0,
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

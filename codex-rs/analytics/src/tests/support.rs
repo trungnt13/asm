@@ -145,10 +145,10 @@ pub(super) fn sample_thread_start_response(
     model: &str,
 ) -> ClientResponsePayload {
     ClientResponsePayload::ThreadStart(ThreadStartResponse {
-        adaptive_reasoning_enabled: false,
-        adaptive_reasoning_revision: 0,
-        adaptive_reasoning_error: None,
-        adaptive_reasoning_failure_episode: 0,
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: sample_thread_with_metadata(
             thread_id,
@@ -215,10 +215,10 @@ pub(super) fn sample_thread_resume_response_with_source(
     parent_thread_id: Option<String>,
 ) -> ClientResponsePayload {
     ClientResponsePayload::ThreadResume(ThreadResumeResponse {
-        adaptive_reasoning_enabled: false,
-        adaptive_reasoning_revision: 0,
-        adaptive_reasoning_error: None,
-        adaptive_reasoning_failure_episode: 0,
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: sample_thread_with_metadata(
             thread_id,

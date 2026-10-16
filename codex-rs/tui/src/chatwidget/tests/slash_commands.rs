@@ -3777,17 +3777,17 @@ async fn raw_slash_command_toggles_and_accepts_on_off_args() {
     );
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.dispatch_command(SlashCommand::Adapt);
-    assert!(!chat.adaptive_reasoning_enabled());
+    chat.dispatch_command(SlashCommand::System1);
+    assert!(!chat.system1_enabled());
     let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-    assert!(events.iter().any(|event| matches!(event, AppEvent::SetAdaptiveReasoning { thread_id: id, action: crate::app_event::AdaptiveReasoningAction::Toggle } if *id == thread_id)));
+    assert!(events.iter().any(|event| matches!(event, AppEvent::SetSystem1 { thread_id: id, action: crate::app_event::System1Action::Toggle } if *id == thread_id)));
     for (args, expected) in [
-        ("on", crate::app_event::AdaptiveReasoningAction::Enable),
-        ("off", crate::app_event::AdaptiveReasoningAction::Disable),
+        ("on", crate::app_event::System1Action::Enable),
+        ("off", crate::app_event::System1Action::Disable),
     ] {
-        chat.dispatch_command_with_args(SlashCommand::Adapt, args.to_string(), Vec::new());
+        chat.dispatch_command_with_args(SlashCommand::System1, args.to_string(), Vec::new());
         let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
-        assert!(events.iter().any(|event| matches!(event, AppEvent::SetAdaptiveReasoning { thread_id: id, action } if *id == thread_id && *action == expected)));
+        assert!(events.iter().any(|event| matches!(event, AppEvent::SetSystem1 { thread_id: id, action } if *id == thread_id && *action == expected)));
     }
 }
 

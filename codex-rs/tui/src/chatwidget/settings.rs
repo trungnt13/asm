@@ -542,11 +542,11 @@ impl ChatWidget {
         settings.collaboration_mode.settings.model = settings.model;
         settings.collaboration_mode.settings.reasoning_effort = settings.effort;
         self.set_effective_collaboration_mode(settings.collaboration_mode);
-        self.set_adaptive_reasoning_state(
-            settings.adaptive_reasoning_enabled,
-            settings.adaptive_reasoning_revision,
-            settings.adaptive_reasoning_error,
-            settings.adaptive_reasoning_failure_episode,
+        self.set_system1_state(
+            settings.system1_enabled,
+            settings.system1_revision,
+            settings.system1_error,
+            settings.system1_failure_episode,
         );
         self.refresh_effective_service_tier();
         self.refresh_status_surfaces();
@@ -600,8 +600,7 @@ impl ChatWidget {
             || current.reasoning_effort() != mode.reasoning_effort()
         {
             self.status_state.captured_step_reasoning = None;
-            self.status_state.suppressed_adaptive_turn_id =
-                self.turn_lifecycle.last_turn_id.clone();
+            self.status_state.suppressed_system1_turn_id = self.turn_lifecycle.last_turn_id.clone();
         }
         let mode_kind = mode.mode;
         let settings = mode.settings;

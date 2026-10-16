@@ -308,7 +308,7 @@ pub(crate) struct AgentPickerThreadRefresh {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AdaptiveReasoningAction {
+pub(crate) enum System1Action {
     Toggle,
     Enable,
     Disable,
@@ -1266,9 +1266,13 @@ pub(crate) enum AppEvent {
     /// Update the current reasoning effort in the running app and widget.
     UpdateReasoningEffort(Option<ReasoningEffort>),
 
-    SetAdaptiveReasoning {
+    ShowSystem1Status {
         thread_id: ThreadId,
-        action: AdaptiveReasoningAction,
+    },
+
+    SetSystem1 {
+        thread_id: ThreadId,
+        action: System1Action,
     },
 
     /// Change Reserve effort only on the task that opened the picker, without saving defaults.

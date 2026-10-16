@@ -1258,7 +1258,7 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         .features
         .enable(Feature::ReasoningEffortOverride)
         .unwrap();
-    config.adaptive_reasoning.decision_model_api_env =
+    config.system1.decision_model_api_env =
         Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
     config.multi_agent_v2.max_concurrent_threads_per_session = 3;
     config.permissions.allow_login_shell = true;
@@ -1316,18 +1316,18 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     let inherited_instructions = parent_thread.session.inherited_instructions().await;
     assert!(inherited_instructions.user.is_some());
     assert!(inherited_instructions.thread.is_some());
-    let born_adaptive = matches!(route, V2ReloadRoute::Sender);
+    let born_system1 = matches!(route, V2ReloadRoute::Sender);
     parent_thread
         .session
-        .set_adaptive_reasoning_enabled(born_adaptive)
+        .set_system1_enabled(born_system1)
         .await
         .unwrap();
     let mut child_config = harness.config.clone();
-    child_config.adaptive_reasoning.enabled = !born_adaptive;
-    child_config.adaptive_reasoning_initial_revision = 999;
-    child_config.adaptive_reasoning_initial_error =
-        Some(codex_protocol::protocol::AdaptiveReasoningError::InvalidResponse);
-    child_config.adaptive_reasoning_initial_failure_episode = 999;
+    child_config.system1.enabled = !born_system1;
+    child_config.system1_initial_revision = 999;
+    child_config.system1_initial_error =
+        Some(codex_protocol::protocol::System1Error::InvalidResponse);
+    child_config.system1_initial_failure_episode = 999;
     child_config.model = Some("gpt-6.1-sol".to_string());
     let spawned_agent =
         spawn_v2_reload_test_child(&control, child_config, &parent_thread, "worker").await;
@@ -1349,53 +1349,44 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         .await
         .expect("child rollout should persist with v2 metadata");
     assert_eq!(
-        child_thread
-            .config_snapshot()
-            .await
-            .adaptive_reasoning_enabled,
-        born_adaptive
+        child_thread.config_snapshot().await.system1_enabled,
+        born_system1
     );
     parent_thread
         .session
-        .set_adaptive_reasoning_enabled(!born_adaptive)
+        .set_system1_enabled(!born_system1)
         .await
         .unwrap();
     assert_eq!(
-        child_thread
-            .config_snapshot()
-            .await
-            .adaptive_reasoning_revision,
-        u64::from(born_adaptive),
+        child_thread.config_snapshot().await.system1_revision,
+        u64::from(born_system1),
         "fresh child owns only its startup-health revision, never parent/config revision"
     );
     child_thread
         .session
-        .set_adaptive_reasoning_enabled(!born_adaptive)
+        .set_system1_enabled(!born_system1)
         .await
         .unwrap();
     child_thread
         .session
-        .set_adaptive_reasoning_enabled(born_adaptive)
+        .set_system1_enabled(born_system1)
         .await
         .unwrap();
-    let born_revision = child_thread
-        .config_snapshot()
-        .await
-        .adaptive_reasoning_revision;
+    let born_revision = child_thread.config_snapshot().await.system1_revision;
     assert_eq!(
         born_revision,
-        2 + u64::from(born_adaptive),
+        2 + u64::from(born_system1),
         "child owns its mode and health revision before eviction"
     );
     let child_health = child_thread.config_snapshot().await;
     assert_eq!(
         (
-            child_health.adaptive_reasoning_error,
-            child_health.adaptive_reasoning_failure_episode
+            child_health.system1_error,
+            child_health.system1_failure_episode
         ),
         (
-            born_adaptive.then_some(codex_protocol::protocol::AdaptiveReasoningError::Credentials),
-            u64::from(born_adaptive)
+            born_system1.then_some(codex_protocol::protocol::System1Error::Credentials),
+            u64::from(born_system1)
         )
     );
     child_thread.session.mark_interrupted();
@@ -1518,16 +1509,16 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     let restored_health = reloaded_child.config_snapshot().await;
     assert_eq!(
         (
-            restored_health.adaptive_reasoning_enabled,
-            restored_health.adaptive_reasoning_revision,
-            restored_health.adaptive_reasoning_error,
-            restored_health.adaptive_reasoning_failure_episode
+            restored_health.system1_enabled,
+            restored_health.system1_revision,
+            restored_health.system1_error,
+            restored_health.system1_failure_episode
         ),
         (
-            born_adaptive,
+            born_system1,
             born_revision,
-            child_health.adaptive_reasoning_error,
-            child_health.adaptive_reasoning_failure_episode
+            child_health.system1_error,
+            child_health.system1_failure_episode
         ),
         "reload retains this child's own mode and failure episode"
     );
@@ -2208,19 +2199,19 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         .features
         .enable(Feature::ReasoningEffortOverride)
         .unwrap();
-    config.adaptive_reasoning.decision_model_api_env =
+    config.system1.decision_model_api_env =
         Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
     let harness = AgentControlHarness::new_with_config(home, config).await;
     let (parent_id, parent) = harness.start_thread().await;
     parent
         .session
-        .set_adaptive_reasoning_enabled(/*enabled*/ true)
+        .set_system1_enabled(/*enabled*/ true)
         .await
         .unwrap();
     let mut child_config = harness.config.clone();
     child_config.model = Some("gpt-5.5".to_string());
     child_config.model_reasoning_effort = selected_effort.clone();
-    child_config.adaptive_reasoning.enabled = false;
+    child_config.system1.enabled = false;
     let source = thread_spawn_source(
         parent_id,
         &parent.session_source,
@@ -2258,20 +2249,20 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         ),
         (Some(reported_effort), selected_effort),
     );
-    assert!(snapshot.adaptive_reasoning_enabled);
+    assert!(snapshot.system1_enabled);
     parent
         .session
-        .set_adaptive_reasoning_enabled(/*enabled*/ false)
+        .set_system1_enabled(/*enabled*/ false)
         .await
         .unwrap();
-    assert!(child.config_snapshot().await.adaptive_reasoning_enabled);
+    assert!(child.config_snapshot().await.system1_enabled);
     let mut second_config = harness.config.clone();
-    second_config.adaptive_reasoning.enabled = true;
+    second_config.system1.enabled = true;
     let second_id = harness
         .control
         .spawn_agent(
             second_config,
-            text_input("born with adaptive off"),
+            text_input("born with system1 off"),
             Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
                 parent_thread_id: parent_id,
                 depth: 1,
@@ -2283,13 +2274,13 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         .await
         .expect("spawn second child");
     let second = harness.manager.get_thread(second_id).await.unwrap();
-    assert!(!second.config_snapshot().await.adaptive_reasoning_enabled);
+    assert!(!second.config_snapshot().await.system1_enabled);
     parent
         .session
-        .set_adaptive_reasoning_enabled(/*enabled*/ true)
+        .set_system1_enabled(/*enabled*/ true)
         .await
         .unwrap();
-    assert!(!second.config_snapshot().await.adaptive_reasoning_enabled);
+    assert!(!second.config_snapshot().await.system1_enabled);
     second
         .shutdown_and_wait()
         .await

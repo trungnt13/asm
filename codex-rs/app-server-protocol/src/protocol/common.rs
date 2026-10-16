@@ -855,6 +855,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadLoadedListResponse,
     },
+    ThreadSystem1StatsRead => "thread/system1Stats/read" {
+        params: v2::ThreadSystem1StatsReadParams,
+        serialization: None,
+        response: v2::ThreadSystem1StatsReadResponse,
+    },
     ThreadRead => "thread/read" {
         params: v2::ThreadReadParams,
         serialization: thread_id(params.thread_id),
@@ -1979,8 +1984,8 @@ server_notification_definitions! {
     ThreadTokenUsageUpdated => "thread/tokenUsage/updated" (v2::ThreadTokenUsageUpdatedNotification),
     TurnStarted => "turn/started" (v2::TurnStartedNotification),
     ReasoningEffortUpdated => "turn/reasoningEffortUpdated" (v2::ReasoningEffortUpdatedNotification),
-    #[experimental("thread/adaptiveReasoningUpdated")]
-    AdaptiveReasoningUpdated => "thread/adaptiveReasoningUpdated" (v2::AdaptiveReasoningUpdatedNotification),
+    #[experimental("thread/system1Updated")]
+    System1Updated => "thread/system1Updated" (v2::System1UpdatedNotification),
     HookStarted => "hook/started" (v2::HookStartedNotification),
     TurnCompleted => "turn/completed" (v2::TurnCompletedNotification),
     HookCompleted => "hook/completed" (v2::HookCompletedNotification),
@@ -3241,10 +3246,10 @@ mod tests {
         let response = ClientResponse::ThreadStart {
             request_id: RequestId::Integer(7),
             response: v2::ThreadStartResponse {
-                adaptive_reasoning_enabled: false,
-                adaptive_reasoning_revision: 0,
-                adaptive_reasoning_error: None,
-                adaptive_reasoning_failure_episode: 0,
+                system1_enabled: false,
+                system1_revision: 0,
+                system1_error: None,
+                system1_failure_episode: 0,
                 disabled_plugin_ids: Vec::new(),
                 thread: v2::Thread {
                     originator: None,
@@ -3342,10 +3347,10 @@ mod tests {
                 "method": "thread/start",
                 "id": 7,
                 "response": {
-                    "adaptiveReasoningEnabled": false,
-                    "adaptiveReasoningRevision": 0,
-                    "adaptiveReasoningError": null,
-                    "adaptiveReasoningFailureEpisode": 0,
+                    "system1Enabled": false,
+                    "system1Revision": 0,
+                    "system1Error": null,
+                    "system1FailureEpisode": 0,
                     "thread": expected_thread,
                     "model": "gpt-5",
                     "modelProvider": "openai",
@@ -4526,10 +4531,10 @@ mod tests {
             ServerNotification::ThreadSettingsUpdated(v2::ThreadSettingsUpdatedNotification {
                 thread_id: "thr_123".to_string(),
                 thread_settings: v2::ThreadSettings {
-                    adaptive_reasoning_enabled: false,
-                    adaptive_reasoning_revision: 0,
-                    adaptive_reasoning_error: None,
-                    adaptive_reasoning_failure_episode: 0,
+                    system1_enabled: false,
+                    system1_revision: 0,
+                    system1_error: None,
+                    system1_failure_episode: 0,
                     disabled_plugin_ids: Vec::new(),
                     cwd: absolute_path("/tmp/repo"),
                     approval_policy: v2::AskForApproval::Never,

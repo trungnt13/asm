@@ -430,24 +430,24 @@ consolidation_reasoning_effort = "high"
         }
     );
 
-    let adaptive = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[adaptive_reasoning]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\n";
-    let adaptive_config = Config::load_from_base_config_with_overrides(
-        toml::from_str(adaptive).expect("adaptive settings should parse"),
+    let system1 = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[system1]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\n";
+    let system1_config = Config::load_from_base_config_with_overrides(
+        toml::from_str(system1).expect("system1 settings should parse"),
         ConfigOverrides::default(),
         tempdir().expect("tempdir").abs(),
     )
     .await
-    .expect("enabled adaptive settings should load with both features");
+    .expect("enabled system1 settings should load with both features");
     assert_eq!(
-        adaptive_config.adaptive_reasoning,
-        codex_config::AdaptiveReasoningConfig {
+        system1_config.system1,
+        codex_config::System1Config {
             enabled: true,
             decision_model_api_env: Some("CUSTOM_DECISION_KEY".to_string()),
             min_effort: ReasoningEffort::Minimal,
             max_effort: ReasoningEffort::High,
-            update_on: vec![codex_config::AdaptiveReasoningTrigger::ToolResult],
+            update_on: vec![codex_config::System1Trigger::ToolResult],
             rubric_instructions: Some("Select effort using my policy.".to_string()),
-            ..config.adaptive_reasoning.clone()
+            ..config.system1.clone()
         }
     );
     for (patch, expected) in [
@@ -469,26 +469,26 @@ consolidation_reasoning_effort = "high"
         "4096 UTF-8 bytes",
     )]) {
         let error = Config::load_from_base_config_with_overrides(
-            toml::from_str(&format!("[adaptive_reasoning]\n{patch}"))
+            toml::from_str(&format!("[system1]\n{patch}"))
                 .expect("invalid bounds still deserialize"),
             ConfigOverrides::default(),
             tempdir().expect("tempdir").abs(),
         )
         .await
-        .expect_err("invalid adaptive settings should fail config loading");
+        .expect_err("invalid system1 settings should fail config loading");
         assert!(error.to_string().contains(expected), "{patch}: {error}");
     }
     for missing in ["reasoning_effort_override", "step_model_switching"] {
         let error = Config::load_from_base_config_with_overrides(
             toml::from_str(
-                &adaptive.replace(&format!("{missing} = true"), &format!("{missing} = false")),
+                &system1.replace(&format!("{missing} = true"), &format!("{missing} = false")),
             )
             .expect("feature settings should parse"),
             ConfigOverrides::default(),
             tempdir().expect("tempdir").abs(),
         )
         .await
-        .expect_err("adaptive reasoning requires both feature gates");
+        .expect_err("System1 requires both feature gates");
         assert!(error.to_string().contains(
             "requires features.reasoning_effort_override and features.step_model_switching"
         ));

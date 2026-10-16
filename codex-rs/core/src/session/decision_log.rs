@@ -90,7 +90,7 @@ impl FailureNotice {
                 session.send_event_raw(Event {
                     id: String::new(),
                     msg: EventMsg::Warning(WarningEvent {
-                        message: "Decisions diagnostic logging lost records or could not write decision.jsonl. Adaptive reasoning is unchanged.".to_owned(),
+                        message: "Decisions diagnostic logging lost records or could not write decision.jsonl. System1 is unchanged.".to_owned(),
                     }),
                 }).await;
             }
@@ -307,7 +307,7 @@ fn open_private_log(log_dir: &Path, thread_id: ThreadId) -> io::Result<File> {
     directories.create(log_dir)?;
     // The configured root is trusted; canonicalize normal OS aliases such as macOS /var.
     // Reject links only in the private directories and file owned by this logger.
-    let parent = log_dir.canonicalize()?.join("adaptive-reasoning");
+    let parent = log_dir.canonicalize()?.join("system1");
     let directory = parent.join(thread_id.to_string());
     for child in [&parent, &directory] {
         match std::fs::symlink_metadata(child) {

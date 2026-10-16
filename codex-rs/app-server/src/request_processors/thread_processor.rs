@@ -4,6 +4,9 @@ mod daemon_continuation;
 #[path = "daemon_snapshot.rs"]
 mod daemon_snapshot;
 
+#[path = "system1_stats.rs"]
+mod system1_stats;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -1634,10 +1637,10 @@ impl ThreadRequestProcessor {
         let thread_originator = config_snapshot.originator.clone();
 
         let response = ThreadStartResponse {
-            adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
-            adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
-            adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
-            adaptive_reasoning_failure_episode: config_snapshot.adaptive_reasoning_failure_episode,
+            system1_enabled: config_snapshot.system1_enabled,
+            system1_revision: config_snapshot.system1_revision,
+            system1_error: config_snapshot.system1_error,
+            system1_failure_episode: config_snapshot.system1_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model,
@@ -4425,11 +4428,10 @@ impl ThreadRequestProcessor {
 
                 let thread_originator = config_snapshot.originator.clone();
                 let response = ThreadResumeResponse {
-                    adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
-                    adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
-                    adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
-                    adaptive_reasoning_failure_episode: config_snapshot
-                        .adaptive_reasoning_failure_episode,
+                    system1_enabled: config_snapshot.system1_enabled,
+                    system1_revision: config_snapshot.system1_revision,
+                    system1_error: config_snapshot.system1_error,
+                    system1_failure_episode: config_snapshot.system1_failure_episode,
                     thread,
                     disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
                     model: session_configured.model,
@@ -5773,10 +5775,10 @@ impl ThreadRequestProcessor {
             thread_response_active_permission_profile(config_snapshot.active_permission_profile);
         let thread_originator = config_snapshot.originator.clone();
         let response = ThreadForkResponse {
-            adaptive_reasoning_enabled: config_snapshot.adaptive_reasoning_enabled,
-            adaptive_reasoning_revision: config_snapshot.adaptive_reasoning_revision,
-            adaptive_reasoning_error: config_snapshot.adaptive_reasoning_error,
-            adaptive_reasoning_failure_episode: config_snapshot.adaptive_reasoning_failure_episode,
+            system1_enabled: config_snapshot.system1_enabled,
+            system1_revision: config_snapshot.system1_revision,
+            system1_error: config_snapshot.system1_error,
+            system1_failure_episode: config_snapshot.system1_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),

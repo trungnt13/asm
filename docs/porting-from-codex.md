@@ -281,9 +281,13 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 - Preserve direct errors/warnings, exit status, protocol events, saved conversation/tool history, subagent relationships, memory, and operational state. Detached-daemon startup/fatal stderr and Windows sandbox security-audit logs remain separate. Do not suppress them or weaken security. Keep product analytics/account usage unchanged.
 - Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Opt-in `runtime_metrics` uses a manual reader without timer/network exporter when none is configured. No unsolicited session-storage size telemetry scan. Check fork-disabled paths with existing focused tests, not broad upstream retesting.
 
-### Adaptive reasoning
+### System1
 
-Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
+Task and steering ingestion precedes skipped checks and invalidates stale decisions; bounded evidence rendering follows cadence, trigger, and recovery gates. Rendering keeps the original deadline and must finish before client setup.
+
+The canonical feature name is System1, configured with `[system1]` and toggled with `/system1`. Accept the former `[adaptive_reasoning]` table when reading existing configuration, including deny-only roles, and former rollout fields when resuming saved sessions. Emit only canonical names. Preserve layer precedence across old and new spellings, but reject both tables in one layer. Before writing canonical settings into a file that still uses the old table, rename that table; reject conflicting writes without changing the file.
+
+Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
@@ -297,7 +301,7 @@ Use opt-in `[adaptive_reasoning]` in the shared backend, not the TUI. Require `f
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
 | `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
 | `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
-| `decision_every_n_steps` | `2` | Positive integer; next due step is the last accepted decision step + N |
+| `decision_every_n_steps` | `1` | Positive integer; next due step is the last accepted decision step + N |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
 Profiles name connection settings, not separate adaptation policies. Keep effort bounds,
@@ -311,21 +315,21 @@ profile together with either legacy `decision_model` or `decision_model_api_env`
 is an error, even if the legacy value matches its default.
 
 ```toml
-[adaptive_reasoning]
+[system1]
 enabled = true
 profile = "jev"
 
-[adaptive_reasoning.profiles.jev]
+[system1.profiles.jev]
 protocol = "typesafe"
 model = "jev-latest"
 api_key_env = "TYPESAFE_API_KEY"
 
-[adaptive_reasoning.profiles.decision_api]
+[system1.profiles.decision_api]
 protocol = "openai"
 model = "gpt-6-luna"
 api_key_env = "DECISION_API_KEY"
 
-[adaptive_reasoning.profiles.local_gateway]
+[system1.profiles.local_gateway]
 protocol = "openai"
 endpoint = "http://127.0.0.1:8080/v1/decisions"
 model = "my-decision-model"
@@ -362,7 +366,8 @@ keep credentials separate from main-model authentication and diagnostics sanitiz
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
 - Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
 - In the shared history-to-request projection, exclude effort updates without harness provenance and keep the last complete envelope in each adjacent update run after filtering. Preserve retained messages, reasoning, tool declarations, and tool results as separators. Do not change stored history or the request-effort pin. This repairs filtered forks and replayed checkpoints without a separate transport workaround. A changed projected tail can lose prefix/cache reuse; let existing incremental-request checks choose full input rather than force a session reset.
-- Turn adaptation off after a successful manual model or effort change. Log the transition. Ordinary turn-start and spawn settings do not turn it off. Use `/adapt` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
+- `/system1 status` reads the current thread's mode, selected and last captured effort, and reported health without changing settings or sending a model turn. Show decision backend/protocol, model, named profile or legacy configuration, and client initialization from the session-fixed resolved connection. Capture the profile name with its resolved settings; never present reloaded configuration as the connection used by an existing client. Before resolution report that identity is not resolved; initialization is not proof of a successful provider request. Do not resolve a profile, inspect credentials, or start warmup for status. It also queries fixed-size in-memory decision totals for the currently loaded backend runtime. Exclude warmup, cadence/backoff skips, and incomplete tasks; accepted includes unchanged decisions, effort changes include only applied changes. Count local client setup failures separately. Show total/last completed-decision wall time, not estimated net overhead, cost, or savings. Totals reset on runtime unload/restart; children have separate totals. Do not scan rollouts, persist totals, add per-step notifications, expose credentials/endpoints, or resume unloaded threads for this read. Older servers show stats unavailable.
+- Turn adaptation off after a successful manual model or effort change. Log the transition. Ordinary turn-start and spawn settings do not turn it off. Use `/system1` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
 - Report runtime mode and its revision at thread attachment and on each transition. Ignore older revisions so delayed notifications cannot restore old mode. Show `<effort>·auto` when adaptation is on without an outstanding error, including startup and the wait before a decision. Show `<effort>·err` after a Decisions error; keep adaptation on and retain current effort. When off, show only effort. Use the baseline before the first captured step. The marker reports runtime health, not a promised effort change. Unsupported steps keep their effort without a Decisions call. Before each eligible main request, report captured effort through `turn/reasoningEffortUpdated`, including fallback steps. Keep mode and captured effort separate; toggles do not change already-running steps.
 - A spawned subagent copies its parent’s runtime mode once at spawn. Later parent toggles do not change that child. Preserve the child’s own mode across live eviction and reload, not backend restarts. Do not apply this rule to internal workers. If the assigned task is encrypted and no readable task is available, log the fallback and keep current effort; never forward ciphertext or guess the task.
 - Retain captured effort and turn identity in live TUI thread snapshots, outside saved history. Restore them after switching threads without accepting stale history settings. Clear them for a new turn or manual settings change.
@@ -375,15 +380,16 @@ keep credentials separate from main-model authentication and diagnostics sanitiz
 #### Space decision calls by turn and step
 
 A turn is one request and its resulting work. A step is one ordinary model request
-within that turn, not an individual tool call. Defaults select every turn and space
-accepted decisions by two steps. With eligible steps and no failures, decide before
-steps 1, 3, 5, ... . Set `decision_every_n_steps = 1` for every eligible step.
+within that turn, not an individual tool call. Defaults select every turn and every
+eligible step. With eligible steps and no failures, decide before steps 1, 2, 3, ... .
+For nondefault two-step spacing, set `decision_every_n_steps = 2`; decisions then
+precede steps 1, 3, 5, ... .
 
 ```toml
-[adaptive_reasoning]
+[system1]
 enabled = true
 decision_every_n_turns = 1
-decision_every_n_steps = 2
+decision_every_n_steps = 1
 ```
 
 - Turn selection is unchanged: every N turns selects turns 1, 1 + N, 1 + 2N, ... .
@@ -419,14 +425,14 @@ Example with defaults, all shown steps eligible, and times measured from session
 
 | Turn / step | Time | Decisions behavior |
 | --- | --- | --- |
-| 1 / 1 | 0.0s | Accepted; next due step is 3 |
-| 1 / 2 | 0.2s | Keep effort; spacing not due |
+| 1 / 1 | 0.0s | Accepted; next due step is 2 |
+| 1 / 2 | 0.2s | Accepted unchanged effort; next due step is 3 |
 | 1 / 3 | 0.4s | Transient failure; cooldown until 1.4s; step remains due |
 | 1 / 4 | 0.8s | Keep effort during cooldown |
 | 2 / 1 | 1.0s | New turn resets spacing, not cooldown; keep effort |
 | 2 / 2 | 1.5s | Probe fails; cooldown doubles to 2s, until 3.5s |
-| 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 5 |
-| 2 / 4 | 3.8s | Keep effort; spacing not due |
+| 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 4 |
+| 2 / 4 | 3.8s | Accepted; next due step is 5 |
 | 2 / 5 | 4.0s | Due again |
 
 - Children inherit cadence configuration, not parent counters or recovery state.
@@ -527,11 +533,10 @@ allowed_agent_roles = ["reviewer"]
 
 ### Role configuration restrictions
 
-Role TOML files may disable web search with `web_search = "disabled"` and adaptive
-reasoning with `[adaptive_reasoning] enabled = false`. Only explicit disabling is
-applied; omitted fields retain inheritance, including the parent's live adaptive toggle.
-Role settings cannot enable either capability against parent restrictions. Adaptive
-restrictions survive child spawn and reload; other adaptive settings remain inherited.
+Role TOML files may disable web search with `web_search = "disabled"` and System1 with `[system1] enabled = false`. Only explicit disabling is
+applied; omitted fields retain inheritance, including the parent's live System1 toggle.
+Role settings cannot enable either capability against parent restrictions. System1
+restrictions survive child spawn and reload; other System1 settings remain inherited.
 Keep the projected role layer aligned with runtime settings. This does not add support
 for arbitrary role configuration fields or change session authority.
 

@@ -613,7 +613,7 @@ pub struct ThreadSettingsOverrides {
     pub effort: Option<Option<ReasoningEffortConfig>>,
 
     /// Changes only this live session; it is never persisted as a thread default.
-    pub adaptive_reasoning_enabled: Option<bool>,
+    pub system1_enabled: Option<bool>,
 
     /// Updated reasoning summary preference (honored only for reasoning-capable models).
     pub summary: Option<ReasoningSummaryConfig>,
@@ -1526,7 +1526,8 @@ pub enum EventMsg {
     ReasoningEffortUpdated(ReasoningEffortUpdatedEvent),
 
     /// Runtime automatic reasoning mode changed.
-    AdaptiveReasoningUpdated(AdaptiveReasoningUpdatedEvent),
+    #[serde(alias = "adaptive_reasoning_updated")]
+    System1Updated(System1UpdatedEvent),
 
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
@@ -2336,7 +2337,7 @@ pub struct TurnStartedEvent {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
-pub enum AdaptiveReasoningError {
+pub enum System1Error {
     Credentials,
     InvalidRequest,
     Transport,
@@ -2347,7 +2348,7 @@ pub enum AdaptiveReasoningError {
     Rejected,
 }
 
-impl std::fmt::Display for AdaptiveReasoningError {
+impl std::fmt::Display for System1Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Credentials => f.write_str("configured API key is missing; load the key in the backend environment and restart"),
@@ -2364,14 +2365,15 @@ impl std::fmt::Display for AdaptiveReasoningError {
 
 /// Reports the runtime mode without changing saved reasoning preferences.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
-pub struct AdaptiveReasoningUpdatedEvent {
+pub struct System1UpdatedEvent {
     pub enabled: bool,
     #[serde(default)]
-    pub error: Option<AdaptiveReasoningError>,
+    pub error: Option<System1Error>,
     #[serde(default)]
     pub failure_episode: u64,
     #[serde(default)]
-    pub adaptive_reasoning_revision: u64,
+    #[serde(alias = "adaptive_reasoning_revision")]
+    pub system1_revision: u64,
 }
 
 /// Reports captured step effort without changing the thread's saved settings.
@@ -2380,7 +2382,8 @@ pub struct ReasoningEffortUpdatedEvent {
     pub turn_id: String,
     pub reasoning_effort: Option<ReasoningEffortConfig>,
     /// Automatic mode is active, including when a decision falls back to current effort.
-    pub adaptive: bool,
+    #[serde(alias = "adaptive")]
+    pub system1: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
@@ -4193,11 +4196,15 @@ pub struct SessionConfiguredEvent {
     pub reasoning_effort: Option<ReasoningEffortConfig>,
 
     /// Automatic reasoning mode when the session starts.
-    pub adaptive_reasoning_enabled: bool,
+    #[serde(alias = "adaptive_reasoning_enabled")]
+    pub system1_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
-    pub adaptive_reasoning_revision: u64,
-    pub adaptive_reasoning_error: Option<AdaptiveReasoningError>,
-    pub adaptive_reasoning_failure_episode: u64,
+    #[serde(alias = "adaptive_reasoning_revision")]
+    pub system1_revision: u64,
+    #[serde(alias = "adaptive_reasoning_error")]
+    pub system1_error: Option<System1Error>,
+    #[serde(alias = "adaptive_reasoning_failure_episode")]
+    pub system1_failure_episode: u64,
 
     /// Runtime proxy bind addresses, when the managed proxy was started for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4241,13 +4248,17 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             cwd: AbsolutePathBuf,
             reasoning_effort: Option<ReasoningEffortConfig>,
             #[serde(default)]
-            adaptive_reasoning_enabled: bool,
+            #[serde(alias = "adaptive_reasoning_enabled")]
+            system1_enabled: bool,
             #[serde(default)]
-            adaptive_reasoning_revision: u64,
+            #[serde(alias = "adaptive_reasoning_revision")]
+            system1_revision: u64,
             #[serde(default)]
-            adaptive_reasoning_error: Option<AdaptiveReasoningError>,
+            #[serde(alias = "adaptive_reasoning_error")]
+            system1_error: Option<System1Error>,
             #[serde(default)]
-            adaptive_reasoning_failure_episode: u64,
+            #[serde(alias = "adaptive_reasoning_failure_episode")]
+            system1_failure_episode: u64,
             network_proxy: Option<SessionNetworkProxyRuntime>,
             rollout_path: Option<PathBuf>,
         }
@@ -4280,10 +4291,10 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: wire.active_permission_profile,
             cwd: wire.cwd,
             reasoning_effort: wire.reasoning_effort,
-            adaptive_reasoning_enabled: wire.adaptive_reasoning_enabled,
-            adaptive_reasoning_revision: wire.adaptive_reasoning_revision,
-            adaptive_reasoning_error: wire.adaptive_reasoning_error,
-            adaptive_reasoning_failure_episode: wire.adaptive_reasoning_failure_episode,
+            system1_enabled: wire.system1_enabled,
+            system1_revision: wire.system1_revision,
+            system1_error: wire.system1_error,
+            system1_failure_episode: wire.system1_failure_episode,
             network_proxy: wire.network_proxy,
             rollout_path: wire.rollout_path,
         })
@@ -6488,10 +6499,10 @@ mod tests {
         let event = Event {
             id: "1234".to_string(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
-                adaptive_reasoning_enabled: false,
-                adaptive_reasoning_revision: 0,
-                adaptive_reasoning_error: None,
-                adaptive_reasoning_failure_episode: 0,
+                system1_enabled: false,
+                system1_revision: 0,
+                system1_error: None,
+                system1_failure_episode: 0,
                 session_id,
                 thread_id,
                 forked_from_id: None,
@@ -6516,10 +6527,10 @@ mod tests {
             "id": "1234",
             "msg": {
                 "type": "session_configured",
-                "adaptive_reasoning_enabled": false,
-                "adaptive_reasoning_revision": 0,
-                "adaptive_reasoning_error": null,
-                "adaptive_reasoning_failure_episode": 0,
+                "system1_enabled": false,
+                "system1_revision": 0,
+                "system1_error": null,
+                "system1_failure_episode": 0,
                 "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c7",
                 "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
                 "model": "codex-mini-latest",

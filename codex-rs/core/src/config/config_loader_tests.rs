@@ -998,7 +998,7 @@ async fn selected_user_config_file_layers_over_base_user_config() {
         r#"
 model = "gpt-main"
 approval_policy = "on-request"
-[adaptive_reasoning]
+[system1]
 min_effort = "minimal"
 max_effort = "max"
 rubric_instructions = "Base selection policy."
@@ -1008,7 +1008,7 @@ rubric_instructions = "Base selection policy."
     std::fs::write(
         &selected_config,
         r#"model = "gpt-work"
-[adaptive_reasoning]
+[system1]
 max_effort = "high"
 rubric_instructions = "Selected profile policy."
 "#,
@@ -1073,8 +1073,8 @@ rubric_instructions = "Selected profile policy."
         .try_into()
         .expect("merged profile config should deserialize");
     assert_eq!(
-        effective.adaptive_reasoning,
-        Some(codex_config::AdaptiveReasoningConfig {
+        effective.system1,
+        Some(codex_config::System1Config {
             min_effort: codex_protocol::openai_models::ReasoningEffort::Minimal,
             max_effort: codex_protocol::openai_models::ReasoningEffort::High,
             rubric_instructions: Some("Selected profile policy.".to_string()),

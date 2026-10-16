@@ -294,7 +294,7 @@ impl ThreadEventStore {
                         .session
                         .as_ref()
                         .is_some_and(|session| session.thread_id.to_string() == step.thread_id)
-                    && !(step.adaptive
+                    && !(step.system1
                         && self.reasoning_state.suppressed_turn_id.as_deref()
                             == Some(&step.turn_id)) =>
             {
@@ -732,10 +732,10 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
-            adaptive_reasoning_enabled: false,
-            adaptive_reasoning_revision: 0,
-            adaptive_reasoning_error: None,
-            adaptive_reasoning_failure_episode: 0,
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

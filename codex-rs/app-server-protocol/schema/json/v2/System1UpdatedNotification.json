@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "AdaptiveReasoningError": {
+    "System1Error": {
       "description": "Describes a Decisions failure without exposing request or response content.",
       "oneOf": [
         {
@@ -10,14 +10,14 @@
               "enum": [
                 "credentials"
               ],
-              "title": "CredentialsAdaptiveReasoningErrorType",
+              "title": "CredentialsSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "CredentialsAdaptiveReasoningError",
+          "title": "CredentialsSystem1Error",
           "type": "object"
         },
         {
@@ -26,14 +26,14 @@
               "enum": [
                 "invalidRequest"
               ],
-              "title": "InvalidRequestAdaptiveReasoningErrorType",
+              "title": "InvalidRequestSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "InvalidRequestAdaptiveReasoningError",
+          "title": "InvalidRequestSystem1Error",
           "type": "object"
         },
         {
@@ -42,14 +42,14 @@
               "enum": [
                 "transport"
               ],
-              "title": "TransportAdaptiveReasoningErrorType",
+              "title": "TransportSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "TransportAdaptiveReasoningError",
+          "title": "TransportSystem1Error",
           "type": "object"
         },
         {
@@ -58,14 +58,14 @@
               "enum": [
                 "timeout"
               ],
-              "title": "TimeoutAdaptiveReasoningErrorType",
+              "title": "TimeoutSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "TimeoutAdaptiveReasoningError",
+          "title": "TimeoutSystem1Error",
           "type": "object"
         },
         {
@@ -79,7 +79,7 @@
               "enum": [
                 "http"
               ],
-              "title": "HttpAdaptiveReasoningErrorType",
+              "title": "HttpSystem1ErrorType",
               "type": "string"
             }
           },
@@ -87,7 +87,7 @@
             "status",
             "type"
           ],
-          "title": "HttpAdaptiveReasoningError",
+          "title": "HttpSystem1Error",
           "type": "object"
         },
         {
@@ -96,14 +96,14 @@
               "enum": [
                 "responseTooLarge"
               ],
-              "title": "ResponseTooLargeAdaptiveReasoningErrorType",
+              "title": "ResponseTooLargeSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "ResponseTooLargeAdaptiveReasoningError",
+          "title": "ResponseTooLargeSystem1Error",
           "type": "object"
         },
         {
@@ -112,14 +112,14 @@
               "enum": [
                 "invalidResponse"
               ],
-              "title": "InvalidResponseAdaptiveReasoningErrorType",
+              "title": "InvalidResponseSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "InvalidResponseAdaptiveReasoningError",
+          "title": "InvalidResponseSystem1Error",
           "type": "object"
         },
         {
@@ -128,14 +128,14 @@
               "enum": [
                 "rejected"
               ],
-              "title": "RejectedAdaptiveReasoningErrorType",
+              "title": "RejectedSystem1ErrorType",
               "type": "string"
             }
           },
           "required": [
             "type"
           ],
-          "title": "RejectedAdaptiveReasoningError",
+          "title": "RejectedSystem1Error",
           "type": "object"
         }
       ]
@@ -143,19 +143,13 @@
   },
   "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
   "properties": {
-    "adaptiveReasoningRevision": {
-      "default": 0,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
     "enabled": {
       "type": "boolean"
     },
     "error": {
       "anyOf": [
         {
-          "$ref": "#/definitions/AdaptiveReasoningError"
+          "$ref": "#/definitions/System1Error"
         },
         {
           "type": "null"
@@ -169,6 +163,12 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "system1Revision": {
+      "default": 0,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
     "threadId": {
       "type": "string"
     }
@@ -177,6 +177,6 @@
     "enabled",
     "threadId"
   ],
-  "title": "AdaptiveReasoningUpdatedNotification",
+  "title": "System1UpdatedNotification",
   "type": "object"
 }

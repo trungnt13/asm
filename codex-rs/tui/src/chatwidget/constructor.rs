@@ -63,7 +63,7 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
-        let adaptive_reasoning_enabled = config.adaptive_reasoning.enabled
+        let system1_enabled = config.system1.enabled
             && !config
                 .model_reasoning_effort
                 .as_ref()
@@ -238,7 +238,7 @@ impl ChatWidget {
             reasoning_header: None,
             reasoning_summary_parts: Vec::new(),
             status_state: StatusState {
-                adaptive_reasoning_enabled,
+                system1_enabled,
                 ..Default::default()
             },
             review: ReviewState::default(),
