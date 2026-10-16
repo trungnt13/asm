@@ -361,10 +361,11 @@ impl ReasoningSummaryCell {
     }
 
     fn lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let lines = crate::markdown_render::render_markdown_lines_with_width_and_cwd(
+        let lines = crate::markdown_render::render_markdown_lines_with_width_cwd_and_hidden_link_destinations(
             &self.content,
             crate::width::usable_content_width_u16(width, /*reserved_cols*/ 2),
             Some(self.cwd.as_path()),
+            &crate::markdown_render::hide_link_destination,
         );
         let summary_style = Style::default().dim().italic();
         let summary_lines = lines
