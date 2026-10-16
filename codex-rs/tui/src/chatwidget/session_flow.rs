@@ -109,13 +109,12 @@ impl ChatWidget {
         self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
         self.status_state.captured_step_reasoning = None;
-        self.status_state.suppressed_adaptive_turn_id = None;
+        self.status_state.suppressed_system1_turn_id = None;
         self.clear_safety_buffering();
-        self.status_state.adaptive_reasoning_enabled = session.adaptive_reasoning_enabled;
-        self.status_state.adaptive_reasoning_revision = session.adaptive_reasoning_revision;
-        self.status_state.adaptive_reasoning_error = session.adaptive_reasoning_error;
-        self.status_state.adaptive_reasoning_failure_episode =
-            session.adaptive_reasoning_failure_episode;
+        self.status_state.system1_enabled = session.system1_enabled;
+        self.status_state.system1_revision = session.system1_revision;
+        self.status_state.system1_error = session.system1_error;
+        self.status_state.system1_failure_episode = session.system1_failure_episode;
         self.thread_name = session.thread_name.clone();
         self.current_goal_status_indicator = None;
         self.current_goal_status = None;
@@ -260,7 +259,7 @@ impl ChatWidget {
         {
             self.emit_forked_thread_event(forked_from_id, fork_parent_title);
         }
-        self.announce_adaptive_reasoning_error();
+        self.announce_system1_error();
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
@@ -342,7 +341,7 @@ impl ChatWidget {
         self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
         self.status_state.captured_step_reasoning = None;
-        self.status_state.suppressed_adaptive_turn_id = None;
+        self.status_state.suppressed_system1_turn_id = None;
         self.review = Default::default();
         self.transcript.take_active_cell();
         self.transcript.reset_copy_history();

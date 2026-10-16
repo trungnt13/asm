@@ -415,7 +415,8 @@ pub struct ConfigToml {
 
     /// Automatic naming in the TUI; Desktop naming is unaffected.
     pub auto_rename: Option<crate::AutoRenameConfig>,
-    pub adaptive_reasoning: Option<crate::AdaptiveReasoningConfig>,
+    #[serde(alias = "adaptive_reasoning")]
+    pub system1: Option<crate::System1Config>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.

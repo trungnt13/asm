@@ -80,9 +80,7 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ThreadQueueChanged(notification) => {
             Some(notification.thread_id.as_str())
         }
-        ServerNotification::AdaptiveReasoningUpdated(notification) => {
-            Some(notification.thread_id.as_str())
-        }
+        ServerNotification::System1Updated(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::ReasoningEffortUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
@@ -264,10 +262,10 @@ mod tests {
 
     fn test_thread_settings() -> ThreadSettings {
         ThreadSettings {
-            adaptive_reasoning_enabled: false,
-            adaptive_reasoning_revision: 0,
-            adaptive_reasoning_error: None,
-            adaptive_reasoning_failure_episode: 0,
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: codex_app_server_protocol::AskForApproval::Never,
@@ -377,11 +375,11 @@ mod tests {
         let target = server_notification_thread_target(&notification);
 
         assert_eq!(target, ServerNotificationThreadTarget::Thread(thread_id));
-        let mode = ServerNotification::AdaptiveReasoningUpdated(
-            codex_app_server_protocol::AdaptiveReasoningUpdatedNotification {
+        let mode = ServerNotification::System1Updated(
+            codex_app_server_protocol::System1UpdatedNotification {
                 thread_id: thread_id.to_string(),
                 enabled: true,
-                adaptive_reasoning_revision: 1,
+                system1_revision: 1,
                 error: None,
                 failure_episode: 0,
             },
@@ -395,7 +393,7 @@ mod tests {
                 thread_id: thread_id.to_string(),
                 turn_id: "captured-turn".to_string(),
                 reasoning_effort: None,
-                adaptive: true,
+                system1: true,
             },
         );
         assert_eq!(

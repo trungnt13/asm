@@ -920,7 +920,7 @@ impl TurnRequestProcessor {
         }
 
         Ok(codex_protocol::protocol::ThreadSettingsOverrides {
-            adaptive_reasoning_enabled: None,
+            system1_enabled: None,
             disabled_plugin_ids,
             environments: environment_requests,
             runtime_workspace_roots,
@@ -978,8 +978,8 @@ impl TurnRequestProcessor {
             )
             .await?;
 
-        thread_settings.adaptive_reasoning_enabled = params.adaptive_reasoning_enabled;
-        if params.adaptive_reasoning_enabled.is_some() {
+        thread_settings.system1_enabled = params.system1_enabled;
+        if params.system1_enabled.is_some() {
             thread
                 .update_thread_settings(thread_settings)
                 .await
@@ -997,22 +997,22 @@ impl TurnRequestProcessor {
             .map_err(|err| internal_error(format!("failed to update thread settings: {err}")))?;
         }
 
-        let adaptive = if params.adaptive_reasoning_enabled.is_some() {
+        let system1 = if params.system1_enabled.is_some() {
             let snapshot = thread.config_snapshot().await;
             Some((
-                snapshot.adaptive_reasoning_enabled,
-                snapshot.adaptive_reasoning_revision,
-                snapshot.adaptive_reasoning_error,
-                snapshot.adaptive_reasoning_failure_episode,
+                snapshot.system1_enabled,
+                snapshot.system1_revision,
+                snapshot.system1_error,
+                snapshot.system1_failure_episode,
             ))
         } else {
             None
         };
         Ok(ThreadSettingsUpdateResponse {
-            adaptive_reasoning_enabled: adaptive.map(|(enabled, _, _, _)| enabled),
-            adaptive_reasoning_revision: adaptive.map(|(_, revision, _, _)| revision),
-            adaptive_reasoning_error: adaptive.and_then(|(_, _, error, _)| error),
-            adaptive_reasoning_failure_episode: adaptive.map(|(_, _, _, episode)| episode),
+            system1_enabled: system1.map(|(enabled, _, _, _)| enabled),
+            system1_revision: system1.map(|(_, revision, _, _)| revision),
+            system1_error: system1.and_then(|(_, _, error, _)| error),
+            system1_failure_episode: system1.map(|(_, _, _, episode)| episode),
         })
     }
 

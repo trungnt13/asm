@@ -273,11 +273,11 @@ impl App {
 }
 
 fn apply_thread_settings_to_session(session: &mut ThreadSessionState, settings: &ThreadSettings) {
-    if settings.adaptive_reasoning_revision >= session.adaptive_reasoning_revision {
-        session.adaptive_reasoning_enabled = settings.adaptive_reasoning_enabled;
-        session.adaptive_reasoning_revision = settings.adaptive_reasoning_revision;
-        session.adaptive_reasoning_error = settings.adaptive_reasoning_error;
-        session.adaptive_reasoning_failure_episode = settings.adaptive_reasoning_failure_episode;
+    if settings.system1_revision >= session.system1_revision {
+        session.system1_enabled = settings.system1_enabled;
+        session.system1_revision = settings.system1_revision;
+        session.system1_error = settings.system1_error;
+        session.system1_failure_episode = settings.system1_failure_episode;
     }
     if settings.collaboration_mode.mode == ModeKind::Default {
         session.model = settings.model.clone();

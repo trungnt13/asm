@@ -271,7 +271,7 @@ pub(crate) async fn run_turn(
         sess.adapt_reasoning(
             &turn_context,
             &input,
-            codex_config::AdaptiveReasoningTrigger::TurnStart,
+            codex_config::System1Trigger::TurnStart,
             &cancellation_token,
         )
         .await;
@@ -509,12 +509,12 @@ pub(crate) async fn run_turn(
                 if input.is_empty()
                     && turn_context
                         .extension_data
-                        .get::<super::adaptive_reasoning::AdaptiveModelStepStarted>()
+                        .get::<super::system1::System1ModelStepStarted>()
                         .is_none()
                 {
-                    codex_config::AdaptiveReasoningTrigger::TurnStart
+                    codex_config::System1Trigger::TurnStart
                 } else {
-                    codex_config::AdaptiveReasoningTrigger::ToolResult
+                    codex_config::System1Trigger::ToolResult
                 },
                 &cancellation_token,
             )
@@ -595,7 +595,7 @@ pub(crate) async fn run_turn(
             .await;
 
             sess.report_reasoning_effort(step_context.as_ref()).await;
-            sess.record_adaptive_model_step(&turn_context);
+            sess.record_system1_model_step(&turn_context);
 
             run_sampling_request(
                 Arc::clone(&sess),
@@ -2257,7 +2257,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::TurnStarted(_)
         | EventMsg::ThreadSettingsApplied(_)
         | EventMsg::ReasoningEffortUpdated(_)
-        | EventMsg::AdaptiveReasoningUpdated(_)
+        | EventMsg::System1Updated(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)
         | EventMsg::UserMessage(_)

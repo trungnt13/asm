@@ -90,28 +90,24 @@ impl ChatWidget {
             }
             ServerNotification::ThreadSettingsUpdated(mut notification) => {
                 if from_replay {
-                    notification.thread_settings.adaptive_reasoning_enabled =
-                        self.adaptive_reasoning_enabled();
-                    notification.thread_settings.adaptive_reasoning_revision =
-                        self.status_state.adaptive_reasoning_revision;
-                    notification.thread_settings.adaptive_reasoning_error =
-                        self.status_state.adaptive_reasoning_error;
-                    notification
-                        .thread_settings
-                        .adaptive_reasoning_failure_episode =
-                        self.status_state.adaptive_reasoning_failure_episode;
+                    notification.thread_settings.system1_enabled = self.system1_enabled();
+                    notification.thread_settings.system1_revision =
+                        self.status_state.system1_revision;
+                    notification.thread_settings.system1_error = self.status_state.system1_error;
+                    notification.thread_settings.system1_failure_episode =
+                        self.status_state.system1_failure_episode;
                 }
                 self.on_thread_settings_updated(notification);
             }
-            ServerNotification::AdaptiveReasoningUpdated(notification) => {
+            ServerNotification::System1Updated(notification) => {
                 if !from_replay
                     && self
                         .thread_id
                         .is_some_and(|id| id.to_string() == notification.thread_id)
                 {
-                    self.set_adaptive_reasoning_state(
+                    self.set_system1_state(
                         notification.enabled,
-                        notification.adaptive_reasoning_revision,
+                        notification.system1_revision,
                         notification.error,
                         notification.failure_episode,
                     );
@@ -119,8 +115,8 @@ impl ChatWidget {
             }
             ServerNotification::ReasoningEffortUpdated(notification) => {
                 if !(from_replay
-                    || notification.adaptive
-                        && self.status_state.suppressed_adaptive_turn_id.as_deref()
+                    || notification.system1
+                        && self.status_state.suppressed_system1_turn_id.as_deref()
                             == Some(&notification.turn_id))
                     && self
                         .thread_id
@@ -134,7 +130,7 @@ impl ChatWidget {
             }
             ServerNotification::TurnStarted(notification) => {
                 self.status_state.captured_step_reasoning = None;
-                self.status_state.suppressed_adaptive_turn_id = None;
+                self.status_state.suppressed_system1_turn_id = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {

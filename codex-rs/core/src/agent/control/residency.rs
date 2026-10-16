@@ -81,7 +81,7 @@ impl ThreadManagerState {
             let runtime = &thread.session.services.local_agent_runtime;
             let _ = runtime.mailboxes.enqueue(thread_id, /*id*/ None, mail);
             let environments = thread.environment_selections().await;
-            let adaptive = thread.config_snapshot().await;
+            let system1 = thread.config_snapshot().await;
             let mut threads = manager.threads.write().await;
             if threads
                 .get(&thread_id)
@@ -94,13 +94,13 @@ impl ThreadManagerState {
                 thread_id,
                 EvictedAgentRuntimeState {
                     environments,
-                    adaptive_reasoning_enabled: adaptive.adaptive_reasoning_enabled,
-                    role_adaptive_reasoning_disabled: child_config.role_adaptive_reasoning_disabled,
+                    system1_enabled: system1.system1_enabled,
+                    role_system1_disabled: child_config.role_system1_disabled,
                     web_search_disabled: child_config.web_search_mode.value()
                         == WebSearchMode::Disabled,
-                    adaptive_reasoning_revision: adaptive.adaptive_reasoning_revision,
-                    adaptive_reasoning_error: adaptive.adaptive_reasoning_error,
-                    adaptive_reasoning_failure_episode: adaptive.adaptive_reasoning_failure_episode,
+                    system1_revision: system1.system1_revision,
+                    system1_error: system1.system1_error,
+                    system1_failure_episode: system1.system1_failure_episode,
                 },
             );
             let removed = threads.remove(&thread_id).is_some();

@@ -9,7 +9,6 @@ use crate::thread_state::resolve_server_request_on_thread_listener;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
 use codex_app_server_protocol::AccountRateLimitsUpdatedNotification;
-use codex_app_server_protocol::AdaptiveReasoningUpdatedNotification;
 use codex_app_server_protocol::AdditionalPermissionProfile as V2AdditionalPermissionProfile;
 use codex_app_server_protocol::AuthRecoveryNotification;
 use codex_app_server_protocol::CodexErrorInfo as V2CodexErrorInfo;
@@ -54,6 +53,7 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequestPayload;
 use codex_app_server_protocol::StrictReviewRequiredNotification;
+use codex_app_server_protocol::System1UpdatedNotification;
 use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadRealtimeClosedNotification;
@@ -186,13 +186,13 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .send_server_notification(ServerNotification::TurnStarted(notification))
                 .await;
         }
-        EventMsg::AdaptiveReasoningUpdated(payload) => {
+        EventMsg::System1Updated(payload) => {
             outgoing
-                .send_server_notification(ServerNotification::AdaptiveReasoningUpdated(
-                    AdaptiveReasoningUpdatedNotification {
+                .send_server_notification(ServerNotification::System1Updated(
+                    System1UpdatedNotification {
                         thread_id: conversation_id.to_string(),
                         enabled: payload.enabled,
-                        adaptive_reasoning_revision: payload.adaptive_reasoning_revision,
+                        system1_revision: payload.system1_revision,
                         error: payload.error,
                         failure_episode: payload.failure_episode,
                     },
@@ -206,7 +206,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                         thread_id: conversation_id.to_string(),
                         turn_id: payload.turn_id,
                         reasoning_effort: payload.reasoning_effort,
-                        adaptive: payload.adaptive,
+                        system1: payload.system1,
                     },
                 ))
                 .await;
@@ -3201,7 +3201,7 @@ mod tests {
             other => bail!("unexpected message: {other:?}"),
         }
 
-        for (reasoning_effort, adaptive) in [
+        for (reasoning_effort, system1) in [
             (
                 Some(codex_protocol::openai_models::ReasoningEffort::High),
                 true,
@@ -3219,7 +3219,7 @@ mod tests {
                         codex_protocol::protocol::ReasoningEffortUpdatedEvent {
                             turn_id: "turn-1".to_string(),
                             reasoning_effort: reasoning_effort.clone(),
-                            adaptive,
+                            system1,
                         },
                     ),
                 },
@@ -3241,7 +3241,7 @@ mod tests {
                     thread_id: conversation_id.to_string(),
                     turn_id: "turn-1".to_string(),
                     reasoning_effort: reasoning_effort.clone(),
-                    adaptive,
+                    system1,
                 }
             );
             let json = serde_json::to_value(notification)?;
@@ -3250,7 +3250,7 @@ mod tests {
                 json["params"]["reasoningEffort"],
                 serde_json::to_value(reasoning_effort)?
             );
-            assert_eq!(json["params"]["adaptive"], adaptive);
+            assert_eq!(json["params"]["system1"], system1);
             assert!(
                 json["params"]
                     .as_object()
@@ -3263,16 +3263,12 @@ mod tests {
             apply_bespoke_event_handling(
                 Event {
                     id: "mode-update".to_string(),
-                    msg: EventMsg::AdaptiveReasoningUpdated(
-                        codex_protocol::protocol::AdaptiveReasoningUpdatedEvent {
-                            enabled,
-                            adaptive_reasoning_revision: 0,
-                            error: Some(codex_protocol::protocol::AdaptiveReasoningError::Http {
-                                status: 503,
-                            }),
-                            failure_episode: 1,
-                        },
-                    ),
+                    msg: EventMsg::System1Updated(codex_protocol::protocol::System1UpdatedEvent {
+                        enabled,
+                        system1_revision: 0,
+                        error: Some(codex_protocol::protocol::System1Error::Http { status: 503 }),
+                        failure_episode: 1,
+                    }),
                 },
                 conversation_id,
                 Arc::clone(&conversation),
@@ -3286,8 +3282,8 @@ mod tests {
             assert_eq!(
                 serde_json::to_value(notification)?,
                 serde_json::json!({
-                    "method": "thread/adaptiveReasoningUpdated",
-                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "adaptiveReasoningRevision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1},
+                    "method": "thread/system1Updated",
+                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "system1Revision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1},
                 })
             );
         }

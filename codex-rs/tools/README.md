@@ -46,7 +46,7 @@ The corresponding non-goals are just as important:
 The expected migration shape is:
 
 1. Keep extension-owned executable-tool authoring in `codex-extension-api`.
-2. Move host-side planning/adaptation helpers here when they no longer need to
+2. Move host-side planning/system1ation helpers here when they no longer need to
    stay coupled to `codex-core`.
 3. Leave compatibility-sensitive adapters in `codex-core` while downstream
    call sites are updated.

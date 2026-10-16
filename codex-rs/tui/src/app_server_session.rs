@@ -1391,18 +1391,35 @@ impl AppServerSession {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(crate) async fn adaptive_reasoning_update(
+    pub(crate) async fn system1_stats_read(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<codex_app_server_protocol::ThreadSystem1StatsReadResponse> {
+        let request_id = self.next_request_id();
+        Ok(self
+            .client
+            .request_typed(ClientRequest::ThreadSystem1StatsRead {
+                request_id,
+                params: codex_app_server_protocol::ThreadSystem1StatsReadParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await?)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn system1_update(
         &mut self,
         params: ThreadSettingsUpdateParams,
     ) -> Result<Option<ThreadSettingsUpdateResponse>> {
-        let requested = params.adaptive_reasoning_enabled;
+        let requested = params.system1_enabled;
         Ok(self
             .request_thread_settings_update(params)
             .await?
             .and_then(|response| {
-                (requested.is_some() && response.adaptive_reasoning_enabled == requested)
+                (requested.is_some() && response.system1_enabled == requested)
                     .then_some(response)
-                    .filter(|response| response.adaptive_reasoning_revision.is_some())
+                    .filter(|response| response.system1_revision.is_some())
             }))
     }
 
@@ -2455,10 +2472,10 @@ async fn thread_session_state_from_thread_start_response(
         local_settings,
     )
     .await?;
-    session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
-    session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
-    session.adaptive_reasoning_error = response.adaptive_reasoning_error;
-    session.adaptive_reasoning_failure_episode = response.adaptive_reasoning_failure_episode;
+    session.system1_enabled = response.system1_enabled;
+    session.system1_revision = response.system1_revision;
+    session.system1_error = response.system1_error;
+    session.system1_failure_episode = response.system1_failure_episode;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response
         .thread
@@ -2498,10 +2515,10 @@ async fn thread_session_state_from_thread_resume_response(
         local_settings,
     )
     .await?;
-    session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
-    session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
-    session.adaptive_reasoning_error = response.adaptive_reasoning_error;
-    session.adaptive_reasoning_failure_episode = response.adaptive_reasoning_failure_episode;
+    session.system1_enabled = response.system1_enabled;
+    session.system1_revision = response.system1_revision;
+    session.system1_error = response.system1_error;
+    session.system1_failure_episode = response.system1_failure_episode;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.collaboration_mode = response.collaboration_mode.clone().map(Box::new);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
@@ -2540,10 +2557,10 @@ async fn thread_session_state_from_thread_fork_response(
         local_settings,
     )
     .await?;
-    session.adaptive_reasoning_enabled = response.adaptive_reasoning_enabled;
-    session.adaptive_reasoning_revision = response.adaptive_reasoning_revision;
-    session.adaptive_reasoning_error = response.adaptive_reasoning_error;
-    session.adaptive_reasoning_failure_episode = response.adaptive_reasoning_failure_episode;
+    session.system1_enabled = response.system1_enabled;
+    session.system1_revision = response.system1_revision;
+    session.system1_error = response.system1_error;
+    session.system1_failure_episode = response.system1_failure_episode;
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
@@ -2610,10 +2627,10 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
-        adaptive_reasoning_enabled: false,
-        adaptive_reasoning_revision: 0,
-        adaptive_reasoning_error: None,
-        adaptive_reasoning_failure_episode: 0,
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host,
@@ -4271,10 +4288,10 @@ mod tests {
         let forked_from_id = ThreadId::new();
         let read_only_profile = PermissionProfile::read_only();
         let response = ThreadResumeResponse {
-            adaptive_reasoning_enabled: true,
-            adaptive_reasoning_revision: 0,
-            adaptive_reasoning_error: None,
-            adaptive_reasoning_failure_episode: 0,
+            system1_enabled: true,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
                 originator: None,
@@ -4379,7 +4396,7 @@ mod tests {
         .await
         .expect("resume response should map");
         assert_eq!(started.session.forked_from_id, Some(forked_from_id));
-        assert!(started.session.adaptive_reasoning_enabled);
+        assert!(started.session.system1_enabled);
         assert_eq!(
             started.session.runtime_workspace_roots,
             response.runtime_workspace_roots
@@ -4397,7 +4414,7 @@ mod tests {
         let (mut chat, _sender, _events, mut commands) =
             crate::chatwidget::tests::helpers::make_chatwidget_manual_with_sender().await;
         chat.handle_thread_session(started.session);
-        assert!(chat.adaptive_reasoning_enabled());
+        assert!(chat.system1_enabled());
         insta::assert_snapshot!(
             "resumed_plan_mode",
             crate::chatwidget::tests::helpers::normalize_snapshot_paths(

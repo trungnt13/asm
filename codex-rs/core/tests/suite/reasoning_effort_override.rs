@@ -626,8 +626,8 @@ async fn reasoning_effort_override_preserves_prefix_and_only_appends_on_change(
         })
         .with_config(move |config| {
             config.features.enable(Feature::StepModelSwitching).unwrap();
-            config.adaptive_reasoning.enabled = true;
-            config.adaptive_reasoning.decision_model_api_env = Some(credential_env.to_string());
+            config.system1.enabled = true;
+            config.system1.decision_model_api_env = Some(credential_env.to_string());
         })
         .build_with_auto_env(&server)
         .await?;

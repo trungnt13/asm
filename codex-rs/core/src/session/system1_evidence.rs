@@ -7,19 +7,19 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::user_input::UserInput;
 
 #[derive(Default)]
-pub(super) struct AdaptiveEvidence {
+pub(super) struct System1Evidence {
     pub(super) task: String,
     pub(super) encrypted_task_unavailable: bool,
     steer: String,
 }
 
-impl AdaptiveEvidence {
-    pub(super) fn collect(
+impl System1Evidence {
+    pub(super) fn ingest(
         &mut self,
         input: &[TurnInput],
         history: &[ResponseItemEnvelope],
         limit: usize,
-    ) -> String {
+    ) {
         // Keep scan work bounded, but let larger byte budgets reach more history and parts.
         let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
         let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
@@ -81,6 +81,11 @@ impl AdaptiveEvidence {
                 }
             }
         }
+    }
+
+    pub(super) fn render(&self, history: &[ResponseItemEnvelope], limit: usize) -> String {
+        let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
+        let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
         let mut text = String::new();
         append_text(&mut text, "Current user task:\n", limit);
         append_text(&mut text, &self.task, limit);
@@ -163,5 +168,5 @@ fn append_item(
 }
 
 #[cfg(test)]
-#[path = "adaptive_reasoning_evidence_tests.rs"]
+#[path = "system1_evidence_tests.rs"]
 mod tests;

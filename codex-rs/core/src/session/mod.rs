@@ -256,9 +256,6 @@ mod reasoning_effort;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
-mod adaptive_reasoning;
-mod adaptive_reasoning_evidence;
-mod adaptive_reasoning_task;
 mod decision_log;
 mod input_queue;
 mod mcp;
@@ -278,6 +275,9 @@ pub(crate) mod startup_prewarm;
 mod step_activation;
 pub(crate) mod step_context;
 pub(crate) mod step_settings;
+mod system1;
+mod system1_evidence;
+mod system1_task;
 mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
@@ -2129,14 +2129,11 @@ impl Session {
         let mut snapshot = state
             .session_configuration
             .thread_config_snapshot(state.session_configuration.environments.clone());
-        let adaptive = self.adaptive_reasoning_state(
-            snapshot.adaptive_reasoning_enabled,
-            snapshot.adaptive_reasoning_revision,
-        );
-        snapshot.adaptive_reasoning_enabled = adaptive.enabled;
-        snapshot.adaptive_reasoning_revision = adaptive.revision;
-        snapshot.adaptive_reasoning_error = adaptive.error;
-        snapshot.adaptive_reasoning_failure_episode = adaptive.failure_episode;
+        let system1 = self.system1_state(snapshot.system1_enabled, snapshot.system1_revision);
+        snapshot.system1_enabled = system1.enabled;
+        snapshot.system1_revision = system1.revision;
+        snapshot.system1_error = system1.error;
+        snapshot.system1_failure_episode = system1.failure_episode;
         snapshot
     }
 
@@ -3763,7 +3760,7 @@ impl Session {
                             | ResponseItem::CustomToolCallOutput { .. }
                     )
             }) {
-                self.invalidate_adaptive_reasoning();
+                self.invalidate_system1();
             }
             state
                 .history

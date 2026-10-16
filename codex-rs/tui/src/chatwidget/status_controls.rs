@@ -252,30 +252,29 @@ impl ChatWidget {
                         .as_ref()
                         .and_then(Option::as_ref)
                         .map_or("none", ReasoningEffortConfig::as_str);
-                    let source = if self.adaptive_reasoning_enabled() {
-                        "adaptive"
+                    let source = if self.system1_enabled() {
+                        "System1"
                     } else {
                         "step"
                     };
                     format!("{effort} ({source}; baseline {baseline})")
                 });
         let captured_reasoning_label = captured_reasoning_label.or_else(|| {
-            self.adaptive_reasoning_enabled().then(|| {
+            self.system1_enabled().then(|| {
                 let effort = reasoning_effort_override
                     .as_ref()
                     .and_then(Option::as_ref)
                     .map_or("none", ReasoningEffortConfig::as_str);
-                format!("{effort} (adaptive; baseline {effort})")
+                format!("{effort} (System1; baseline {effort})")
             })
         });
-        let captured_reasoning_label = captured_reasoning_label.map(|label| {
-            match self.status_state.adaptive_reasoning_error {
-                Some(error) if self.adaptive_reasoning_enabled() => {
-                    format!("{label}; adaptive error: {error}")
+        let captured_reasoning_label =
+            captured_reasoning_label.map(|label| match self.status_state.system1_error {
+                Some(error) if self.system1_enabled() => {
+                    format!("{label}; System1 error: {error}")
                 }
                 Some(_) | None => label,
-            }
-        });
+            });
         let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
             .rate_limit_snapshots_by_limit_id
             .values()

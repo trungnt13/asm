@@ -25,145 +25,6 @@
       ],
       "type": "object"
     },
-    "AdaptiveReasoningError": {
-      "description": "Describes a Decisions failure without exposing request or response content.",
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "credentials"
-              ],
-              "title": "CredentialsAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "CredentialsAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "invalidRequest"
-              ],
-              "title": "InvalidRequestAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "InvalidRequestAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "transport"
-              ],
-              "title": "TransportAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "TransportAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "timeout"
-              ],
-              "title": "TimeoutAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "TimeoutAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "status": {
-              "format": "uint16",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "type": {
-              "enum": [
-                "http"
-              ],
-              "title": "HttpAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "status",
-            "type"
-          ],
-          "title": "HttpAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "responseTooLarge"
-              ],
-              "title": "ResponseTooLargeAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ResponseTooLargeAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "invalidResponse"
-              ],
-              "title": "InvalidResponseAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "InvalidResponseAdaptiveReasoningError",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "rejected"
-              ],
-              "title": "RejectedAdaptiveReasoningErrorType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "RejectedAdaptiveReasoningError",
-          "type": "object"
-        }
-      ]
-    },
     "AgentMessageDelivery": {
       "enum": [
         "async"
@@ -1514,6 +1375,145 @@
             "other"
           ],
           "title": "OtherSubAgentSource",
+          "type": "object"
+        }
+      ]
+    },
+    "System1Error": {
+      "description": "Describes a Decisions failure without exposing request or response content.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "credentials"
+              ],
+              "title": "CredentialsSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CredentialsSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidRequest"
+              ],
+              "title": "InvalidRequestSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidRequestSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "transport"
+              ],
+              "title": "TransportSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TransportSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "timeout"
+              ],
+              "title": "TimeoutSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TimeoutSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "http"
+              ],
+              "title": "HttpSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "title": "HttpSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "responseTooLarge"
+              ],
+              "title": "ResponseTooLargeSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ResponseTooLargeSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidResponse"
+              ],
+              "title": "InvalidResponseSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidResponseSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "RejectedSystem1Error",
           "type": "object"
         }
       ]
@@ -3366,35 +3366,6 @@
     }
   },
   "properties": {
-    "adaptiveReasoningEnabled": {
-      "default": false,
-      "description": "Current session-only automatic reasoning mode; never a saved preference.",
-      "type": "boolean"
-    },
-    "adaptiveReasoningError": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/AdaptiveReasoningError"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "adaptiveReasoningFailureEpisode": {
-      "default": 0,
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
-    "adaptiveReasoningRevision": {
-      "default": 0,
-      "description": "Monotonic session revision for ordering mode updates.",
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
     "approvalPolicy": {
       "$ref": "#/definitions/AskForApproval"
     },
@@ -3473,6 +3444,35 @@
         "string",
         "null"
       ]
+    },
+    "system1Enabled": {
+      "default": false,
+      "description": "Current session-only automatic reasoning mode; never a saved preference.",
+      "type": "boolean"
+    },
+    "system1Error": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/System1Error"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "system1FailureEpisode": {
+      "default": 0,
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "system1Revision": {
+      "default": 0,
+      "description": "Monotonic session revision for ordering mode updates.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
     },
     "thread": {
       "$ref": "#/definitions/Thread"

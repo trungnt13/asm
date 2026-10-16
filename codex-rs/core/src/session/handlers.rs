@@ -297,7 +297,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
-    sess.stop_adaptive_reasoning().await;
+    sess.stop_system1().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     super::async_compaction::shutdown(sess).await;
@@ -615,7 +615,7 @@ pub(super) async fn submission_loop(
                     mut thread_settings,
                     reply,
                 } => {
-                    let adaptive_enabled = thread_settings.adaptive_reasoning_enabled.take();
+                    let system1_enabled = thread_settings.system1_enabled.take();
                     let persistent = thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default();
                     let manual_reasoning = thread_settings.model.is_some()
                         || thread_settings.effort.is_some()
@@ -625,25 +625,25 @@ pub(super) async fn submission_loop(
                         turn_extension_init: sub.turn_extension_init,
                     };
                     let result = async {
-                        if adaptive_enabled.is_some() && persistent {
-                            return Err(CodexErr::InvalidRequest("adaptive reasoning mode must be updated separately from persistent thread settings".to_string()));
+                        if system1_enabled.is_some() && persistent {
+                            return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
                         }
-                        let _settings_guard = if adaptive_enabled.is_none() {
+                        let _settings_guard = if system1_enabled.is_none() {
                             Some(thread_settings::acquire_persistence_lock(&sess).await)
                         } else {
                             None
                         };
-                        let snapshot = if adaptive_enabled.is_none() {
+                        let snapshot = if system1_enabled.is_none() {
                             Some(thread_settings::update(&sess, thread_settings).await
                                 .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?)
                         } else {
                             None
                         };
                         if manual_reasoning {
-                            sess.pause_adaptive_reasoning().await;
+                            sess.pause_system1().await;
                         }
-                        if let Some(enabled) = adaptive_enabled {
-                            sess.set_adaptive_reasoning_enabled(enabled).await?;
+                        if let Some(enabled) = system1_enabled {
+                            sess.set_system1_enabled(enabled).await?;
                         }
                         Ok::<_, CodexErr>(snapshot)
                     }.await;

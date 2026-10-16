@@ -169,7 +169,7 @@ async fn read_http_request(stream: &mut (impl AsyncRead + Unpin)) -> (String, Ve
 }
 
 #[tracing::instrument(skip_all)]
-async fn adaptive_fixture(
+async fn system1_fixture(
     client: Arc<DecisionsClient>,
     configure: impl FnOnce(&mut Config),
 ) -> (
@@ -184,12 +184,12 @@ async fn adaptive_fixture(
             config.model = Some("gpt-6-astra".to_string());
             config.model_catalog = Some(codex_models_manager::bundled_models_response().unwrap());
             config.model_reasoning_effort = Some(ReasoningEffort::Low);
-            config.adaptive_reasoning.enabled = true;
-            config.adaptive_reasoning.decision_every_n_steps = 1;
-            config.adaptive_reasoning.decision_timeout_ms = 5_000;
-            config.adaptive_reasoning.min_effort = ReasoningEffort::Low;
-            config.adaptive_reasoning.max_effort = ReasoningEffort::High;
-            config.adaptive_reasoning.rubric_instructions = Some("Test rubric only.".to_string());
+            config.system1.enabled = true;
+            config.system1.decision_every_n_steps = 1;
+            config.system1.decision_timeout_ms = 5_000;
+            config.system1.min_effort = ReasoningEffort::Low;
+            config.system1.max_effort = ReasoningEffort::High;
+            config.system1.rubric_instructions = Some("Test rubric only.".to_string());
             for feature in [
                 Feature::StepModelSwitching,
                 Feature::ReasoningEffortOverride,
@@ -203,7 +203,7 @@ async fn adaptive_fixture(
     session
         .services
         .thread_extension_data
-        .get_or_init(AdaptiveSession::default)
+        .get_or_init(System1Session::default)
         .client
         .set(client)
         .ok()
@@ -263,15 +263,15 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         responses::ev_completed("final-response"),
     ]));
     let requests = responses::mount_sse_sequence(&primary, steps).await;
-    let (session, turn, _events) = adaptive_fixture(Arc::clone(&proxy.client), |config| {
+    let (session, turn, _events) = system1_fixture(Arc::clone(&proxy.client), |config| {
         config.model_provider.base_url = Some(format!("{}/v1", primary.uri()));
         config.model_provider.supports_websockets = false;
         config.update_plan_enabled = true;
         if scenario == "success" {
-            config.adaptive_reasoning.decision_every_n_steps = 2;
+            config.system1.decision_every_n_steps = 2;
         }
         if scenario == "timeout" {
-            config.adaptive_reasoning.decision_timeout_ms = 500;
+            config.system1.decision_timeout_ms = 500;
         }
     })
     .await;
@@ -402,5 +402,5 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
         proxy.requests.try_recv().is_err(),
         "three main steps make only two decisions: spacing or cooldown skips the other"
     );
-    session.stop_adaptive_reasoning().await;
+    session.stop_system1().await;
 }

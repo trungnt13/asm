@@ -89,11 +89,11 @@ static LIVE_THREADS: Gauge = Gauge::new("core.threads.live");
 #[derive(Clone, Debug)]
 pub struct ThreadConfigSnapshot {
     /// Current session-only automatic reasoning mode; never a saved preference.
-    pub adaptive_reasoning_enabled: bool,
+    pub system1_enabled: bool,
     /// Monotonic session revision for ordering mode updates.
-    pub adaptive_reasoning_revision: u64,
-    pub adaptive_reasoning_error: Option<codex_protocol::protocol::AdaptiveReasoningError>,
-    pub adaptive_reasoning_failure_episode: u64,
+    pub system1_revision: u64,
+    pub system1_error: Option<codex_protocol::protocol::System1Error>,
+    pub system1_failure_episode: u64,
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,
@@ -988,6 +988,14 @@ impl CodexThread {
 
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
         self.session.thread_config_snapshot().await
+    }
+
+    pub fn system1_decision_connection(&self) -> Option<codex_protocol::System1DecisionConnection> {
+        self.session.system1_decision_connection()
+    }
+
+    pub fn system1_stats(&self) -> codex_protocol::System1Stats {
+        self.session.system1_stats()
     }
 
     /// Returns the active turn's reviewer, including live updates, or the thread default.

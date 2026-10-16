@@ -429,7 +429,7 @@ impl LocalAgentControl {
             None
         };
         if let Some(evicted) = &evicted_runtime_state {
-            config.role_adaptive_reasoning_disabled |= evicted.role_adaptive_reasoning_disabled;
+            config.role_system1_disabled |= evicted.role_system1_disabled;
             if evicted.web_search_disabled {
                 config
                     .web_search_mode
@@ -519,24 +519,19 @@ impl LocalAgentControl {
             }
         }
         // Reload restores this child's runtime toggle, never the parent's current preference.
-        config.adaptive_reasoning.enabled = evicted_runtime_state
+        config.system1.enabled = evicted_runtime_state
             .as_ref()
-            .is_some_and(|state| state.adaptive_reasoning_enabled)
-            && !config.role_adaptive_reasoning_disabled;
-        config.adaptive_reasoning_initial_revision = evicted_runtime_state.as_ref().map_or(
-            /*default*/ 0,
-            |state| state.adaptive_reasoning_revision,
-        );
-        config.adaptive_reasoning_initial_error = evicted_runtime_state
+            .is_some_and(|state| state.system1_enabled)
+            && !config.role_system1_disabled;
+        config.system1_initial_revision = evicted_runtime_state
             .as_ref()
-            .and_then(|state| state.adaptive_reasoning_error);
-        config.adaptive_reasoning_initial_failure_episode =
-            evicted_runtime_state
-                .as_ref()
-                .map_or(
-                    /*default*/ 0,
-                    |state| state.adaptive_reasoning_failure_episode,
-                );
+            .map_or(/*default*/ 0, |state| state.system1_revision);
+        config.system1_initial_error = evicted_runtime_state
+            .as_ref()
+            .and_then(|state| state.system1_error);
+        config.system1_initial_failure_episode = evicted_runtime_state
+            .as_ref()
+            .map_or(/*default*/ 0, |state| state.system1_failure_episode);
         let parent_thread_id = owner_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id())
             .or(stored_parent_thread_id);
@@ -750,9 +745,9 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
-        config.adaptive_reasoning_initial_revision = 0;
-        config.adaptive_reasoning_initial_error = None;
-        config.adaptive_reasoning_initial_failure_episode = 0;
+        config.system1_initial_revision = 0;
+        config.system1_initial_error = None;
+        config.system1_initial_failure_episode = 0;
         let membership = self.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
         let state = self.runtime.upgrade()?;
@@ -768,10 +763,10 @@ impl LocalAgentControl {
         {
             // Freeze the parent's live toggle without relaxing inherited role restrictions.
             // Later parent changes do not belong to this child's runtime state.
-            config.adaptive_reasoning.enabled = match state.get_thread(*parent_thread_id).await {
-                Ok(parent) => parent.config_snapshot().await.adaptive_reasoning_enabled,
+            config.system1.enabled = match state.get_thread(*parent_thread_id).await {
+                Ok(parent) => parent.config_snapshot().await.system1_enabled,
                 Err(_) => false,
-            } && !config.role_adaptive_reasoning_disabled;
+            } && !config.role_system1_disabled;
         }
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
