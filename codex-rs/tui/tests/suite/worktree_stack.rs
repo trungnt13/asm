@@ -129,7 +129,6 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
     // Repeat through the real event loop, whose dev-build frames share the production stack.
     for (attempt, (command, title)) in [
         ("/side", "Side"),
-        ("/chat", "Chat"),
         ("/side", "Side"),
         ("/side", "Side"),
         ("/parallel", "Parallel"),

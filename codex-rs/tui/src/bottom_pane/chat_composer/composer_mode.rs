@@ -17,7 +17,6 @@ pub(crate) enum ComposerMode {
     #[default]
     Main,
     Side,
-    Chat,
     Parallel,
 }
 
@@ -26,7 +25,6 @@ impl ComposerMode {
         match self {
             Self::Main => "Main",
             Self::Side => "Side",
-            Self::Chat => "Chat",
             Self::Parallel => "Parallel",
         }
     }
@@ -38,13 +36,13 @@ impl ComposerMode {
                 .map_or(Color::Reset, |(fg, bg)| {
                     best_color(blend(fg, bg, /*alpha*/ 0.22))
                 }),
-            Self::Side | Self::Chat | Self::Parallel => best_color((175, 0, 175)),
+            Self::Side | Self::Parallel => best_color((175, 0, 175)),
         };
         if background == Color::Reset {
             // Terminal-owned palettes cannot be resolved to RGB; reverse their own colors.
             let foreground = match self {
                 Self::Main => Color::Reset,
-                Self::Side | Self::Chat | Self::Parallel => Color::Magenta,
+                Self::Side | Self::Parallel => Color::Magenta,
             };
             return Style::default()
                 .fg(foreground)
