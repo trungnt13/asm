@@ -7,6 +7,7 @@ mod sanitized_git_url;
 mod session_id;
 mod system1_stats;
 mod thread_id;
+pub use system1_stats::System1DecisionConnection;
 pub use system1_stats::System1Stats;
 mod tool_name;
 pub use agent_path::AgentPath;

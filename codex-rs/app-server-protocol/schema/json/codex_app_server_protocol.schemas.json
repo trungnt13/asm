@@ -21026,6 +21026,32 @@
         ],
         "type": "object"
       },
+      "System1DecisionConnection": {
+        "description": "Identifies the session-fixed decision connection without endpoint or credential settings. Resolution does not imply successful initialization or provider use.",
+        "properties": {
+          "backend": {
+            "type": "string"
+          },
+          "clientInitialized": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "backend",
+          "clientInitialized",
+          "model"
+        ],
+        "type": "object"
+      },
       "System1Error": {
         "description": "Describes a Decisions failure without exposing request or response content.",
         "oneOf": [
@@ -25722,6 +25748,16 @@
       "ThreadSystem1StatsReadResponse": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "decisionConnection": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/System1DecisionConnection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "enabled": {
             "type": "boolean"
           },

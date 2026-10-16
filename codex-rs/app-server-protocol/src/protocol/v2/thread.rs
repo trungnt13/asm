@@ -20,6 +20,7 @@ use super::shared::v2_enum_from_core;
 use crate::JsonSchema;
 use crate::TS;
 use codex_experimental_api_macros::ExperimentalApi;
+pub use codex_protocol::System1DecisionConnection;
 pub use codex_protocol::System1Stats;
 pub use codex_protocol::capabilities::CapabilityRootLocation;
 pub use codex_protocol::capabilities::SelectedCapabilityRoot;
@@ -2265,5 +2266,6 @@ pub struct ThreadSystem1StatsReadResponse {
     pub error: Option<System1Error>,
     pub failure_episode: u64,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub decision_connection: Option<System1DecisionConnection>,
     pub stats: System1Stats,
 }

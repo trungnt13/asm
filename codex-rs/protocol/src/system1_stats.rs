@@ -18,3 +18,14 @@ pub struct System1Stats {
     pub total_elapsed_ms: u64,
     pub last_elapsed_ms: Option<u64>,
 }
+
+/// Identifies the session-fixed decision connection without endpoint or credential settings.
+/// Resolution does not imply successful initialization or provider use.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct System1DecisionConnection {
+    pub backend: String,
+    pub model: String,
+    pub profile: Option<String>,
+    pub client_initialized: bool,
+}

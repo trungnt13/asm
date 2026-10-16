@@ -1,11 +1,31 @@
 use super::System1Session;
 use crate::session::decision_log::DecisionDisposition;
 use crate::session::session::Session;
+use codex_config::System1Backend;
+use codex_protocol::System1DecisionConnection;
 use codex_protocol::System1Stats;
 use codex_protocol::protocol::System1Error;
 use std::time::Duration;
 
 impl Session {
+    pub(crate) fn system1_decision_connection(&self) -> Option<System1DecisionConnection> {
+        let state = self
+            .services
+            .thread_extension_data
+            .get::<System1Session>()?;
+        let profile = state.profile.get()?;
+        Some(System1DecisionConnection {
+            backend: match profile.settings.backend {
+                System1Backend::Openai => "openai",
+                System1Backend::Typesafe => "typesafe",
+            }
+            .to_string(),
+            model: profile.settings.model.clone(),
+            profile: profile.name.clone(),
+            client_initialized: state.client.get().is_some(),
+        })
+    }
+
     pub(crate) fn system1_stats(&self) -> System1Stats {
         self.services
             .thread_extension_data

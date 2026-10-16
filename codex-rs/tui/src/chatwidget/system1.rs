@@ -66,6 +66,23 @@ impl ChatWidget {
             "System1 status ({source})\nMode: {mode}\nSelected effort: {selected}\nLast captured step effort: {captured}\nHealth: {health}\nRevision: {revision}; failure episode: {failure_episode}"
         );
         if let Some(response) = response {
+            if let Some(connection) = response.decision_connection {
+                let profile = connection
+                    .profile
+                    .as_deref()
+                    .unwrap_or("legacy configuration");
+                let client = if connection.client_initialized {
+                    "client initialized"
+                } else {
+                    "client not initialized"
+                };
+                message.push_str(&format!(
+                    "\nDecision connection: session-fixed; {client}\nDecision backend/protocol: {}\nDecision model: {}\nDecision profile: {profile}",
+                    connection.backend, connection.model,
+                ));
+            } else {
+                message.push_str("\nDecision connection: not resolved or not reported by server.");
+            }
             let stats = response.stats;
             let last = stats
                 .last_elapsed_ms
@@ -76,7 +93,7 @@ impl ChatWidget {
                 stats.ignored, stats.setup_failures, stats.total_elapsed_ms,
             ));
         } else {
-            message.push_str("\nStats unavailable on this server.");
+            message.push_str("\nDecision connection and stats unavailable on this server.");
         }
         self.add_info_message(message, /*hint*/ None);
     }

@@ -5103,6 +5103,16 @@ class SubagentMigration(BaseModel):
     name: str
 
 
+class System1DecisionConnection(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    backend: str
+    client_initialized: Annotated[bool, Field(alias="clientInitialized")]
+    model: str
+    profile: str | None = None
+
+
 class CredentialsSystem1Error(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6519,6 +6529,9 @@ class ThreadSystem1StatsReadResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    decision_connection: Annotated[
+        System1DecisionConnection | None, Field(alias="decisionConnection")
+    ] = None
     enabled: bool
     error: System1Error | None = None
     failure_episode: Annotated[int, Field(alias="failureEpisode", ge=0)]

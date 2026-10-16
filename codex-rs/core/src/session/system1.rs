@@ -73,13 +73,18 @@ struct System1Session {
     turns_started: AtomicU64,
     decision_due_after_enable: AtomicBool,
     warmup_started: AtomicBool,
-    profile: OnceLock<System1Profile>,
+    profile: OnceLock<ResolvedSystem1Profile>,
     client: OnceLock<Arc<DecisionsClient>>,
     recovery: StdMutex<System1Recovery>,
     stats: StdMutex<codex_protocol::System1Stats>,
     shutdown: CancellationToken,
     evidence: StdMutex<CancellationToken>,
     warmup: StdMutex<Option<AbortOnDropHandle<()>>>,
+}
+
+struct ResolvedSystem1Profile {
+    name: Option<String>,
+    settings: System1Profile,
 }
 
 pub(super) struct System1ModelStepStarted;
@@ -169,8 +174,12 @@ impl System1Session {
                 .system1
                 .resolved_profile()
                 .map_err(|_| DecisionsError::InvalidRequest)?;
-            self.profile.get_or_init(|| profile)
+            self.profile.get_or_init(|| ResolvedSystem1Profile {
+                name: config.system1.profile.clone(),
+                settings: profile,
+            })
         };
+        let profile = &profile.settings;
         if let Some(client) = self.client.get() {
             return Ok((Arc::clone(client), profile.model.clone()));
         }

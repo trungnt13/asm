@@ -990,6 +990,10 @@ impl CodexThread {
         self.session.thread_config_snapshot().await
     }
 
+    pub fn system1_decision_connection(&self) -> Option<codex_protocol::System1DecisionConnection> {
+        self.session.system1_decision_connection()
+    }
+
     pub fn system1_stats(&self) -> codex_protocol::System1Stats {
         self.session.system1_stats()
     }

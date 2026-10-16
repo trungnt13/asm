@@ -18,6 +18,7 @@ impl ThreadRequestProcessor {
                 error: snapshot.system1_error,
                 failure_episode: snapshot.system1_failure_episode,
                 reasoning_effort: snapshot.reasoning_effort,
+                decision_connection: thread.system1_decision_connection(),
                 stats: thread.system1_stats(),
             }
             .into(),
