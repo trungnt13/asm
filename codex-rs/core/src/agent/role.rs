@@ -3,6 +3,8 @@
 //! Roles may customize the child or reduce its capabilities, but never replace the parent
 //! session's authority. A projected layer keeps existing layer-based consumers in sync.
 
+pub(super) use role_overrides::build_config_layer_stack as build_role_layer_stack;
+
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::deserialize_config_toml_with_base;
@@ -53,7 +55,9 @@ struct AgentRoleOverrides {
 
 #[derive(Serialize)]
 struct System1RoleOverride {
-    enabled: bool,
+    enabled: Option<bool>,
+    min_effort: Option<ReasoningEffort>,
+    max_effort: Option<ReasoningEffort>,
 }
 
 /// Applies typed role overrides to the existing parent-derived configuration.
@@ -85,14 +89,25 @@ async fn apply_role_to_config_inner(
         return Ok(());
     };
     let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
-    // Check the raw field: the typed table defaults an omitted `enabled` to false.
-    let disables_system1 = role_layer_toml
+    let system1 = role_layer_toml
         .get("system1")
-        .or_else(|| role_layer_toml.get("adaptive_reasoning"))
-        .and_then(|system1| system1.get("enabled"))
+        .or_else(|| role_layer_toml.get("adaptive_reasoning"));
+    let has_min = system1.is_some_and(|table| table.get("min_effort").is_some());
+    let has_max = system1.is_some_and(|table| table.get("max_effort").is_some());
+    let disables_system1 = system1
+        .and_then(|table| table.get("enabled"))
         .and_then(TomlValue::as_bool)
         == Some(false);
     let role_config = deserialize_config_toml_with_base(role_layer_toml, &config.codex_home)?;
+    let system1_override = role_config
+        .system1
+        .as_ref()
+        .filter(|_| disables_system1 || has_min || has_max)
+        .map(|settings| System1RoleOverride {
+            enabled: disables_system1.then_some(false),
+            min_effort: has_min.then(|| settings.min_effort.clone()),
+            max_effort: has_max.then(|| settings.max_effort.clone()),
+        });
     let mut overrides = AgentRoleOverrides {
         developer_instructions: role_config.developer_instructions,
         model: role_config.model,
@@ -105,7 +120,7 @@ async fn apply_role_to_config_inner(
         web_search: role_config
             .web_search
             .filter(|mode| *mode == WebSearchMode::Disabled),
-        system1: disables_system1.then_some(System1RoleOverride { enabled: false }),
+        system1: system1_override,
         ..Default::default()
     };
 
@@ -247,9 +262,26 @@ mod role_overrides {
         if let Some(mode) = overrides.web_search {
             next_config.web_search_mode.set(mode)?;
         }
-        if overrides.system1.is_some() {
-            next_config.system1.enabled = false;
-            next_config.role_system1_disabled = true;
+        if let Some(system1) = &overrides.system1 {
+            if system1.enabled == Some(false) {
+                next_config.system1.enabled = false;
+                next_config.role_system1_disabled = true;
+            }
+            if system1.min_effort.is_some() || system1.max_effort.is_some() {
+                next_config.role_system1_base_bounds.get_or_insert_with(|| {
+                    (
+                        config.system1.min_effort.clone(),
+                        config.system1.max_effort.clone(),
+                    )
+                });
+                if let Some(min) = &system1.min_effort {
+                    next_config.system1.min_effort = min.clone();
+                }
+                if let Some(max) = &system1.max_effort {
+                    next_config.system1.max_effort = max.clone();
+                }
+                next_config.system1.validate().map_err(|err| anyhow!(err))?;
+            }
         }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {
@@ -277,7 +309,7 @@ mod role_overrides {
         Ok(next_config)
     }
 
-    fn build_config_layer_stack(
+    pub(crate) fn build_config_layer_stack(
         config: &Config,
         role_layer_toml: &TomlValue,
     ) -> anyhow::Result<ConfigLayerStack> {

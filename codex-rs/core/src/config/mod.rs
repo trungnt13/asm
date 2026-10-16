@@ -1069,6 +1069,8 @@ pub struct Config {
     pub system1: codex_config::System1Config,
     /// Retains role restrictions across live-toggle inheritance and child reloads.
     pub(crate) role_system1_disabled: bool,
+    /// Restores inherited bounds before a new child applies its own role.
+    pub(crate) role_system1_base_bounds: Option<(ReasoningEffort, ReasoningEffort)>,
     /// Runtime-only revision seed when an evicted child session is reloaded.
     pub system1_initial_revision: u64,
     pub system1_initial_error: Option<codex_protocol::protocol::System1Error>,
@@ -4670,6 +4672,7 @@ impl Config {
             model_reasoning_effort: cfg.model_reasoning_effort,
             system1,
             role_system1_disabled: false,
+            role_system1_base_bounds: None,
             system1_initial_revision: 0,
             system1_initial_error: None,
             system1_initial_failure_episode: 0,

@@ -536,7 +536,16 @@ allowed_agent_roles = ["reviewer"]
 Role TOML files may disable web search with `web_search = "disabled"` and System1 with `[system1] enabled = false`. Only explicit disabling is
 applied; omitted fields retain inheritance, including the parent's live System1 toggle.
 Role settings cannot enable either capability against parent restrictions. System1
-restrictions survive child spawn and reload; other System1 settings remain inherited.
+restrictions survive child spawn and reload. Roles may override `min_effort` and
+`max_effort` independently in `[system1]`; omitted bounds retain inherited values.
+Validate the merged range with the ordinary-effort rules. Intersect it with the
+current model's supported efforts; fewer than two choices skips Decisions.
+Bounds follow the applied role through model changes and child reload. New
+children resolve their own role without inheriting ancestor role bounds; V1
+full-history forks retain their role bounds. Other System1 settings remain inherited.
+This is a decision-choice range, not a clamp on manual effort or fallback requests.
+After a supporting release is published and installed, set the personal reviewer
+to `min_effort = "high"` and `max_effort = "xhigh"`; do not change it before then.
 Keep the projected role layer aligned with runtime settings. This does not add support
 for arbitrary role configuration fields or change session authority.
 
