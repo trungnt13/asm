@@ -638,11 +638,6 @@ pub struct Config {
 
     /// Optional override of model selection.
     pub model: Option<String>,
-    /// Model for temporary `/chat` conversations; absent inherits the parent.
-    pub chat_model: Option<String>,
-    /// Initial `/chat` effort; absent inherits the parent.
-    pub chat_reasoning: Option<ReasoningEffort>,
-
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak_enabled: bool,
 
@@ -4516,11 +4511,6 @@ impl Config {
             plugins: cfg.plugins,
             prefer_mxc,
             model,
-            chat_model: cfg
-                .chat_model
-                .map(|model| model.trim().to_string())
-                .filter(|model| !model.is_empty()),
-            chat_reasoning: cfg.chat_reasoning,
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
             service_tier,
             subagent_service_tiers: cfg.subagent_service_tiers,
