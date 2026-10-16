@@ -76,12 +76,6 @@ pub(crate) struct RealtimeWebrtcStartupFailure {
     pub cause: codex_realtime_webrtc::ConnectionError,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SideConversationMode {
-    Side,
-    Chat,
-}
-
 #[derive(Debug)]
 pub(crate) enum SideConversationAction {
     Sync,
@@ -460,7 +454,6 @@ pub(crate) enum AppEvent {
     /// Fork the current thread into a transient side conversation.
     StartSide {
         parent_thread_id: ThreadId,
-        mode: SideConversationMode,
         user_message: Option<UserMessage>,
     },
 

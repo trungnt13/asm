@@ -10,7 +10,6 @@ use crate::app::WindowsSandboxHost;
 use crate::app_event::AdaptiveReasoningAction;
 use crate::app_event::ManagedWorktreeMode;
 use crate::app_event::SideConversationAction;
-use crate::app_event::SideConversationMode;
 use crate::app_event::ThreadGoalSetMode;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
@@ -45,14 +44,6 @@ const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
 
 impl ChatWidget {
-    fn side_mode_for_command(cmd: SlashCommand) -> SideConversationMode {
-        if cmd == SlashCommand::Chat {
-            SideConversationMode::Chat
-        } else {
-            SideConversationMode::Side
-        }
-    }
-
     pub(crate) fn last_side_reply_markdown(&self) -> Option<&str> {
         if !self.active_side_conversation {
             return None;
@@ -130,18 +121,13 @@ impl ChatWidget {
     fn request_side_conversation(
         &mut self,
         parent_thread_id: ThreadId,
-        mode: SideConversationMode,
         user_message: Option<UserMessage>,
     ) {
-        let label = match mode {
-            SideConversationMode::Side => SIDE_STARTING_CONTEXT_LABEL,
-            SideConversationMode::Chat => "Chat starting...",
-        };
+        let label = SIDE_STARTING_CONTEXT_LABEL;
         self.set_side_conversation_context_label(Some(label.to_string()));
         self.request_redraw();
         self.app_event_tx.send(AppEvent::StartSide {
             parent_thread_id,
-            mode,
             user_message,
         });
     }
@@ -155,11 +141,7 @@ impl ChatWidget {
             return;
         };
 
-        self.request_side_conversation(
-            parent_thread_id,
-            Self::side_mode_for_command(cmd),
-            /*user_message*/ None,
-        );
+        self.request_side_conversation(parent_thread_id, /*user_message*/ None);
     }
 
     fn request_parallel_conversation(
@@ -487,7 +469,7 @@ impl ChatWidget {
                     action: SideConversationAction::Sync,
                 });
             }
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Chat => {
+            SlashCommand::Side | SlashCommand::Btw => {
                 self.request_empty_side_conversation(cmd);
             }
             SlashCommand::Parallel => {
@@ -1227,10 +1209,7 @@ impl ChatWidget {
                     self.clear_live_goal_submission();
                 }
             }
-            SlashCommand::Side
-            | SlashCommand::Btw
-            | SlashCommand::Chat
-            | SlashCommand::Parallel
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
                 if !trimmed.is_empty() =>
             {
                 let Some(parent_thread_id) = self.thread_id else {
@@ -1251,11 +1230,7 @@ impl ChatWidget {
                 if cmd == SlashCommand::Parallel {
                     self.request_parallel_conversation(parent_thread_id, Some(user_message));
                 } else {
-                    self.request_side_conversation(
-                        parent_thread_id,
-                        Self::side_mode_for_command(cmd),
-                        Some(user_message),
-                    );
+                    self.request_side_conversation(parent_thread_id, Some(user_message));
                 }
             }
             SlashCommand::Review if !trimmed.is_empty() => {
@@ -1491,7 +1466,6 @@ impl ChatWidget {
             | SlashCommand::Goal
             | SlashCommand::Side
             | SlashCommand::Btw
-            | SlashCommand::Chat
             | SlashCommand::SendLast
             | SlashCommand::Sync
             | SlashCommand::Parallel
@@ -1548,10 +1522,7 @@ impl ChatWidget {
         if !self.active_side_conversation
             && matches!(cmd, SlashCommand::SendLast | SlashCommand::Sync)
         {
-            self.add_error_message(format!(
-                "'/{}' is only available in Side/Chat.",
-                cmd.command()
-            ));
+            self.add_error_message(format!("'/{}' is only available in Side.", cmd.command()));
             self.bottom_pane.drain_pending_submission_state();
             return false;
         }
@@ -1569,7 +1540,7 @@ impl ChatWidget {
     fn ensure_side_command_allowed_outside_review(&mut self, cmd: SlashCommand) -> bool {
         if !matches!(
             cmd,
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Chat | SlashCommand::Parallel
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
         ) || !self.review.is_review_mode
         {
             return true;
