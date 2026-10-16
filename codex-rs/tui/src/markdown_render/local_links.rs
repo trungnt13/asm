@@ -48,7 +48,8 @@ pub(super) fn is_markdown_file_link(destination: &str) -> bool {
             && !destination.starts_with('#')
             && (Url::parse(destination).is_err()
                 || extract_colon_location_suffix(destination).is_some_and(|suffix| {
-                    Url::parse(&destination[..destination.len() - suffix.len()]).is_err()
+                    let basename = &destination[..destination.len() - suffix.len()];
+                    basename.contains('.') && Url::parse(basename).is_err()
                 })))
 }
 

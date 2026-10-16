@@ -442,6 +442,7 @@ struct LinkState {
     show_destination: bool,
     style_label: bool,
     has_visible_label: bool,
+    has_terminal_destination: bool,
     /// Pre-rendered display text for local file links.
     ///
     /// When this is present, label spans are buffered until the link closes so path-like labels
@@ -1340,10 +1341,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         let destination = self
             .link
             .as_ref()
-            .and_then(|link| markdown_destination(&link.destination));
+            .filter(|link| link.has_terminal_destination)
+            .map(|link| link.destination.as_str());
         let mut annotated = if let Some(destination) = destination {
             let mut annotated = HyperlinkLine::new(Line::default());
-            annotated.push_markdown_span(span, Some(&destination));
+            annotated.push_markdown_span(span, Some(destination));
             annotated
         } else if self.link.is_some() || self.in_code_block {
             HyperlinkLine::new(Line::from(span))
@@ -2139,7 +2141,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn style_link_label(&mut self, mut span: Span<'static>) -> Span<'static> {
         if let Some(link) = self.link.as_mut()
-            && markdown_destination(&link.destination).is_some()
+            && link.has_terminal_destination
         {
             link.has_visible_label |=
                 !span.content.trim().is_empty() && display_width(&span.content) > 0;
@@ -2156,6 +2158,8 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                 .then(|| local_links::local_link_destination(&dest_url, self.cwd.as_deref()))
                 .flatten();
         let style_label = compact && (web.is_some() || local_destination.is_some());
+        let has_terminal_destination = web.is_some()
+            || markdown_destination(local_destination.as_deref().unwrap_or(&dest_url)).is_some();
         if style_label {
             self.push_inline_style(self.styles.link);
         }
@@ -2164,6 +2168,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             show_destination,
             style_label,
             has_visible_label: false,
+            has_terminal_destination,
             local_target_display: if local_destination.is_some()
                 || is_local_path_like_link(&dest_url)
             {
@@ -2210,7 +2215,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             } else if link.show_destination
                 || (!link.has_visible_label
                     && link.local_target_display.is_none()
-                    && markdown_destination(&link.destination).is_some())
+                    && link.has_terminal_destination)
             {
                 // Link destinations are rendered as " (url)" suffixes. When parsing table cells,
                 // append the suffix into the active cell buffer rather than the outer paragraph
@@ -2502,10 +2507,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         let destination = self
             .link
             .as_ref()
-            .and_then(|link| markdown_destination(&link.destination));
+            .filter(|link| link.has_terminal_destination)
+            .map(|link| link.destination.as_str());
         let annotated = if let Some(destination) = destination {
             let mut annotated = HyperlinkLine::new(Line::default());
-            annotated.push_markdown_span(span, Some(&destination));
+            annotated.push_markdown_span(span, Some(destination));
             annotated
         } else if self.link.is_some() || self.in_code_block {
             HyperlinkLine::new(Line::from(span))
