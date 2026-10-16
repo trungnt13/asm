@@ -770,16 +770,17 @@ impl App {
         resume_restored_queue: bool,
     ) -> Result<()> {
         let mut config = self.config.clone();
-        if self.side_threads.get(&thread_id).is_some_and(|state| {
-            state.kind == CompanionKind::Parallel
-                || state.mode == crate::app_event::SideConversationMode::Chat
-        }) || (!self.side_threads.contains_key(&thread_id)
-            && snapshot
-                .session
-                .as_ref()
-                .is_some_and(ThreadSessionState::is_user_fork))
+        if self
+            .side_threads
+            .get(&thread_id)
+            .is_some_and(|state| state.kind == CompanionKind::Parallel)
+            || (!self.side_threads.contains_key(&thread_id)
+                && snapshot
+                    .session
+                    .as_ref()
+                    .is_some_and(ThreadSessionState::is_user_fork))
         {
-            // Chat and saved user forks retain their selected tier across view rebuilds.
+            // Saved user forks retain their selected tier across view rebuilds.
             config.service_tier = snapshot
                 .session
                 .as_ref()
