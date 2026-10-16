@@ -293,7 +293,8 @@ codex --no-daemon --model claude-code/claude-sonnet-5-5
 - Launch with restricted settings, no built-in tools/skills, no hooks, and only the
   explicit MCP bridge. Ignore ambient API-key and cloud-provider billing selectors;
   use the existing official subscription sign-in. The installed CLI must support the
-  launch flags; CLI 2.1.296 help was inspected, not proven by live integration.
+  launch flags; CLI 2.1.296 is the Linux validation target. Recheck protocol and
+  lifecycle compatibility when changing CLI versions.
 - Isolate transport and framing in `ext/claude-runtime`; keep the shared session/task
   integration small. Do not introduce a second agent registry or pretend CLI events
   implement the Responses API. Root and child threads use the same execution path.

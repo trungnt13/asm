@@ -482,14 +482,30 @@ async fn run_conversation(
             total_tokens: input_tokens + cached + written + output,
             codex_rollout_budget_units: None,
         };
+        let response_id = result["uuid"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         session
+            .record_observed_response_completed(
+                turn,
+                &response_id,
+                Some(&usage),
+                /*usage_metadata*/ None,
+            )
+            .await;
+        let budget_result = session
             .record_token_usage_info(
                 turn,
                 &step.settings,
                 Some(&usage),
                 TokenUsageContext::Sampling,
             )
-            .await?;
+            .await;
+        session
+            .send_token_count_event(turn, /*output_tokens_per_second*/ None)
+            .await;
+        budget_result?;
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
         runtime.save_checkpoint()?;
