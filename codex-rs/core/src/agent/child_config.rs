@@ -5,6 +5,7 @@
 
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
+use crate::agent::role::build_role_layer_stack;
 use crate::config::Config;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -65,6 +66,7 @@ pub(crate) async fn prepare_agent_spawn_config(
         config.system1.min_effort = turn.config.system1.min_effort.clone();
         config.system1.max_effort = turn.config.system1.max_effort.clone();
         config.role_system1_base_bounds = turn.config.role_system1_base_bounds.clone();
+        config.config_layer_stack = turn.config.config_layer_stack.clone();
     }
     apply_requested_spawn_agent_model_overrides(
         session,
@@ -140,6 +142,12 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     let mut config = (*base_config).clone();
     config.role_model_context_window = None;
     if let Some((min, max)) = config.role_system1_base_bounds.take() {
+        let reset = toml::Value::try_from(serde_json::json!({
+            "system1": { "min_effort": min, "max_effort": max }
+        }))
+        .map_err(|err| err.to_string())?;
+        config.config_layer_stack =
+            build_role_layer_stack(&config, &reset).map_err(|err| err.to_string())?;
         config.system1.min_effort = min;
         config.system1.max_effort = max;
     }
