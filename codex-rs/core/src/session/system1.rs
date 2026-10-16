@@ -556,7 +556,7 @@ impl Session {
             {
                 return;
             }
-            let text = evidence.collect(
+            evidence.ingest(
                 input,
                 state.history.annotated_items(),
                 config.max_context_bytes,
@@ -611,6 +611,10 @@ impl Session {
                     .child_token(),
                 deadline,
             };
+            let text = evidence.render(state.history.annotated_items(), config.max_context_bytes);
+            if Instant::now() >= deadline {
+                return;
+            }
             drop(state);
             let attempt = self.system1_decision_log(&turn.config).map(|log| {
                 log.start(

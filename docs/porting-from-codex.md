@@ -283,6 +283,8 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ### System1
 
+Task and steering ingestion precedes skipped checks and invalidates stale decisions; bounded evidence rendering follows cadence, trigger, and recovery gates. Rendering keeps the original deadline and must finish before client setup.
+
 The canonical feature name is System1, configured with `[system1]` and toggled with `/system1`. Accept the former `[adaptive_reasoning]` table when reading existing configuration, including deny-only roles, and former rollout fields when resuming saved sessions. Emit only canonical names. Preserve layer precedence across old and new spellings, but reject both tables in one layer. Before writing canonical settings into a file that still uses the old table, rename that table; reject conflicting writes without changing the file.
 
 Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.

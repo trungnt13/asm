@@ -64,21 +64,23 @@ fn basic_evidence_includes_task_and_conversation_history() {
         .into(),
     ];
     let mut evidence = System1Evidence::default();
-    evidence.collect(&[input("Review performance.")], &[], /*limit*/ 8192);
-    assert_eq!(
-        evidence.collect(
-            &[input("Review documentation only.")],
-            &history,
-            /*limit*/ 8192
-        ),
-        "Current user task:\nReview performance.\nLatest user steer:\nReview documentation only.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.\nuser: Review performance.",
+    evidence.ingest(&[input("Review performance.")], &[], /*limit*/ 8192);
+    evidence.ingest(
+        &[input("Review documentation only.")],
+        &history,
+        /*limit*/ 8192,
     );
     assert_eq!(
-        evidence.collect(
-            &[input("Review performance.")],
-            &history,
-            /*limit*/ 8192
-        ),
+        evidence.render(&history, /*limit*/ 8192),
+        "Current user task:\nReview performance.\nLatest user steer:\nReview documentation only.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.\nuser: Review performance.",
+    );
+    evidence.ingest(
+        &[input("Review performance.")],
+        &history,
+        /*limit*/ 8192,
+    );
+    assert_eq!(
+        evidence.render(&history, /*limit*/ 8192),
         "Current user task:\nReview performance.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.\nuser: Review performance.",
     );
     assert_eq!(evidence.task, "Review performance.");
@@ -105,7 +107,9 @@ fn basic_evidence_respects_configured_context_budget() {
         }],
         /*metadata*/ None,
     )];
-    let text = System1Evidence::default().collect(&[input], &history, /*limit*/ 32768);
+    let mut evidence = System1Evidence::default();
+    evidence.ingest(&[input], &history, /*limit*/ 32768);
+    let text = evidence.render(&history, /*limit*/ 32768);
     assert!(text.len() <= 32768);
     assert!(text.starts_with("Current user task:\n界"));
     assert!(text.contains("\nassistant: é"));
@@ -168,11 +172,13 @@ fn basic_evidence_respects_configured_context_budget() {
         task: "Current task.".to_string(),
         ..Default::default()
     };
-    let default_text = evidence.collect(&[], &history, /*limit*/ 8192);
+    evidence.ingest(&[], &history, /*limit*/ 8192);
+    let default_text = evidence.render(&history, /*limit*/ 8192);
     assert!(default_text.len() <= 8192);
     assert!(!default_text.contains("EARLIER_USER_CONSTRAINT"));
     assert!(!default_text.contains("LATE_ASSISTANT_PART"));
-    let expanded_text = evidence.collect(&[], &history, /*limit*/ 32768);
+    evidence.ingest(&[], &history, /*limit*/ 32768);
+    let expanded_text = evidence.render(&history, /*limit*/ 32768);
     assert!(expanded_text.len() <= 32768);
     assert!(expanded_text.contains("\nuser: EARLIER_USER_CONSTRAINT"));
     assert!(expanded_text.contains("LATE_ASSISTANT_PART"));

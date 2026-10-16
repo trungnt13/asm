@@ -14,12 +14,12 @@ pub(super) struct System1Evidence {
 }
 
 impl System1Evidence {
-    pub(super) fn collect(
+    pub(super) fn ingest(
         &mut self,
         input: &[TurnInput],
         history: &[ResponseItemEnvelope],
         limit: usize,
-    ) -> String {
+    ) {
         // Keep scan work bounded, but let larger byte budgets reach more history and parts.
         let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
         let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
@@ -81,6 +81,11 @@ impl System1Evidence {
                 }
             }
         }
+    }
+
+    pub(super) fn render(&self, history: &[ResponseItemEnvelope], limit: usize) -> String {
+        let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
+        let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
         let mut text = String::new();
         append_text(&mut text, "Current user task:\n", limit);
         append_text(&mut text, &self.task, limit);
