@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "codex-claude-runtime"
-version = "0.163.1-alpha.13.2"
+version = "0.164.1-alpha.1"
 dependencies = [
  "anyhow",
  "libc",
