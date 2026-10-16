@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Checkpoint {
     pub(super) model: String,
     pub(super) effort: Option<String>,
@@ -15,9 +15,79 @@ pub(super) struct Checkpoint {
     pub(super) session_id: String,
     pub(super) instructions: String,
     pub(super) authority: Value,
+    #[serde(default)]
+    pub(super) system_policy: Option<SystemPolicy>,
     pub(super) in_flight: bool,
     pub(super) delivered_items: usize,
     pub(super) delivered_prefix: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct SystemPolicy {
+    pub(super) stable_instructions: String,
+    pub(super) approved_prefixes: std::collections::BTreeSet<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct PermissionSnapshot {
+    pub(super) instructions: String,
+    pub(super) approved_command_prefixes: std::collections::BTreeSet<Vec<String>>,
+}
+
+impl SystemPolicy {
+    pub(super) fn permits_refresh(&self, current: &Self) -> bool {
+        self.stable_instructions == current.stable_instructions
+            && self.approved_prefixes.is_subset(&current.approved_prefixes)
+    }
+
+    pub(super) fn verifies_receipt(&self, current: &Self, text: &str) -> bool {
+        use crate::context::ContextualUserFragment;
+        if !self.permits_refresh(current) {
+            return false;
+        }
+        let prefixes = text
+            .lines()
+            .skip(1)
+            .map(|line| {
+                line.strip_prefix("- ")
+                    .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
+            })
+            .collect::<Option<std::collections::BTreeSet<_>>>();
+        let Some(prefixes) = prefixes else {
+            return false;
+        };
+        if prefixes.is_empty()
+            || !prefixes.is_subset(&current.approved_prefixes)
+            || !prefixes.is_disjoint(&self.approved_prefixes)
+        {
+            return false;
+        }
+        let Some(formatted) =
+            codex_protocol::models::format_allow_prefixes(prefixes.into_iter().collect())
+        else {
+            return false;
+        };
+        crate::context::ApprovedCommandPrefixSaved::new(formatted).body() == text
+    }
+}
+
+impl Checkpoint {
+    pub(super) fn permits_system(
+        &self,
+        instructions: &str,
+        policy: &SystemPolicy,
+    ) -> anyhow::Result<()> {
+        if self.instructions == instructions {
+            return Ok(());
+        }
+        anyhow::ensure!(
+            self.system_policy
+                .as_ref()
+                .is_some_and(|previous| previous.permits_refresh(policy)),
+            "Claude system policy changed without a verified approved-prefix transition; start a new chat (older checkpoints cannot refresh changed instructions)"
+        );
+        Ok(())
+    }
 }
 
 pub(crate) struct ClaudeSession {
@@ -30,6 +100,37 @@ pub(crate) struct ClaudeSession {
 }
 
 impl ClaudeSession {
+    pub(super) async fn spawn_runtime(
+        bridge: &ClaudeToolBridge,
+        checkpoint: &Checkpoint,
+        session: codex_claude_runtime::ClaudeSession,
+    ) -> anyhow::Result<ClaudeRuntime> {
+        use anyhow::Context;
+        let allowed_tools = bridge
+            .tool_names()
+            .await
+            .into_iter()
+            .map(|name| format!("mcp__asm__{name}"))
+            .collect();
+        ClaudeRuntime::spawn(codex_claude_runtime::ClaudeOptions {
+            executable: PathBuf::from("claude"),
+            cwd: checkpoint.cwd.clone(),
+            model: checkpoint
+                .model
+                .strip_prefix("claude-code/")
+                .context("not a Claude model")?
+                .to_owned(),
+            effort: checkpoint.effort.clone(),
+            system_prompt: checkpoint.instructions.clone(),
+            session,
+            mcp_config: serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
+                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}}),
+            allowed_tools,
+            turn_timeout: std::time::Duration::from_secs(/*secs*/ 3600),
+        })
+        .await
+    }
+
     pub(super) fn save_checkpoint(&self) -> anyhow::Result<()> {
         let temporary = self
             .checkpoint_path
@@ -66,17 +167,15 @@ struct SlotState {
 }
 
 impl RuntimeSlot {
-    pub(super) fn checkpoint(&self) -> anyhow::Result<Option<(usize, String)>> {
+    pub(super) fn checkpoint(&self) -> anyhow::Result<Option<Checkpoint>> {
         let state = self
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("Claude session lock was poisoned"))?;
-        Ok(state.runtime.as_ref().map(|runtime| {
-            (
-                runtime.checkpoint.delivered_items,
-                runtime.checkpoint.delivered_prefix.clone(),
-            )
-        }))
+        Ok(state
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.checkpoint.clone()))
     }
 
     pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ClaudeSession>> {

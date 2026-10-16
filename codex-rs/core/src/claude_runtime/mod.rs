@@ -5,21 +5,20 @@ mod state;
 use events::record_assistant_frame;
 use state::Checkpoint;
 use state::ClaudeSession;
+use state::PermissionSnapshot;
 use state::RuntimeLease;
 pub(crate) use state::RuntimeSlot;
+use state::SystemPolicy;
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::bail;
 use codex_async_utils::OrCancelExt;
-use codex_claude_runtime::ClaudeOptions;
-use codex_claude_runtime::ClaudeRuntime;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::ContentItemProvenance;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
@@ -159,15 +158,19 @@ async fn run_conversation(
             .codex_home
             .join("claude-runtime")
             .join(format!("{}.json", session.thread_id()));
-        let runtime_checkpoint = session.claude_runtime.checkpoint()?;
-        let (previous_count, expected_prefix) = if let Some(checkpoint) = runtime_checkpoint {
-            checkpoint
-        } else if checkpoint_path.exists() {
-            let checkpoint: Checkpoint = serde_json::from_slice(&std::fs::read(&checkpoint_path)?)?;
-            (checkpoint.delivered_items, checkpoint.delivered_prefix)
-        } else {
-            (0, String::new())
+        let previous_checkpoint = match session.claude_runtime.checkpoint()? {
+            Some(checkpoint) => Some(checkpoint),
+            None if checkpoint_path.exists() => Some(serde_json::from_slice::<Checkpoint>(
+                &std::fs::read(&checkpoint_path)?,
+            )?),
+            None => None,
         };
+        let previous_count = previous_checkpoint
+            .as_ref()
+            .map_or(0, |checkpoint| checkpoint.delivered_items);
+        let expected_prefix = previous_checkpoint
+            .as_ref()
+            .map_or("", |checkpoint| checkpoint.delivered_prefix.as_str());
         let original_history = session.clone_history().await;
         if previous_count > original_history_count
             || previous_count > 0
@@ -191,30 +194,76 @@ async fn run_conversation(
         let world = session
             .record_context_updates_and_set_reference_context_item(&step)
             .await?;
-        let (initial_context, _) = session
+        let base = session.get_prompt_base_instructions().await.text;
+        let (initial_context, snapshot) = session
             .build_initial_context_with_world_state(&step, &world)
             .await;
-        let developer_messages =
-            crate::context_manager::updates::merge_world_state_updates(initial_context)
-                .into_iter()
-                .filter_map(|item| match item {
-                    ResponseItem::Message { role, content, .. } if role == "developer" => Some(
-                        content
-                            .into_iter()
-                            .filter_map(|part| match part {
-                                ContentItem::InputText { text } => Some(text),
-                                _ => None,
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    ),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-        let mut instructions = session.get_prompt_base_instructions().await.text;
-        for message in &developer_messages {
+        let permissions = snapshot
+            .into_object()
+            .remove("permissions")
+            .map(serde_json::from_value::<PermissionSnapshot>)
+            .transpose()?;
+        let mut instructions = base.clone();
+        let mut stable_messages = Vec::new();
+        let mut developer_parts = Vec::new();
+        for item in crate::context_manager::updates::merge_world_state_updates(initial_context) {
+            let ResponseItem::Message {
+                role,
+                content,
+                internal_chat_message_metadata_passthrough: metadata,
+                ..
+            } = item
+            else {
+                continue;
+            };
+            if role != "developer" {
+                continue;
+            }
+            let mut texts = Vec::new();
+            let mut stable_parts = Vec::new();
+            for (index, content) in content.into_iter().enumerate() {
+                let ContentItem::InputText { text } = content else {
+                    bail!("non-text developer policy is unsupported");
+                };
+                let kind = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.content_item_kinds.as_ref())
+                    .and_then(|kinds| kinds.get(index))
+                    .map(|kind| kind.as_str().to_owned());
+                let provenance = metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.content_item_metadata.as_ref())
+                    .and_then(|parts| parts.get(index))
+                    .map(|part| part.provenance.clone());
+                let stable_text = if kind.as_deref() == Some("permissions.instructions")
+                    && matches!(
+                        provenance,
+                        Some(ContentItemProvenance::Harness { hook: false })
+                    ) {
+                    permissions
+                        .as_ref()
+                        .context("missing typed permissions snapshot")?
+                        .instructions
+                        .clone()
+                } else {
+                    text.clone()
+                };
+                stable_parts.push((kind.clone(), provenance.clone(), stable_text));
+                developer_parts.push((kind, provenance, text.clone()));
+                texts.push(text);
+            }
             instructions.push_str("\n\n");
-            instructions.push_str(message);
+            instructions.push_str(&texts.join("\n"));
+            stable_messages.push(stable_parts);
+        }
+        let system_policy = SystemPolicy {
+            stable_instructions: serde_json::to_string(&(base, stable_messages))?,
+            approved_prefixes: permissions
+                .map(|permissions| permissions.approved_command_prefixes)
+                .unwrap_or_default(),
+        };
+        if let Some(checkpoint) = &previous_checkpoint {
+            checkpoint.permits_system(&instructions, &system_policy)?;
         }
         if codex_utils_output_truncation::approx_token_count(&instructions) > 10_000 {
             bail!("Claude system instructions exceed the 10,000 approximate tokens");
@@ -236,19 +285,45 @@ async fn run_conversation(
         for item in history.raw_items().skip(previous_count) {
             match item {
                 ResponseItem::Message { role, .. } if role == "assistant" => {}
-                ResponseItem::Message { role, content, .. } if role == "developer" => {
-                    let text = content
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentItem::InputText { text } => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
-                    if !developer_messages.contains(&text) {
-                        bail!(
-                            "dynamic developer instructions cannot be delivered at user priority; start a new chat"
-                        );
+                ResponseItem::Message {
+                    role,
+                    content,
+                    internal_chat_message_metadata_passthrough: metadata,
+                    ..
+                } if role == "developer" => {
+                    for (index, part) in content.iter().enumerate() {
+                        let ContentItem::InputText { text } = part else {
+                            bail!("non-text developer policy is unsupported");
+                        };
+                        let kind = metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.content_item_kinds.as_ref())
+                            .and_then(|kinds| kinds.get(index))
+                            .map(|kind| kind.as_str().to_owned());
+                        let provenance = metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.content_item_metadata.as_ref())
+                            .and_then(|parts| parts.get(index))
+                            .map(|part| part.provenance.clone());
+                        let saved_prefix = kind.as_deref()
+                            == Some("permissions.approved_command_prefix_saved")
+                            && matches!(
+                                provenance,
+                                Some(ContentItemProvenance::Harness { hook: false })
+                            )
+                            && previous_checkpoint
+                                .as_ref()
+                                .and_then(|checkpoint| checkpoint.system_policy.as_ref())
+                                .is_some_and(|previous| {
+                                    previous.verifies_receipt(&system_policy, text)
+                                });
+                        if !saved_prefix
+                            && !developer_parts.contains(&(kind, provenance, text.clone()))
+                        {
+                            bail!(
+                                "dynamic developer instructions cannot be delivered at user priority; start a new chat"
+                            );
+                        }
                     }
                 }
                 ResponseItem::Message { role, content, .. } => {
@@ -309,7 +384,7 @@ async fn run_conversation(
                 .context("Claude session is already owned by another ASM process")?;
             let (checkpoint, claude_session) = match std::fs::read(&checkpoint_path) {
                 Ok(bytes) => {
-                    let checkpoint: Checkpoint = serde_json::from_slice(&bytes)?;
+                    let mut checkpoint: Checkpoint = serde_json::from_slice(&bytes)?;
                     if checkpoint.in_flight {
                         bail!(
                             "previous turn has an uncertain outcome; automatic replay/resume is unsafe. Start a new chat"
@@ -318,13 +393,15 @@ async fn run_conversation(
                     if checkpoint.model != step.settings.model_info.slug
                         || checkpoint.effort != effort
                         || checkpoint.cwd != cwd
-                        || checkpoint.instructions != instructions
                         || checkpoint.authority != authority
                     {
                         bail!(
                             "saved Claude model, directory, or instructions changed; start a new chat"
                         );
                     }
+                    checkpoint.permits_system(&instructions, &system_policy)?;
+                    checkpoint.instructions = instructions.clone();
+                    checkpoint.system_policy = Some(system_policy.clone());
                     let resume = codex_claude_runtime::ClaudeSession::Resume {
                         id: checkpoint.session_id.clone(),
                     };
@@ -353,6 +430,7 @@ async fn run_conversation(
                             session_id: id.clone(),
                             instructions: instructions.clone(),
                             authority: authority.clone(),
+                            system_policy: Some(system_policy.clone()),
                             in_flight: false,
                             delivered_items: 0,
                             delivered_prefix: String::new(),
@@ -366,31 +444,8 @@ async fn run_conversation(
             bridge
                 .set_turn(Arc::clone(session), Arc::clone(&step), cancellation.clone())
                 .await?;
-            let allowed_tools = bridge
-                .tool_names()
-                .await
-                .into_iter()
-                .map(|name| format!("mcp__asm__{name}"))
-                .collect();
-            let runtime = ClaudeRuntime::spawn(ClaudeOptions {
-                executable: PathBuf::from("claude"),
-                cwd: cwd.clone(),
-                model: step
-                    .settings
-                    .model_info
-                    .slug
-                    .strip_prefix("claude-code/")
-                    .context("not a Claude model")?
-                    .to_owned(),
-                effort,
-                system_prompt: instructions.clone(),
-                session: claude_session,
-                mcp_config: json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
-                    "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}}),
-                allowed_tools,
-                turn_timeout: Duration::from_secs(/*secs*/ 3600),
-            })
-            .await?;
+            let runtime =
+                ClaudeSession::spawn_runtime(&bridge, &checkpoint, claude_session).await?;
             lease.runtime = Some(ClaudeSession {
                 runtime,
                 bridge,
@@ -404,9 +459,9 @@ async fn run_conversation(
             .runtime
             .as_mut()
             .context("Claude session was not initialized")?;
-        if runtime.checkpoint.instructions != instructions {
-            bail!("Claude system instructions changed; start a new chat");
-        }
+        runtime
+            .checkpoint
+            .permits_system(&instructions, &system_policy)?;
         if runtime.checkpoint.authority != authority {
             bail!("Claude tool or permission configuration changed; start a new chat");
         }
@@ -415,12 +470,38 @@ async fn run_conversation(
                 "previous Claude turn was interrupted or failed; start a new chat to avoid unsafe replay"
             );
         }
+        let refresh_system = runtime.checkpoint.instructions != instructions;
+        if refresh_system {
+            runtime.runtime.shutdown().await?;
+        }
         if needs_binding {
             runtime
                 .bridge
                 .set_turn(Arc::clone(session), Arc::clone(&step), cancellation.clone())
                 .await?;
         }
+        if refresh_system {
+            // Only a clean result and drained bridge can reach this boundary. Resume the same
+            // Claude history with new system policy, never replay a prompt or tool call.
+            let previous_instructions =
+                std::mem::replace(&mut runtime.checkpoint.instructions, instructions.clone());
+            let resumed = ClaudeSession::spawn_runtime(
+                &runtime.bridge,
+                &runtime.checkpoint,
+                codex_claude_runtime::ClaudeSession::Resume {
+                    id: runtime.checkpoint.session_id.clone(),
+                },
+            )
+            .await;
+            match resumed {
+                Ok(resumed) => runtime.runtime = resumed,
+                Err(error) => {
+                    runtime.checkpoint.instructions = previous_instructions;
+                    return Err(error);
+                }
+            }
+        }
+        runtime.checkpoint.system_policy = Some(system_policy);
         runtime.checkpoint.delivered_items = history.raw_items().count();
         runtime.checkpoint.delivered_prefix =
             history_prefix(&history, runtime.checkpoint.delivered_items)?;
