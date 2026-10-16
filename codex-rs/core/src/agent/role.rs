@@ -3,6 +3,8 @@
 //! Roles may customize the child or reduce its capabilities, but never replace the parent
 //! session's authority. A projected layer keeps existing layer-based consumers in sync.
 
+pub(super) use role_overrides::build_config_layer_stack as build_role_layer_stack;
+
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::deserialize_config_toml_with_base;
@@ -100,6 +102,7 @@ async fn apply_role_to_config_inner(
     let system1_override = role_config
         .system1
         .as_ref()
+        .filter(|_| disables_system1 || has_min || has_max)
         .map(|settings| System1RoleOverride {
             enabled: disables_system1.then_some(false),
             min_effort: has_min.then(|| settings.min_effort.clone()),
@@ -306,7 +309,7 @@ mod role_overrides {
         Ok(next_config)
     }
 
-    fn build_config_layer_stack(
+    pub(crate) fn build_config_layer_stack(
         config: &Config,
         role_layer_toml: &TomlValue,
     ) -> anyhow::Result<ConfigLayerStack> {
