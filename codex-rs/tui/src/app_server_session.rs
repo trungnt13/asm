@@ -1391,6 +1391,23 @@ impl AppServerSession {
     }
 
     #[tracing::instrument(skip_all)]
+    pub(crate) async fn system1_stats_read(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<codex_app_server_protocol::ThreadSystem1StatsReadResponse> {
+        let request_id = self.next_request_id();
+        Ok(self
+            .client
+            .request_typed(ClientRequest::ThreadSystem1StatsRead {
+                request_id,
+                params: codex_app_server_protocol::ThreadSystem1StatsReadParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await?)
+    }
+
+    #[tracing::instrument(skip_all)]
     pub(crate) async fn system1_update(
         &mut self,
         params: ThreadSettingsUpdateParams,

@@ -883,6 +883,30 @@
             },
             "method": {
               "enum": [
+                "thread/system1Stats/read"
+              ],
+              "title": "Thread/system1Stats/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadSystem1StatsReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/system1Stats/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/read"
               ],
               "title": "Thread/readRequestMethod",
@@ -21141,6 +21165,64 @@
           }
         ]
       },
+      "System1Stats": {
+        "description": "Decision totals for one loaded thread runtime, excluding warmup. Totals reset when the runtime unloads; each child has separate totals. Setup failures do not contribute completed attempts or elapsed time.",
+        "properties": {
+          "accepted": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "completedAttempts": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "effortChanges": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "errors": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "ignored": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "lastElapsedMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "setupFailures": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "totalElapsedMs": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accepted",
+          "completedAttempts",
+          "effortChanges",
+          "errors",
+          "ignored",
+          "setupFailures",
+          "totalElapsedMs"
+        ],
+        "type": "object"
+      },
       "System1UpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
@@ -25622,6 +25704,68 @@
           "threadId"
         ],
         "title": "ThreadStatusChangedNotification",
+        "type": "object"
+      },
+      "ThreadSystem1StatsReadParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadSystem1StatsReadParams",
+        "type": "object"
+      },
+      "ThreadSystem1StatsReadResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/System1Error"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failureEpisode": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "reasoningEffort": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/ReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "stats": {
+            "$ref": "#/definitions/v2/System1Stats"
+          }
+        },
+        "required": [
+          "enabled",
+          "failureEpisode",
+          "revision",
+          "stats"
+        ],
+        "title": "ThreadSystem1StatsReadResponse",
         "type": "object"
       },
       "ThreadTimelineEntry": {

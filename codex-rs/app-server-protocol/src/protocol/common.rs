@@ -855,6 +855,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadLoadedListResponse,
     },
+    ThreadSystem1StatsRead => "thread/system1Stats/read" {
+        params: v2::ThreadSystem1StatsReadParams,
+        serialization: None,
+        response: v2::ThreadSystem1StatsReadResponse,
+    },
     ThreadRead => "thread/read" {
         params: v2::ThreadReadParams,
         serialization: thread_id(params.thread_id),

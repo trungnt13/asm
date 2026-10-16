@@ -1266,6 +1266,10 @@ pub(crate) enum AppEvent {
     /// Update the current reasoning effort in the running app and widget.
     UpdateReasoningEffort(Option<ReasoningEffort>),
 
+    ShowSystem1Status {
+        thread_id: ThreadId,
+    },
+
     SetSystem1 {
         thread_id: ThreadId,
         action: System1Action,

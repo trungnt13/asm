@@ -990,6 +990,10 @@ impl CodexThread {
         self.session.thread_config_snapshot().await
     }
 
+    pub fn system1_stats(&self) -> codex_protocol::System1Stats {
+        self.session.system1_stats()
+    }
+
     /// Returns the active turn's reviewer, including live updates, or the thread default.
     pub async fn approvals_reviewer_for_turn(&self, turn_id: &str) -> ApprovalsReviewer {
         if let Some((turn, settings, _, _)) = self

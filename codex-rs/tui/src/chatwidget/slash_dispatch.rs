@@ -998,7 +998,15 @@ impl ChatWidget {
                 "" => self.request_system1(System1Action::Toggle),
                 "on" => self.request_system1(System1Action::Enable),
                 "off" => self.request_system1(System1Action::Disable),
-                _ => self.add_error_message("Usage: /system1 [on|off]".to_string()),
+                "status" => {
+                    if let Some(thread_id) = self.thread_id {
+                        self.app_event_tx
+                            .send(AppEvent::ShowSystem1Status { thread_id });
+                    } else {
+                        self.add_error_message("No active session for System1.".to_string());
+                    }
+                }
+                _ => self.add_error_message("Usage: /system1 [on|off|status]".to_string()),
             },
             SlashCommand::Raw => match trimmed.to_ascii_lowercase().as_str() {
                 "on" => {

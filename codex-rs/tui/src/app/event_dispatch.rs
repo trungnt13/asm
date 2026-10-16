@@ -466,6 +466,9 @@ impl App {
                 )
                 .await;
             }
+            AppEvent::ShowSystem1Status { thread_id } => {
+                self.show_system1_status(app_server, thread_id).await;
+            }
             AppEvent::SetSystem1 { thread_id, action } => {
                 self.change_system1(app_server, thread_id, action).await;
             }

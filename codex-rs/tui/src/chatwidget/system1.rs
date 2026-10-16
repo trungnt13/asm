@@ -11,6 +11,76 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn show_system1_status(
+        &mut self,
+        response: Option<codex_app_server_protocol::ThreadSystem1StatsReadResponse>,
+    ) {
+        let (enabled, revision, error, failure_episode, selected_effort) =
+            if let Some(response) = &response {
+                (
+                    response.enabled,
+                    response.revision,
+                    response.error,
+                    response.failure_episode,
+                    response.reasoning_effort.clone(),
+                )
+            } else {
+                (
+                    self.system1_enabled(),
+                    self.status_state.system1_revision,
+                    self.status_state.system1_error,
+                    self.status_state.system1_failure_episode,
+                    self.effective_reasoning_effort()
+                        .or_else(|| self.config.model_reasoning_effort.clone()),
+                )
+            };
+        let mode = if enabled { "on" } else { "off" };
+        let selected = selected_effort
+            .as_ref()
+            .map_or("model default", ReasoningEffortConfig::as_str);
+        let captured = self
+            .status_state
+            .captured_step_reasoning
+            .as_ref()
+            .map(|step| {
+                step.reasoning_effort
+                    .as_ref()
+                    .map_or("none", ReasoningEffortConfig::as_str)
+            })
+            .unwrap_or("not captured");
+        let health = error
+            .map(|error| {
+                if enabled {
+                    error.to_string()
+                } else {
+                    format!("{error} (retained while off)")
+                }
+            })
+            .unwrap_or_else(|| "no reported error".to_string());
+        let source = if response.is_some() {
+            "loaded runtime"
+        } else {
+            "cached TUI state (server query failed)"
+        };
+        let mut message = format!(
+            "System1 status ({source})\nMode: {mode}\nSelected effort: {selected}\nLast captured step effort: {captured}\nHealth: {health}\nRevision: {revision}; failure episode: {failure_episode}"
+        );
+        if let Some(response) = response {
+            let stats = response.stats;
+            let last = stats
+                .last_elapsed_ms
+                .map_or_else(|| "not available".to_string(), |ms| format!("{ms} ms"));
+            message.push_str(&format!(
+                "\nStats: current loaded runtime; reset on unload/restart; warmup excluded\nCompleted decisions: {}; accepted (including unchanged): {}; effort changes: {}\nErrors: {}; ignored/cancelled: {}; setup failures: {}\nDecision wall time: total {} ms; last {last}\nTiming does not measure net overhead or savings.",
+                stats.completed_attempts, stats.accepted, stats.effort_changes, stats.errors,
+                stats.ignored, stats.setup_failures, stats.total_elapsed_ms,
+            ));
+        } else {
+            message.push_str("\nStats unavailable on this server.");
+        }
+        self.add_info_message(message, /*hint*/ None);
+    }
+
     pub(crate) fn system1_enabled(&self) -> bool {
         self.status_state.system1_enabled
     }

@@ -6,6 +6,19 @@ use codex_protocol::ThreadId;
 
 impl App {
     #[tracing::instrument(skip_all)]
+    pub(super) async fn show_system1_status(
+        &mut self,
+        app_server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        if self.chat_widget.thread_id() != Some(thread_id) {
+            return;
+        }
+        let response = app_server.system1_stats_read(thread_id).await.ok();
+        self.chat_widget.show_system1_status(response);
+    }
+
+    #[tracing::instrument(skip_all)]
     pub(super) async fn change_system1(
         &mut self,
         app_server: &mut AppServerSession,

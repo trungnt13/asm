@@ -5190,6 +5190,20 @@ class System1Error(
     ]
 
 
+class System1Stats(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    accepted: Annotated[int, Field(ge=0)]
+    completed_attempts: Annotated[int, Field(alias="completedAttempts", ge=0)]
+    effort_changes: Annotated[int, Field(alias="effortChanges", ge=0)]
+    errors: Annotated[int, Field(ge=0)]
+    ignored: Annotated[int, Field(ge=0)]
+    last_elapsed_ms: Annotated[int | None, Field(alias="lastElapsedMs", ge=0)] = None
+    setup_failures: Annotated[int, Field(alias="setupFailures", ge=0)]
+    total_elapsed_ms: Annotated[int, Field(alias="totalElapsedMs", ge=0)]
+
+
 class System1UpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6494,6 +6508,25 @@ class ThreadStatusChangedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadSystem1StatsReadParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadSystem1StatsReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    enabled: bool
+    error: System1Error | None = None
+    failure_episode: Annotated[int, Field(alias="failureEpisode", ge=0)]
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    revision: Annotated[int, Field(ge=0)]
+    stats: System1Stats
+
+
 class TurnStartedThreadTimelineEntry(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7371,6 +7404,17 @@ class ThreadLoadedListRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/loaded/list"], Field(title="Thread/loaded/listRequestMethod")]
     params: ThreadLoadedListParams
+
+
+class ThreadSystem1StatsReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/system1Stats/read"], Field(title="Thread/system1Stats/readRequestMethod")
+    ]
+    params: ThreadSystem1StatsReadParams
 
 
 class ThreadReadRequest(BaseModel):
@@ -13086,6 +13130,7 @@ class ClientRequest(
         | ThreadSectionUpdateRequest
         | ThreadSectionDeleteRequest
         | ThreadLoadedListRequest
+        | ThreadSystem1StatsReadRequest
         | ThreadReadRequest
         | ThreadTurnsListRequest
         | ThreadItemsListRequest
@@ -13197,6 +13242,7 @@ class ClientRequest(
         | ThreadSectionUpdateRequest
         | ThreadSectionDeleteRequest
         | ThreadLoadedListRequest
+        | ThreadSystem1StatsReadRequest
         | ThreadReadRequest
         | ThreadTurnsListRequest
         | ThreadItemsListRequest

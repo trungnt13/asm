@@ -5656,6 +5656,17 @@
       ],
       "type": "string"
     },
+    "ThreadSystem1StatsReadParams": {
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadTurnsListParams": {
       "properties": {
         "cursor": {
@@ -6914,6 +6925,30 @@
         "params"
       ],
       "title": "Thread/loaded/listRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/system1Stats/read"
+          ],
+          "title": "Thread/system1Stats/readRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadSystem1StatsReadParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/system1Stats/readRequest",
       "type": "object"
     },
     {

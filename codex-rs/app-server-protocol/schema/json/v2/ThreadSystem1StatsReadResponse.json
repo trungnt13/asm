@@ -1,0 +1,253 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ReasoningEffort": {
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "minLength": 1,
+      "type": "string"
+    },
+    "System1Error": {
+      "description": "Describes a Decisions failure without exposing request or response content.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "credentials"
+              ],
+              "title": "CredentialsSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CredentialsSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidRequest"
+              ],
+              "title": "InvalidRequestSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidRequestSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "transport"
+              ],
+              "title": "TransportSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TransportSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "timeout"
+              ],
+              "title": "TimeoutSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TimeoutSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "http"
+              ],
+              "title": "HttpSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "title": "HttpSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "responseTooLarge"
+              ],
+              "title": "ResponseTooLargeSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ResponseTooLargeSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidResponse"
+              ],
+              "title": "InvalidResponseSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidResponseSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "RejectedSystem1Error",
+          "type": "object"
+        }
+      ]
+    },
+    "System1Stats": {
+      "description": "Decision totals for one loaded thread runtime, excluding warmup. Totals reset when the runtime unloads; each child has separate totals. Setup failures do not contribute completed attempts or elapsed time.",
+      "properties": {
+        "accepted": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "completedAttempts": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "effortChanges": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "errors": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "ignored": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "lastElapsedMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "setupFailures": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "totalElapsedMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accepted",
+        "completedAttempts",
+        "effortChanges",
+        "errors",
+        "ignored",
+        "setupFailures",
+        "totalElapsedMs"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "enabled": {
+      "type": "boolean"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/System1Error"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "failureEpisode": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "reasoningEffort": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ReasoningEffort"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "revision": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "stats": {
+      "$ref": "#/definitions/System1Stats"
+    }
+  },
+  "required": [
+    "enabled",
+    "failureEpisode",
+    "revision",
+    "stats"
+  ],
+  "title": "ThreadSystem1StatsReadResponse",
+  "type": "object"
+}

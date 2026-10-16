@@ -144,7 +144,7 @@ impl SlashCommand {
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
-            SlashCommand::System1 => "turn System1 on or off for this session",
+            SlashCommand::System1 => "turn System1 on/off or show status and stats",
             SlashCommand::Presets => "run or save reusable prompts and slash commands",
             SlashCommand::Daybreak => "turn Daybreak on or off",
             SlashCommand::Ide => {

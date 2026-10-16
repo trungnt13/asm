@@ -126,6 +126,11 @@ pub(super) async fn run_decision(
         }
     };
     let error = error.filter(|_| !cancellation.is_cancelled() && !guard.freshness.is_cancelled());
+    if matches!(target, DecisionTarget::System1 { .. })
+        && let Some(session) = session.upgrade()
+    {
+        session.record_system1_decision(disposition, error, started.elapsed());
+    }
     if let Some(session) = session.upgrade()
         && let Some(error) = error
     {

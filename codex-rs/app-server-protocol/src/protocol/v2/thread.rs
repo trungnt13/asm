@@ -20,6 +20,7 @@ use super::shared::v2_enum_from_core;
 use crate::JsonSchema;
 use crate::TS;
 use codex_experimental_api_macros::ExperimentalApi;
+pub use codex_protocol::System1Stats;
 pub use codex_protocol::capabilities::CapabilityRootLocation;
 pub use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::config_types::CollaborationMode;
@@ -2246,4 +2247,23 @@ pub struct ThreadQueueChangedNotification {
 pub struct ContextCompactedNotification {
     pub thread_id: String,
     pub turn_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSystem1StatsReadParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSystem1StatsReadResponse {
+    pub enabled: bool,
+    pub revision: u64,
+    pub error: Option<System1Error>,
+    pub failure_episode: u64,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub stats: System1Stats,
 }

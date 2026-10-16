@@ -598,6 +598,8 @@ export type { ThreadStartSource } from "./ThreadStartSource";
 export type { ThreadStartedNotification } from "./ThreadStartedNotification";
 export type { ThreadStatus } from "./ThreadStatus";
 export type { ThreadStatusChangedNotification } from "./ThreadStatusChangedNotification";
+export type { ThreadSystem1StatsReadParams } from "./ThreadSystem1StatsReadParams";
+export type { ThreadSystem1StatsReadResponse } from "./ThreadSystem1StatsReadResponse";
 export type { ThreadTimelineEntry } from "./ThreadTimelineEntry";
 export type { ThreadTokenUsage } from "./ThreadTokenUsage";
 export type { ThreadTokenUsageUpdatedNotification } from "./ThreadTokenUsageUpdatedNotification";

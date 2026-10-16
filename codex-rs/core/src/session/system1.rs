@@ -76,6 +76,7 @@ struct System1Session {
     profile: OnceLock<System1Profile>,
     client: OnceLock<Arc<DecisionsClient>>,
     recovery: StdMutex<System1Recovery>,
+    stats: StdMutex<codex_protocol::System1Stats>,
     shutdown: CancellationToken,
     evidence: StdMutex<CancellationToken>,
     warmup: StdMutex<Option<AbortOnDropHandle<()>>>,
@@ -103,6 +104,7 @@ impl Default for System1Session {
             profile: OnceLock::new(),
             client: OnceLock::new(),
             recovery: StdMutex::new(System1Recovery::default()),
+            stats: StdMutex::new(codex_protocol::System1Stats::default()),
             evidence: StdMutex::new(shutdown.child_token()),
             shutdown,
             warmup: StdMutex::new(None),
@@ -207,6 +209,8 @@ mod control;
 
 #[path = "system1_health.rs"]
 pub(super) mod health;
+#[path = "system1_stats.rs"]
+mod stats;
 
 impl Session {
     fn system1_decision_log(self: &Arc<Self>, config: &Config) -> Option<Arc<DecisionLog>> {
@@ -631,6 +635,12 @@ impl Session {
                     attempt,
                 )),
                 Err(error) => {
+                    let mut stats = session
+                        .stats
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    stats.setup_failures = stats.setup_failures.saturating_add(/*rhs*/ 1);
+                    drop(stats);
                     if let Some(attempt) = attempt {
                         attempt.finish(
                             DecisionApiOutcome::Error(error),
