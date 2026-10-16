@@ -1,6 +1,8 @@
 use super::MarkdownStyles;
+use crate::markdown::render_markdown_agent_with_links_and_cwd;
 use crate::render::highlight::set_syntax_theme;
 use crate::style::accent_color;
+use crate::terminal_hyperlinks::visible_lines;
 use pretty_assertions::assert_eq;
 use ratatui::style::Modifier;
 use ratatui::style::Stylize;
@@ -372,10 +374,7 @@ fn blockquote_two_paragraphs_inside_ordered_list_stay_compact() {
         .collect();
     assert_eq!(
         lines,
-        vec![
-            "1. > para 1".to_string(),
-            "   > para 2".to_string(),
-        ],
+        vec!["1. > para 1".to_string(), "   > para 2".to_string(),],
         "expected blockquote content to stay aligned after list marker"
     );
 }
@@ -465,10 +464,7 @@ fn blockquote_with_heading_and_paragraph() {
         .collect();
     assert_eq!(
         lines,
-        vec![
-            "> # Heading".to_string(),
-            "> paragraph text".to_string(),
-        ]
+        vec!["> # Heading".to_string(), "> paragraph text".to_string(),]
     );
 }
 
@@ -943,21 +939,19 @@ fn file_link_preserves_label_and_decodes_fallback_destination() {
 
 #[test]
 fn file_link_keeps_descriptive_label_and_target() {
-    let text = render_markdown_text_for_cwd(
+    let text = Text::from(visible_lines(render_markdown_agent_with_links_and_cwd(
         "Your `codex` launcher [automatically adds those overrides](/home/dev-user/code/openai/project/dotslash-gen/bin/codex:1105), even though you did not specify any.",
-        Path::new("/home/dev-user/code/openai"),
-    );
+        /*width*/ None,
+        Some(Path::new("/home/dev-user/code/openai")),
+    )));
     let expected = Text::from(Line::from_iter([
         "Your ".into(),
         Span::styled("codex", MarkdownStyles::default().code),
         " launcher ".into(),
-        "automatically adds those overrides".into(),
-        " (".into(),
         Span::styled(
-            "project/dotslash-gen/bin/codex:1105",
-            MarkdownStyles::default().code,
+            "automatically adds those overrides",
+            MarkdownStyles::default().link,
         ),
-        ")".into(),
         ", even though you did not specify any.".into(),
     ]));
     assert_eq!(text, expected);
@@ -1120,14 +1114,18 @@ fn file_links_preserve_foreign_windows_paths_and_anchors_snapshot() {
         ),
     ]
     .map(|(destination, cwd)| {
-        render_markdown_text_for_cwd(&format!("[report]({destination}#L4C2)"), Path::new(cwd))
-            .to_string()
+        Text::from(visible_lines(render_markdown_agent_with_links_and_cwd(
+            &format!("[report]({destination}#L4C2)"),
+            /*width*/ None,
+            Some(Path::new(cwd)),
+        )))
+        .to_string()
     })
     .join("\n");
 
     insta::assert_snapshot!(rendered, @r"
-    report (Quarterly Report.xlsx:4:2)
-    report (Quarterly Report.xlsx:4:2)
+    report
+    report
     ");
 }
 
@@ -1576,10 +1574,7 @@ fn list_item_after_code_block_stays_compact() {
     let md = "1. First:\n\n   ```rust\n   fn first() {}\n   ```\n\n2. Second:\n";
     let text = render_markdown_text(md);
     let lines = plain_lines(&text);
-    assert_eq!(
-        lines,
-        vec!["1. First:", "   fn first() {}", "2. Second:"]
-    );
+    assert_eq!(lines, vec!["1. First:", "   fn first() {}", "2. Second:"]);
     assert_snapshot!(
         "list_item_after_code_block_keeps_blank_separator",
         lines.join("\n")
