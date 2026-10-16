@@ -64,7 +64,7 @@ impl Default for System1Config {
         Self {
             enabled: false,
             decision_every_n_turns: 1,
-            decision_every_n_steps: 2,
+            decision_every_n_steps: 1,
             profile: None,
             profiles: BTreeMap::new(),
             decision_model: None,

@@ -4589,7 +4589,7 @@
       "additionalProperties": false,
       "properties": {
         "decision_every_n_steps": {
-          "default": 2,
+          "default": 1,
           "description": "Wait N model steps after each accepted decision in selected turns. The first eligible step is due; failures do not restart the spacing. Each new turn starts without a previous accepted decision.",
           "format": "uint64",
           "minimum": 1.0,

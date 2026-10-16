@@ -299,7 +299,7 @@ Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.ste
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
 | `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
 | `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
-| `decision_every_n_steps` | `2` | Positive integer; next due step is the last accepted decision step + N |
+| `decision_every_n_steps` | `1` | Positive integer; next due step is the last accepted decision step + N |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
 Profiles name connection settings, not separate adaptation policies. Keep effort bounds,
@@ -378,15 +378,16 @@ keep credentials separate from main-model authentication and diagnostics sanitiz
 #### Space decision calls by turn and step
 
 A turn is one request and its resulting work. A step is one ordinary model request
-within that turn, not an individual tool call. Defaults select every turn and space
-accepted decisions by two steps. With eligible steps and no failures, decide before
-steps 1, 3, 5, ... . Set `decision_every_n_steps = 1` for every eligible step.
+within that turn, not an individual tool call. Defaults select every turn and every
+eligible step. With eligible steps and no failures, decide before steps 1, 2, 3, ... .
+For nondefault two-step spacing, set `decision_every_n_steps = 2`; decisions then
+precede steps 1, 3, 5, ... .
 
 ```toml
 [system1]
 enabled = true
 decision_every_n_turns = 1
-decision_every_n_steps = 2
+decision_every_n_steps = 1
 ```
 
 - Turn selection is unchanged: every N turns selects turns 1, 1 + N, 1 + 2N, ... .
@@ -422,14 +423,14 @@ Example with defaults, all shown steps eligible, and times measured from session
 
 | Turn / step | Time | Decisions behavior |
 | --- | --- | --- |
-| 1 / 1 | 0.0s | Accepted; next due step is 3 |
-| 1 / 2 | 0.2s | Keep effort; spacing not due |
+| 1 / 1 | 0.0s | Accepted; next due step is 2 |
+| 1 / 2 | 0.2s | Accepted unchanged effort; next due step is 3 |
 | 1 / 3 | 0.4s | Transient failure; cooldown until 1.4s; step remains due |
 | 1 / 4 | 0.8s | Keep effort during cooldown |
 | 2 / 1 | 1.0s | New turn resets spacing, not cooldown; keep effort |
 | 2 / 2 | 1.5s | Probe fails; cooldown doubles to 2s, until 3.5s |
-| 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 5 |
-| 2 / 4 | 3.8s | Keep effort; spacing not due |
+| 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 4 |
+| 2 / 4 | 3.8s | Accepted; next due step is 5 |
 | 2 / 5 | 4.0s | Due again |
 
 - Children inherit cadence configuration, not parent counters or recovery state.
