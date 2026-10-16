@@ -2,15 +2,13 @@
 
 use super::*;
 use crate::app_event::SideConversationAction;
-use crate::app_event::SideConversationMode;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_context_fragments::AdditionalContextDeveloperFragment;
 use codex_context_fragments::ContextualUserFragment;
-use codex_protocol::config_types::ServiceTier;
 
-const SAVED_FORK_INSTRUCTIONS: &str = "You are in an ordinary saved fork. Inherited history is reference context, not an active task. Earlier temporary Side/Chat role and capability restrictions no longer apply; use normal capabilities under this session's permissions. Wait for a new user request before starting work.";
+const SAVED_FORK_INSTRUCTIONS: &str = "You are in an ordinary saved fork. Inherited history is reference context, not an active task. Earlier temporary Side role and capability restrictions no longer apply; use normal capabilities under this session's permissions. Wait for a new user request before starting work.";
 
 impl App {
     #[tracing::instrument(skip_all)]
@@ -29,9 +27,8 @@ impl App {
             .cloned()
             .filter(|state| state.kind == CompanionKind::Side)
         else {
-            self.chat_widget.add_error_message(
-                "This command requires an active Side or Chat conversation.".into(),
-            );
+            self.chat_widget
+                .add_error_message("This command requires an active Side conversation.".into());
             return Ok(());
         };
         if matches!(
@@ -40,7 +37,7 @@ impl App {
         ) && self.active_turn_id_for_thread(thread_id).await.is_some()
         {
             self.chat_widget.add_error_message(
-                "Wait for Side/Chat to finish before syncing or saving a fork.".into(),
+                "Wait for Side to finish before syncing or saving a fork.".into(),
             );
             return Ok(());
         }
@@ -58,7 +55,7 @@ impl App {
             SideConversationAction::SendLast { text } => {
                 let Some(reply) = self.chat_widget.last_side_reply_markdown() else {
                     self.chat_widget
-                        .add_error_message("Side/Chat has no completed reply to send.".into());
+                        .add_error_message("Side has no completed reply to send.".into());
                     return Ok(());
                 };
                 let extra = if text.trim().is_empty() {
@@ -109,13 +106,7 @@ impl App {
                 }
             }
             SideConversationAction::Sync => {
-                let config = self.side_fork_config(CompanionKind::Side, SideConversationMode::Side);
-                if state.mode == SideConversationMode::Chat
-                    && let Err(error) = app_server.require_fast_service_tier(&config)
-                {
-                    self.chat_widget.add_error_message(error.to_string());
-                    return Ok(());
-                }
+                let config = self.side_fork_config(CompanionKind::Side);
                 let selected_profile = self.selected_server_profile(thread_id);
                 let forked = match app_server
                     .fork_side_thread(
@@ -135,16 +126,6 @@ impl App {
                     }
                 };
                 let replacement_id = forked.session.thread_id;
-                if state.mode == SideConversationMode::Chat
-                    && forked.session.service_tier.as_deref()
-                        != Some(ServiceTier::Fast.request_value())
-                {
-                    self.discard_side_thread(app_server, replacement_id).await;
-                    self.chat_widget.add_error_message(
-                        "The server did not retain Fast; the current Chat is unchanged.".into(),
-                    );
-                    return Ok(());
-                }
                 if let Err(error) = app_server
                     .thread_inject_items(
                         replacement_id,
@@ -178,7 +159,7 @@ impl App {
                         .await;
                     self.sync_side_thread_ui();
                     self.chat_widget.add_info_message(
-                        "Synced with main; previous Side/Chat history was discarded.".into(),
+                        "Synced with main; previous Side history was discarded.".into(),
                         /*hint*/ None,
                     );
                 } else {
@@ -274,7 +255,7 @@ impl App {
                         }
                     }
                     Err(error) => self.chat_widget.add_error_message(format!(
-                        "Failed to save fork; Side/Chat is unchanged: {error}"
+                        "Failed to save fork; Side is unchanged: {error}"
                     )),
                 }
             }

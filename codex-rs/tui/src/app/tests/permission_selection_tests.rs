@@ -51,7 +51,6 @@ async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
         &mut server,
         thread_id,
         CompanionKind::Parallel,
-        crate::app_event::SideConversationMode::Side,
         /*user_message*/ None,
     ))
     .await?;

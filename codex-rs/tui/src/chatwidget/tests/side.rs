@@ -126,11 +126,7 @@ async fn slash_side_is_rejected_for_side_threads() {
 
 #[tokio::test]
 async fn side_aliases_are_rejected_during_review_mode() {
-    for (command, name) in [
-        (SlashCommand::Side, "side"),
-        (SlashCommand::Btw, "btw"),
-        (SlashCommand::Chat, "chat"),
-    ] {
+    for (command, name) in [(SlashCommand::Side, "side"), (SlashCommand::Btw, "btw")] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.review.is_review_mode = true;
 
@@ -208,7 +204,7 @@ async fn submit_user_message_as_plain_user_turn_does_not_run_shell_commands() {
 
 #[tokio::test]
 async fn side_aliases_without_args_start_empty_side_conversations() {
-    for input in ["/side", "/btw", "/chat"] {
+    for input in ["/side", "/btw"] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let parent_thread_id = ThreadId::new();
         chat.thread_id = Some(parent_thread_id);
@@ -223,10 +219,8 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
             rx.try_recv(),
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
-                mode,
                 user_message: None,
             }) if emitted_parent_thread_id == parent_thread_id
-                && mode == if input.starts_with("/chat") { crate::app_event::SideConversationMode::Chat } else { crate::app_event::SideConversationMode::Side }
         );
         assert!(
             op_rx.try_recv().is_err(),
@@ -238,11 +232,7 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
 
 #[tokio::test]
 async fn side_aliases_request_forked_questions_while_task_running() {
-    for input in [
-        "/side explore the codebase",
-        "/btw explore the codebase",
-        "/chat explore the codebase",
-    ] {
+    for input in ["/side explore the codebase", "/btw explore the codebase"] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         let parent_thread_id = ThreadId::new();
         chat.thread_id = Some(parent_thread_id);
@@ -260,10 +250,8 @@ async fn side_aliases_request_forked_questions_while_task_running() {
             rx.try_recv(),
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
-                mode,
                 user_message: Some(user_message),
             }) if emitted_parent_thread_id == parent_thread_id
-                && mode == if input.starts_with("/chat") { crate::app_event::SideConversationMode::Chat } else { crate::app_event::SideConversationMode::Side }
                 && user_message
                     == UserMessage {
                         text: "explore the codebase".to_string(),
@@ -323,9 +311,9 @@ async fn side_context_label_shows_parent_status_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
     chat.set_side_conversation_active(/*active*/ true);
-    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Chat);
+    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Side);
     chat.set_side_conversation_context_label(Some(
-        "Chat from main thread · main needs input · ctrl+/ to switch · ctrl+c to close".to_string(),
+        "Side from main thread · main needs input · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
 
     let width = 80;
@@ -365,16 +353,7 @@ async fn side_context_label_shows_hidden_side_snapshot() {
             style.add_modifier,
         )),
     );
-    let side = normalized_backend_snapshot(terminal.backend());
-    chat.set_side_conversation_context_label(Some("ctrl+/ for chat".to_string()));
-    terminal
-        .draw(|f| chat.render(f.area(), f.buffer_mut()))
-        .expect("draw hidden chat conversation footer");
-    let chat = normalized_backend_snapshot(terminal.backend());
-    assert_chatwidget_snapshot!(
-        "side_context_label_shows_hidden_side",
-        format!("Side:\n{side}\n\nChat:\n{chat}")
-    );
+    assert_chatwidget_snapshot!("side_context_label_shows_hidden_side", terminal.backend());
 }
 
 #[tokio::test]
@@ -386,7 +365,6 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         SlashCommand::New,
         SlashCommand::Clear,
         SlashCommand::Resume,
-        SlashCommand::Chat,
         SlashCommand::Worktree,
         SlashCommand::Compact,
         SlashCommand::Delete,
@@ -418,7 +396,7 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
     for command in [SlashCommand::SendLast, SlashCommand::Sync] {
         chat.dispatch_command(command);
         let errors = drain_insert_history(&mut rx);
-        assert!(lines_to_single_string(&errors[0]).contains("only available in Side/Chat"));
+        assert!(lines_to_single_string(&errors[0]).contains("only available in Side"));
     }
     chat.set_side_conversation_active(/*active*/ true);
     assert_eq!(chat.last_side_reply_markdown(), None);
