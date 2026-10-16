@@ -62,6 +62,9 @@ pub(crate) async fn prepare_agent_spawn_config(
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
         config.role_model_context_window = turn.config.role_model_context_window;
+        config.system1.min_effort = turn.config.system1.min_effort.clone();
+        config.system1.max_effort = turn.config.system1.max_effort.clone();
+        config.role_system1_base_bounds = turn.config.role_system1_base_bounds.clone();
     }
     apply_requested_spawn_agent_model_overrides(
         session,
@@ -136,6 +139,10 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
     config.role_model_context_window = None;
+    if let Some((min, max)) = config.role_system1_base_bounds.take() {
+        config.system1.min_effort = min;
+        config.system1.max_effort = max;
+    }
     if config
         .features
         .enabled(Feature::SubagentDefaultContextLimits)
