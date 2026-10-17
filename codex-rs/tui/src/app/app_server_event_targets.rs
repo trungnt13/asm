@@ -382,6 +382,7 @@ mod tests {
                 system1_revision: 1,
                 error: None,
                 failure_episode: 0,
+                warning: None,
             },
         );
         assert_eq!(

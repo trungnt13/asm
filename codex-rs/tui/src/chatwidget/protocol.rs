@@ -110,6 +110,7 @@ impl ChatWidget {
                         notification.system1_revision,
                         notification.error,
                         notification.failure_episode,
+                        notification.warning,
                     );
                 }
             }

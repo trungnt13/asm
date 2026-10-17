@@ -1,6 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ReasoningEffort": {
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "minLength": 1,
+      "type": "string"
+    },
     "System1Error": {
       "description": "Describes a Decisions failure without exposing request or response content.",
       "oneOf": [
@@ -139,6 +144,30 @@
           "type": "object"
         }
       ]
+    },
+    "System1FailureWarning": {
+      "properties": {
+        "cooldownSeconds": {
+          "description": "Initial retry delay in seconds; absent when recovery is blocked.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
     }
   },
   "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
@@ -171,6 +200,17 @@
     },
     "threadId": {
       "type": "string"
+    },
+    "warning": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/System1FailureWarning"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

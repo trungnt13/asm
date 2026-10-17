@@ -113,6 +113,7 @@ impl ChatWidget {
         self.clear_safety_buffering();
         self.status_state.system1_enabled = session.system1_enabled;
         self.status_state.system1_revision = session.system1_revision;
+        self.status_state.system1_warning = None;
         self.status_state.system1_error = session.system1_error;
         self.status_state.system1_failure_episode = session.system1_failure_episode;
         self.thread_name = session.thread_name.clone();

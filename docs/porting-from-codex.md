@@ -305,6 +305,8 @@ Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.ste
 | `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` | Built-in descriptions below | Nonblank; each at most 4096 UTF-8 bytes |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
+Failure warnings use yellow chat text with the error category, current fallback effort, and runtime cooldown duration (or recovery blocked). Show at most one warning per failure episode. Old/restored events without recovery details must not invent a cooldown.
+
 Choice descriptions are separate from the selection/safety rubric. Main decisions send only allowed choices; warmup retains its synthetic low/medium pair. Replacing the rubric must not remove or duplicate their descriptions. `none`, `minimal`, and `max` retain fixed descriptions.
 
 ```toml

@@ -1197,6 +1197,7 @@ impl App {
                 mode.system1_revision,
                 mode.error,
                 mode.failure_episode,
+                mode.warning.clone(),
             );
             notification = None;
         }

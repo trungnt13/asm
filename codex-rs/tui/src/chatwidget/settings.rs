@@ -547,6 +547,7 @@ impl ChatWidget {
             settings.system1_revision,
             settings.system1_error,
             settings.system1_failure_episode,
+            /*warning*/ None,
         );
         self.refresh_effective_service_tier();
         self.refresh_status_surfaces();

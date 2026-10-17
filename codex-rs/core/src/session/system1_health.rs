@@ -6,6 +6,7 @@ use codex_api::DecisionsError;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::System1Error;
+use codex_protocol::protocol::System1FailureWarning;
 use codex_protocol::protocol::System1UpdatedEvent;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -83,7 +84,7 @@ impl Session {
         error: Option<System1Error>,
         generation: Option<u64>,
         guard: Option<System1DecisionHealthGuard<'_>>,
-    ) -> Option<System1State> {
+    ) -> Option<(System1State, Option<u64>)> {
         let state = self
             .services
             .thread_extension_data
@@ -109,6 +110,7 @@ impl Session {
         }) {
             return None;
         }
+        let mut cooldown_seconds = None;
         if let Some(error) = error {
             recovery.failures = recovery.failures.saturating_add(/*rhs*/ 1);
             recovery.blocked = permanent_error(error);
@@ -117,6 +119,7 @@ impl Session {
                     << recovery.failures.saturating_sub(/*rhs*/ 1).min(/*other*/ 5))
                 .min(/*other*/ 30);
                 recovery.next_probe = Some(Instant::now() + Duration::from_secs(seconds));
+                cooldown_seconds = Some(seconds);
             }
         }
         if mode.error == error {
@@ -127,7 +130,7 @@ impl Session {
         }
         mode.error = error;
         mode.revision = mode.revision.saturating_add(/*rhs*/ 1);
-        Some(*mode)
+        Some((*mode, cooldown_seconds))
     }
 
     #[tracing::instrument(skip_all)]
@@ -137,7 +140,30 @@ impl Session {
         generation: Option<u64>,
         guard: Option<System1DecisionHealthGuard<'_>>,
     ) {
-        let Some(updated) = self.update_system1_error(error, generation, guard) else {
+        let reasoning_effort = if error.is_some() {
+            let active = self
+                .active_turn
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|turn| turn.task.as_ref())
+                .map(|task| task.turn_context.next_step_settings.load_full());
+            if let Some(active) = active {
+                active.effective_reasoning_effort()
+            } else {
+                self.state
+                    .lock()
+                    .await
+                    .session_configuration
+                    .step_settings
+                    .collaboration_mode
+                    .reasoning_effort()
+            }
+        } else {
+            None
+        };
+        let Some((updated, cooldown_seconds)) = self.update_system1_error(error, generation, guard)
+        else {
             return;
         };
         tracing::info!(thread_id = %self.thread_id(), ?error, revision = updated.revision,
@@ -149,6 +175,10 @@ impl Session {
                 system1_revision: updated.revision,
                 error: updated.error,
                 failure_episode: updated.failure_episode,
+                warning: error.map(|_| System1FailureWarning {
+                    reasoning_effort,
+                    cooldown_seconds,
+                }),
             }),
         })
         .await;

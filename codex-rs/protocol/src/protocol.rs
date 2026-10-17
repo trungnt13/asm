@@ -2363,9 +2363,20 @@ impl std::fmt::Display for System1Error {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct System1FailureWarning {
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
+    /// Initial retry delay in seconds; absent when recovery is blocked.
+    pub cooldown_seconds: Option<u64>,
+}
+
 /// Reports the runtime mode without changing saved reasoning preferences.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct System1UpdatedEvent {
+    #[serde(default)]
+    pub warning: Option<System1FailureWarning>,
     pub enabled: bool,
     #[serde(default)]
     pub error: Option<System1Error>,

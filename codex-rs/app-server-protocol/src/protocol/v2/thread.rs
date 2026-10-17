@@ -35,6 +35,7 @@ pub use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 pub use codex_protocol::protocol::System1Error;
+pub use codex_protocol::protocol::System1FailureWarning;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
 use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
@@ -366,6 +367,8 @@ pub struct ThreadSettings {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct System1UpdatedNotification {
+    #[serde(default)]
+    pub warning: Option<System1FailureWarning>,
     pub thread_id: String,
     pub enabled: bool,
     #[serde(default)]

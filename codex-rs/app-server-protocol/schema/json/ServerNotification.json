@@ -4300,6 +4300,30 @@
         }
       ]
     },
+    "System1FailureWarning": {
+      "properties": {
+        "cooldownSeconds": {
+          "description": "Initial retry delay in seconds; absent when recovery is blocked.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
     "System1UpdatedNotification": {
       "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
       "properties": {
@@ -4331,6 +4355,17 @@
         },
         "threadId": {
           "type": "string"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1FailureWarning"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

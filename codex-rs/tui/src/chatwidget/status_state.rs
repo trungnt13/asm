@@ -115,6 +115,7 @@ pub(super) struct StatusState {
     pub(super) system1_revision: u64,
     pub(super) system1_error: Option<codex_protocol::protocol::System1Error>,
     pub(super) system1_failure_episode: u64,
+    pub(super) system1_warning: Option<codex_protocol::protocol::System1FailureWarning>,
     pub(super) announced_system1_failures: std::collections::HashMap<codex_protocol::ThreadId, u64>,
     pub(super) captured_step_reasoning:
         Option<codex_app_server_protocol::ReasoningEffortUpdatedNotification>,
@@ -144,6 +145,7 @@ impl Default for StatusState {
             system1_revision: 0,
             system1_error: None,
             system1_failure_episode: 0,
+            system1_warning: None,
             announced_system1_failures: Default::default(),
             captured_step_reasoning: None,
             suppressed_system1_turn_id: None,

@@ -5200,6 +5200,21 @@ class System1Error(
     ]
 
 
+class System1FailureWarning(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cooldown_seconds: Annotated[
+        int | None,
+        Field(
+            alias="cooldownSeconds",
+            description="Initial retry delay in seconds; absent when recovery is blocked.",
+            ge=0,
+        ),
+    ] = None
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+
+
 class System1Stats(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5223,6 +5238,7 @@ class System1UpdatedNotification(BaseModel):
     failure_episode: Annotated[int | None, Field(alias="failureEpisode", ge=0)] = 0
     system1_revision: Annotated[int | None, Field(alias="system1Revision", ge=0)] = 0
     thread_id: Annotated[str, Field(alias="threadId")]
+    warning: System1FailureWarning | None = None
 
 
 class TerminalInteractionNotification(BaseModel):

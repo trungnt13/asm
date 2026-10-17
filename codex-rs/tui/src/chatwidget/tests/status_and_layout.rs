@@ -4296,6 +4296,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
             system1_revision: 5,
             error: None,
             failure_episode: 0,
+            warning: None,
         }),
         /*replay_kind*/ None,
     );
@@ -4335,6 +4336,10 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
             system1_revision: 6,
             error: Some(codex_protocol::protocol::System1Error::Credentials),
             failure_episode: 1,
+            warning: Some(codex_protocol::protocol::System1FailureWarning {
+                reasoning_effort: Some(ReasoningEffortConfig::Low),
+                cooldown_seconds: None,
+            }),
         }),
         /*replay_kind*/ None,
     );
@@ -4359,6 +4364,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
             system1_revision: 7,
             error: None,
             failure_episode: 0,
+            warning: None,
         }),
         /*replay_kind*/ None,
     );

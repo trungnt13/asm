@@ -207,6 +207,7 @@ impl Session {
                     system1_revision: updated.revision,
                     error: updated.error,
                     failure_episode: updated.failure_episode,
+                    warning: None,
                 }),
             })
             .await;
