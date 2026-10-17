@@ -1845,6 +1845,7 @@ async fn ignore_same_thread_resume_reports_noop_for_current_thread() {
         while app_event_rx.try_recv().is_ok() {}
         assert!(
             !app.ignore_same_thread_resume(&crate::resume_picker::SessionTarget {
+                backend_id: crate::backend_id::BackendId::new(),
                 path: Some(test_path_buf("/tmp/project")),
                 thread_id: current_id,
                 cwd: None,
