@@ -302,7 +302,18 @@ Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.ste
 | `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
 | `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
 | `decision_every_n_steps` | `1` | Positive integer; next due step is the last accepted decision step + N |
+| `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` | Built-in descriptions below | Nonblank; each at most 4096 UTF-8 bytes |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
+
+Choice descriptions are separate from the selection/safety rubric. Main decisions send only allowed choices; warmup retains its synthetic low/medium pair. Replacing the rubric must not remove or duplicate their descriptions. `none`, `minimal`, and `max` retain fixed descriptions.
+
+```toml
+[system1]
+low_effort_description = "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use."
+medium_effort_description = "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding."
+high_effort_description = "Deep reasoning for difficult debugging, interacting constraints, substantial uncertainty, and complex decisions."
+xhigh_effort_description = "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning."
+```
 
 Profiles name connection settings, not separate adaptation policies. Keep effort bounds,
 cadence, evidence limits, timeout, and rubric shared. Profile names have no built-in

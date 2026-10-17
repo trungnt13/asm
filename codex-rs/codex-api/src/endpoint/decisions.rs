@@ -92,7 +92,7 @@ impl DecisionsClient {
         model: &str,
         input: &str,
         instructions: &str,
-        choices: &[String],
+        choices: &[(String, String)],
     ) -> Result<String, DecisionsError> {
         let url = match self.backend {
             DecisionBackend::OpenAi => DECISIONS_URL,
@@ -115,17 +115,22 @@ impl DecisionsClient {
         model: &str,
         input: &str,
         instructions: &str,
-        choices: &[String],
+        choices: &[(String, String)],
     ) -> Result<String, DecisionsError> {
         if model.trim().is_empty()
             || input.trim().is_empty()
             || instructions.trim().is_empty()
             || !(2..=255).contains(&choices.len())
-            || choices.iter().any(|choice| choice.trim().is_empty())
-            || choices
-                .iter()
-                .enumerate()
-                .any(|(index, choice)| choices[..index].contains(choice))
+            || choices.iter().any(|(choice, description)| {
+                choice.trim().is_empty()
+                    || description.trim().is_empty()
+                    || description.len() > 4096
+            })
+            || choices.iter().enumerate().any(|(index, (choice, _))| {
+                choices[..index]
+                    .iter()
+                    .any(|(previous, _)| previous == choice)
+            })
         {
             return Err(DecisionsError::InvalidRequest);
         }
@@ -159,14 +164,16 @@ impl DecisionsClient {
                         "type": "choice",
                         "name": "reasoning_effort",
                         "instructions": instructions,
-                        "choices": choices.iter().map(|value| json!({"value": value})).collect::<Vec<_>>()
+                        "choices": choices.iter().map(|(value, description)| json!({"value": value, "description": description})).collect::<Vec<_>>()
                     }]
                 })
             }
             DecisionBackend::TypeSafe => {
                 let criteria: serde_json::Map<String, Value> = choices
                     .iter()
-                    .map(|choice| (choice.clone(), Value::Null))
+                    .map(|(choice, description)| {
+                        (choice.clone(), Value::String(description.clone()))
+                    })
                     .collect();
                 json!({
                     "model": model,
@@ -235,8 +242,8 @@ impl DecisionsClient {
             .ok_or(DecisionsError::InvalidResponse)?;
         choices
             .iter()
-            .find(|allowed| allowed.as_str() == choice)
-            .cloned()
+            .find(|(allowed, _)| allowed.as_str() == choice)
+            .map(|(allowed, _)| allowed.clone())
             .ok_or(DecisionsError::InvalidResponse)
     }
 }

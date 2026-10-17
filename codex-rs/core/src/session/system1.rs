@@ -384,7 +384,19 @@ impl Session {
                 input: "Acknowledge a greeting.".to_string(),
                 instructions: "Choose the lowest effort sufficient for this routine task."
                     .to_string(),
-                choices: vec!["low".to_string(), "medium".to_string()],
+                choices: [ReasoningEffort::Low, ReasoningEffort::Medium]
+                    .into_iter()
+                    .map(|effort| {
+                        (
+                            effort.to_string(),
+                            config
+                                .system1
+                                .effort_description(&effort)
+                                .expect("System1 choices are ordinary efforts")
+                                .to_string(),
+                        )
+                    })
+                    .collect(),
             },
             session.shutdown.child_token(),
             guard,
@@ -634,7 +646,18 @@ impl Session {
                             .as_deref()
                             .unwrap_or(RUBRIC)
                             .to_string(),
-                        choices: allowed.iter().map(ToString::to_string).collect(),
+                        choices: allowed
+                            .iter()
+                            .map(|effort| {
+                                (
+                                    effort.to_string(),
+                                    config
+                                        .effort_description(effort)
+                                        .expect("System1 choices are ordinary efforts")
+                                        .to_string(),
+                                )
+                            })
+                            .collect(),
                     },
                     cancellation.child_token(),
                     guard,

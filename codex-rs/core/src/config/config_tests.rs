@@ -431,7 +431,7 @@ consolidation_reasoning_effort = "high"
         }
     );
 
-    let system1 = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[system1]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\n";
+    let system1 = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[system1]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\nlow_effort_description = 'Custom routine effort.'\n";
     let system1_config = Config::load_from_base_config_with_overrides(
         toml::from_str(system1).expect("system1 settings should parse"),
         ConfigOverrides::default(),
@@ -448,6 +448,7 @@ consolidation_reasoning_effort = "high"
             max_effort: ReasoningEffort::High,
             update_on: vec![codex_config::System1Trigger::ToolResult],
             rubric_instructions: Some("Select effort using my policy.".to_string()),
+            low_effort_description: "Custom routine effort.".to_string(),
             ..config.system1.clone()
         }
     );
