@@ -8,6 +8,6 @@ expression: terminal.backend()
 "                  stats                                     "
 "  /presets        run or save reusable prompts and slash    "
 "                                                       Main "
-"› /                                                         "
+"/                                                           "
 "                                                            "
 "                           100% context left | Vim: Insert  "

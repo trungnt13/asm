@@ -2,6 +2,6 @@
 source: tui/src/chatwidget/tests/worktree_picker_tests.rs
 expression: popup
 ---
-› /work
+/ work
 
   sol56 def·/tmp/project

@@ -172,6 +172,7 @@ pub(super) async fn prepare(
         )
         .await?;
         let mut lookup = AppServerSession::new(
+            crate::backend_id::BackendId::new(),
             AppServerClient::InProcess(client),
             crate::app_server_session::ThreadParamsMode::Embedded,
         );

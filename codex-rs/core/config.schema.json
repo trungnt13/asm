@@ -1138,6 +1138,9 @@
             "mcp_oauth_refresh_coordination": {
               "type": "boolean"
             },
+            "mcp_tool_list_changed": {
+              "type": "boolean"
+            },
             "memories": {
               "type": "boolean"
             },
@@ -1160,6 +1163,9 @@
               "$ref": "#/definitions/FeatureToml_for_MultiAgentV2ConfigToml"
             },
             "multi_agent_v2_dynamic_tools": {
+              "type": "boolean"
+            },
+            "multi_env_copy_file": {
               "type": "boolean"
             },
             "network_proxy": {
@@ -2360,6 +2366,10 @@
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "trusted_content_hash": {
+          "description": "Approved plugin contents; kept separate for declaration-only clients.",
+          "type": "string"
         },
         "trusted_hash": {
           "type": "string"
@@ -7706,6 +7716,9 @@
         "mcp_oauth_refresh_coordination": {
           "type": "boolean"
         },
+        "mcp_tool_list_changed": {
+          "type": "boolean"
+        },
         "memories": {
           "type": "boolean"
         },
@@ -7728,6 +7741,9 @@
           "$ref": "#/definitions/FeatureToml_for_MultiAgentV2ConfigToml"
         },
         "multi_agent_v2_dynamic_tools": {
+          "type": "boolean"
+        },
+        "multi_env_copy_file": {
           "type": "boolean"
         },
         "network_proxy": {

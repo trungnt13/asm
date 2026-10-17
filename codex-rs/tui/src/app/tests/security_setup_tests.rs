@@ -244,6 +244,7 @@ async fn security_setup_disabled_skips_auth_status_and_http_requests() -> Result
             .await
         });
         let server = AppServerSession::new(
+            crate::backend_id::BackendId::new(),
             crate::connect_remote_app_server(endpoint).await?,
             ThreadParamsMode::Embedded,
         );
