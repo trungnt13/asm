@@ -680,7 +680,7 @@ pub(crate) async fn start_app_server_for_picker(
     Ok(
         AppServerSession::new(backend_id, app_server, target.thread_params_mode())
             .with_local_codex_home(&config.codex_home)
-.with_side_conversations(&config.codex_home, &target),
+            .with_side_conversations(&config.codex_home, &target),
     )
 }
 
@@ -711,7 +711,7 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         target.thread_params_mode(),
     )
     .with_local_codex_home(&config.codex_home)
-.with_side_conversations(&config.codex_home, &target))
+    .with_side_conversations(&config.codex_home, &target))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1288,7 +1288,7 @@ async fn run_ratatui_app(
             app_server_target.thread_params_mode(),
         )
         .with_local_codex_home(&initial_config.codex_home)
-.with_side_conversations(&initial_config.codex_home, &app_server_target),
+        .with_side_conversations(&initial_config.codex_home, &app_server_target),
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
@@ -1875,7 +1875,7 @@ async fn run_ratatui_app(
                     app_server_target.thread_params_mode(),
                 )
                 .with_local_codex_home(&config.codex_home)
-.with_side_conversations(&config.codex_home, &app_server_target)
+                .with_side_conversations(&config.codex_home, &app_server_target)
                 .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -1992,7 +1992,7 @@ async fn run_ratatui_app(
                     app_server_target.thread_params_mode(),
                 )
                 .with_local_codex_home(&config.codex_home)
-.with_side_conversations(&config.codex_home, &app_server_target);
+                .with_side_conversations(&config.codex_home, &app_server_target);
             }
             #[cfg(target_os = "windows")]
             {

@@ -3912,7 +3912,11 @@ impl ChatComposer {
 
     fn enabled_prompt_prefix_for_text(&self, text: &str) -> PromptPrefix {
         match text.graphemes(/*is_extended*/ true).next() {
-            Some("!") if self.config.shell_commands_enabled && self.attachments.quotes.is_empty() => PromptPrefix::Shell,
+            Some("!")
+                if self.config.shell_commands_enabled && self.attachments.quotes.is_empty() =>
+            {
+                PromptPrefix::Shell
+            }
             Some("/") if self.slash_commands_enabled() => PromptPrefix::Slash,
             _ => PromptPrefix::None,
         }
