@@ -75,22 +75,25 @@ pub async fn build_prompt_request(
             codex_core::CodexAppsToolsCache::default(),
             SessionSource::Exec,
             Arc::clone(&environment_manager),
-            thread_extensions(ThreadExtensionDependencies {
-                event_sink: Arc::clone(&event_sink),
-                auth_manager: auth_manager.clone(),
-                state_db: state_db.clone(),
-                analytics_events_client: AnalyticsEventsClient::disabled(),
-                thread_manager: thread_manager.clone(),
-                goal_service: Arc::new(GoalService::new()),
-                environment_manager: Arc::clone(&environment_manager),
-                executor_skill_provider: executor_skill_provider.clone(),
-                git_attribution_base_url: config.chatgpt_base_url.clone(),
-                http_client_factory: config.http_client_factory(),
-                // Queue installation starts a background dispatch watcher, not prompt tools.
-                // A standalone audit must not submit queued user messages for inference.
-                queue_service: None,
-                turn_start_admission: Some(Arc::new(TurnAdmission::default())),
-            }),
+            thread_extensions(
+                &config,
+                ThreadExtensionDependencies {
+                    event_sink: Arc::clone(&event_sink),
+                    auth_manager: auth_manager.clone(),
+                    state_db: state_db.clone(),
+                    analytics_events_client: AnalyticsEventsClient::disabled(),
+                    thread_manager: thread_manager.clone(),
+                    goal_service: Arc::new(GoalService::new()),
+                    environment_manager: Arc::clone(&environment_manager),
+                    executor_skill_provider: executor_skill_provider.clone(),
+                    git_attribution_base_url: config.chatgpt_base_url.clone(),
+                    http_client_factory: config.http_client_factory(),
+                    // Queue installation starts a background dispatch watcher, not prompt tools.
+                    // A standalone audit must not submit queued user messages for inference.
+                    queue_service: None,
+                    turn_start_admission: Some(Arc::new(TurnAdmission::default())),
+                },
+            ),
             Arc::new(CodexHomeUserInstructionsProvider::new(
                 config.codex_home.clone(),
             )),
