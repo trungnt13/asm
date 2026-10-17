@@ -4,7 +4,7 @@ expression: "frames.join(\"\\n\\n\")"
 ---
 60x8, cursor Some((10, 6))
                                                        Main
-› /
+/ 
 
 
 
@@ -14,7 +14,7 @@ expression: "frames.join(\"\\n\\n\")"
 
 24x8, cursor Some((10, 6))
                    Main
-› /
+/ 
 
 
 
@@ -24,4 +24,4 @@ expression: "frames.join(\"\\n\\n\")"
 
 12x3, cursor None
        Main
-› /
+/ 

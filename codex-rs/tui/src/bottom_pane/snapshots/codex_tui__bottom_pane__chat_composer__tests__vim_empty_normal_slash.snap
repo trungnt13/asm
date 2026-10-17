@@ -2,12 +2,12 @@
 source: tui/src/bottom_pane/chat_composer.rs
 expression: terminal.backend()
 ---
-"› /model          choose what model and reasoning effort to "
+"/ model          choose what model and reasoning effort to "
 "                  use                                       "
 "  /system1        turn System1 on/off or show status and    "
 "                  stats                                     "
 "  /presets        run or save reusable prompts and slash    "
 "                                                       Main "
-"› /                                                         "
+"/                                                          "
 "                                                            "
 "                           100% context left | Vim: Insert  "

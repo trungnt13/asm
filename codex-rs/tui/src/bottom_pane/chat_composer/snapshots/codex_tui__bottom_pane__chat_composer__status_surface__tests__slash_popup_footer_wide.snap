@@ -6,11 +6,11 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 8 },
     content: [
         "  /model     choose what model and reasoning effort to use                      ",
-        "› /memories  configure memory use and generation                                ",
+        "/ memories  configure memory use and generation                                ",
         "  /mention   mention a file                                                     ",
         "  /mcp       list MCP tools; use /mcp verbose or /mcp login <name>              ",
         "                                                                           Main ",
-        "› /m                                                                            ",
+        "/ m                                                                            ",
         "                                                                                ",
         "  model · high · fast                                                           ",
     ],
