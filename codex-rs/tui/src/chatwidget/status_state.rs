@@ -116,7 +116,10 @@ pub(super) struct StatusState {
     pub(super) system1_error: Option<codex_protocol::protocol::System1Error>,
     pub(super) system1_failure_episode: u64,
     pub(super) system1_warning: Option<codex_protocol::protocol::System1FailureWarning>,
-    pub(super) announced_system1_failures: std::collections::HashMap<codex_protocol::ThreadId, u64>,
+    pub(super) announced_system1_failures: std::collections::HashMap<
+        codex_protocol::ThreadId,
+        (u64, codex_protocol::protocol::System1Error),
+    >,
     pub(super) captured_step_reasoning:
         Option<codex_app_server_protocol::ReasoningEffortUpdatedNotification>,
     pub(super) suppressed_system1_turn_id: Option<String>,

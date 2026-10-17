@@ -140,15 +140,16 @@ impl ChatWidget {
             return;
         };
         let episode = self.status_state.system1_failure_episode;
-        let announced = self
-            .status_state
-            .announced_system1_failures
-            .entry(thread_id)
-            .or_default();
-        if episode <= *announced {
+        let announced = self.status_state.announced_system1_failures.get(&thread_id);
+        if announced.is_some_and(|(previous_episode, previous_error)| {
+            episode < *previous_episode
+                || (episode == *previous_episode && error == *previous_error)
+        }) {
             return;
         }
-        *announced = episode;
+        self.status_state
+            .announced_system1_failures
+            .insert(thread_id, (episode, error));
         let code = match error {
             codex_protocol::protocol::System1Error::Credentials => "CREDENTIALS".to_string(),
             codex_protocol::protocol::System1Error::InvalidRequest => "INVALID_REQUEST".to_string(),
