@@ -337,6 +337,44 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
+        let current_claude =
+            crate::claude_runtime::is_claude_model(self.collaboration_mode.model());
+        let claude_settings_changed = current_claude && {
+            // Clients materialize default tiers and collaboration instructions on first input.
+            // The runtime checks effective instructions before each submission; other settings stay frozen.
+            let mut retained_settings = self.clone();
+            retained_settings
+                .collaboration_mode
+                .settings
+                .developer_instructions = next
+                .collaboration_mode
+                .settings
+                .developer_instructions
+                .clone();
+            if self
+                .service_tier
+                .as_deref()
+                .unwrap_or(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+                == next
+                    .service_tier
+                    .as_deref()
+                    .unwrap_or(SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+            {
+                retained_settings.service_tier = next.service_tier.clone();
+            }
+            next != retained_settings
+        };
+        if claude_settings_changed
+            || (!current_claude
+                && crate::claude_runtime::is_claude_model(next.collaboration_mode.model()))
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Claude runtime settings (start a fresh thread to change)",
+                candidate: next.collaboration_mode.model().to_string(),
+                allowed: self.collaboration_mode.model().to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         next.validate(constraints)?;
         Ok(next)
     }

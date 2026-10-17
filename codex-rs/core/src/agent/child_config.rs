@@ -236,6 +236,11 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
+        if crate::claude_runtime::is_claude_model(requested_model) {
+            config.model = Some(requested_model.to_string());
+            config.model_reasoning_effort = requested_reasoning_effort;
+            return Ok(());
+        }
         let available_models = session
             .services
             .models_manager
@@ -268,6 +273,14 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(reasoning_effort) = requested_reasoning_effort {
+        if config
+            .model
+            .as_deref()
+            .is_some_and(crate::claude_runtime::is_claude_model)
+        {
+            config.model_reasoning_effort = Some(reasoning_effort);
+            return Ok(());
+        }
         validate_spawn_agent_reasoning_effort(
             &step_context.settings.model_info.slug,
             &step_context.settings.model_info.supported_reasoning_levels,
@@ -286,6 +299,15 @@ pub(crate) async fn apply_spawn_agent_service_tier(
     let model = config.model.clone().ok_or_else(|| {
         "spawn_agent could not resolve the child model for service tier validation".to_string()
     })?;
+    if crate::claude_runtime::is_claude_model(&model) {
+        if matching_subagent_service_tier(config, &model, config.model_reasoning_effort.as_ref())
+            .is_some_and(|tier| tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
+        {
+            return Err("Claude runtime does not support native service tiers".to_string());
+        }
+        config.service_tier = None;
+        return Ok(());
+    }
     let model_info = session
         .services
         .models_manager
