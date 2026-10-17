@@ -56,6 +56,10 @@ pub struct System1Config {
     #[schemars(range(min = 128, max = 32768))]
     pub max_context_bytes: usize,
     pub update_on: Vec<System1Trigger>,
+    pub low_effort_description: String,
+    pub medium_effort_description: String,
+    pub high_effort_description: String,
+    pub xhigh_effort_description: String,
     pub rubric_instructions: Option<String>,
 }
 
@@ -74,12 +78,38 @@ impl Default for System1Config {
             decision_timeout_ms: 200,
             max_context_bytes: 8192,
             update_on: vec![System1Trigger::TurnStart, System1Trigger::ToolResult],
+            low_effort_description: "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use.".to_string(),
+            medium_effort_description: "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding.".to_string(),
+            high_effort_description: "Deep reasoning for difficult debugging, interacting constraints, substantial uncertainty, and complex decisions.".to_string(),
+            xhigh_effort_description: "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.".to_string(),
             rubric_instructions: None,
         }
     }
 }
 
 impl System1Config {
+    /// Returns the choice description, or `None` for unsupported effort levels.
+    pub fn effort_description(&self, effort: &ReasoningEffort) -> Option<&str> {
+        match effort {
+            ReasoningEffort::None => {
+                Some("No reasoning budget for direct execution without deliberation.")
+            }
+            ReasoningEffort::Minimal => {
+                Some("Minimal reasoning for trivial tasks and simple direct responses.")
+            }
+            ReasoningEffort::Low => Some(&self.low_effort_description),
+            ReasoningEffort::Medium => Some(&self.medium_effort_description),
+            ReasoningEffort::High => Some(&self.high_effort_description),
+            ReasoningEffort::XHigh => Some(&self.xhigh_effort_description),
+            ReasoningEffort::Max => Some(
+                "Maximum reasoning budget for the most demanding problems supported by the model.",
+            ),
+            ReasoningEffort::Ultra | ReasoningEffort::Persistent | ReasoningEffort::Custom(_) => {
+                None
+            }
+        }
+    }
+
     pub fn resolved_profile(&self) -> Result<System1Profile, String> {
         let profile = if let Some(name) = &self.profile {
             if self.decision_model.is_some() || self.decision_model_api_env.is_some() {
@@ -144,6 +174,19 @@ impl System1Config {
         }
         if !(128..=32768).contains(&self.max_context_bytes) {
             return Err("system1.max_context_bytes must be between 128 and 32768".to_string());
+        }
+        for (name, description) in [
+            ("low_effort_description", &self.low_effort_description),
+            ("medium_effort_description", &self.medium_effort_description),
+            ("high_effort_description", &self.high_effort_description),
+            ("xhigh_effort_description", &self.xhigh_effort_description),
+        ] {
+            if description.trim().is_empty() {
+                return Err(format!("system1.{name} must not be blank"));
+            }
+            if description.len() > 4096 {
+                return Err(format!("system1.{name} must not exceed 4096 UTF-8 bytes"));
+            }
         }
         if let Some(rubric) = &self.rubric_instructions {
             if rubric.trim().is_empty() {

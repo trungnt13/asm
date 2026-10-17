@@ -58,8 +58,13 @@ impl App {
                 )
                 .await;
                 if self.chat_widget.thread_id() == Some(thread_id) {
-                    self.chat_widget
-                        .set_system1_state(enabled, revision, error, failure_episode);
+                    self.chat_widget.set_system1_state(
+                        enabled,
+                        revision,
+                        error,
+                        failure_episode,
+                        /*warning*/ None,
+                    );
                 }
             }
             Ok(Some(_)) | Ok(None) => self

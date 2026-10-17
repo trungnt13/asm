@@ -35,7 +35,7 @@ async fn basic_decisions_uses_custom_rubric_and_large_context() {
                 "role": "user", "content": [{"type": "input_text", "text": text}]
             })).collect::<Vec<_>>(),
             "questions": [{"type": "choice", "name": "reasoning_effort",
-                "instructions": rubric, "choices": [{"value": "low"}, {"value": "high"}]}]
+                "instructions": rubric, "choices": [{"value": "low", "description": "Routine work."}, {"value": "high", "description": "Difficult work."}]}]
         })))
         .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
             "model": "gpt-6-luna",
@@ -55,7 +55,10 @@ async fn basic_decisions_uses_custom_rubric_and_large_context() {
                 "gpt-6-luna",
                 &input,
                 rubric,
-                &["low".to_string(), "high".to_string()],
+                &[
+                    ("low".to_string(), "Routine work.".to_string()),
+                    ("high".to_string(), "Difficult work.".to_string())
+                ],
             )
             .await,
         Ok("high".to_string()),
@@ -73,7 +76,7 @@ async fn basic_decisions_returns_low_effort() {
             "state": "Greet the user.",
             "questions": {"reasoning_effort": {
                 "type": "choice", "instructions": "Choose sufficient effort.",
-                "criteria": {"low": null, "medium": null}
+                "criteria": {"low": "Routine work.", "medium": "Balanced work."}
             }}
         })))
         .respond_with(ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
@@ -92,7 +95,10 @@ async fn basic_decisions_returns_low_effort() {
                 "jev-latest",
                 "Greet the user.",
                 "Choose sufficient effort.",
-                &["low".to_string(), "medium".to_string()],
+                &[
+                    ("low".to_string(), "Routine work.".to_string()),
+                    ("medium".to_string(), "Balanced work.".to_string())
+                ],
             )
             .await,
         Ok("low".to_string()),
@@ -117,7 +123,10 @@ async fn special_decisions_rejects_unsupported_effort() {
             "gpt-6-luna",
             "Task",
             "Rubric",
-            &["low".to_string(), "medium".to_string()],
+            &[
+                ("low".to_string(), "Routine work.".to_string()),
+                ("medium".to_string(), "Balanced work.".to_string()),
+            ],
         )
         .await;
     assert_eq!(result, Err(DecisionsError::InvalidResponse));

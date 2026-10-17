@@ -108,6 +108,7 @@ impl ChatWidget {
         revision: u64,
         error: Option<codex_protocol::protocol::System1Error>,
         failure_episode: u64,
+        warning: Option<codex_protocol::protocol::System1FailureWarning>,
     ) {
         if revision < self.status_state.system1_revision {
             return;
@@ -123,6 +124,7 @@ impl ChatWidget {
                 self.add_info_message(format!("System1 turned {state}."), /*hint*/ None);
             }
         }
+        self.status_state.system1_warning = warning;
         self.status_state.system1_error = error;
         self.status_state.system1_failure_episode = failure_episode;
         self.announce_system1_error();
@@ -138,19 +140,45 @@ impl ChatWidget {
             return;
         };
         let episode = self.status_state.system1_failure_episode;
-        let announced = self
-            .status_state
-            .announced_system1_failures
-            .entry(thread_id)
-            .or_default();
-        if episode <= *announced {
+        let announced = self.status_state.announced_system1_failures.get(&thread_id);
+        if announced.is_some_and(|(previous_episode, previous_error)| {
+            episode < *previous_episode
+                || (episode == *previous_episode && error == *previous_error)
+        }) {
             return;
         }
-        *announced = episode;
-        self.add_info_message(
-            format!("System1 error: {error}. Keeping the current effort; auto remains enabled."),
-            /*hint*/ None,
-        );
+        self.status_state
+            .announced_system1_failures
+            .insert(thread_id, (episode, error));
+        let code = match error {
+            codex_protocol::protocol::System1Error::Credentials => "CREDENTIALS".to_string(),
+            codex_protocol::protocol::System1Error::InvalidRequest => "INVALID_REQUEST".to_string(),
+            codex_protocol::protocol::System1Error::Transport => "TRANSPORT".to_string(),
+            codex_protocol::protocol::System1Error::Timeout => "TIMEOUT".to_string(),
+            codex_protocol::protocol::System1Error::Http { status } => format!("HTTP{status}"),
+            codex_protocol::protocol::System1Error::ResponseTooLarge => {
+                "RESPONSE_TOO_LARGE".to_string()
+            }
+            codex_protocol::protocol::System1Error::InvalidResponse => {
+                "INVALID_RESPONSE".to_string()
+            }
+            codex_protocol::protocol::System1Error::Rejected => "REJECTED".to_string(),
+        };
+        let message = if let Some(warning) = &self.status_state.system1_warning {
+            let effort = warning
+                .reasoning_effort
+                .as_ref()
+                .map_or("model default", ReasoningEffortConfig::as_str);
+            let recovery = warning.cooldown_seconds.map_or_else(
+                || "recovery blocked".to_string(),
+                |seconds| format!("cool down {seconds}s"),
+            );
+            format!("System 1 error {code}, fallback to {effort}, {recovery}")
+        } else {
+            format!("System 1 error {code}, fallback and cooldown unavailable")
+        };
+        self.add_to_history(history_cell::new_usage_warning_event(message));
+        self.request_redraw();
     }
 
     pub(crate) fn inherit_system1_warnings(&mut self, previous: &mut Self) {

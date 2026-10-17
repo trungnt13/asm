@@ -29,11 +29,11 @@ Error footer:
 
 
 Error details:
-• System1 error: configured API key is missing; load the key in the backend environment and restart. Keeping the current effort; auto remains enabled.
+⚠ System 1 error CREDENTIALS, fallback to low, recovery blocked
 
 /status
 
-  >_ ASM (v0.163.1-alpha.13.2)
+  >_ ASM (v0.164.1-alpha.3)
 
   Visit https://chatgpt.com/settings/usage for up-to-date
   information on rate limits and credits

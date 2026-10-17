@@ -18,7 +18,7 @@ pub(super) struct DecisionRequest {
     pub(super) model: String,
     pub(super) input: String,
     pub(super) instructions: String,
-    pub(super) choices: Vec<String>,
+    pub(super) choices: Vec<(String, String)>,
 }
 
 pub(super) enum DecisionTarget {

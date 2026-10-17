@@ -194,6 +194,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             outgoing
                 .send_server_notification(ServerNotification::System1Updated(
                     System1UpdatedNotification {
+                        warning: payload.warning,
                         thread_id: conversation_id.to_string(),
                         enabled: payload.enabled,
                         system1_revision: payload.system1_revision,
@@ -3293,6 +3294,7 @@ mod tests {
                 Event {
                     id: "mode-update".to_string(),
                     msg: EventMsg::System1Updated(codex_protocol::protocol::System1UpdatedEvent {
+                        warning: None,
                         enabled,
                         system1_revision: 0,
                         error: Some(codex_protocol::protocol::System1Error::Http { status: 503 }),
@@ -3312,7 +3314,7 @@ mod tests {
                 serde_json::to_value(notification)?,
                 serde_json::json!({
                     "method": "thread/system1Updated",
-                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "system1Revision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1},
+                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "system1Revision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1, "warning": null},
                 })
             );
         }
