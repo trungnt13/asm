@@ -2490,25 +2490,13 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
         ),
         expected_settings,
     );
-    let content = if plaintext {
-        vec![json!({
-            "type": "input_text",
-            "text": format!(
-                "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n{message}"
-            ),
-        })]
-    } else {
-        vec![
-            json!({
-                "type": "input_text",
-                "text": "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n",
-            }),
-            json!({
-                "type": "encrypted_content",
-                "encrypted_content": message,
-            }),
-        ]
-    };
+    // ASM delivers plaintext even when the server omits plaintext argument metadata.
+    let content = vec![json!({
+        "type": "input_text",
+        "text": format!(
+            "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n{message}"
+        ),
+    })];
     assert_eq!(
         strip_response_item_ids_from_json(strip_metadata_from_json(Value::Array(
             child_request.inputs_of_type("agent_message"),
@@ -2584,8 +2572,7 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
         .expect("spawn send event");
     assert!(send.contains(&format!("sender_thread_id={root_thread_id}")));
     assert!(send.contains(&format!("receiver_thread_id={child_thread_id}")));
-    let logged_message = if plaintext { "[plaintext]" } else { message };
-    assert!(send.contains(&format!("content=\"{logged_message}\"")));
+    assert!(send.contains("content=\"[plaintext]\""));
 
     let communication_id = log_field(send, "communication_id").expect("communication ID");
     logs.lines()
