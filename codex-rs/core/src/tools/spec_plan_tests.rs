@@ -2925,7 +2925,7 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_message_schemas_are_encrypted() {
+async fn multi_agent_v2_message_schemas_are_plaintext() {
     let plan = probe(|turn| {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
     })
@@ -2951,7 +2951,7 @@ async fn multi_agent_v2_message_schemas_are_encrypted() {
             properties
                 .get("message")
                 .and_then(|schema| schema.encrypted),
-            Some(true)
+            None
         );
     }
 }
