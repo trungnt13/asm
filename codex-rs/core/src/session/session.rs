@@ -568,15 +568,12 @@ impl SessionConfiguration {
         )?);
         if crate::claude_runtime::is_claude_model(self.step_settings.collaboration_mode.model())
             && (next_configuration.cwd() != self.cwd()
-                || next_configuration.environments != self.environments
-                || next_configuration.permission_profile() != self.permission_profile()
-                || next_configuration.runtime_workspace_roots != self.runtime_workspace_roots
-                || next_configuration.disabled_plugin_ids != self.disabled_plugin_ids)
+                || next_configuration.environments != self.environments)
         {
             return Err(crate::config::ConstraintError::InvalidValue {
                 field_name: "Claude runtime environment (start a fresh thread to change)",
-                candidate: "changed environment or permissions".to_string(),
-                allowed: "original environment and permissions".to_string(),
+                candidate: "changed environment".to_string(),
+                allowed: "original environment".to_string(),
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }

@@ -3927,7 +3927,7 @@ impl Session {
 
     /// Prepares a candidate step without replacing the active turn's retained context.
     /// The caller must retain it explicitly if it is selected for execution.
-    async fn capture_speculative_step_context(
+    pub(crate) async fn capture_speculative_step_context(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         cancellation_token: &CancellationToken,
@@ -5577,6 +5577,13 @@ async fn build_hooks_config(
     environment: Option<&TurnEnvironment>,
     disabled_plugin_ids: &[String],
 ) -> HooksConfig {
+    if config
+        .model
+        .as_deref()
+        .is_some_and(crate::claude_runtime::is_claude_model)
+    {
+        return HooksConfig::default();
+    }
     let (hook_shell_program, hook_shell_argv) = environment
         .and_then(|environment| environment.shell.as_ref())
         .map(|shell| {

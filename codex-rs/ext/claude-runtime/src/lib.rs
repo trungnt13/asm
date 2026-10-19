@@ -1,5 +1,5 @@
 //! Run persistent official Claude CLI sessions.
-//! Callers own tool execution and serialize turns.
+//! Claude owns tools and configuration. Callers serialize turns.
 
 mod frames;
 
@@ -36,10 +36,8 @@ pub struct ClaudeOptions {
     pub cwd: PathBuf,
     pub model: String,
     pub effort: Option<String>,
-    pub system_prompt: String,
     pub session: ClaudeSession,
-    pub mcp_config: Value,
-    pub allowed_tools: Vec<String>,
+    pub mcp_config: Option<Value>,
     pub turn_timeout: Duration,
 }
 
@@ -109,6 +107,8 @@ impl ClaudeRuntime {
             command.env_remove(name);
         }
         command
+            // Official SDK opt-in: idle follows held-back results and native background agents.
+            .env("CLAUDE_CODE_SDK_READS_SESSION_STATE", "1")
             .current_dir(options.cwd)
             .args([
                 "-p",
@@ -117,39 +117,21 @@ impl ClaudeRuntime {
                 "--output-format",
                 "stream-json",
             ])
-            .args(["--verbose", "--include-partial-messages", "--tools", ""])
-            .args([
-                "--restricted",
-                "--setting-sources",
-                "",
-                "--disable-slash-commands",
-            ])
-            .args([
-                "--settings",
-                "{\"disableAllHooks\":true}",
-                "--strict-mcp-config",
-            ])
-            .arg("--mcp-config")
-            .arg(options.mcp_config.to_string())
-            .arg("--allowedTools")
-            .arg(options.allowed_tools.join(","))
-            .args([
-                "--permission-mode",
-                "dontAsk",
-                "--permission-prompts",
-                "none",
-            ])
-            .args(["--system-prompt-snapshot", "off"])
+            .args(["--verbose", "--include-partial-messages"])
+            // No permission host is attached. Native allow/deny rules still apply,
+            // but a tool that requires a new approval must be denied, not granted.
+            .args(["--permission-prompts", "none"])
             .arg("--model")
             .arg(options.model)
-            .arg("--system-prompt")
-            .arg(options.system_prompt)
             .arg(session_flag)
             .arg(&session_id)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(/*kill_on_drop*/ true);
+        if let Some(mcp_config) = options.mcp_config {
+            command.arg("--mcp-config").arg(mcp_config.to_string());
+        }
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
         }
@@ -234,7 +216,7 @@ impl ClaudeRuntime {
                     bail!("Claude turn interrupted; explicit recovery is required");
                 }
                 result = async {
-                    self.write_frame(json!({"type":"user", "client_composed":true,
+                    self.write_frame(json!({"type":"user",
                         "message":{"role":"user","content":prompt}})).await?;
                     self.read_result(&events).await
                 } => result,
@@ -277,6 +259,7 @@ impl ClaudeRuntime {
     }
 
     async fn read_result(&mut self, events: &mpsc::Sender<Value>) -> Result<Value> {
+        let mut pending_result = None;
         loop {
             let frame = self
                 .frames
@@ -291,7 +274,35 @@ impl ClaudeRuntime {
             {
                 bail!("Claude returned a different session ID than requested");
             }
+            if frame.get("type").and_then(Value::as_str) == Some("control_request") {
+                self.failure_result = Some(frame.clone());
+                if let Some(request_id) = frame.get("request_id").and_then(Value::as_str) {
+                    self.write_frame(json!({
+                        "type": "control_response",
+                        "response": {
+                            "subtype": "error",
+                            "request_id": request_id,
+                            "error": "ASM does not provide a Claude permission or control callback",
+                        }
+                    }))
+                    .await
+                    .context("refusing unsupported Claude control request")?;
+                }
+                bail!(
+                    "Claude requested an unsupported approval or control callback; no permission was granted"
+                );
+            }
             let is_result = frame.get("type").and_then(Value::as_str) == Some("result");
+            let is_idle = frame.get("type").and_then(Value::as_str) == Some("system")
+                && frame.get("subtype").and_then(Value::as_str) == Some("session_state_changed")
+                && frame.get("state").and_then(Value::as_str) == Some("idle");
+            if matches!(
+                frame.get("type").and_then(Value::as_str),
+                Some("assistant" | "stream_event")
+            ) && frame.get("parent_tool_use_id").is_none_or(Value::is_null)
+            {
+                pending_result = None;
+            }
             events
                 .send(frame.clone())
                 .await
@@ -317,7 +328,12 @@ impl ClaudeRuntime {
                     self.failure_result = Some(frame);
                     bail!("Claude returned an unsuccessful turn result: {category}");
                 }
-                return Ok(frame);
+                pending_result = Some(frame);
+            }
+            // A result ends one generation, not necessarily the native agent's run.
+            // Require explicit idle before the next ASM turn can consume this stream.
+            if is_idle && let Some(result) = pending_result.take() {
+                return Ok(result);
             }
         }
     }

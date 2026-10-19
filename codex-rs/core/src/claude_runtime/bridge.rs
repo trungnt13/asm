@@ -1,6 +1,5 @@
-//! Thread-scoped MCP ingress; execution stays in ASM's captured tool runtime.
+//! Child-only MCP messaging; native agent control retains caller-scoped authority.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Weak;
 use std::time::Duration;
@@ -18,8 +17,9 @@ use axum::response::Response;
 use axum::routing::post;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
-use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::ToolMode;
+use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
@@ -35,13 +35,20 @@ use uuid::Uuid;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::tools::context::ToolPayload;
+use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
+use crate::tools::handlers::multi_agents_v2::ListAgentsHandler;
+use crate::tools::handlers::multi_agents_v2::SendMessageHandler;
+use crate::tools::handlers::multi_agents_v2::WaitAgentHandler;
+use crate::tools::multi_agent_tool::multi_agent_v2_handler;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::registry::ToolRegistry;
 use crate::tools::router::ToolCall;
+use crate::tools::router::ToolRouter;
 use crate::turn_diff_tracker::TurnDiffTracker;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 
-pub(super) struct ClaudeToolBridge {
+pub(super) struct ClaudeMessageBridge {
     state: Arc<BridgeState>,
     stop: CancellationToken,
     server: Option<JoinHandle<std::io::Result<()>>>,
@@ -54,7 +61,7 @@ struct BridgeState {
     turn: Mutex<Option<Arc<BridgeTurn>>>,
     requests: Semaphore,
     stop: CancellationToken,
-    tool_specs: Mutex<Option<Vec<Value>>>,
+    message_tools: Mutex<Option<Vec<MessageTool>>>,
 }
 
 struct BridgeTurn {
@@ -62,18 +69,18 @@ struct BridgeTurn {
     stop: CancellationToken,
     step: Arc<StepContext>,
     cancel: CancellationToken,
-    tools: BTreeMap<String, BridgeTool>,
+    tools: Vec<ToolName>,
     execution: Arc<Semaphore>,
     tracker: crate::tools::context::SharedTurnDiffTracker,
 }
 
-struct BridgeTool {
+#[derive(Clone, PartialEq)]
+struct MessageTool {
     name: ToolName,
-    custom: bool,
     spec: Value,
 }
 
-impl ClaudeToolBridge {
+impl ClaudeMessageBridge {
     #[tracing::instrument(level = "trace", skip_all, err)]
     pub(super) async fn start() -> anyhow::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
@@ -86,7 +93,7 @@ impl ClaudeToolBridge {
             turn: Mutex::new(/*t*/ None),
             requests: Semaphore::new(/*permits*/ 8),
             stop: stop.clone(),
-            tool_specs: Mutex::new(/*t*/ None),
+            message_tools: Mutex::new(/*t*/ None),
         });
         let app = Router::new()
             .route("/mcp", post(serve_rpc))
@@ -116,30 +123,38 @@ impl ClaudeToolBridge {
     pub(super) async fn set_turn(
         &self,
         session: Arc<Session>,
-        step: Arc<StepContext>,
+        mut step: Arc<StepContext>,
         cancel: CancellationToken,
     ) -> anyhow::Result<()> {
         if self.stop.is_cancelled() {
-            bail!("Claude tool bridge is stopped");
+            bail!("Claude messaging bridge is stopped");
         }
-        let tools = build_tools(&step)?;
-        let specs = tools
-            .values()
-            .map(|tool| tool.spec.clone())
-            .collect::<Vec<_>>();
+        if step.turn.parent_thread_id.is_none()
+            || !step.turn.session_source.is_non_root_agent()
+            || step.turn.multi_agent_version != MultiAgentVersion::V2
         {
-            let mut original_specs = self.state.tool_specs.lock().await;
-            if original_specs
+            bail!("Claude messaging is available only to native V2 child agents");
+        }
+        let (router, message_tools) = build_message_tools(&session, &step)?;
+        // The bridge owns a fresh captured step. Inference metadata must not hide
+        // caller-authorized messaging on a Claude child with no native model catalog.
+        Arc::get_mut(&mut step)
+            .context("Claude messaging requires an exclusively owned captured step")?
+            .tool_router = Arc::new(router);
+        let tools = message_tools.iter().map(|tool| tool.name.clone()).collect();
+        {
+            let mut original = self.state.message_tools.lock().await;
+            if original
                 .as_ref()
-                .is_some_and(|original| *original != specs)
+                .is_some_and(|original| *original != message_tools)
             {
-                bail!("Claude runtime tool definitions changed; start a new thread");
+                bail!("Claude messaging definitions changed; start a new thread");
             }
-            *original_specs = Some(specs);
+            *original = Some(message_tools);
         }
         let mut turn = self.state.turn.lock().await;
         if turn.is_some() {
-            bail!("Claude tool bridge already has an active turn");
+            bail!("Claude messaging bridge already has an active turn");
         }
         *turn = Some(Arc::new(BridgeTurn {
             session: Arc::downgrade(&session),
@@ -153,16 +168,6 @@ impl ClaudeToolBridge {
         Ok(())
     }
 
-    pub(super) async fn tool_names(&self) -> Vec<String> {
-        self.state
-            .turn
-            .lock()
-            .await
-            .as_ref()
-            .map(|turn| turn.tools.keys().cloned().collect())
-            .unwrap_or_default()
-    }
-
     #[tracing::instrument(level = "trace", skip_all, err)]
     pub(super) async fn clear_turn(&self) -> anyhow::Result<()> {
         let turn = self.state.turn.lock().await.take();
@@ -174,7 +179,7 @@ impl ClaudeToolBridge {
                 .is_err()
             {
                 self.stop.cancel();
-                bail!("Claude tool cleanup exceeded 5 seconds; bridge cannot be reused");
+                bail!("Claude messaging cleanup exceeded 5 seconds; bridge cannot be reused");
             }
         }
         Ok(())
@@ -186,10 +191,10 @@ impl ClaudeToolBridge {
         self.stop.cancel();
         if let Some(mut server) = self.server.take() {
             match tokio::time::timeout(Duration::from_secs(/*secs*/ 5), &mut server).await {
-                Ok(result) => result.context("Claude tool HTTP task failed")??,
+                Ok(result) => result.context("Claude messaging HTTP task failed")??,
                 Err(_) => {
                     server.abort();
-                    bail!("Claude tool HTTP shutdown exceeded 5 seconds");
+                    bail!("Claude messaging HTTP shutdown exceeded 5 seconds");
                 }
             }
         }
@@ -197,7 +202,7 @@ impl ClaudeToolBridge {
     }
 }
 
-impl Drop for ClaudeToolBridge {
+impl Drop for ClaudeMessageBridge {
     fn drop(&mut self) {
         self.stop.cancel();
         if let Ok(mut turn) = self.state.turn.try_lock()
@@ -288,7 +293,15 @@ async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> R
     }
     if method == "tools/list" && !state.stop.is_cancelled() {
         // Discovery has no execution authority and must also work between turns.
-        let tools = state.tool_specs.lock().await.clone().unwrap_or_default();
+        let tools = state
+            .message_tools
+            .lock()
+            .await
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|tool| tool.spec.clone())
+            .collect::<Vec<_>>();
         return rpc_result(id, json!({"tools": tools}));
     }
     let Some(turn) = state.turn.lock().await.clone() else {
@@ -301,7 +314,7 @@ async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> R
         "tools/call" if !id.is_null() => {
             let params = rpc.get("params").cloned().unwrap_or(Value::Null);
             // Keep admitted work alive on HTTP disconnect until ASM cancels/drains it.
-            match tokio::spawn(invoke_tool(turn, params))
+            match tokio::spawn(invoke_message_tool(turn, params))
                 .await
                 .unwrap_or_else(|error| Err(error.into()))
             {
@@ -324,79 +337,84 @@ fn rpc_error(id: Value, code: i64, message: &str) -> Response {
     Json(json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})).into_response()
 }
 
-fn build_tools(step: &StepContext) -> anyhow::Result<BTreeMap<String, BridgeTool>> {
-    let mut tools = BTreeMap::new();
-    for spec in step.tool_router.model_visible_specs().iter() {
-        let entries = match spec {
-            ToolSpec::Function(tool) => vec![(
-                ToolName::plain(&tool.name),
-                false,
-                serde_json::to_value(tool)?,
-            )],
-            ToolSpec::Freeform(tool) => vec![(
-                ToolName::plain(&tool.name),
-                true,
-                serde_json::to_value(tool)?,
-            )],
-            ToolSpec::Namespace(namespace) => namespace
-                .tools
-                .iter()
-                .map(|tool| match tool {
-                    ResponsesApiNamespaceTool::Function(tool) => Ok((
-                        ToolName::namespaced(&namespace.name, &tool.name),
-                        false,
-                        serde_json::to_value(tool)?,
-                    )),
-                    ResponsesApiNamespaceTool::Custom(tool) => Ok((
-                        ToolName::namespaced(&namespace.name, &tool.name),
-                        true,
-                        serde_json::to_value(tool)?,
-                    )),
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?,
-            ToolSpec::WebSearch { .. } | ToolSpec::ToolSearch { .. } => bail!(
-                "Claude runtime does not support hosted/deferred tool {}: disable it explicitly",
-                spec.name()
-            ),
-        };
-        for (name, custom, spec) in entries {
-            let wire_name = match &name.namespace {
-                Some(namespace) => format!("{namespace}__{}", name.name),
-                None => name.name.clone(),
-            };
-            if wire_name.len() > 64
-                || !wire_name
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-            {
-                bail!("Tool name is not MCP-compatible: {wire_name}");
-            }
-            let schema = if custom {
-                json!({"type":"object","properties":{"input":{"type":"string", "description":"Complete tool input, unchanged."}},"required":["input"],"additionalProperties":false})
-            } else {
-                spec.get("parameters")
-                    .context("Tool has no input schema")?
-                    .clone()
-            };
-            let description = spec
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let tool = BridgeTool {
-                name,
-                custom,
-                spec: json!({"name":wire_name,"description":description,"inputSchema":schema}),
-            };
-            if tools.insert(wire_name.clone(), tool).is_some() {
-                bail!("Colliding MCP tool name: {wire_name}");
-            }
+fn build_message_tools(
+    session: &Session,
+    step: &StepContext,
+) -> anyhow::Result<(ToolRouter, Vec<MessageTool>)> {
+    let config = &step.turn.config.multi_agent_v2;
+    let options = WaitAgentTimeoutOptions {
+        default_timeout_ms: config.default_wait_timeout_ms,
+        min_timeout_ms: config.min_wait_timeout_ms,
+        max_timeout_ms: config.max_wait_timeout_ms,
+    };
+    let namespace = config.tool_namespace.as_deref();
+    let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
+    let mut tools = Vec::new();
+    let mut specs = Vec::new();
+    // Build only native messaging handlers; never import the inference tool catalog.
+    for (enabled, runtime) in [
+        (
+            !config.disable_direct_message,
+            multi_agent_v2_handler(SendMessageHandler, namespace, None, None),
+        ),
+        (
+            true,
+            multi_agent_v2_handler(ListAgentsHandler, namespace, None, None),
+        ),
+        (
+            config.wait_agent_enabled,
+            multi_agent_v2_handler(WaitAgentHandler::new(options), namespace, None, None),
+        ),
+    ] {
+        if config.disable_native_tools || !enabled {
+            continue;
         }
+        let name = runtime.tool_name();
+        let spec = runtime.spec();
+        registry.register_trusted(runtime);
+        if registry.registered_tool(&name).is_none() {
+            continue;
+        }
+        let tool = match spec.clone() {
+            ToolSpec::Function(tool) => tool,
+            ToolSpec::Namespace(mut namespace) if namespace.tools.len() == 1 => {
+                let Some(ResponsesApiNamespaceTool::Function(tool)) = namespace.tools.pop() else {
+                    bail!("Native messaging tool must use function arguments");
+                };
+                tool
+            }
+            _ => bail!("Native messaging tool must use function arguments"),
+        };
+        let wire_name = match &name.namespace {
+            Some(namespace) => format!("{namespace}__{}", name.name),
+            None => name.name.clone(),
+        };
+        if wire_name.len() > 64
+            || !wire_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            bail!("Messaging namespace is not MCP-compatible");
+        }
+        tools.push(MessageTool {
+            name,
+            spec: json!({"name":wire_name,"description":tool.description,"inputSchema":tool.parameters}),
+        });
+        specs.push(spec);
     }
-    Ok(tools)
+    let router = ToolRouter::from_parts(
+        registry,
+        specs,
+        ToolMode::Direct,
+        Default::default(),
+        None,
+        &[],
+    );
+    Ok((router, tools))
 }
 
 #[tracing::instrument(level = "trace", skip_all, err)]
-async fn invoke_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Value> {
+async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Value> {
     let _execution = tokio::select! {
         permit = turn.execution.acquire() => permit?,
         _ = turn.cancel.cancelled() => bail!("ASM turn cancelled"),
@@ -412,8 +430,12 @@ async fn invoke_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Val
         .context("Missing tool name")?;
     let tool = turn
         .tools
-        .get(name)
-        .context("Tool is not exposed by this ASM turn")?;
+        .iter()
+        .find(|tool| match &tool.namespace {
+            Some(namespace) => name == format!("{namespace}__{}", tool.name),
+            None => name == tool.name,
+        })
+        .context("Only exposed native messaging tools are allowed")?;
     let arguments = params
         .get("arguments")
         .cloned()
@@ -422,51 +444,26 @@ async fn invoke_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Val
         bail!("Tool arguments must be an object");
     }
     let call_id = format!("claude-{}", Uuid::new_v4());
-    let (payload, item) = if tool.custom {
-        let input = arguments
-            .get("input")
-            .and_then(Value::as_str)
-            .context("Freeform tool needs string input")?
-            .to_string();
-        (
-            ToolPayload::Custom {
-                input: input.clone(),
-            },
-            ResponseItem::CustomToolCall {
-                encrypted_content: None,
-                id: None,
-                status: None,
-                call_id: call_id.clone(),
-                name: tool.name.name.clone(),
-                namespace: tool.name.namespace.clone(),
-                input,
-                internal_chat_message_metadata_passthrough: None,
-            },
-        )
-    } else {
-        let arguments = arguments.to_string();
-        (
-            ToolPayload::Function {
-                arguments: arguments.clone(),
-            },
-            ResponseItem::FunctionCall {
-                encrypted_content: None,
-                status: None,
-                id: None,
-                name: tool.name.name.clone(),
-                namespace: tool.name.namespace.clone(),
-                arguments,
-                encrypted_function_args: None,
-                call_id: call_id.clone(),
-                internal_chat_message_metadata_passthrough: None,
-            },
-        )
+    let arguments = arguments.to_string();
+    let payload = ToolPayload::Function {
+        arguments: arguments.clone(),
+    };
+    let item = ResponseItem::FunctionCall {
+        encrypted_content: None,
+        status: None,
+        id: None,
+        name: tool.name.clone(),
+        namespace: tool.namespace.clone(),
+        arguments,
+        encrypted_function_args: None,
+        call_id: call_id.clone(),
+        internal_chat_message_metadata_passthrough: None,
     };
     session
         .record_conversation_items(&turn.step.turn, &turn.step.settings.model_info, &[item])
         .await;
     let call = ToolCall {
-        tool_name: tool.name.clone(),
+        tool_name: tool.clone(),
         call_id,
         payload,
         encrypted_function_args: None,
@@ -498,10 +495,8 @@ async fn invoke_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Val
 }
 
 fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
-    let output = match item {
-        ResponseItem::FunctionCallOutput { output, .. }
-        | ResponseItem::CustomToolCallOutput { output, .. } => output,
-        _ => bail!("Unsupported ASM tool result"),
+    let ResponseItem::FunctionCallOutput { output, .. } = item else {
+        bail!("Unsupported native messaging result");
     };
     let content = match &output.body {
         FunctionCallOutputBody::Text(text) => vec![json!({"type":"text","text":text})],
@@ -511,24 +506,7 @@ fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
                 FunctionCallOutputContentItem::InputText { text } => {
                     Ok(json!({"type":"text","text":text}))
                 }
-                FunctionCallOutputContentItem::InputImage {
-                    image: ImageReference::Inline { image_url },
-                    ..
-                } => {
-                    let (mime, data) = image_url
-                        .strip_prefix("data:")
-                        .and_then(|url| url.split_once(";base64,"))
-                        .context("Claude MCP bridge requires inline base64 images")?;
-                    Ok(json!({"type":"image","mimeType":mime,"data":data}))
-                }
-                FunctionCallOutputContentItem::InputImage {
-                    image: ImageReference::File { .. },
-                    ..
-                }
-                | FunctionCallOutputContentItem::InputAudio { .. }
-                | FunctionCallOutputContentItem::EncryptedContent { .. } => bail!(
-                    "Unsupported tool media in Claude MCP bridge; output retained in ASM history"
-                ),
+                _ => bail!("Native messaging returned non-text content"),
             })
             .collect::<anyhow::Result<Vec<_>>>()?,
     };

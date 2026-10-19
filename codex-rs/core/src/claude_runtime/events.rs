@@ -22,6 +22,10 @@ pub(super) async fn record_assistant_frame(
     frame: &Value,
     stream: &mut MessageStream,
 ) -> anyhow::Result<Option<String>> {
+    // Native Claude agents have their own streams; do not present them as this thread.
+    if !frame["parent_tool_use_id"].is_null() {
+        return Ok(None);
+    }
     if frame["type"] == "stream_event" {
         let event = &frame["event"];
         if event["type"] == "message_start" {

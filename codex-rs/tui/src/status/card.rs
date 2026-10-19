@@ -347,14 +347,22 @@ impl StatusHistoryCell {
         let sandbox = status_permission_summary(&permission_profile, &cwd, &workspace_roots);
         let workspace_root_suffix = workspace_root_suffix(&workspace_roots, &cwd);
         let approval = status_approval_label(approval_policy, config.approvals_reviewer, &approval);
-        let permissions = status_permissions_label(
-            active_permission_profile.as_ref(),
-            &permission_profile,
-            approval_policy,
-            &sandbox,
-            &approval,
-            workspace_root_suffix.as_deref(),
-        );
+        let permissions = if config
+            .model
+            .as_deref()
+            .is_some_and(|model| model.starts_with("claude-code/"))
+        {
+            "Claude Code-managed (ASM sandbox and approvals do not apply)".to_string()
+        } else {
+            status_permissions_label(
+                active_permission_profile.as_ref(),
+                &permission_profile,
+                approval_policy,
+                &sandbox,
+                &approval,
+                workspace_root_suffix.as_deref(),
+            )
+        };
         let show_chatgpt_usage_link = requires_openai_auth;
         let account = compose_account_display(account_display);
         let session_id = session_id.as_ref().map(std::string::ToString::to_string);

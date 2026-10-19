@@ -1,90 +1,54 @@
-use super::bridge::ClaudeToolBridge;
+use super::bridge::ClaudeMessageBridge;
 use codex_claude_runtime::ClaudeRuntime;
+use codex_protocol::protocol::TokenUsage;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Checkpoint {
+    pub(super) format_version: u8,
     pub(super) model: String,
     pub(super) effort: Option<String>,
     pub(super) cwd: PathBuf,
     pub(super) session_id: String,
-    pub(super) instructions: String,
-    pub(super) authority: Value,
-    #[serde(default)]
-    pub(super) system_policy: Option<SystemPolicy>,
+    pub(super) messaging: bool,
     pub(super) in_flight: bool,
-    pub(super) delivered_items: usize,
-    pub(super) delivered_prefix: String,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(super) struct SystemPolicy {
-    pub(super) stable_instructions: String,
-    pub(super) approved_prefixes: std::collections::BTreeSet<Vec<String>>,
-}
-
-#[derive(Deserialize)]
-pub(super) struct PermissionSnapshot {
-    pub(super) instructions: String,
-    pub(super) approved_command_prefixes: std::collections::BTreeSet<Vec<String>>,
-}
-
-impl SystemPolicy {
-    pub(super) fn permits_refresh(&self, current: &Self) -> bool {
-        self.stable_instructions == current.stable_instructions
-            && self.approved_prefixes.is_subset(&current.approved_prefixes)
-    }
-
-    pub(super) fn verifies_receipt(&self, current: &Self, text: &str) -> bool {
-        use crate::context::ContextualUserFragment;
-        if !self.permits_refresh(current) {
-            return false;
-        }
-        let prefixes = text
-            .lines()
-            .skip(1)
-            .map(|line| {
-                line.strip_prefix("- ")
-                    .and_then(|json| serde_json::from_str::<Vec<String>>(json).ok())
-            })
-            .collect::<Option<std::collections::BTreeSet<_>>>();
-        let Some(prefixes) = prefixes else {
-            return false;
-        };
-        if prefixes.is_empty()
-            || !prefixes.is_subset(&current.approved_prefixes)
-            || !prefixes.is_disjoint(&self.approved_prefixes)
-        {
-            return false;
-        }
-        let Some(formatted) =
-            codex_protocol::models::format_allow_prefixes(prefixes.into_iter().collect())
-        else {
-            return false;
-        };
-        crate::context::ApprovedCommandPrefixSaved::new(formatted).body() == text
-    }
+    pub(super) input_count: usize,
+    pub(super) input_prefix: String,
 }
 
 impl Checkpoint {
-    pub(super) fn permits_system(
+    pub(super) fn validate(
         &self,
-        instructions: &str,
-        policy: &SystemPolicy,
+        model: &str,
+        effort: &Option<String>,
+        cwd: &std::path::Path,
+        messaging: bool,
+        messages: &[String],
     ) -> anyhow::Result<()> {
-        if self.instructions == instructions {
-            return Ok(());
-        }
         anyhow::ensure!(
-            self.system_policy
-                .as_ref()
-                .is_some_and(|previous| previous.permits_refresh(policy)),
-            "Claude system policy changed without a verified approved-prefix transition; start a new chat (older checkpoints cannot refresh changed instructions)"
+            self.format_version == 2,
+            "incompatible Claude linkage; start a new chat"
+        );
+        anyhow::ensure!(
+            !self.in_flight,
+            "previous Claude turn has an uncertain outcome; start a new chat to avoid replay"
+        );
+        anyhow::ensure!(
+            self.model == model
+                && &self.effort == effort
+                && self.cwd == cwd
+                && self.messaging == messaging,
+            "saved Claude model, effort, directory, or messaging configuration changed; start a new chat"
+        );
+        anyhow::ensure!(
+            self.input_count <= messages.len()
+                && self.input_prefix == super::input_prefix(&messages[..self.input_count])?,
+            "saved user input does not match the Claude checkpoint; refusing replay"
         );
         Ok(())
     }
@@ -92,26 +56,22 @@ impl Checkpoint {
 
 pub(crate) struct ClaudeSession {
     pub(super) runtime: ClaudeRuntime,
-    pub(super) bridge: ClaudeToolBridge,
+    pub(super) bridge: Option<ClaudeMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
     pub(super) _lock: File,
     pub(super) diagnostic_capture: bool,
+    pub(super) usage_baseline: Option<BTreeMap<String, [i64; 4]>>,
 }
 
 impl ClaudeSession {
+    #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
-        bridge: &ClaudeToolBridge,
+        bridge: Option<&ClaudeMessageBridge>,
         checkpoint: &Checkpoint,
         session: codex_claude_runtime::ClaudeSession,
     ) -> anyhow::Result<ClaudeRuntime> {
         use anyhow::Context;
-        let allowed_tools = bridge
-            .tool_names()
-            .await
-            .into_iter()
-            .map(|name| format!("mcp__asm__{name}"))
-            .collect();
         ClaudeRuntime::spawn(codex_claude_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
@@ -121,14 +81,76 @@ impl ClaudeSession {
                 .context("not a Claude model")?
                 .to_owned(),
             effort: checkpoint.effort.clone(),
-            system_prompt: checkpoint.instructions.clone(),
             session,
-            mcp_config: serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
-                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}}),
-            allowed_tools,
+            mcp_config: bridge.map(|bridge| {
+                serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
+                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}})
+            }),
             turn_timeout: std::time::Duration::from_secs(/*secs*/ 3600),
         })
         .await
+    }
+
+    pub(super) fn measure_usage_delta(&mut self, result: &serde_json::Value) -> Option<TokenUsage> {
+        let current = result["modelUsage"]
+            .as_object()
+            .filter(|models| !models.is_empty())
+            .and_then(|models| {
+                models
+                    .iter()
+                    .map(|(model, usage)| {
+                        let mut counters = [0; 4];
+                        for (index, field) in [
+                            "inputTokens",
+                            "cacheReadInputTokens",
+                            "cacheCreationInputTokens",
+                            "outputTokens",
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            counters[index] = usage[field].as_i64().filter(|value| *value >= 0)?;
+                        }
+                        Some((model.clone(), counters))
+                    })
+                    .collect::<Option<BTreeMap<_, _>>>()
+            });
+        // Native resume restores cost-state only when present; its first baseline is unknown.
+        let previous = std::mem::replace(&mut self.usage_baseline, current);
+        let (Some(previous), Some(current)) = (previous, &self.usage_baseline) else {
+            return None;
+        };
+        let delta = (|| {
+            if previous.keys().any(|model| !current.contains_key(model)) {
+                return None;
+            }
+            let mut totals = [0i64; 4];
+            for (model, counters) in current {
+                let baseline = previous.get(model).copied().unwrap_or_default();
+                for index in 0..4 {
+                    let delta = counters[index]
+                        .checked_sub(baseline[index])
+                        .filter(|delta| *delta >= 0)?;
+                    totals[index] = totals[index].checked_add(delta)?;
+                }
+            }
+            let [uncached, cached, written, output] = totals;
+            let input = uncached.checked_add(cached)?.checked_add(written)?;
+            Some(TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                cache_write_input_tokens: written,
+                output_tokens: output,
+                // modelUsage includes thinking in output but does not expose its separate count.
+                reasoning_output_tokens: 0,
+                total_tokens: input.checked_add(output)?,
+                codex_rollout_budget_units: None,
+            })
+        })();
+        if delta.is_none() {
+            self.usage_baseline = None;
+        }
+        delta
     }
 
     pub(super) fn save_checkpoint(&self) -> anyhow::Result<()> {
@@ -167,17 +189,6 @@ struct SlotState {
 }
 
 impl RuntimeSlot {
-    pub(super) fn checkpoint(&self) -> anyhow::Result<Option<Checkpoint>> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Claude session lock was poisoned"))?;
-        Ok(state
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.checkpoint.clone()))
-    }
-
     pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ClaudeSession>> {
         let returned = async {
             loop {

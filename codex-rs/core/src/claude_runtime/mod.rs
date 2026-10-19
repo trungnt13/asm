@@ -1,14 +1,13 @@
-//! Thread-scoped adapter for the official CLI; native ASM retains tool authority.
+//! Thread-scoped lifecycle for the official CLI's native conversation and tools.
 mod bridge;
 mod events;
 mod state;
+use bridge::ClaudeMessageBridge;
 use events::record_assistant_frame;
 use state::Checkpoint;
 use state::ClaudeSession;
-use state::PermissionSnapshot;
 use state::RuntimeLease;
 pub(crate) use state::RuntimeSlot;
-use state::SystemPolicy;
 
 use std::io::Write;
 use std::sync::Arc;
@@ -16,24 +15,25 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::bail;
 use codex_async_utils::OrCancelExt;
+use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
+use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemProvenance;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::TokenUsage;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::MultiAgentVersion;
+use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
-use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
-use crate::hook_runtime::run_pending_session_start_hooks;
+use crate::hook_runtime::record_pending_input;
 use crate::session::TokenUsageContext;
 use crate::session::TurnInput;
 use crate::session::session::Session;
-use crate::session::turn::run_hooks_and_record_inputs;
 use crate::session::turn_context::TurnContext;
 use crate::state::TaskKind;
 use crate::tasks::SessionTaskResult;
-use bridge::ClaudeToolBridge;
 
 pub(crate) fn is_claude_model(model: &str) -> bool {
     model.starts_with("claude-code/")
@@ -49,8 +49,10 @@ pub(crate) async fn shutdown(session: &Session) {
         }
     };
     if let Some(mut runtime) = runtime {
-        if let Err(error) = runtime.bridge.clear_turn().await {
-            tracing::warn!(%error, "Claude tool drain failed");
+        if let Some(bridge) = &runtime.bridge
+            && let Err(error) = bridge.clear_turn().await
+        {
+            tracing::warn!(%error, "Claude messaging drain failed");
         }
         if let Err(error) = runtime.runtime.shutdown().await {
             tracing::warn!(%error, "Claude runtime shutdown failed");
@@ -77,8 +79,10 @@ pub(crate) async fn shutdown(session: &Session) {
                 tracing::warn!(%error, "could not retain Claude diagnostics");
             }
         }
-        if let Err(error) = runtime.bridge.shutdown().await {
-            tracing::warn!(%error, "Claude bridge shutdown failed");
+        if let Some(bridge) = &mut runtime.bridge
+            && let Err(error) = bridge.shutdown().await
+        {
+            tracing::warn!(%error, "Claude messaging bridge shutdown failed");
         }
     }
 }
@@ -99,7 +103,6 @@ pub(crate) async fn run_turn(
         )
         .or_cancel(&cancellation)
         .await;
-    session.request_mcp_runtime_reprojection();
     if preparation.is_err() {
         return Err(CodexErr::TurnAborted);
     }
@@ -123,250 +126,94 @@ async fn run_conversation(
     input: &mut Vec<TurnInput>,
     cancellation: &CancellationToken,
 ) -> anyhow::Result<Option<String>> {
+    if session.tool_policy.require_managed_sandbox {
+        bail!(
+            "Claude native tools cannot satisfy the required ASM-managed sandbox; use an ASM-managed model"
+        );
+    }
     if turn.final_output_json_schema.is_some() {
         bail!("structured output is not supported; start a native-model chat");
     }
+    // Resume reads this native metadata; no ASM context is generated or sent to Claude.
+    if !session
+        .persist_rollout_items(&[RolloutItem::TurnContext(turn.to_turn_context_item())])
+        .await
+    {
+        bail!("could not persist Claude turn settings");
+    }
+    session.flush_rollout().await?;
+    let settings = &turn.initial_settings;
+    let effort = settings
+        .effective_reasoning_effort()
+        .map(|effort| effort.to_string());
+    if effort
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "low" | "medium" | "high" | "xhigh" | "max"))
+    {
+        bail!("unsupported Claude effort; use low, medium, high, xhigh, or max");
+    }
+    if turn.initial_environments.turn_environments().count() != 1 {
+        bail!("Claude runtime requires exactly one local environment");
+    }
+    let cwd = turn
+        .initial_environments
+        .local_environment_cwd()
+        .context("Claude requires a local working directory")?
+        .to_path_buf();
+    let messaging = turn.parent_thread_id.is_some()
+        && turn.session_source.is_non_root_agent()
+        && turn.multi_agent_version == MultiAgentVersion::V2;
     let mut last_message = None;
-    let mut stop_hook_active = false;
     loop {
         if cancellation.is_cancelled() {
             bail!("turn interrupted");
         }
+        // Automatic child starts place their assignment in the queue, not task input.
+        if input.is_empty() {
+            session
+                .input_queue
+                .accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id)
+                .await;
+            let (pending, _) = session
+                .input_queue
+                .get_pending_input(&session.active_turn)
+                .await;
+            *input = pending;
+        }
         for item in input.iter() {
-            if let TurnInput::UserInput { content, .. } = item
-                && content
-                    .iter()
-                    .any(|part| !matches!(part, UserInput::Text { .. }))
-            {
-                bail!(
-                    "only text input is supported; images, skills, and attachments require a native model"
-                );
+            match item {
+                TurnInput::UserInput { content, .. }
+                    if content
+                        .iter()
+                        .all(|part| matches!(part, UserInput::Text { .. })) => {}
+                TurnInput::InterAgentCommunication(message)
+                    if message.encrypted_content.is_none() => {}
+                TurnInput::UserInput { .. } => bail!(
+                    "only text input is supported; use Claude's native text references for files and skills"
+                ),
+                TurnInput::InterAgentCommunication(_) => {
+                    bail!("encrypted agent messages cannot be delivered to Claude")
+                }
+                TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => bail!(
+                    "ASM-injected context and tool outputs are not supported by the native Claude runtime"
+                ),
             }
         }
-        let effort = turn
-            .effective_reasoning_effort()
-            .map(|effort| effort.to_string());
-        if effort
-            .as_deref()
-            .is_some_and(|value| !matches!(value, "low" | "medium" | "high" | "xhigh" | "max"))
-        {
-            bail!("unsupported Claude effort; use low, medium, high, xhigh, or max");
-        }
-        let original_history_count = session.clone_history().await.raw_items().count();
-        let checkpoint_path = turn
-            .config
-            .codex_home
-            .join("claude-runtime")
-            .join(format!("{}.json", session.thread_id()));
-        let previous_checkpoint = match session.claude_runtime.checkpoint()? {
-            Some(checkpoint) => Some(checkpoint),
-            None if checkpoint_path.exists() => Some(serde_json::from_slice::<Checkpoint>(
-                &std::fs::read(&checkpoint_path)?,
-            )?),
-            None => None,
-        };
-        let previous_count = previous_checkpoint
-            .as_ref()
-            .map_or(0, |checkpoint| checkpoint.delivered_items);
-        let expected_prefix = previous_checkpoint
-            .as_ref()
-            .map_or("", |checkpoint| checkpoint.delivered_prefix.as_str());
         let original_history = session.clone_history().await;
-        if previous_count > original_history_count
-            || previous_count > 0
-                && history_prefix(&original_history, previous_count)? != expected_prefix
-        {
-            bail!("saved ASM context does not match the Claude checkpoint; refusing replay");
-        }
-        let step = session
-            .capture_step_context(Arc::clone(turn), cancellation)
-            .await?;
-        if step.environments.turn_environments().count() != 1
-            || step.environments.local_environment_cwd().is_none()
-        {
-            bail!("Claude runtime requires exactly one local environment");
-        }
-        let cwd = step
-            .environments
-            .local_environment_cwd()
-            .context("Claude requires a local working directory")?
-            .to_path_buf();
-        let world = session
-            .record_context_updates_and_set_reference_context_item(&step)
-            .await?;
-        let base = session.get_prompt_base_instructions().await.text;
-        let (initial_context, snapshot) = session
-            .build_initial_context_with_world_state(&step, &world)
-            .await;
-        let permissions = snapshot
-            .into_object()
-            .remove("permissions")
-            .map(serde_json::from_value::<PermissionSnapshot>)
-            .transpose()?;
-        let mut instructions = base.clone();
-        let mut stable_messages = Vec::new();
-        let mut developer_parts = Vec::new();
-        for item in crate::context_manager::updates::merge_world_state_updates(initial_context) {
-            let ResponseItem::Message {
-                role,
-                content,
-                internal_chat_message_metadata_passthrough: metadata,
-                ..
-            } = item
-            else {
-                continue;
-            };
-            if role != "developer" {
-                continue;
-            }
-            let mut texts = Vec::new();
-            let mut stable_parts = Vec::new();
-            for (index, content) in content.into_iter().enumerate() {
-                let ContentItem::InputText { text } = content else {
-                    bail!("non-text developer policy is unsupported");
-                };
-                let kind = metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.content_item_kinds.as_ref())
-                    .and_then(|kinds| kinds.get(index))
-                    .map(|kind| kind.as_str().to_owned());
-                let provenance = metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.content_item_metadata.as_ref())
-                    .and_then(|parts| parts.get(index))
-                    .map(|part| part.provenance.clone());
-                let stable_text = if kind.as_deref() == Some("permissions.instructions")
-                    && matches!(
-                        provenance,
-                        Some(ContentItemProvenance::Harness { hook: false })
-                    ) {
-                    permissions
-                        .as_ref()
-                        .context("missing typed permissions snapshot")?
-                        .instructions
-                        .clone()
-                } else {
-                    text.clone()
-                };
-                stable_parts.push((kind.clone(), provenance.clone(), stable_text));
-                developer_parts.push((kind, provenance, text.clone()));
-                texts.push(text);
-            }
-            instructions.push_str("\n\n");
-            instructions.push_str(&texts.join("\n"));
-            stable_messages.push(stable_parts);
-        }
-        let system_policy = SystemPolicy {
-            stable_instructions: serde_json::to_string(&(base, stable_messages))?,
-            approved_prefixes: permissions
-                .map(|permissions| permissions.approved_command_prefixes)
-                .unwrap_or_default(),
-        };
-        if let Some(checkpoint) = &previous_checkpoint {
-            checkpoint.permits_system(&instructions, &system_policy)?;
-        }
-        if codex_utils_output_truncation::approx_token_count(&instructions) > 10_000 {
-            bail!("Claude system instructions exceed the 10,000 approximate tokens");
-        }
-        if run_pending_session_start_hooks(session, turn).await
-            || run_hooks_and_record_inputs(
+        for item in input.drain(..) {
+            // Only transcript recording is shared; Claude owns its prompt and hook lifecycle.
+            record_pending_input(
                 session,
                 turn,
-                &step.settings.model_info,
-                input,
+                &settings.model_info,
+                item,
+                Vec::new(),
                 codex_thread_store::PersistContext::TurnStart,
             )
-            .await
-        {
-            return Ok(last_message);
+            .await;
         }
         let history = session.clone_history().await;
-        let mut prompt = String::new();
-        for item in history.raw_items().skip(previous_count) {
-            match item {
-                ResponseItem::Message { role, .. } if role == "assistant" => {}
-                ResponseItem::Message {
-                    role,
-                    content,
-                    internal_chat_message_metadata_passthrough: metadata,
-                    ..
-                } if role == "developer" => {
-                    for (index, part) in content.iter().enumerate() {
-                        let ContentItem::InputText { text } = part else {
-                            bail!("non-text developer policy is unsupported");
-                        };
-                        let kind = metadata
-                            .as_ref()
-                            .and_then(|metadata| metadata.content_item_kinds.as_ref())
-                            .and_then(|kinds| kinds.get(index))
-                            .map(|kind| kind.as_str().to_owned());
-                        let provenance = metadata
-                            .as_ref()
-                            .and_then(|metadata| metadata.content_item_metadata.as_ref())
-                            .and_then(|parts| parts.get(index))
-                            .map(|part| part.provenance.clone());
-                        let saved_prefix = kind.as_deref()
-                            == Some("permissions.approved_command_prefix_saved")
-                            && matches!(
-                                provenance,
-                                Some(ContentItemProvenance::Harness { hook: false })
-                            )
-                            && previous_checkpoint
-                                .as_ref()
-                                .and_then(|checkpoint| checkpoint.system_policy.as_ref())
-                                .is_some_and(|previous| {
-                                    previous.verifies_receipt(&system_policy, text)
-                                });
-                        if !saved_prefix
-                            && !developer_parts.contains(&(kind, provenance, text.clone()))
-                        {
-                            bail!(
-                                "dynamic developer instructions cannot be delivered at user priority; start a new chat"
-                            );
-                        }
-                    }
-                }
-                ResponseItem::Message { role, content, .. } => {
-                    prompt.push_str(&format!("<{role}>\n"));
-                    for content in content {
-                        match content {
-                            ContentItem::InputText { text }
-                            | ContentItem::OutputText { text, .. } => {
-                                prompt.push_str(text);
-                                prompt.push('\n');
-                            }
-                            _ => bail!("non-text context cannot be delivered to Claude"),
-                        }
-                    }
-                    prompt.push_str(&format!("</{role}>\n"));
-                }
-                ResponseItem::FunctionCall { .. }
-                | ResponseItem::CustomToolCall { .. }
-                | ResponseItem::CustomToolCallOutput { .. }
-                | ResponseItem::FunctionCallOutput {
-                    call_id: Some(_), ..
-                } => {}
-                ResponseItem::FunctionCallOutput { output, .. } => {
-                    prompt.push_str(&serde_json::to_string(output)?);
-                    prompt.push('\n');
-                }
-                _ => bail!("unsupported injected context; no input was sent to Claude"),
-            }
-        }
-        if prompt.trim().is_empty() {
-            return Ok(last_message);
-        }
-        if codex_utils_output_truncation::approx_token_count(&prompt) > 10_000 {
-            bail!(
-                "Claude input exceeds the 10,000 approximate tokens per context item; shorten the input or use a native model"
-            );
-        }
-        let authority = json!({
-            "tools": &*step.tool_router.model_visible_specs(),
-            "permissions": turn.permission_profile(),
-            "approval": turn.approval_policy(),
-            "developer_instructions": turn.developer_instructions,
-        });
+        let messages = input_messages(&history)?;
         let mut lease = RuntimeLease::take(&session.claude_runtime)?;
         let needs_binding = lease.runtime.is_some();
         if lease.runtime.is_none() {
@@ -384,68 +231,71 @@ async fn run_conversation(
                 .context("Claude session is already owned by another ASM process")?;
             let (checkpoint, claude_session) = match std::fs::read(&checkpoint_path) {
                 Ok(bytes) => {
-                    let mut checkpoint: Checkpoint = serde_json::from_slice(&bytes)?;
-                    if checkpoint.in_flight {
-                        bail!(
-                            "previous turn has an uncertain outcome; automatic replay/resume is unsafe. Start a new chat"
-                        );
-                    }
-                    if checkpoint.model != step.settings.model_info.slug
-                        || checkpoint.effort != effort
-                        || checkpoint.cwd != cwd
-                        || checkpoint.authority != authority
-                    {
-                        bail!(
-                            "saved Claude model, directory, or instructions changed; start a new chat"
-                        );
-                    }
-                    checkpoint.permits_system(&instructions, &system_policy)?;
-                    checkpoint.instructions = instructions.clone();
-                    checkpoint.system_policy = Some(system_policy.clone());
+                    let checkpoint: Checkpoint = serde_json::from_slice(&bytes)
+                        .context("incompatible Claude linkage; start a new chat")?;
                     let resume = codex_claude_runtime::ClaudeSession::Resume {
                         id: checkpoint.session_id.clone(),
                     };
                     (checkpoint, resume)
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    // Existing assistant history without a linkage cannot be replayed safely.
-                    if history
-                        .raw_items()
-                        .take(original_history_count)
-                        .any(|item| {
-                            matches!(item,
-                        ResponseItem::Message { role, .. } if role == "assistant")
-                        })
+                    if !input_messages(&original_history)?.is_empty()
+                        || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
                     {
-                        bail!(
-                            "missing Claude session linkage for existing history; start a new chat"
-                        );
+                        bail!("missing Claude session linkage for existing history; start a new chat");
                     }
                     let id = session.thread_id().to_string();
                     (
                         Checkpoint {
-                            model: step.settings.model_info.slug.clone(),
+                            format_version: 2,
+                            model: settings.model_info.slug.clone(),
                             effort: effort.clone(),
                             cwd: cwd.clone(),
                             session_id: id.clone(),
-                            instructions: instructions.clone(),
-                            authority: authority.clone(),
-                            system_policy: Some(system_policy.clone()),
+                            messaging,
                             in_flight: false,
-                            delivered_items: 0,
-                            delivered_prefix: String::new(),
+                            input_count: 0,
+                            input_prefix: input_prefix(&[])?,
                         },
                         codex_claude_runtime::ClaudeSession::New { id },
                     )
                 }
                 Err(error) => return Err(error.into()),
             };
-            let bridge = ClaudeToolBridge::start().await?;
-            bridge
-                .set_turn(Arc::clone(session), Arc::clone(&step), cancellation.clone())
-                .await?;
+            checkpoint.validate(
+                &settings.model_info.slug,
+                &effort,
+                &cwd,
+                messaging,
+                &messages,
+            )?;
+            if messages[checkpoint.input_count..]
+                .iter()
+                .all(|message| message.trim().is_empty())
+            {
+                return Ok(last_message);
+            }
+            let bridge = if messaging {
+                let step = session
+                    .capture_speculative_step_context(Arc::clone(turn), cancellation)
+                    .await?;
+                let bridge = ClaudeMessageBridge::start().await?;
+                bridge
+                    .set_turn(Arc::clone(session), step, cancellation.clone())
+                    .await?;
+                Some(bridge)
+            } else {
+                None
+            };
+            session.send_event(turn, EventMsg::Warning(WarningEvent { message:
+                "Claude Code owns instructions, tools, hooks and permissions. ASM sandbox and approvals do not apply; unavailable Claude approval prompts are denied.".to_owned()
+            })).await;
+            let usage_baseline = match &claude_session {
+                codex_claude_runtime::ClaudeSession::New { .. } => Some(Default::default()),
+                codex_claude_runtime::ClaudeSession::Resume { .. } => None,
+            };
             let runtime =
-                ClaudeSession::spawn_runtime(&bridge, &checkpoint, claude_session).await?;
+                ClaudeSession::spawn_runtime(bridge.as_ref(), &checkpoint, claude_session).await?;
             lease.runtime = Some(ClaudeSession {
                 runtime,
                 bridge,
@@ -453,58 +303,34 @@ async fn run_conversation(
                 checkpoint_path,
                 _lock: lock,
                 diagnostic_capture: turn.config.diagnostic_log_capture,
+                usage_baseline,
             });
         }
         let runtime = lease
             .runtime
             .as_mut()
             .context("Claude session was not initialized")?;
-        runtime
-            .checkpoint
-            .permits_system(&instructions, &system_policy)?;
-        if runtime.checkpoint.authority != authority {
-            bail!("Claude tool or permission configuration changed; start a new chat");
+        runtime.checkpoint.validate(
+            &settings.model_info.slug,
+            &effort,
+            &cwd,
+            messaging,
+            &messages,
+        )?;
+        let prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
+        if prompt.trim().is_empty() {
+            return Ok(last_message);
         }
-        if runtime.checkpoint.in_flight {
-            bail!(
-                "previous Claude turn was interrupted or failed; start a new chat to avoid unsafe replay"
-            );
-        }
-        let refresh_system = runtime.checkpoint.instructions != instructions;
-        if refresh_system {
-            runtime.runtime.shutdown().await?;
-        }
-        if needs_binding {
-            runtime
-                .bridge
-                .set_turn(Arc::clone(session), Arc::clone(&step), cancellation.clone())
+        if needs_binding && let Some(bridge) = &runtime.bridge {
+            let step = session
+                .capture_speculative_step_context(Arc::clone(turn), cancellation)
+                .await?;
+            bridge
+                .set_turn(Arc::clone(session), step, cancellation.clone())
                 .await?;
         }
-        if refresh_system {
-            // Only a clean result and drained bridge can reach this boundary. Resume the same
-            // Claude history with new system policy, never replay a prompt or tool call.
-            let previous_instructions =
-                std::mem::replace(&mut runtime.checkpoint.instructions, instructions.clone());
-            let resumed = ClaudeSession::spawn_runtime(
-                &runtime.bridge,
-                &runtime.checkpoint,
-                codex_claude_runtime::ClaudeSession::Resume {
-                    id: runtime.checkpoint.session_id.clone(),
-                },
-            )
-            .await;
-            match resumed {
-                Ok(resumed) => runtime.runtime = resumed,
-                Err(error) => {
-                    runtime.checkpoint.instructions = previous_instructions;
-                    return Err(error);
-                }
-            }
-        }
-        runtime.checkpoint.system_policy = Some(system_policy);
-        runtime.checkpoint.delivered_items = history.raw_items().count();
-        runtime.checkpoint.delivered_prefix =
-            history_prefix(&history, runtime.checkpoint.delivered_items)?;
+        runtime.checkpoint.input_count = messages.len();
+        runtime.checkpoint.input_prefix = input_prefix(&messages)?;
         runtime.checkpoint.in_flight = true;
         runtime.save_checkpoint()?;
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
@@ -530,7 +356,10 @@ async fn run_conversation(
                 last_message = Some(text);
             }
         }
-        let cleanup = runtime.bridge.clear_turn().await;
+        let cleanup = match &runtime.bridge {
+            Some(bridge) => bridge.clear_turn().await,
+            None => Ok(()),
+        };
         let result = match result {
             Ok(result) => {
                 cleanup?;
@@ -543,26 +372,12 @@ async fn run_conversation(
                 return Err(error);
             }
         };
-        let usage = &result["usage"];
-        let input_tokens = usage["input_tokens"].as_i64().unwrap_or_default();
-        let cached = usage["cache_read_input_tokens"]
-            .as_i64()
-            .unwrap_or_default();
-        let written = usage["cache_creation_input_tokens"]
-            .as_i64()
-            .unwrap_or_default();
-        let output = usage["output_tokens"].as_i64().unwrap_or_default();
-        let usage = TokenUsage {
-            input_tokens: input_tokens + cached + written,
-            cached_input_tokens: cached,
-            cache_write_input_tokens: written,
-            output_tokens: output,
-            reasoning_output_tokens: usage["output_tokens_details"]["thinking_tokens"]
-                .as_i64()
-                .unwrap_or_default(),
-            total_tokens: input_tokens + cached + written + output,
-            codex_rollout_budget_units: None,
-        };
+        let usage = runtime.measure_usage_delta(&result);
+        if usage.is_none() {
+            session.send_event(turn, EventMsg::Warning(WarningEvent {
+                message: "Claude token usage is unavailable for this response: the first result after resume or missing/reset cumulative counters cannot be counted safely.".to_owned(),
+            })).await;
+        }
         let response_id = result["uuid"]
             .as_str()
             .map(str::to_owned)
@@ -571,44 +386,23 @@ async fn run_conversation(
             .record_observed_response_completed(
                 turn,
                 &response_id,
-                Some(&usage),
+                usage.as_ref(),
                 /*usage_metadata*/ None,
             )
             .await;
-        let budget_result = session
-            .record_token_usage_info(
-                turn,
-                &step.settings,
-                Some(&usage),
-                TokenUsageContext::Sampling,
-            )
-            .await;
-        session
-            .send_token_count_event(turn, /*output_tokens_per_second*/ None)
-            .await;
-        budget_result?;
+        if let Some(usage) = usage {
+            let budget_result = session
+                .record_token_usage_info(turn, settings, Some(&usage), TokenUsageContext::Sampling)
+                .await;
+            session
+                .send_token_count_event(turn, /*output_tokens_per_second*/ None)
+                .await;
+            budget_result?;
+        }
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
         runtime.save_checkpoint()?;
         drop(lease);
-        let stop = crate::hook_runtime::run_turn_stop_hooks(
-            session,
-            &step,
-            stop_hook_active,
-            last_message.clone(),
-        )
-        .await;
-        if stop.should_stop {
-            return Ok(last_message);
-        }
-        if stop.should_block {
-            let message =
-                codex_protocol::items::build_hook_prompt_message(&stop.continuation_fragments)
-                    .context("Stop hook blocked completion without continuation instructions")?;
-            *input = vec![TurnInput::ResponseItem(message.into())];
-            stop_hook_active = true;
-            continue;
-        }
         session
             .input_queue
             .accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id)
@@ -617,20 +411,71 @@ async fn run_conversation(
             .input_queue
             .get_pending_input(&session.active_turn)
             .await;
+        if pending.is_empty() {
+            return Ok(last_message);
+        }
         *input = pending;
-        // Re-enter once even without queued input: tool hooks may have appended context.
-        // An empty prompt at the next boundary ends the turn without another CLI request.
     }
 }
 
-fn history_prefix(
-    history: &crate::context_manager::ContextManager,
-    count: usize,
-) -> anyhow::Result<String> {
+fn input_messages(history: &crate::context_manager::ContextManager) -> anyhow::Result<Vec<String>> {
+    let mut messages = Vec::new();
+    for item in history.raw_items() {
+        match item {
+            ResponseItem::Message {
+                role,
+                content,
+                internal_chat_message_metadata_passthrough: Some(metadata),
+                ..
+            } if role == "user"
+                && metadata
+                    .content_item_metadata
+                    .as_ref()
+                    .is_some_and(|parts| {
+                        parts.len() == content.len()
+                            && parts
+                                .iter()
+                                .all(|part| part.provenance == ContentItemProvenance::User)
+                    }) =>
+            {
+                let mut texts = Vec::new();
+                for part in content {
+                    let ContentItem::InputText { text } = part else {
+                        bail!("non-text user history cannot be delivered to Claude");
+                    };
+                    texts.push(text.as_str());
+                }
+                messages.push(texts.join("\n"));
+            }
+            // Native received mail uses AgentMessage; sent mail is an assistant Message.
+            ResponseItem::AgentMessage {
+                author,
+                recipient,
+                content,
+                ..
+            } => {
+                let mut texts = Vec::new();
+                for part in content {
+                    let AgentMessageInputContent::InputText { text } = part else {
+                        bail!("encrypted agent history cannot be delivered to Claude");
+                    };
+                    texts.push(text.as_str());
+                }
+                messages.push(format!(
+                    "Message from {author} to {recipient}:\n{}",
+                    texts.join("\n")
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(messages)
+}
+
+fn input_prefix(messages: &[String]) -> anyhow::Result<String> {
     use sha1::Digest;
-    let items = history.raw_items().take(count).collect::<Vec<_>>();
     Ok(format!(
         "{:x}",
-        sha1::Sha1::digest(serde_json::to_vec(&items)?)
+        sha1::Sha1::digest(serde_json::to_vec(messages)?)
     ))
 }
