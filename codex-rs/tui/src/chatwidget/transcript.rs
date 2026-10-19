@@ -34,6 +34,8 @@ pub(super) struct StatusCopySource {
 #[derive(Default)]
 pub(super) struct TranscriptState {
     pub(super) active_cell: Option<Box<dyn HistoryCell>>,
+    pub(super) native_calls:
+        std::collections::HashMap<String, crate::history_cell::RetainedMcpToolCallCell>,
     /// Shared retained rows for concurrently running dynamic tools, removed on completion.
     pub(super) dynamic_calls:
         std::collections::HashMap<String, crate::history_cell::DynamicToolCallCell>,

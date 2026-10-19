@@ -1,4 +1,5 @@
 //! Thread-scoped lifecycle for the official CLI's native conversation and tools.
+mod activity;
 mod bridge;
 mod events;
 mod state;
@@ -335,6 +336,7 @@ async fn run_conversation(
         runtime.save_checkpoint()?;
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
+        stream.activity.messaging = messaging;
         let result = {
             let run = runtime
                 .runtime
@@ -356,6 +358,7 @@ async fn run_conversation(
                 last_message = Some(text);
             }
         }
+        stream.activity.close(session, turn).await?;
         let cleanup = match &runtime.bridge {
             Some(bridge) => bridge.clear_turn().await,
             None => Ok(()),

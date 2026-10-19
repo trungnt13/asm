@@ -290,6 +290,10 @@ codex --no-daemon --model claude-code/claude-sonnet-5-5
 - Main sessions have no injected ASM MCP server. ASM-managed Claude children may
   receive only inter-agent messaging tools over authenticated loopback MCP. Never
   forward executable ASM tools or create a second agent registry.
+- Project native tool, skill and task activity into existing MCP display cells for
+  streaming, disclosure, grouping and replay. These are display events, not tool
+  execution requests or model-context items. Attribute native child activity without
+  inventing ASM threads; preserve failures and avoid duplicate bridge-tool events.
 - Use native Claude Code settings and subscription login; resolve `claude` through
   PATH. Do not extract subscription credentials or enable API billing implicitly.
   Do not disable native tools, skills or instructions to emulate ASM inference.
@@ -305,8 +309,8 @@ codex --no-daemon --model claude-code/claude-sonnet-5-5
 - Keep text-only local execution initially. Reject unsupported history forks,
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
-  extraction may summarize their saved ASM transcripts; private Claude tool and
-  internal-subagent history is not synchronized for extraction.
+  extraction may summarize their saved ASM transcripts. Native activity is retained
+  for display replay, not synchronized into the model's conversation context.
 - External threads use Default collaboration mode only and never use guardian
   approval review. Mandatory managed-execution restrictions still apply.
 - Native turns have no total-duration deadline; cancellation and bounded cleanup

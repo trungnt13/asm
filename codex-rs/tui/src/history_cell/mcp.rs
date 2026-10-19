@@ -65,6 +65,10 @@ pub(crate) struct McpInvocation {
 }
 
 impl McpInvocation {
+    pub(crate) fn is_claude_activity(&self) -> bool {
+        self.server == "claude-code" || self.server.starts_with("claude-code/")
+    }
+
     pub(crate) fn is_computer_activity(&self) -> bool {
         self.server == "cua_repl"
     }
@@ -360,6 +364,49 @@ impl HistoryCell for McpToolCallCell {
         if self.success() == Some(false) || self.invocation.is_computer_activity() {
             return None;
         }
+        if self.invocation.is_claude_activity() {
+            let tool = self.invocation.tool.as_str();
+            if tool == "__agent_message" {
+                return None;
+            }
+            let argument = |key| {
+                self.invocation
+                    .arguments
+                    .as_ref()
+                    .and_then(|arguments| arguments.get(key))
+                    .and_then(serde_json::Value::as_str)
+            };
+            let started = tool == "__agent_started";
+            let completed = tool == "__agent_completed";
+            let progress = tool == "__agent_progress";
+            let detail = if started || completed || progress {
+                argument("task_id").or_else(|| argument("agent_id"))
+            } else if tool == "Skill" {
+                argument("skill")
+            } else if tool == "Read" {
+                argument("file_path").filter(|path| path.ends_with("/SKILL.md"))
+            } else {
+                None
+            };
+            let name = if started || completed || progress {
+                "native agent"
+            } else {
+                tool
+            };
+            let name = detail.map_or_else(|| name.to_owned(), |detail| format!("{name}({detail})"));
+            return Some(ToolCallSummary {
+                count: usize::from(!(started || completed || progress)),
+                count_key: None,
+                agent_starts: usize::from(started),
+                agent_completions: usize::from(completed),
+                running: self.duration.is_none(),
+                names: vec![format!(
+                    "{}/{}",
+                    self.invocation.server,
+                    name.split_whitespace().collect::<Vec<_>>().join(" ")
+                )],
+            });
+        }
         Some(ToolCallSummary {
             count: 1,
             count_key: None,
@@ -428,6 +475,79 @@ impl HistoryCell for McpToolCallCell {
             return None;
         }
         Some((self.start_time.elapsed().as_millis() / 50) as u64)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct RetainedMcpToolCallCell(std::sync::Arc<std::sync::Mutex<McpToolCallCell>>);
+
+impl RetainedMcpToolCallCell {
+    pub(crate) fn new(cell: McpToolCallCell) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(cell)))
+    }
+
+    fn cell(&self) -> std::sync::MutexGuard<'_, McpToolCallCell> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn complete(
+        &self,
+        duration: Duration,
+        result: Result<codex_protocol::mcp::CallToolResult, String>,
+    ) {
+        self.cell().complete(duration, result);
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.cell().duration.is_none()
+    }
+
+    pub(crate) fn mark_failed(&self) {
+        self.cell().mark_failed();
+    }
+}
+
+impl HistoryCell for RetainedMcpToolCallCell {
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        self.cell().tool_call_summary()
+    }
+
+    fn activity_ids(&self) -> Vec<String> {
+        self.cell().activity_ids()
+    }
+
+    fn has_stable_transcript_height(&self) -> bool {
+        false
+    }
+
+    fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.cell().compact_hyperlink_lines(width)
+    }
+
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.cell().display_lines(width)
+    }
+
+    fn raw_lines(&self) -> Vec<Line<'static>> {
+        self.cell().raw_lines()
+    }
+
+    fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.cell().transcript_lines(width)
+    }
+
+    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.cell().display_hyperlink_lines(width)
+    }
+
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.cell().transcript_hyperlink_lines(width)
+    }
+
+    fn transcript_animation_tick(&self) -> Option<u64> {
+        self.cell().transcript_animation_tick()
     }
 }
 

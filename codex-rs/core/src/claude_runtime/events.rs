@@ -11,6 +11,7 @@ use serde_json::json;
 
 #[derive(Default)]
 pub(super) struct MessageStream {
+    pub(super) activity: super::activity::ActivityStream,
     id: Option<String>,
     text: String,
     started: bool,
@@ -29,6 +30,7 @@ pub(super) async fn record_assistant_frame(
     frame: &Value,
     stream: &mut MessageStream,
 ) -> anyhow::Result<Option<String>> {
+    stream.activity.record(session, turn, frame).await?;
     // Native Claude agents have their own streams; do not present them as this thread.
     if !frame["parent_tool_use_id"].is_null() {
         return Ok(None);
