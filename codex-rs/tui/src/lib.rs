@@ -211,6 +211,7 @@ mod session_resume;
 mod session_start;
 mod session_state;
 mod shortcut_help;
+mod side_conversations;
 mod skills_helpers;
 mod slash_command;
 mod startup_draft;
@@ -222,6 +223,7 @@ mod startup_presentation;
 mod startup_recovery;
 mod status;
 mod status_indicator_widget;
+mod status_line_labels;
 mod streaming;
 mod style;
 mod subscription;
@@ -664,7 +666,11 @@ pub(crate) async fn start_app_server_for_picker(
         loader_overrides,
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
-        codex_feedback::CodexFeedback::new(),
+        if config.diagnostic_log_capture {
+            codex_feedback::CodexFeedback::new()
+        } else {
+            codex_feedback::CodexFeedback::disabled()
+        },
         /*log_db*/ None,
         &mut state_db,
         environment_manager,
@@ -673,7 +679,8 @@ pub(crate) async fn start_app_server_for_picker(
     .await?;
     Ok(
         AppServerSession::new(backend_id, app_server, target.thread_params_mode())
-            .with_local_codex_home(&config.codex_home),
+            .with_local_codex_home(&config.codex_home)
+            .with_side_conversations(&config.codex_home, &target),
     )
 }
 
@@ -703,7 +710,8 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         app_server,
         target.thread_params_mode(),
     )
-    .with_local_codex_home(&config.codex_home))
+    .with_local_codex_home(&config.codex_home)
+    .with_side_conversations(&config.codex_home, &target))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1279,7 +1287,8 @@ async fn run_ratatui_app(
             app_server,
             app_server_target.thread_params_mode(),
         )
-        .with_local_codex_home(&initial_config.codex_home),
+        .with_local_codex_home(&initial_config.codex_home)
+        .with_side_conversations(&initial_config.codex_home, &app_server_target),
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
@@ -1866,6 +1875,7 @@ async fn run_ratatui_app(
                     app_server_target.thread_params_mode(),
                 )
                 .with_local_codex_home(&config.codex_home)
+                .with_side_conversations(&config.codex_home, &app_server_target)
                 .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -1981,7 +1991,8 @@ async fn run_ratatui_app(
                     client,
                     app_server_target.thread_params_mode(),
                 )
-                .with_local_codex_home(&config.codex_home);
+                .with_local_codex_home(&config.codex_home)
+                .with_side_conversations(&config.codex_home, &app_server_target);
             }
             #[cfg(target_os = "windows")]
             {
@@ -2861,7 +2872,7 @@ requires_openai_auth = {requires_openai_auth}
             .expect_err("Guardian resume should be rejected");
         insta::assert_snapshot!(error.to_string(), @"
         Cannot resume a Guardian review thread.
-        Resume its parent session instead: codex resume 00000000-0000-0000-0000-000000000001
+        Resume its parent session instead: asm resume 00000000-0000-0000-0000-000000000001
         ");
         app_server.shutdown().await?;
         Ok(())

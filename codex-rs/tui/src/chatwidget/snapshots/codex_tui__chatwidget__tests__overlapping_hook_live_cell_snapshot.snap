@@ -7,10 +7,10 @@ activity:
 "                                                                                "
 "• Thinking (0s • esc to interrupt) · checking command policy                    "
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.6-Sol default · /tmp/project                                            "
+"  sol56 def·/tmp/project                                                        "
 history:
 <empty>
 
@@ -19,10 +19,10 @@ activity:
 "                                                                                "
 "• Thinking (0s • esc to interrupt) · Running hooks                              "
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.6-Sol default · /tmp/project                                            "
+"  sol56 def·/tmp/project                                                        "
 history:
 <empty>
 
@@ -31,10 +31,10 @@ activity:
 "                                                                                "
 "• Thinking (0s • esc to interrupt) · checking output policy                     "
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.6-Sol default · /tmp/project                                            "
+"  sol56 def·/tmp/project                                                        "
 history:
 <empty>
 
@@ -43,9 +43,9 @@ activity:
 "                                                                                "
 "• Thinking (0s • esc to interrupt)                                              "
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.6-Sol default · /tmp/project                                            "
+"  sol56 def·/tmp/project                                                        "
 history:
 <empty>

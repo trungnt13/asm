@@ -177,6 +177,10 @@ pub struct ConfigToml {
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
 
+    /// Model-specific context windows for V2 spawned children, in tokens.
+    #[serde(default)]
+    pub subagent_model_context_windows: HashMap<String, NonZeroU64>,
+
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
 
@@ -262,6 +266,16 @@ pub struct ConfigToml {
     /// Whether to inject the `<collaboration_mode>` developer block.
     pub include_collaboration_mode_instructions: Option<bool>,
 
+    /// Include the generated spawn-model catalog in tool descriptions or context.
+    /// Defaults to true.
+    /// Disabling it preserves model and reasoning-effort arguments.
+    pub include_model_catalog_in_spawn_agent_list: Option<bool>,
+
+    /// Include the Copyright compliance subsection in the local `web.run` description.
+    /// Defaults to true.
+    /// Other quotation and word limits remain unchanged.
+    pub include_web_search_copyright_compliance: Option<bool>,
+
     /// Whether to inject the `<environment_context>` user block.
     pub include_environment_context: Option<bool>,
 
@@ -297,6 +311,11 @@ pub struct ConfigToml {
     // Uses the raw MCP input shape (custom deserialization) rather than `McpServerConfig`.
     #[schemars(schema_with = "crate::schema::mcp_servers_schema")]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+
+    /// Enable the built-in MCP resource listing and reading tools.
+    /// Defaults to true.
+    /// Disabling them leaves MCP server connections and other tools unchanged.
+    pub mcp_resource_tools_enabled: Option<bool>,
 
     /// Trusted enterprise IdP shared by EMA-enabled MCP servers and plugins.
     #[serde(default)]
@@ -342,6 +361,10 @@ pub struct ConfigToml {
     /// Token budget applied when storing tool/function outputs in the context manager.
     pub tool_output_token_limit: Option<usize>,
 
+    /// Minimum poll window for background terminal output (`write_stdin`), in milliseconds.
+    /// Default: `5000` (5 seconds).
+    pub background_terminal_min_timeout: Option<u64>,
+
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: Option<u64>,
@@ -374,8 +397,12 @@ pub struct ConfigToml {
     /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
+    /// Opt in to process-local Rust logs and feedback diagnostics at startup.
+    /// Defaults to false; saved conversation history is independent.
+    pub diagnostic_log_capture: Option<bool>,
+
     /// Directory where Codex writes log files. Setting this value explicitly
-    /// also enables the TUI text log in this directory.
+    /// also enables the TUI text log when diagnostic capture is enabled.
     /// Defaults to `$CODEX_HOME/log`.
     pub log_dir: Option<AbsolutePathBuf>,
 
@@ -385,6 +412,11 @@ pub struct ConfigToml {
 
     /// Collection of settings that are specific to the TUI.
     pub tui: Option<Tui>,
+
+    /// Automatic naming in the TUI; Desktop naming is unaffected.
+    pub auto_rename: Option<crate::AutoRenameConfig>,
+    #[serde(alias = "adaptive_reasoning")]
+    pub system1: Option<crate::System1Config>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.
@@ -411,6 +443,10 @@ pub struct ConfigToml {
     /// Optional explicit service tier request id for new turns (for example
     /// `default`, `priority`, or `flex`; legacy `fast` also works).
     pub service_tier: Option<String>,
+
+    /// Child-only routing overrides, keyed by model and reasoning effort.
+    #[serde(default)]
+    pub subagent_service_tiers: HashMap<String, HashMap<ReasoningEffort, String>>,
 
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
@@ -1021,6 +1057,53 @@ mod tests {
 
     const WORKSPACE_ID_A: &str = "123e4567-e89b-42d3-a456-426614174000";
     const WORKSPACE_ID_B: &str = "123e4567-e89b-42d3-a456-426614174001";
+
+    #[test]
+    fn subagent_service_tiers_parse_by_model_and_reasoning_effort() {
+        for contents in [
+            "",
+            "subagent_model_context_windows = { \"gpt-6-astra\" = 272000 }",
+            "[subagent_model_context_windows]\n\"gpt-6-astra\" = 272000",
+        ] {
+            let config: ConfigToml = toml::from_str(contents).expect("valid child context windows");
+            let expected = if contents.is_empty() {
+                HashMap::new()
+            } else {
+                HashMap::from([(
+                    "gpt-6-astra".to_string(),
+                    NonZeroU64::new(272_000).expect("positive context window"),
+                )])
+            };
+            assert_eq!(config.subagent_model_context_windows, expected);
+        }
+        for invalid in ["0", "-1", "1.5", "\"272000\""] {
+            let contents =
+                format!("subagent_model_context_windows = {{ \"gpt-6-astra\" = {invalid} }}");
+            assert!(toml::from_str::<ConfigToml>(&contents).is_err());
+        }
+        let config: ConfigToml = toml::from_str(
+            r#"
+[subagent_service_tiers]
+gpt-6-sol = { high = "fast" }
+gpt-6-luna = { max = "fast" }
+"#,
+        )
+        .expect("subagent service tiers should deserialize");
+
+        assert_eq!(
+            config.subagent_service_tiers,
+            HashMap::from([
+                (
+                    "gpt-6-sol".to_string(),
+                    HashMap::from([(ReasoningEffort::High, "fast".to_string())]),
+                ),
+                (
+                    "gpt-6-luna".to_string(),
+                    HashMap::from([(ReasoningEffort::Max, "fast".to_string())]),
+                ),
+            ])
+        );
+    }
 
     #[test]
     fn sandbox_mode_uses_executor_platform_and_sandbox_level() {

@@ -20,6 +20,8 @@ use super::shared::v2_enum_from_core;
 use crate::JsonSchema;
 use crate::TS;
 use codex_experimental_api_macros::ExperimentalApi;
+pub use codex_protocol::System1DecisionConnection;
+pub use codex_protocol::System1Stats;
 pub use codex_protocol::capabilities::CapabilityRootLocation;
 pub use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::config_types::CollaborationMode;
@@ -32,6 +34,8 @@ pub use codex_protocol::dynamic_tools::DynamicToolNamespaceTool;
 pub use codex_protocol::dynamic_tools::DynamicToolSpec;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
+pub use codex_protocol::protocol::System1Error;
+pub use codex_protocol::protocol::System1FailureWarning;
 use codex_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use codex_protocol::protocol::TokenUsage as CoreTokenUsage;
 use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
@@ -186,6 +190,16 @@ pub struct MockExperimentalMethodResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadStartResponse {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub system1_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub system1_revision: u64,
+    #[serde(default)]
+    pub system1_error: Option<System1Error>,
+    #[serde(default)]
+    pub system1_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -234,6 +248,9 @@ impl ThreadStartResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSettingsUpdateParams {
+    /// Changes only this live session. Omitted/null preserves the mode.
+    #[ts(optional = nullable)]
+    pub system1_enabled: Option<bool>,
     pub thread_id: String,
     /// Replace this thread's disabled plugin IDs.
     /// Omitted/null preserves the list; [] clears it.
@@ -296,12 +313,33 @@ pub struct ThreadSettingsUpdateParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub struct ThreadSettingsUpdateResponse {}
+pub struct ThreadSettingsUpdateResponse {
+    /// Confirms runtime mode after a mode-only update; absent on older servers.
+    #[serde(default)]
+    pub system1_enabled: Option<bool>,
+    /// Revision of the confirmed mode; absent on older servers.
+    #[serde(default)]
+    pub system1_revision: Option<u64>,
+    #[serde(default)]
+    pub system1_error: Option<System1Error>,
+    #[serde(default)]
+    pub system1_failure_episode: Option<u64>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSettings {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub system1_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub system1_revision: u64,
+    #[serde(default)]
+    pub system1_error: Option<System1Error>,
+    #[serde(default)]
+    pub system1_failure_episode: u64,
     /// Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
     #[serde(default)]
     pub disabled_plugin_ids: Vec<String>,
@@ -322,6 +360,23 @@ pub struct ThreadSettings {
     pub multi_agent_mode: MultiAgentMode,
     /// @deprecated Reports the saved setting; `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,
+}
+
+/// Reports an immediate runtime-mode change, before any subsequent model step.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct System1UpdatedNotification {
+    #[serde(default)]
+    pub warning: Option<System1FailureWarning>,
+    pub thread_id: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub system1_revision: u64,
+    #[serde(default)]
+    pub error: Option<System1Error>,
+    #[serde(default)]
+    pub failure_episode: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -434,6 +489,16 @@ pub struct ThreadResumeParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadResumeResponse {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub system1_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub system1_revision: u64,
+    #[serde(default)]
+    pub system1_error: Option<System1Error>,
+    #[serde(default)]
+    pub system1_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -639,6 +704,16 @@ pub struct ThreadForkParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadForkResponse {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    #[serde(default)]
+    pub system1_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(default)]
+    pub system1_revision: u64,
+    #[serde(default)]
+    pub system1_error: Option<System1Error>,
+    #[serde(default)]
+    pub system1_failure_episode: u64,
     pub thread: Thread,
     pub model: String,
     pub model_provider: String,
@@ -1935,6 +2010,10 @@ pub struct ThreadTokenUsageUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
     pub token_usage: ThreadTokenUsage,
+    /// Successful ordinary response throughput, including request latency and reasoning output.
+    /// Other usage updates and replayed updates carry `None`.
+    #[serde(default)]
+    pub output_tokens_per_second: Option<f64>,
 }
 
 /// Internal-only notification containing the exact usage from one upstream
@@ -2172,4 +2251,24 @@ pub struct ThreadQueueChangedNotification {
 pub struct ContextCompactedNotification {
     pub thread_id: String,
     pub turn_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSystem1StatsReadParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSystem1StatsReadResponse {
+    pub enabled: bool,
+    pub revision: u64,
+    pub error: Option<System1Error>,
+    pub failure_episode: u64,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub decision_connection: Option<System1DecisionConnection>,
+    pub stats: System1Stats,
 }

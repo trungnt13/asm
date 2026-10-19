@@ -693,9 +693,15 @@ impl App {
                         }
                     }
                 };
+                let mut widget_config = config.clone();
+                if let Some(started) = &resumed
+                    && started.session.is_user_fork()
+                {
+                    widget_config.service_tier = started.session.service_tier.clone();
+                }
                 let init = crate::chatwidget::ChatWidgetInit {
                     local_settings: local_settings.clone(),
-                    config: config.clone(),
+                    config: widget_config,
                     frame_requester: tui.frame_requester(),
                     app_event_tx: app_event_tx.clone(),
                     workspace_command_runner: Some(workspace_command_runner.clone()),
@@ -966,8 +972,10 @@ See the Codex keymap documentation for supported actions and examples."
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashMap::new(),
+            automatic_thread_titles: HashMap::new(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
+            turn_agent_counts: Default::default(),
             agents_overview,
             side_threads: HashMap::new(),
             abandoned_side_threads: HashSet::new(),
@@ -1099,7 +1107,7 @@ See the Codex keymap documentation for supported actions and examples."
         if Self::should_handle_active_thread_events(
             wait_for_initial_session_configured,
             app.active_thread_rx.is_some(),
-        ) && let Err(err) = app.drain_active_thread_events(tui).await
+        ) && let Err(err) = app.drain_active_thread_events(tui, &app_server).await
         {
             return shutdown_on_startup_error(app_server, err).await;
         }
@@ -1477,7 +1485,7 @@ See the Codex keymap documentation for supported actions and examples."
                 ) {
                     waiting_for_initial_session_configured = false;
                     let had_active_modal = app.chat_widget.has_active_modal();
-                    if let Err(err) = app.drain_active_thread_events(tui).await {
+                    if let Err(err) = app.drain_active_thread_events(tui, &app_server).await {
                         break Err(err);
                     }
                     if !had_active_modal

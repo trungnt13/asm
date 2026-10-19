@@ -107,6 +107,7 @@ pub struct ThreadHistoryItemChange {
 /// Turn metadata for history projection and snapshots that do not need items.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadHistoryTurnMetadata {
+    pub token_usage: Option<crate::protocol::v2::TokenUsageBreakdown>,
     pub turn_id: String,
     pub root_turn_id: Option<String>,
     pub status: TurnStatus,
@@ -145,6 +146,7 @@ impl From<ThreadHistoryTurnMetadata> for Turn {
             started_at: value.started_at,
             completed_at: value.completed_at,
             duration_ms: value.duration_ms,
+            token_usage: value.token_usage,
         }
     }
 }
@@ -159,6 +161,7 @@ impl ThreadHistoryTurnMetadata {
             started_at: turn.started_at,
             completed_at: turn.completed_at,
             duration_ms: turn.duration_ms,
+            token_usage: turn.token_usage.clone(),
         }
     }
 }
@@ -414,6 +417,14 @@ impl ThreadHistoryBuilder {
             EventMsg::ItemCompleted(payload) => self.handle_item_completed(payload),
             EventMsg::HookStarted(_) | EventMsg::HookCompleted(_) => {}
             EventMsg::Error(payload) => self.handle_error(payload),
+            EventMsg::RawResponseItem(payload)
+                if matches!(
+                    payload.item,
+                    codex_protocol::models::ResponseItem::AgentMessage { .. }
+                ) =>
+            {
+                self.handle_response_item(&payload.item);
+            }
             EventMsg::TokenCount(_) => {}
             EventMsg::ThreadRolledBack(payload) => self.handle_thread_rollback(payload),
             EventMsg::TurnAborted(payload) => self.handle_turn_aborted(payload),
@@ -430,10 +441,25 @@ impl ThreadHistoryBuilder {
             RolloutItem::EventMsg(event) => self.handle_event(event),
             RolloutItem::Compacted(payload) => self.handle_compacted(payload),
             RolloutItem::ResponseItem(item) => self.handle_response_item(&item.item),
-            RolloutItem::InterAgentCommunication(_)
-            | RolloutItem::InterAgentCommunicationMetadata { .. }
+            RolloutItem::TokenUsageRecord(record) => {
+                let turn = self
+                    .current_turn
+                    .iter_mut()
+                    .chain(self.turns.iter_mut())
+                    .find(|turn| turn.id == record.turn_id);
+                let changed_turn = turn.map(|turn| {
+                    turn.token_usage = Some(record.turn_token_usage.clone().into());
+                    ThreadHistoryTurnMetadata::from_pending_turn(turn)
+                });
+                if let Some(changed_turn) = changed_turn {
+                    self.record_changed_turn(changed_turn);
+                }
+            }
+            RolloutItem::InterAgentCommunication(communication) => {
+                self.handle_response_item(&communication.to_model_input_item());
+            }
+            RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::TurnContext(_)
-            | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
@@ -479,6 +505,17 @@ impl ThreadHistoryBuilder {
     }
 
     fn handle_response_item(&mut self, item: &codex_protocol::models::ResponseItem) {
+        if matches!(
+            item,
+            codex_protocol::models::ResponseItem::AgentMessage { .. }
+        ) {
+            let fallback_id = format!("inter-agent-{}", self.next_item_index);
+            if let Some(item) = ThreadItem::from_inter_agent_message(item, &fallback_id) {
+                self.next_item_index += 1;
+                self.upsert_item_in_current_turn(item);
+            }
+            return;
+        }
         let codex_protocol::models::ResponseItem::Message {
             role, content, id, ..
         } = item
@@ -1433,6 +1470,7 @@ impl ThreadHistoryBuilder {
             opened_explicitly: false,
             saw_compaction: false,
             rollout_start_index: self.current_rollout_index,
+            token_usage: None,
         }
     }
 
@@ -1718,6 +1756,7 @@ struct PendingTurn {
     saw_compaction: bool,
     /// Index of the rollout item that opened this turn during replay.
     rollout_start_index: usize,
+    token_usage: Option<crate::protocol::v2::TokenUsageBreakdown>,
 }
 
 impl PendingTurn {
@@ -1747,6 +1786,7 @@ impl PendingTurn {
             started_at: self.started_at,
             completed_at: self.completed_at,
             duration_ms: self.duration_ms,
+            token_usage: self.token_usage.clone(),
         }
     }
 }
@@ -1763,6 +1803,7 @@ impl From<PendingTurn> for Turn {
             started_at: value.started_at,
             completed_at: value.completed_at,
             duration_ms: value.duration_ms,
+            token_usage: value.token_usage,
         }
     }
 }
@@ -2725,6 +2766,7 @@ mod tests {
         assert_eq!(
             turns[0],
             Turn {
+                token_usage: None,
                 id: "turn-image".into(),
                 root_turn_id: None,
                 status: TurnStatus::Completed,
@@ -4084,7 +4126,39 @@ mod tests {
         builder.handle_event(&EventMsg::AgentReasoning(AgentReasoningEvent {
             text: "not included in the summary".repeat(1024),
         }));
+        let thread_id = ThreadId::new();
+        let session_id = codex_protocol::SessionId::new();
+        for (turn_id, input_tokens) in [("turn-1", 10), ("turn-1", 25), ("unknown-turn", 99)] {
+            let usage = codex_protocol::protocol::TokenUsage {
+                input_tokens,
+                total_tokens: input_tokens,
+                ..Default::default()
+            };
+            builder.handle_rollout_item(&RolloutItem::TokenUsageRecord(
+                codex_protocol::protocol::TokenUsageRecord {
+                    thread_id,
+                    turn_id: turn_id.into(),
+                    session_id,
+                    root_turn_id: turn_id.into(),
+                    response_id: format!("response-{input_tokens}"),
+                    usage: usage.clone(),
+                    turn_token_usage: usage.clone(),
+                    thread_token_usage: usage,
+                },
+            ));
+        }
         let mut expected = builder.active_turn_snapshot().unwrap();
+        assert_eq!(
+            expected.token_usage,
+            Some(
+                codex_protocol::protocol::TokenUsage {
+                    input_tokens: 25,
+                    total_tokens: 25,
+                    ..Default::default()
+                }
+                .into()
+            )
+        );
         expected.items = vec![first_user, final_agent];
         expected.items_view = TurnItemsView::Summary;
         assert_eq!(
@@ -4132,6 +4206,7 @@ mod tests {
             ..Default::default()
         }));
         let mut expected = ThreadHistoryTurnMetadata {
+            token_usage: None,
             turn_id: "turn-1".into(),
             root_turn_id: Some("root-turn".into()),
             error: None,
@@ -4466,6 +4541,7 @@ mod tests {
             build_turns_from_rollout_items(&items),
             vec![
                 Turn {
+                    token_usage: None,
                     id: "turn-a".into(),
                     root_turn_id: None,
                     items_view: TurnItemsView::Full,
@@ -4492,6 +4568,7 @@ mod tests {
                     duration_ms: Some(10_000),
                 },
                 Turn {
+                    token_usage: None,
                     id: "turn-b".into(),
                     root_turn_id: None,
                     items_view: TurnItemsView::Full,
@@ -4592,6 +4669,14 @@ mod tests {
 
     #[test]
     fn preserves_compaction_only_turn() {
+        let usage = codex_protocol::protocol::TokenUsage {
+            input_tokens: 100,
+            cached_input_tokens: 60,
+            output_tokens: 20,
+            reasoning_output_tokens: 5,
+            total_tokens: 120,
+            ..Default::default()
+        };
         let items = vec![
             RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
                 turn_attribution: None,
@@ -4602,6 +4687,16 @@ mod tests {
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
             })),
+            RolloutItem::TokenUsageRecord(codex_protocol::protocol::TokenUsageRecord {
+                thread_id: ThreadId::new(),
+                turn_id: "turn-compact".into(),
+                session_id: codex_protocol::SessionId::new(),
+                root_turn_id: "turn-compact".into(),
+                response_id: "compact-response".into(),
+                usage: usage.clone(),
+                turn_token_usage: usage.clone(),
+                thread_token_usage: usage.clone(),
+            }),
             RolloutItem::Compacted(CompactedItem {
                 message: String::new(),
                 replacement_history: None,
@@ -4632,6 +4727,7 @@ mod tests {
         assert_eq!(
             turns,
             vec![Turn {
+                token_usage: Some(usage.into()),
                 id: "turn-compact".into(),
                 root_turn_id: None,
                 status: TurnStatus::Completed,
@@ -4913,6 +5009,7 @@ mod tests {
         assert_eq!(
             turns[0],
             Turn {
+                token_usage: None,
                 id: "turn-a".into(),
                 root_turn_id: None,
                 status: TurnStatus::Completed,
@@ -5039,6 +5136,7 @@ mod tests {
         assert_eq!(
             build_turns_from_rollout_items(&items),
             vec![Turn {
+                token_usage: None,
                 id: "turn-a".into(),
                 root_turn_id: None,
                 items_view: TurnItemsView::Full,
@@ -5326,6 +5424,7 @@ mod tests {
                     completed_at_ms: None,
                 }],
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    token_usage: None,
                     turn_id: "rollout-0".into(),
                     root_turn_id: None,
                     status: TurnStatus::Completed,
@@ -5435,6 +5534,7 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    token_usage: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::InProgress,
@@ -5475,6 +5575,7 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    token_usage: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::Completed,
@@ -5523,6 +5624,7 @@ mod tests {
                     completed_at_ms: None,
                 }],
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    token_usage: None,
                     turn_id: "rollout-0".into(),
                     root_turn_id: None,
                     status: TurnStatus::Completed,
@@ -5566,6 +5668,7 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    token_usage: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::Completed,

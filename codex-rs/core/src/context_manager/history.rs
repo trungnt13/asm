@@ -612,8 +612,21 @@ impl ContextManager {
         mut self,
         input_modalities: &[InputModality],
     ) -> Vec<ResponseItemEnvelope> {
+        // Replacements can bypass recording's admission check; never trust their raw updates.
+        Arc::make_mut(&mut self.items).retain(|envelope| {
+            !matches!(envelope.item, ResponseItem::ConfigurationUpdate { .. })
+                || is_api_message(&envelope.item, envelope.metadata.as_ref())
+        });
         self.normalize_history(input_modalities);
-        Arc::unwrap_or_clone(self.items)
+        let mut items = Arc::unwrap_or_clone(self.items);
+        // After normalization removes items, keep the last complete envelope in each update run.
+        items.reverse();
+        items.dedup_by(|earlier, later| {
+            matches!(earlier.item, ResponseItem::ConfigurationUpdate { .. })
+                && matches!(later.item, ResponseItem::ConfigurationUpdate { .. })
+        });
+        items.reverse();
+        items
     }
 
     /// Iterates over raw response items without exposing their history envelopes.

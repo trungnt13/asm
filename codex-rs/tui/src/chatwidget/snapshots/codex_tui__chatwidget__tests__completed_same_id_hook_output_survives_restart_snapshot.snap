@@ -7,10 +7,10 @@ activity:
 "                                                                                "
 "• Checking stop condition                                                       "
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.6-Sol default · /tmp/project                                            "
+"  sol56 def·/tmp/project                                                        "
 history:
 • Hook stopped
   └ continue with more context

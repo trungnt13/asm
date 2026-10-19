@@ -27,17 +27,24 @@ pub(super) fn activity_layout(
     expanded: bool,
     shortcut: Option<ShortcutHint>,
 ) -> TextLayout {
+    let inline = matches!(lines.disclosure, Some(ActivityDisclosure::ToolGroup));
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
     let source_offset = (!lines.auxiliary.is_empty())
         .then(|| TextLayout::new(lines.activity.clone(), width).text().len());
     lines.activity.extend(lines.auxiliary);
-    let layout = TextLayout::new(lines.activity, width);
+    let mut layout = TextLayout::new(lines.activity, width);
+    if inline {
+        layout.disclosure = true;
+        return layout;
+    }
     if !has_details {
         return layout;
     }
     let label = match (expanded, lines.disclosure) {
         (true, Some(ActivityDisclosure::OutputLines(_))) => "− Show less".to_owned(),
-        (true, Some(ActivityDisclosure::Generic) | None) => "− Hide details".to_owned(),
+        (true, Some(ActivityDisclosure::Generic | ActivityDisclosure::ToolGroup) | None) => {
+            "− Hide details".to_owned()
+        }
         (false, Some(ActivityDisclosure::OutputLines(count))) => {
             let noun = if count == 1 { "line" } else { "lines" };
             let mut label = format!("+ {count} {noun}");
@@ -50,7 +57,9 @@ pub(super) fn activity_layout(
             }
             label
         }
-        (false, Some(ActivityDisclosure::Generic) | None) => "+ Show details".to_owned(),
+        (false, Some(ActivityDisclosure::Generic | ActivityDisclosure::ToolGroup) | None) => {
+            "+ Show details".to_owned()
+        }
     };
     match source_offset {
         Some(offset) => layout.with_disclosure_control_at(label, offset),
@@ -167,9 +176,15 @@ impl TranscriptView {
         {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
         }
+        if !full_content && let Some(layout) = self.tool_group_layout(cells, index) {
+            return Some(layout);
+        }
         let mode = self.mode;
         let ids = cell.activity_ids();
-        let disclosure = !self.detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
+        let disclosure = !self.detailed
+            && mode == HistoryRenderMode::Rich
+            && !ids.is_empty()
+            && cell.supports_individual_disclosure();
         let manually_expanded = self.disclosure.is_expanded(&ids);
         let reveal_image = ids.is_empty() || manually_expanded || self.detailed;
         let expanded = disclosure && (full_content || manually_expanded);

@@ -8,9 +8,16 @@ import type { ReasoningEffort } from "../ReasoningEffort";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { SandboxPolicy } from "./SandboxPolicy";
+import type { System1Error } from "./System1Error";
 import type { Thread } from "./Thread";
 
-export type ThreadResumeResponse = {thread: Thread, model: string, modelProvider: string, serviceTier: string | null, /**
+export type ThreadResumeResponse = {/**
+ * Current session-only automatic reasoning mode; never a saved preference.
+ */
+system1Enabled: boolean, /**
+ * Monotonic session revision for ordering mode updates.
+ */
+system1Revision: bigint, system1Error: System1Error | null, system1FailureEpisode: bigint, thread: Thread, model: string, modelProvider: string, serviceTier: string | null, /**
  * Saved list of disabled plugin IDs. Does not yet filter plugin capabilities.
  */
 disabledPluginIds: Array<string>, cwd: AbsolutePathBuf, /**

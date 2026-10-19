@@ -22,25 +22,25 @@ shortcut help:
                                 ⇧⌥, / ⇧⌥.     Top / latest
 
   /keymap customize
-
+                                                                           Main
 › Ask Codex to do anything
 
   ? / esc close
 
 after /model selects Astra:
-                            ⠈     ⢀     ⠁                 ⠂
+                            ⠈     ⢀     ⠁                 ⠂                Main
 ›⠁Ask Codex to do anything         ⠈      ⠁
        ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀
   ? for shortcuts                                            100% context left
 
 literal pasted question mark:
-
+                                                                           Main
 › ?
 
                                                              100% context left
 
 after clearing and selecting Astra:
-
+                                                                           Main
 › Ask Codex to do anything
 
   ? for shortcuts                                            100% context left

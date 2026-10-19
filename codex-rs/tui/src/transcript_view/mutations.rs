@@ -7,6 +7,7 @@ use super::*;
 impl TranscriptView {
     /// Refresh unseen activity before either footer measurement or transcript painting.
     pub(crate) fn sync_history_tail(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        self.collapsed_tools.invalidate_layouts();
         let tail = cells.last().map(EntryKey::cell);
         if !self.is_following() && self.last_tail.is_some() && self.last_tail != tail {
             let previous = cells
@@ -14,8 +15,10 @@ impl TranscriptView {
                 .rposition(|cell| Some(EntryKey::cell(cell)) == self.last_tail);
             self.unseen_activity |= previous.is_none_or(|index| {
                 (index + 1..cells.len()).any(|index| {
-                    self.current_layout(cells, index)
-                        .is_some_and(|layout| layout.row_count() > 0)
+                    (self.groups_tools() && cells[index].tool_call_summary().is_some())
+                        || self
+                            .current_layout(cells, index)
+                            .is_some_and(|layout| layout.row_count() > 0)
                 })
             });
         }

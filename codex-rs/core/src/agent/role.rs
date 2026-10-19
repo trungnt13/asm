@@ -3,6 +3,8 @@
 //! Roles may customize the child or reduce its capabilities, but never replace the parent
 //! session's authority. A projected layer keeps existing layer-based consumers in sync.
 
+pub(super) use role_overrides::build_config_layer_stack as build_role_layer_stack;
+
 use crate::config::AgentRoleConfig;
 use crate::config::Config;
 use crate::config::deserialize_config_toml_with_base;
@@ -20,6 +22,7 @@ use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::Verbosity;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::openai_models::ReasoningEffort;
 use serde::Serialize;
@@ -37,14 +40,24 @@ const AGENT_TYPE_UNAVAILABLE_ERROR: &str = "agent type is currently not availabl
 struct AgentRoleOverrides {
     developer_instructions: Option<String>,
     model: Option<String>,
+    model_context_window: Option<i64>,
     model_reasoning_effort: Option<ReasoningEffort>,
     model_reasoning_summary: Option<ReasoningSummary>,
     model_verbosity: Option<Verbosity>,
     personality: Option<Personality>,
     service_tier: Option<String>,
+    web_search: Option<WebSearchMode>,
+    system1: Option<System1RoleOverride>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     features: BTreeMap<String, bool>,
     skills: Option<SkillsConfig>,
+}
+
+#[derive(Serialize)]
+struct System1RoleOverride {
+    enabled: Option<bool>,
+    min_effort: Option<ReasoningEffort>,
+    max_effort: Option<ReasoningEffort>,
 }
 
 /// Applies typed role overrides to the existing parent-derived configuration.
@@ -76,17 +89,47 @@ async fn apply_role_to_config_inner(
         return Ok(());
     };
     let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
+    let system1 = role_layer_toml
+        .get("system1")
+        .or_else(|| role_layer_toml.get("adaptive_reasoning"));
+    let has_min = system1.is_some_and(|table| table.get("min_effort").is_some());
+    let has_max = system1.is_some_and(|table| table.get("max_effort").is_some());
+    let disables_system1 = system1
+        .and_then(|table| table.get("enabled"))
+        .and_then(TomlValue::as_bool)
+        == Some(false);
     let role_config = deserialize_config_toml_with_base(role_layer_toml, &config.codex_home)?;
+    let system1_override = role_config
+        .system1
+        .as_ref()
+        .filter(|_| disables_system1 || has_min || has_max)
+        .map(|settings| System1RoleOverride {
+            enabled: disables_system1.then_some(false),
+            min_effort: has_min.then(|| settings.min_effort.clone()),
+            max_effort: has_max.then(|| settings.max_effort.clone()),
+        });
     let mut overrides = AgentRoleOverrides {
         developer_instructions: role_config.developer_instructions,
         model: role_config.model,
+        model_context_window: role_config.model_context_window,
         model_reasoning_effort: role_config.model_reasoning_effort,
         model_reasoning_summary: role_config.model_reasoning_summary,
         model_verbosity: role_config.model_verbosity,
         personality: role_config.personality,
         service_tier: role_config.service_tier,
+        web_search: role_config
+            .web_search
+            .filter(|mode| *mode == WebSearchMode::Disabled),
+        system1: system1_override,
         ..Default::default()
     };
+
+    anyhow::ensure!(
+        overrides
+            .model_context_window
+            .is_none_or(|window| window > 0),
+        "model_context_window must be positive"
+    );
 
     if let Some(features) = role_config.features {
         for (key, enabled) in features.entries() {
@@ -184,6 +227,9 @@ mod role_overrides {
         if let Some(model) = &overrides.model {
             next_config.model = Some(model.clone());
         }
+        if let Some(window) = overrides.model_context_window {
+            next_config.role_model_context_window = Some(window);
+        }
         if let Some(instructions) = &overrides.developer_instructions {
             next_config.developer_instructions = Some(instructions.clone());
         }
@@ -213,6 +259,30 @@ mod role_overrides {
                 None => Some(service_tier.clone()),
             };
         }
+        if let Some(mode) = overrides.web_search {
+            next_config.web_search_mode.set(mode)?;
+        }
+        if let Some(system1) = &overrides.system1 {
+            if system1.enabled == Some(false) {
+                next_config.system1.enabled = false;
+                next_config.role_system1_disabled = true;
+            }
+            if system1.min_effort.is_some() || system1.max_effort.is_some() {
+                next_config.role_system1_base_bounds.get_or_insert_with(|| {
+                    (
+                        config.system1.min_effort.clone(),
+                        config.system1.max_effort.clone(),
+                    )
+                });
+                if let Some(min) = &system1.min_effort {
+                    next_config.system1.min_effort = min.clone();
+                }
+                if let Some(max) = &system1.max_effort {
+                    next_config.system1.max_effort = max.clone();
+                }
+                next_config.system1.validate().map_err(|err| anyhow!(err))?;
+            }
+        }
         for key in overrides.features.keys() {
             if let Some(feature) = feature_for_key(key) {
                 next_config.features.disable(feature)?;
@@ -239,7 +309,7 @@ mod role_overrides {
         Ok(next_config)
     }
 
-    fn build_config_layer_stack(
+    pub(crate) fn build_config_layer_stack(
         config: &Config,
         role_layer_toml: &TomlValue,
     ) -> anyhow::Result<ConfigLayerStack> {
@@ -353,55 +423,54 @@ mod built_in {
                         description: Some("Default agent.".to_string()),
                         config_file: None,
                         nickname_candidates: None,
-                    }
+                    },
                 ),
                 (
                     "explorer".to_string(),
                     AgentRoleConfig {
-                        description: Some(r#"Use `explorer` for specific codebase questions.
+                        description: Some(
+                            r#"Use `explorer` for specific codebase questions.
 Explorers are fast and authoritative.
-They must be used to ask specific, well-scoped questions on the codebase.
-Rules:
-- In order to avoid redundant work, you should avoid exploring the same problem that explorers have already covered. Typically, you should trust the explorer results without additional verification. You are still allowed to inspect the code yourself to gain the needed context!
-- You are encouraged to spawn up multiple explorers in parallel when you have multiple distinct questions to ask about the codebase that can be answered independently. This allows you to get more information faster without waiting for one question to finish before asking the next. While waiting for the explorer results, you can continue working on other local tasks that do not depend on those results. This parallelism is a key advantage of delegation, so use it whenever you have multiple questions to ask.
-- Reuse existing explorers for related questions."#.to_string()),
+They must be used to ask specific, well-scoped questions on the codebase."#
+                                .to_string(),
+                        ),
                         config_file: Some("explorer.toml".to_string().parse().unwrap_or_default()),
                         nickname_candidates: None,
-                    }
+                    },
                 ),
                 (
                     "worker".to_string(),
                     AgentRoleConfig {
-                        description: Some(r#"Use for execution and production work.
+                        description: Some(
+                            r#"Use for execution and production work.
 Typical tasks:
 - Implement part of a feature
 - Fix tests or bugs
-- Split large refactors into independent chunks
-Rules:
-- Explicitly assign **ownership** of the task (files / responsibility). When the subtask involves code changes, you should clearly specify which files or modules the worker is responsible for. This helps avoid merge conflicts and ensures accountability. For example, you can say "Worker 1 is responsible for updating the authentication module, while Worker 2 will handle the database layer." By defining clear ownership, you can delegate more effectively and reduce coordination overhead.
-- Always tell workers they are **not alone in the codebase**, and they should not revert the edits made by others, and they should adjust their implementation to accommodate the changes made by others. This is important because there may be multiple workers making changes in parallel, and they need to be aware of each other's work to avoid conflicts and ensure a cohesive final product."#.to_string()),
+- Split large refactors into independent chunks"#
+                                .to_string(),
+                        ),
                         config_file: None,
                         nickname_candidates: None,
-                    }
+                    },
                 ),
                 // Awaiter is temp removed
-//                 (
-//                     "awaiter".to_string(),
-//                     AgentRoleConfig {
-//                         description: Some(r#"Use an `awaiter` agent EVERY TIME you must run a command that will take some very long time.
-// This includes, but not only:
-// * testing
-// * monitoring of a long running process
-// * explicit ask to wait for something
-//
-// Rules:
-// - When an awaiter is running, you can work on something else. If you need to wait for its completion, use the largest possible timeout.
-// - Be patient with the `awaiter`.
-// - Do not use an awaiter for every compilation/test if it won't take time. Only use if for long running commands.
-// - Close the awaiter when you're done with it."#.to_string()),
-//                         config_file: Some("awaiter.toml".to_string().parse().unwrap_or_default()),
-//                     }
-//                 )
+                //                 (
+                //                     "awaiter".to_string(),
+                //                     AgentRoleConfig {
+                //                         description: Some(r#"Use an `awaiter` agent EVERY TIME you must run a command that will take some very long time.
+                // This includes, but not only:
+                // * testing
+                // * monitoring of a long running process
+                // * explicit ask to wait for something
+                //
+                // Rules:
+                // - When an awaiter is running, you can work on something else. If you need to wait for its completion, use the largest possible timeout.
+                // - Be patient with the `awaiter`.
+                // - Do not use an awaiter for every compilation/test if it won't take time. Only use if for long running commands.
+                // - Close the awaiter when you're done with it."#.to_string()),
+                //                         config_file: Some("awaiter.toml".to_string().parse().unwrap_or_default()),
+                //                     }
+                //                 )
             ])
         });
         &CONFIG

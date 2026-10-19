@@ -182,6 +182,8 @@ struct LiveWriterLocks {
 struct ThreadCoordination {
     // Serialize writes and capture consistent fork snapshots.
     writer: Arc<Mutex<()>>,
+    // Successful catch-up for an unchanged source and checkpoint; never seed from partial batches.
+    history_projection: Mutex<Option<(String, u64, u64)>>,
     // Forks hold a shared lease until their child reference is durable; deletion, archive, and
     // unarchive require exclusive access. Keeping this separate from `writer` lets the source
     // accept writes during child initialization, including MCP startup that can take 30 seconds.
@@ -1200,6 +1202,7 @@ mod tests {
                 ),
                 RolloutItem::EventMsg(EventMsg::TokenCount(
                     codex_protocol::protocol::TokenCountEvent {
+                        output_tokens_per_second: None,
                         info: None,
                         rate_limits: None,
                     },
@@ -1327,6 +1330,7 @@ mod tests {
         live_thread
             .append_items(&[RolloutItem::EventMsg(EventMsg::TokenCount(
                 codex_protocol::protocol::TokenCountEvent {
+                    output_tokens_per_second: None,
                     info: None,
                     rate_limits: None,
                 },
@@ -2198,6 +2202,7 @@ mod tests {
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,

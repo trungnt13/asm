@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use crate::bottom_pane::LocalImageAttachment;
 use crate::bottom_pane::MentionBinding;
 use crate::bottom_pane::QueuedInputAction;
+use crate::bottom_pane::QuoteComment;
 use codex_app_server_protocol::ImageReference;
 use codex_app_server_protocol::TextElement as AppServerTextElement;
 use codex_app_server_protocol::UserInput;
@@ -121,6 +122,8 @@ pub(super) enum QueueDrain {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct ThreadComposerState {
+    pub(super) quotes: Vec<String>,
+    pub(super) quote_comments: Vec<QuoteComment>,
     pub(super) text: String,
     pub(super) local_images: Vec<LocalImageAttachment>,
     pub(super) remote_image_urls: Vec<String>,
@@ -131,7 +134,8 @@ pub(super) struct ThreadComposerState {
 
 impl ThreadComposerState {
     pub(super) fn has_content(&self) -> bool {
-        !self.text.is_empty()
+        !self.quotes.is_empty()
+            || !self.text.is_empty()
             || !self.local_images.is_empty()
             || !self.remote_image_urls.is_empty()
             || !self.text_elements.is_empty()
@@ -324,6 +328,7 @@ pub(super) fn remap_colliding_paste_placeholders(
     mut message: UserMessage,
     mut pending_pastes: Vec<(String, String)>,
     used: &mut HashSet<String>,
+    quote_comments: &mut Vec<QuoteComment>,
 ) -> (UserMessage, Vec<(String, String)>) {
     let mut mapping = HashMap::new();
     for (placeholder, text) in &mut pending_pastes {
@@ -343,8 +348,10 @@ pub(super) fn remap_colliding_paste_placeholders(
         mapping.insert(placeholder.clone(), replacement.clone());
         *placeholder = replacement;
     }
+    let original_elements = message.text_elements.clone();
     (message.text, message.text_elements) =
         remap_placeholders_in_text(message.text, message.text_elements, &mapping);
+    rebase_quote_comments(quote_comments, &original_elements, &message.text_elements);
     (message, pending_pastes)
 }
 
@@ -432,6 +439,54 @@ pub(super) fn merge_user_messages(messages: Vec<UserMessage>) -> UserMessage {
             .collect(),
     );
     merge_remapped_user_messages(messages.into_iter().map(|(message, _)| message))
+}
+
+pub(super) fn merge_composer_messages(
+    messages: Vec<(UserMessage, Vec<QuoteComment>)>,
+) -> (UserMessage, Vec<QuoteComment>) {
+    let (messages, metadata): (Vec<_>, Vec<_>) = messages
+        .into_iter()
+        .map(|(message, comments)| {
+            let original_elements = message.text_elements.clone();
+            (message, (original_elements, comments))
+        })
+        .unzip();
+    let merged = merge_user_messages(messages);
+    let mut offset = 0;
+    let mut comments = Vec::new();
+    for (original_elements, mut message_comments) in metadata {
+        let end = offset + original_elements.len();
+        rebase_quote_comments(
+            &mut message_comments,
+            &original_elements,
+            &merged.text_elements[offset..end],
+        );
+        comments.extend(message_comments);
+        offset = end;
+    }
+    (merged, comments)
+}
+
+fn rebase_quote_comments(
+    comments: &mut Vec<QuoteComment>,
+    original_elements: &[TextElement],
+    remapped_elements: &[TextElement],
+) {
+    let mut original_elements: Vec<_> = original_elements.iter().collect();
+    let mut remapped_elements: Vec<_> = remapped_elements.iter().collect();
+    original_elements.sort_by_key(|element| element.byte_range.start);
+    remapped_elements.sort_by_key(|element| element.byte_range.start);
+    comments.retain_mut(|comment| {
+        let Some(index) = original_elements.iter().position(|element| {
+            element.byte_range.start == comment.range.start
+                && element.byte_range.end == comment.range.end
+        }) else {
+            return false;
+        };
+        let element = remapped_elements[index];
+        comment.range = element.byte_range.start..element.byte_range.end;
+        true
+    });
 }
 
 fn merge_remapped_user_messages(messages: impl IntoIterator<Item = UserMessage>) -> UserMessage {
@@ -589,6 +644,9 @@ pub(crate) fn mention_bindings_from_user_inputs(
     let mention_start = |sigil: char, mention: &str| {
         let token = format!("{sigil}{mention}");
         message.match_indices(&token).find_map(|(start, _)| {
+            if crate::mention_codec::is_quoted_line(message, start) {
+                return None;
+            }
             let end = start + token.len();
             message
                 .as_bytes()
@@ -647,8 +705,9 @@ pub(crate) fn mention_bindings_from_user_inputs(
             continue;
         };
         for element in text_elements {
-            if let Some((mention, path, end)) =
-                crate::task_mentions::parse_task_link(text, element.byte_range.start)
+            if !crate::mention_codec::is_quoted_line(text, element.byte_range.start)
+                && let Some((mention, path, end)) =
+                    crate::task_mentions::parse_task_link(text, element.byte_range.start)
                 && end == element.byte_range.end
                 && element
                     .placeholder()
@@ -683,8 +742,9 @@ pub(crate) fn mention_bindings_from_user_inputs(
                 let offset = text_offset;
                 text_offset += text.len();
                 text_elements.iter().find_map(|element| {
-                    (text.get(element.byte_range.start..element.byte_range.end)
-                        == Some(token.as_str()))
+                    (!crate::mention_codec::is_quoted_line(text, element.byte_range.start)
+                        && text.get(element.byte_range.start..element.byte_range.end)
+                            == Some(token.as_str()))
                     .then_some(offset + element.byte_range.start)
                 })
             })

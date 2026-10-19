@@ -76,6 +76,13 @@ pub(crate) struct RealtimeWebrtcStartupFailure {
     pub cause: codex_realtime_webrtc::ConnectionError,
 }
 
+#[derive(Debug)]
+pub(crate) enum SideConversationAction {
+    Sync,
+    SendLast { text: String },
+    Fork { name: Option<String> },
+}
+
 /// Global voice controls always apply to the one call's owner.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum VoiceControl {
@@ -261,11 +268,19 @@ pub(crate) enum TranscriptExportDestination {
     File(PathBuf),
 }
 
-/// Deliver a generated title to its originating automatic rename or editable prompt.
+/// Capture the saved name that a generated title may replace.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AutoRenameRequest {
+    pub(crate) expected_name: Option<String>,
+}
+
+/// Route a title to background naming, an explicit command, or an editable suggestion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ThreadTitleDestination {
-    /// Name the thread only if the user has not already named it.
+    /// Apply a title only while the initiating client's naming ownership is unchanged.
     Automatic,
+    /// Apply one configured title after an explicit user command.
+    ExplicitAutoRename,
     /// Prefill only the still-active rename prompt with the matching request ID.
     RenameSuggestion { request_id: Uuid },
 }
@@ -290,6 +305,13 @@ pub(crate) struct AgentsOverviewThreadRefresh {
 pub(crate) struct AgentPickerThreadRefresh {
     pub(crate) threads: Vec<Thread>,
     pub(crate) archived_thread_ids: std::collections::HashSet<ThreadId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum System1Action {
+    Toggle,
+    Enable,
+    Disable,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -363,8 +385,18 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         request_id: Uuid,
     },
+    /// Generate and save one configured title for the displayed thread.
+    AutoRenameThread {
+        thread_id: ThreadId,
+    },
+    StopAutomaticThreadTitles {
+        thread_id: ThreadId,
+        stopped: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
     /// Register a hidden title-generation thread started in the background.
     ThreadTitleStarted {
+        auto_rename: AutoRenameRequest,
+        max_title_chars: usize,
         cancellation: CancellationToken,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
@@ -372,8 +404,10 @@ pub(crate) enum AppEvent {
         effort: Option<ReasoningEffort>,
         result: Result<String, String>,
     },
-    /// Route a hidden title request to its automatic rename or editable prompt.
+    /// Route a hidden title result to its captured naming destination.
     GeneratedThreadTitle {
+        auto_rename: AutoRenameRequest,
+        max_title_chars: usize,
         cancellation: CancellationToken,
         thread_id: ThreadId,
         temporary_thread_id: ThreadId,
@@ -419,6 +453,16 @@ pub(crate) enum AppEvent {
 
     /// Fork the current thread into a transient side conversation.
     StartSide {
+        parent_thread_id: ThreadId,
+        user_message: Option<UserMessage>,
+    },
+
+    SideConversationAction {
+        action: SideConversationAction,
+    },
+
+    /// Fork the current thread into a saved parallel conversation.
+    StartParallel {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
     },
@@ -1221,6 +1265,15 @@ pub(crate) enum AppEvent {
 
     /// Update the current reasoning effort in the running app and widget.
     UpdateReasoningEffort(Option<ReasoningEffort>),
+
+    ShowSystem1Status {
+        thread_id: ThreadId,
+    },
+
+    SetSystem1 {
+        thread_id: ThreadId,
+        action: System1Action,
+    },
 
     /// Change Reserve effort only on the task that opened the picker, without saving defaults.
     UpdateLunaReserveReasoning {

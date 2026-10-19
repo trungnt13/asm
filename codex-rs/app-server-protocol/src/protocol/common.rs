@@ -862,6 +862,11 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadLoadedListResponse,
     },
+    ThreadSystem1StatsRead => "thread/system1Stats/read" {
+        params: v2::ThreadSystem1StatsReadParams,
+        serialization: None,
+        response: v2::ThreadSystem1StatsReadResponse,
+    },
     ThreadRead => "thread/read" {
         params: v2::ThreadReadParams,
         serialization: thread_id(params.thread_id),
@@ -1985,6 +1990,9 @@ server_notification_definitions! {
     ThreadSettingsUpdated => "thread/settings/updated" (v2::ThreadSettingsUpdatedNotification),
     ThreadTokenUsageUpdated => "thread/tokenUsage/updated" (v2::ThreadTokenUsageUpdatedNotification),
     TurnStarted => "turn/started" (v2::TurnStartedNotification),
+    ReasoningEffortUpdated => "turn/reasoningEffortUpdated" (v2::ReasoningEffortUpdatedNotification),
+    #[experimental("thread/system1Updated")]
+    System1Updated => "thread/system1Updated" (v2::System1UpdatedNotification),
     HookStarted => "hook/started" (v2::HookStartedNotification),
     TurnCompleted => "turn/completed" (v2::TurnCompletedNotification),
     HookCompleted => "hook/completed" (v2::HookCompletedNotification),
@@ -3245,6 +3253,10 @@ mod tests {
         let response = ClientResponse::ThreadStart {
             request_id: RequestId::Integer(7),
             response: v2::ThreadStartResponse {
+                system1_enabled: false,
+                system1_revision: 0,
+                system1_error: None,
+                system1_failure_episode: 0,
                 disabled_plugin_ids: Vec::new(),
                 thread: v2::Thread {
                     originator: None,
@@ -3299,6 +3311,42 @@ mod tests {
             },
         };
 
+        let expected_thread = json!({
+            "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+            "environments": null,
+            "extra": null,
+            "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
+            "forkedFromId": null,
+            "parentThreadId": null,
+            "preview": "first prompt",
+            "ephemeral": true,
+            "section": null,
+            "sectionEnteredAt": null,
+            "projectId": null,
+            "historyMode": "legacy",
+            "modelProvider": "openai",
+            "model": null,
+            "reasoningEffort": null,
+            "createdAt": 1,
+            "updatedAt": 2,
+            "recencyAt": 3,
+            "status": {
+                "type": "idle"
+            },
+            "path": null,
+            "cwd": absolute_path_string("tmp"),
+            "cliVersion": "0.0.0",
+            "originator": null,
+            "source": "exec",
+            "canAcceptDirectInput": null,
+            "threadSource": null,
+            "agentNickname": null,
+            "agentRole": null,
+            "gitInfo": null,
+            "name": null,
+            "daybreakEnabled": null,
+            "turns": []
+        });
         assert_eq!(response.id(), &RequestId::Integer(7));
         assert_eq!(response.method(), "thread/start");
         assert_eq!(
@@ -3306,42 +3354,11 @@ mod tests {
                 "method": "thread/start",
                 "id": 7,
                 "response": {
-                    "thread": {
-                        "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
-                        "environments": null,
-                        "extra": null,
-                        "sessionId": "67e55044-10b1-426f-9247-bb680e5fe0c7",
-                        "forkedFromId": null,
-                        "parentThreadId": null,
-                        "preview": "first prompt",
-                        "ephemeral": true,
-                        "section": null,
-                        "sectionEnteredAt": null,
-                        "projectId": null,
-                        "historyMode": "legacy",
-                        "modelProvider": "openai",
-                        "model": null,
-                        "reasoningEffort": null,
-                        "createdAt": 1,
-                        "updatedAt": 2,
-                        "recencyAt": 3,
-                        "status": {
-                            "type": "idle"
-                        },
-                        "path": null,
-                        "cwd": absolute_path_string("tmp"),
-                        "cliVersion": "0.0.0",
-                        "originator": null,
-                        "source": "exec",
-                        "canAcceptDirectInput": null,
-                        "threadSource": null,
-                        "agentNickname": null,
-                        "agentRole": null,
-                        "gitInfo": null,
-                        "name": null,
-                        "daybreakEnabled": null,
-                        "turns": []
-                    },
+                    "system1Enabled": false,
+                    "system1Revision": 0,
+                    "system1Error": null,
+                    "system1FailureEpisode": 0,
+                    "thread": expected_thread,
                     "model": "gpt-5",
                     "modelProvider": "openai",
                     "serviceTier": null,
@@ -4521,6 +4538,10 @@ mod tests {
             ServerNotification::ThreadSettingsUpdated(v2::ThreadSettingsUpdatedNotification {
                 thread_id: "thr_123".to_string(),
                 thread_settings: v2::ThreadSettings {
+                    system1_enabled: false,
+                    system1_revision: 0,
+                    system1_error: None,
+                    system1_failure_episode: 0,
                     disabled_plugin_ids: Vec::new(),
                     cwd: absolute_path("/tmp/repo"),
                     approval_policy: v2::AskForApproval::Never,

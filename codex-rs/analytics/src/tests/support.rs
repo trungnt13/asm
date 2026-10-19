@@ -145,6 +145,10 @@ pub(super) fn sample_thread_start_response(
     model: &str,
 ) -> ClientResponsePayload {
     ClientResponsePayload::ThreadStart(ThreadStartResponse {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: sample_thread_with_metadata(
             thread_id,
@@ -211,6 +215,10 @@ pub(super) fn sample_thread_resume_response_with_source(
     parent_thread_id: Option<String>,
 ) -> ClientResponsePayload {
     ClientResponsePayload::ThreadResume(ThreadResumeResponse {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: sample_thread_with_metadata(
             thread_id,
@@ -264,6 +272,7 @@ pub(super) fn sample_turn_start_request(thread_id: &str, request_id: i64) -> Cli
 pub(super) fn sample_turn_start_response(turn_id: &str) -> ClientResponsePayload {
     ClientResponsePayload::TurnStart(codex_app_server_protocol::TurnStartResponse {
         turn: Turn {
+            token_usage: None,
             id: turn_id.to_string(),
             root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -284,6 +293,7 @@ pub(super) fn sample_turn_started_notification(
     ServerNotification::TurnStarted(TurnStartedNotification {
         thread_id: thread_id.to_string(),
         turn: Turn {
+            token_usage: None,
             id: turn_id.to_string(),
             root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -322,6 +332,7 @@ pub(super) fn sample_turn_completed_notification(
     ServerNotification::TurnCompleted(TurnCompletedNotification {
         thread_id: thread_id.to_string(),
         turn: Turn {
+            token_usage: None,
             id: turn_id.to_string(),
             root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,

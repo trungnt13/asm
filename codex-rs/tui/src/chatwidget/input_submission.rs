@@ -140,12 +140,16 @@ impl ChatWidget {
             return (false, None);
         }
         self.empty_state_animation.borrow_mut().dismiss();
-        if self.input_queue.rate_limit_recovery_pending || self.pending_image_submission.is_some() {
+        if self.input_queue.rate_limit_recovery_pending
+            || self.pending_image_submission.is_some()
+            || self.input_queue.thread_switch_pending
+        {
             let model_prompt = source == UserMessageSource::Prompt
                 && (shell_escape_policy == ShellEscapePolicy::Disallow
                     || !user_message.text.starts_with('!'));
-            // A prepared submission was accepted before any messages queued behind it.
-            let queue_index = if prepared_images.is_some() {
+            // Prepared submissions and interrupted steers precede queued follow-ups.
+            let queue_index = if prepared_images.is_some() || self.input_queue.thread_switch_pending
+            {
                 0
             } else {
                 self.input_queue.queued_user_messages.len()
@@ -497,6 +501,8 @@ impl ChatWidget {
         self.dismiss_backend_banner_for_new_turn();
         self.note_realtime_typed_input(&submitted_message.text);
         if render_in_history {
+            self.status_state.captured_step_reasoning = None;
+            self.refresh_status_surfaces();
             self.input_queue.user_turn_pending_start = true;
             self.input_queue.pending_user_message_client_id = Some(client_user_message_id.clone());
         }

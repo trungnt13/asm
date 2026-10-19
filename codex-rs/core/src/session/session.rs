@@ -96,6 +96,8 @@ pub(crate) struct Session {
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
     pub(super) fork_persistence: ForkPersistence,
     pub(super) history_initialization: HistoryInitialization,
+    /// Raw replay history retained only for temporary root forks, for explicit saving.
+    pub(crate) ephemeral_rollout_items: Option<Mutex<Vec<RolloutItem>>>,
     pub(super) forked_from_ordinal_exclusive: Option<u64>,
     pub(super) next_internal_sub_id: AtomicU64,
 }
@@ -278,6 +280,12 @@ impl SessionConfiguration {
             .map(|config| config.permission_profile.clone())
             .unwrap_or_else(|| self.permission_profile_state.snapshot());
         ThreadConfigSnapshot {
+            system1_enabled: self.original_config_do_not_use.system1.enabled,
+            system1_revision: self.original_config_do_not_use.system1_initial_revision,
+            system1_error: self.original_config_do_not_use.system1_initial_error,
+            system1_failure_episode: self
+                .original_config_do_not_use
+                .system1_initial_failure_episode,
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -654,6 +662,7 @@ async fn warm_plugins_and_skills_for_session_init(
         effective_skill_roots,
         turn_environments,
     );
+    let skills_input = skills_input.with_agent_role(session_source.get_agent_role());
     skills_service
         .snapshot_for_config(&skills_input, fs)
         .await
@@ -920,21 +929,27 @@ impl Session {
                 .runtime()
                 .root_thread_instructions_provider(thread_id, instructions.thread_provider);
         }
-        // Ephemeral forks reuse cache routing, without sharing storage or lifecycle identity.
-        let fork_cache_key = match &initial_history {
-            InitialHistory::Forked(items)
-                if config.ephemeral
-                    && !session_configuration.session_source.is_non_root_agent() =>
-            {
-                items.iter().find_map(|item| match item {
-                    RolloutItem::SessionMeta(meta) => Some(meta.meta.session_id.to_string()),
+        // Persist cache routing separately so root forks retain independent session identities.
+        let prompt_cache_key = if session_configuration.session_source.is_non_root_agent() {
+            None
+        } else {
+            match &initial_history {
+                InitialHistory::Forked(items) => items.iter().find_map(|item| match item {
+                    RolloutItem::SessionMeta(meta) => {
+                        Some(meta.meta.prompt_cache_key.unwrap_or(meta.meta.session_id))
+                    }
                     _ => None,
-                })
+                }),
+                InitialHistory::Resumed(resumed) => resumed
+                    .history
+                    .iter()
+                    .find_map(|item| match item {
+                        RolloutItem::SessionMeta(meta) => Some(meta.meta.prompt_cache_key),
+                        _ => None,
+                    })
+                    .flatten(),
+                InitialHistory::New | InitialHistory::Cleared => None,
             }
-            InitialHistory::New
-            | InitialHistory::Cleared
-            | InitialHistory::Resumed(_)
-            | InitialHistory::Forked(_) => None,
         };
         let resumed_session_id = match &initial_history {
             InitialHistory::Resumed(resumed) => {
@@ -1059,6 +1074,7 @@ impl Session {
                             creator_user_id: auth.as_ref().and_then(CodexAuth::get_chatgpt_user_id),
                             creator_account_id: auth.as_ref().and_then(CodexAuth::get_account_id),
                             session_id,
+                            prompt_cache_key,
                             thread_id,
                             extra_config: config.extra_config.clone(),
                             forked_from_id,
@@ -1246,47 +1262,51 @@ impl Session {
             } else {
                 None
             };
-            let trace_agent_path = session_configuration
-                .session_source
-                .get_agent_path()
-                .unwrap_or_else(codex_protocol::AgentPath::root);
-            let trace_task_name =
-                (!trace_agent_path.is_root()).then(|| trace_agent_path.name().to_string());
-            let trace_metadata = ThreadStartedTraceMetadata {
-                thread_id: thread_id.to_string(),
-                agent_path: trace_agent_path.to_string(),
-                task_name: trace_task_name,
-                nickname: session_configuration.session_source.get_nickname(),
-                agent_role: session_configuration.session_source.get_agent_role(),
-                session_source: session_configuration.session_source.clone(),
-                cwd: session_configuration.cwd().to_path_buf(),
-                rollout_path: rollout_path.clone(),
-                model: session_configuration
-                    .step_settings
-                    .collaboration_mode
-                    .model()
-                    .to_string(),
-                provider_name: config.model_provider_id.clone(),
-                approval_policy: session_configuration
-                    .step_settings
-                    .approval_policy
-                    .value()
-                    .to_string(),
-                sandbox_policy: format!(
-                    "{:?}",
-                    session_configuration.sandbox_policy(environment_selections)
-                ),
-            };
-            let rollout_thread_trace = if matches!(
-                session_configuration.session_source,
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-            ) {
-                // Spawned child threads are part of their root rollout tree. If the
-                // parent had no trace bundle, do not create an orphan child bundle
-                // that looks like an independent rollout.
-                parent_rollout_thread_trace.start_child_thread_trace_or_disabled(trace_metadata)
+            let rollout_thread_trace = if config.diagnostic_log_capture {
+                let trace_agent_path = session_configuration
+                    .session_source
+                    .get_agent_path()
+                    .unwrap_or_else(codex_protocol::AgentPath::root);
+                let trace_task_name =
+                    (!trace_agent_path.is_root()).then(|| trace_agent_path.name().to_string());
+                let trace_metadata = ThreadStartedTraceMetadata {
+                    thread_id: thread_id.to_string(),
+                    agent_path: trace_agent_path.to_string(),
+                    task_name: trace_task_name,
+                    nickname: session_configuration.session_source.get_nickname(),
+                    agent_role: session_configuration.session_source.get_agent_role(),
+                    session_source: session_configuration.session_source.clone(),
+                    cwd: session_configuration.cwd().to_path_buf(),
+                    rollout_path: rollout_path.clone(),
+                    model: session_configuration
+                        .step_settings
+                        .collaboration_mode
+                        .model()
+                        .to_string(),
+                    provider_name: config.model_provider_id.clone(),
+                    approval_policy: session_configuration
+                        .step_settings
+                        .approval_policy
+                        .value()
+                        .to_string(),
+                    sandbox_policy: format!(
+                        "{:?}",
+                        session_configuration.sandbox_policy(environment_selections)
+                    ),
+                };
+                if matches!(
+                    session_configuration.session_source,
+                    SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+                ) {
+                    // Spawned child threads are part of their root rollout tree. If the
+                    // parent had no trace bundle, do not create an orphan child bundle
+                    // that looks like an independent rollout.
+                    parent_rollout_thread_trace.start_child_thread_trace_or_disabled(trace_metadata)
+                } else {
+                    ThreadTraceContext::start_root_or_disabled(trace_metadata)
+                }
             } else {
-                ThreadTraceContext::start_root_or_disabled(trace_metadata)
+                ThreadTraceContext::disabled()
             };
 
             let mut post_session_configured_events = Vec::<Event>::new();
@@ -1732,7 +1752,7 @@ impl Session {
                 mcp_runtime,
                 mcp_handler_cache: Default::default(),
                 unified_exec_manager: UnifiedExecProcessManager::new(
-                    config.background_terminal_max_timeout,
+                    config.background_terminal_timeout_bounds(),
                 ),
                 elicitations: crate::elicitation::ElicitationService::new(),
                 analytics_events_client,
@@ -1813,7 +1833,7 @@ impl Session {
                         &session_configuration.session_source,
                         session_configuration.parent_thread_id,
                     )
-                    .or(fork_cache_key),
+                    .or(prompt_cache_key.map(|key| key.to_string())),
                     tx_event.clone(),
                     codex_responses_headers,
                     crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),
@@ -1865,9 +1885,22 @@ impl Session {
                 git_enrichment_policy,
                 fork_persistence,
                 history_initialization,
+                ephemeral_rollout_items: (config.ephemeral
+                    && !session_configuration.session_source.is_non_root_agent()
+                    && matches!(&initial_history, InitialHistory::Forked(_)))
+                .then(|| Mutex::new(Vec::new())),
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
             });
+            let initial_system1 = config.system1.enabled
+                && super::system1::ordinary_agent_session(
+                    &session_configuration.session_source,
+                    session_configuration.thread_source.as_ref(),
+                );
+            sess.system1_state(initial_system1, config.system1_initial_revision);
+            sess.initialize_system1_health(&config, &session_configuration);
+            let system1_state =
+                sess.system1_state(initial_system1, config.system1_initial_revision);
             if let Some(startup) = &startup {
                 startup.set_session(Arc::clone(&sess));
             }
@@ -1901,6 +1934,10 @@ impl Session {
                     permission_profile: thread_config.permission_profile,
                     active_permission_profile: thread_config.active_permission_profile,
                     reasoning_effort: thread_config.reasoning_effort,
+                    system1_enabled: system1_state.enabled,
+                    system1_revision: system1_state.revision,
+                    system1_error: system1_state.error,
+                    system1_failure_episode: system1_state.failure_episode,
                     rollout_path,
                 }),
             })
@@ -1908,6 +1945,7 @@ impl Session {
             for event in events {
                 sess.send_event_raw(event).await;
             }
+            sess.start_system1_warmup(&config, &session_configuration);
             turn_environments.start_connection_event_forwarding(tx_event.clone());
 
             let startup_auth_changed = mcp_auth_changes.has_changed().unwrap_or(false);

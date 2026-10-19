@@ -14,6 +14,10 @@ fn thread_settings_for_test(
     codex_app_server_protocol::ThreadSettingsUpdatedNotification {
         thread_id: thread_id.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: AskForApproval::OnRequest,
@@ -45,6 +49,12 @@ fn thread_settings_for_test(
 
 fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
+        agent_role: None,
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -164,6 +174,7 @@ fn start_safety_buffering_test_turn(
                 id: turn_id.to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -877,6 +888,7 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -925,6 +937,7 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Summary,
+                token_usage: None,
                 items: vec![item],
                 status: AppServerTurnStatus::Completed,
                 error: None,
@@ -963,6 +976,7 @@ async fn live_app_server_turn_started_sets_feedback_turn_id() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1423,6 +1437,94 @@ async fn live_app_server_sub_agent_activity_renders_once() {
     assert_eq!(cells.len(), 1);
     let rendered = lines_to_single_string(&cells[0]);
     assert_chatwidget_snapshot!("app_server_sub_agent_activity_renders_once", rendered);
+
+    for replay_kind in [None, Some(ReplayKind::ThreadSnapshot)] {
+        for (kind, title) in [
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Interacted,
+                "Interacted with",
+            ),
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Started,
+                "Started",
+            ),
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Completed,
+                "Completed",
+            ),
+            (
+                codex_app_server_protocol::SubAgentActivityKind::Interrupted,
+                "Interrupted",
+            ),
+        ] {
+            let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+            let activity = AppServerThreadItem::SubAgentActivity {
+                model: None,
+                reasoning_effort: None,
+                id: "activity-2".to_string(),
+                kind,
+                agent_thread_id: ThreadId::new().to_string(),
+                agent_path: "/root/researcher".to_string(),
+            };
+            chat.handle_server_notification(
+                ServerNotification::ItemStarted(ItemStartedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    started_at_ms: 0,
+                    item: activity.clone(),
+                }),
+                replay_kind,
+            );
+            chat.handle_server_notification(
+                ServerNotification::ItemCompleted(ItemCompletedNotification {
+                    thread_id: "thread-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    completed_at_ms: 0,
+                    item: activity,
+                }),
+                replay_kind,
+            );
+            let mut cells = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = event {
+                    cells.push(cell);
+                }
+            }
+            assert_eq!(cells.len(), 1);
+            assert_eq!(
+                lines_to_single_string(&cells[0].display_lines(/*width*/ 80)),
+                format!("• {title} `/root/researcher`\n"),
+            );
+            let grouped = kind != codex_app_server_protocol::SubAgentActivityKind::Interrupted;
+            assert_eq!(
+                cells[0].activity_ids(),
+                if grouped {
+                    vec!["subagent:activity-2".to_string()]
+                } else {
+                    Vec::new()
+                },
+            );
+            assert_eq!(
+                cells[0].tool_call_summary().map(|summary| (
+                    summary.count,
+                    summary.agent_starts,
+                    summary.agent_completions,
+                    summary.running,
+                    summary.names
+                )),
+                grouped.then(|| (
+                    usize::from(
+                        kind == codex_app_server_protocol::SubAgentActivityKind::Interacted
+                    ),
+                    usize::from(kind == codex_app_server_protocol::SubAgentActivityKind::Started),
+                    usize::from(kind == codex_app_server_protocol::SubAgentActivityKind::Completed),
+                    false,
+                    vec!["/root/researcher".to_string()],
+                )),
+            );
+            assert_eq!(cells[0].activity_disclosure(/*width*/ 80), None);
+        }
+    }
 }
 
 #[tokio::test]
@@ -1512,6 +1614,113 @@ async fn live_app_server_collab_wait_items_render_history() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_chatwidget_snapshot!("app_server_collab_wait_items_render_history", combined);
+
+    for replay_kind in [None, Some(ReplayKind::ThreadSnapshot)] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        let mut wait = AppServerThreadItem::CollabAgentToolCall {
+            id: "routine-wait".to_owned(),
+            tool: AppServerCollabAgentTool::Wait,
+            status: AppServerCollabAgentToolCallStatus::InProgress,
+            sender_thread_id: sender_thread_id.to_string(),
+            receiver_thread_ids: Vec::new(),
+            prompt: None,
+            model: None,
+            reasoning_effort: None,
+            agents_states: HashMap::new(),
+        };
+        chat.handle_server_notification(
+            ServerNotification::ItemStarted(ItemStartedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                started_at_ms: 0,
+                item: wait.clone(),
+            }),
+            replay_kind,
+        );
+        let mut cells = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                cells.push(cell);
+            }
+        }
+        assert_eq!(cells.len(), 1);
+        assert!(cells[0].tool_call_summary().unwrap().running);
+        let AppServerThreadItem::CollabAgentToolCall { status, .. } = &mut wait else {
+            unreachable!()
+        };
+        *status = AppServerCollabAgentToolCallStatus::Completed;
+        chat.handle_server_notification(
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: "thread-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                completed_at_ms: 0,
+                item: wait,
+            }),
+            replay_kind,
+        );
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                cells.push(cell);
+            }
+        }
+        assert_eq!(cells.len(), 2);
+        for cell in &cells {
+            let summary = cell.tool_call_summary().unwrap();
+            assert_eq!(
+                (
+                    summary.count,
+                    summary.count_key,
+                    summary.running,
+                    summary.names
+                ),
+                (
+                    1,
+                    Some("agent-wait:routine-wait".to_string()),
+                    false,
+                    vec!["wait_agent".to_string()]
+                )
+            );
+            assert_eq!(
+                cell.activity_ids(),
+                vec!["agent-wait:routine-wait".to_string()]
+            );
+            assert_eq!(cell.activity_disclosure(/*width*/ 80), None);
+        }
+        assert_eq!(
+            cells
+                .iter()
+                .flat_map(|cell| cell.raw_lines())
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                "• Waiting for agents",
+                "• Finished waiting",
+                "  └ No agents completed yet"
+            ]
+        );
+
+        // An unfinished wait must stop grouping when its parent turn is interrupted.
+        let item = AppServerThreadItem::CollabAgentToolCall {
+            id: "unfinished-wait".to_string(),
+            tool: AppServerCollabAgentTool::Wait,
+            status: AppServerCollabAgentToolCallStatus::InProgress,
+            sender_thread_id: sender_thread_id.to_string(),
+            receiver_thread_ids: Vec::new(),
+            prompt: None,
+            model: None,
+            reasoning_effort: None,
+            agents_states: HashMap::new(),
+        };
+        chat.on_collab_agent_tool_call(item);
+        let unfinished = loop {
+            if let AppEvent::InsertHistoryCell(cell) = rx.try_recv().unwrap() {
+                break cell;
+            }
+        };
+        assert!(unfinished.tool_call_summary().unwrap().running);
+        handle_turn_interrupted(&mut chat, "turn-1");
+        assert!(unfinished.tool_call_summary().is_none());
+    }
 }
 
 #[tokio::test]
@@ -1590,6 +1799,7 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1626,6 +1836,7 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::Failed,
                 error: Some(AppServerTurnError {
@@ -1800,6 +2011,7 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1878,6 +2090,7 @@ async fn live_app_server_server_overloaded_error_renders_error() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1922,6 +2135,7 @@ async fn live_app_server_cyber_policy_error_renders_dedicated_notice() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,

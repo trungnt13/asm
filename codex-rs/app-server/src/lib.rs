@@ -101,7 +101,6 @@ mod attestation;
 mod auth_mode;
 mod bespoke_event_handling;
 mod code_mode_host;
-mod codex_home_metrics;
 mod command_exec;
 mod config_layer;
 mod startup_config;
@@ -138,6 +137,7 @@ mod notification_media;
 mod otel_reloader;
 mod outgoing_message;
 mod plugin_config_reload;
+mod prompt_debug;
 mod request_processors;
 mod request_serialization;
 mod server_request_error;
@@ -155,6 +155,7 @@ pub use crate::code_mode_host::AppServerCodeModeHostArgs;
 pub use crate::code_mode_host::CodeModeHostTransport;
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
+pub use crate::prompt_debug::build_prompt_request;
 pub use crate::transport::AppServerTransport;
 pub use crate::transport::RemoteControlStartupMode;
 pub use crate::transport::app_server_control_socket_path;
@@ -707,38 +708,47 @@ pub async fn run_main_with_transport_options(
         outgoing_tx,
         analytics_events_client.clone(),
     ));
-    let feedback = CodexFeedback::new();
+    let feedback = if config.diagnostic_log_capture {
+        CodexFeedback::new()
+    } else {
+        CodexFeedback::disabled()
+    };
 
-    // Install a simple subscriber so `tracing` output is visible. Users can
-    // control the log level with `RUST_LOG` and switch to JSON logs with
-    // `LOG_FORMAT=json`.
+    // With diagnostic capture enabled, `RUST_LOG` controls stderr verbosity
+    // and `LOG_FORMAT=json` selects JSON output.
     // SQLx enters the caller's span for each command. Skip enter/exit records
     // that can block its worker on stderr while holding a write transaction.
     // Preserve span boundaries, busy/idle timings, and explicit events.
-    let stderr_fmt: StderrLogLayer = match log_format_from_env() {
-        LogFormat::Json => tracing_subscriber::fmt::layer()
-            .json()
-            .with_writer(std::io::stderr)
-            .with_span_events(stderr_span_events())
-            .with_filter(EnvFilter::from_default_env())
-            .boxed(),
-        LogFormat::Default => tracing_subscriber::fmt::layer()
-            .with_writer(std::io::stderr)
-            .with_span_events(stderr_span_events())
-            .with_filter(EnvFilter::from_default_env())
-            .boxed(),
-    };
+    let stderr_fmt = config.diagnostic_log_capture.then(|| {
+        let layer: StderrLogLayer = match log_format_from_env() {
+            LogFormat::Json => tracing_subscriber::fmt::layer()
+                .json()
+                .with_writer(std::io::stderr)
+                .with_span_events(stderr_span_events())
+                .with_filter(EnvFilter::from_default_env())
+                .boxed(),
+            LogFormat::Default => tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_span_events(stderr_span_events())
+                .with_filter(EnvFilter::from_default_env())
+                .boxed(),
+        };
+        layer
+    });
 
-    let log_write_warning = log_write_warning::LogWriteWarningReporter::new(
-        feedback.clone(),
-        &outgoing_message_sender,
-        &config,
-    );
     let feedback_layer = feedback.logger_layer();
     let feedback_metadata_layer = feedback.metadata_layer();
     let log_db = state_db
         .clone()
-        .map(|state_db| log_db::start(state_db, log_write_warning.clone()));
+        .filter(|_| config.diagnostic_log_capture)
+        .map(|state_db| {
+            let log_write_warning = log_write_warning::LogWriteWarningReporter::new(
+                feedback.clone(),
+                &outgoing_message_sender,
+                &config,
+            );
+            log_db::start(state_db, log_write_warning)
+        });
     let log_db_layer = log_db
         .clone()
         .map(|layer| layer.with_filter(log_db::default_filter()));
@@ -910,11 +920,6 @@ pub async fn run_main_with_transport_options(
         }
     }
     transport_accept_handles.push(remote_control_accept_handle);
-
-    // Only the standalone server measures its local home, not embedded/cloud runtimes.
-    if let Some(metrics) = otel.as_ref().and_then(codex_otel::OtelProvider::metrics) {
-        codex_home_metrics::spawn(&config, metrics.clone(), transport_shutdown_token.clone());
-    }
 
     let otel_reloader_handle = otel_reloader::spawn(
         otel,

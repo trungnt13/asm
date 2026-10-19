@@ -115,6 +115,7 @@ pub fn create_fake_rollout_with_token_usage(
         /*git_info*/ None,
     )?;
     let payload = serde_json::to_value(EventMsg::TokenCount(TokenCountEvent {
+        output_tokens_per_second: None,
         info: Some(TokenUsageInfo {
             total_token_usage: TokenUsage {
                 input_tokens: 120,
@@ -256,6 +257,7 @@ fn create_fake_rollout_with_source_and_parent_thread_id(
         creator_user_id: None,
         creator_account_id: None,
         session_id,
+        prompt_cache_key: None,
         id: conversation_id,
         forked_from_id: None,
         forked_from_ordinal_exclusive: None,
@@ -352,6 +354,7 @@ pub fn create_fake_rollout_with_text_elements(
         creator_user_id: None,
         creator_account_id: None,
         session_id: conversation_id.into(),
+        prompt_cache_key: None,
         id: conversation_id,
         forked_from_id: None,
         forked_from_ordinal_exclusive: None,

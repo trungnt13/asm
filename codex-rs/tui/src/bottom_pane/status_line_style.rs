@@ -15,7 +15,7 @@ use crate::terminal_palette::effective_stdout_color_level;
 use crate::thread_color::thread_color;
 use codex_protocol::ThreadId;
 
-const STATUS_LINE_SEPARATOR: &str = " · ";
+pub(super) const STATUS_LINE_SEPARATOR: &str = "·";
 const STATUS_LINE_COLOR_SATURATION_PERCENT: u16 = 85;
 const STATUS_LINE_COLOR_BRIGHTNESS_PERCENT: u16 = 100;
 
@@ -49,7 +49,9 @@ impl StatusLineAccent {
             | StatusLineItem::ContextWindowSize
             | StatusLineItem::UsedTokens
             | StatusLineItem::TotalInputTokens
+            | StatusLineItem::CacheHitRate
             | StatusLineItem::TotalOutputTokens
+            | StatusLineItem::OutputTps
             | StatusLineItem::ThreadCredits
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
             StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => Self::Limit,
@@ -239,7 +241,7 @@ mod tests {
         )
         .expect("status line");
 
-        assert_eq!(line_text(&line), "gpt-5 · /repo · main");
+        assert_eq!(line_text(&line), "gpt-5·/repo·main");
         assert_eq!(line.spans[0].style.fg, Some(Color::Cyan));
         assert!(!line.spans[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(line.spans[2].style.fg, Some(Color::Green));
@@ -253,7 +255,7 @@ mod tests {
         let line = status_line_from_segments_with_resolver(
             [
                 (StatusLineItem::ModelName, "gpt-5".to_string()),
-                (StatusLineItem::ContextUsed, "Context 12% used".to_string()),
+                (StatusLineItem::ContextUsed, "Ctx12%".to_string()),
             ],
             /*use_theme_colors*/ true,
             /*thread_id*/ None,
@@ -284,7 +286,7 @@ mod tests {
         )
         .expect("thread usage status line");
 
-        assert_eq!(line_text(&line), "5.2 credits · ~$0.21");
+        assert_eq!(line_text(&line), "5.2 credits·~$0.21");
         assert_eq!(line.spans[0].style, line.spans[2].style);
         assert_eq!(line.spans[1].style, secondary_text_style());
     }
@@ -321,7 +323,7 @@ mod tests {
         let line = status_line_from_segments_with_resolver(
             [
                 (StatusLineItem::ModelName, "gpt-5".to_string()),
-                (StatusLineItem::ContextUsed, "Context 12% used".to_string()),
+                (StatusLineItem::ContextUsed, "Ctx12%".to_string()),
             ],
             /*use_theme_colors*/ false,
             /*thread_id*/ None,
@@ -329,7 +331,7 @@ mod tests {
         )
         .expect("status line");
 
-        assert_eq!(line_text(&line), "gpt-5 · Context 12% used");
+        assert_eq!(line_text(&line), "gpt-5·Ctx12%");
         assert_eq!(line.spans[0].style, secondary_text_style());
         assert_eq!(line.spans[1].style, secondary_text_style());
         assert_eq!(line.spans[2].style, secondary_text_style());

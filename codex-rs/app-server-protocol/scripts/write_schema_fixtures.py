@@ -26,6 +26,11 @@ def main() -> None:
         action="store_true",
         help="regenerate the precomputed experimental exports",
     )
+    parser.add_argument(
+        "--cargo-profile",
+        default=None if os.environ.get("CI") else "dev-small",
+        help="Cargo build profile; defaults to dev-small locally and Cargo's default in CI",
+    )
     args = parser.parse_args()
 
     workspace_root = Path(__file__).resolve().parents[2]
@@ -42,6 +47,7 @@ def main() -> None:
         [
             "cargo",
             "test",
+            *(["--profile", args.cargo_profile] if args.cargo_profile else []),
             "-p",
             "codex-app-server-protocol",
             "--lib",

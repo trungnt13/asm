@@ -9,12 +9,12 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 
 
 
-✗ Request denied for codex to run curl -sS -i -X POST --data-binary
+✗ Request denied for ASM to run curl -sS -i -X POST --data-binary
   @core/src/codex.rs https://example.com
 
 • Working (0s • esc to interrupt)
 
+                                                                                                                                       Main 
+› Ask ASM to do anything
 
-› Ask Codex to do anything
-
-  GPT-5.6-Sol default · /tmp/project
+  sol56 def·/tmp/project

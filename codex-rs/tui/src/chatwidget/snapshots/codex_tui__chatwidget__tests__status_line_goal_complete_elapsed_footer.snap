@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.5                                           Goal achieved (2d 23h 42m)  "
+"  55                                                Goal achieved (2d 23h 42m)  "

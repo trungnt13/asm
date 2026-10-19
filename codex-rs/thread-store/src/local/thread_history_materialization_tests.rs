@@ -757,6 +757,7 @@ async fn paginated_realtime_items_materialize_separately_in_rollout_order() {
             creator_user_id: None,
             creator_account_id: None,
             session_id: legacy_thread_id.into(),
+            prompt_cache_key: None,
             thread_id: legacy_thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -1966,6 +1967,7 @@ async fn paginated_projection_accepts_float_rate_limits_and_later_final_answers(
         .expect("rollout path");
     let token_count = |primary: Option<f64>, secondary: Option<f64>| {
         RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
+            output_tokens_per_second: None,
             info: None,
             rate_limits: Some(RateLimitSnapshot {
                 limit_id: None,
@@ -3071,6 +3073,7 @@ async fn create_paginated_subagent_thread(
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,

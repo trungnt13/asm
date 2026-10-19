@@ -5,12 +5,17 @@ use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::*;
 use crate::app_event::AgentPickerThreadRefresh;
+use crate::status::format_tokens_compact;
+use crate::status_line_labels::compact_model_name;
+use crate::status_line_labels::compact_reasoning_label;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadSourceKind;
 use codex_app_server_protocol::ThreadStatus;
+use codex_features::Feature;
+use codex_protocol::config_types::ServiceTier;
 use std::collections::HashSet;
 
 pub(super) const AGENT_PICKER_VIEW_ID: &str = "agent-picker";
@@ -18,6 +23,78 @@ const AGENT_PICKER_PAGE_SIZE: u32 = 100;
 const AGENT_PICKER_MAX_THREADS: usize = 1_000;
 
 impl App {
+    /// Formats configured picker settings; this is not a report of an executed request.
+    pub(super) fn agent_picker_model_label(
+        &self,
+        thread_id: ThreadId,
+        is_primary: bool,
+    ) -> Option<String> {
+        let settings = self.agent_navigation.model_settings(&thread_id)?;
+        let preset = self
+            .model_catalog
+            .models
+            .iter()
+            .find(|preset| preset.model == settings.model);
+        let effort = settings
+            .reasoning_effort
+            .as_ref()
+            .or_else(|| preset.map(|preset| &preset.default_reasoning_effort));
+        let inherited_tier = self
+            .primary_session_configured
+            .as_ref()
+            .map(|session| session.service_tier.as_deref())
+            .unwrap_or_else(|| self.config.service_tier.as_deref());
+        let selected_tier = if is_primary {
+            inherited_tier
+        } else {
+            effort
+                .and_then(|effort| {
+                    self.config
+                        .subagent_service_tiers
+                        .get(&settings.model)?
+                        .get(effort)
+                })
+                .map(String::as_str)
+                .or(inherited_tier)
+        };
+        let fast = selected_tier.and_then(ServiceTier::from_request_value)
+            == Some(ServiceTier::Fast)
+            && self.config.features.enabled(Feature::FastMode)
+            && preset.is_none_or(|preset| {
+                crate::service_tier_resolution::model_supports_service_tier(
+                    preset,
+                    ServiceTier::Fast.request_value(),
+                )
+            });
+        let mut label = compact_model_name(&settings.model);
+        if let Some(effort) = effort {
+            label.push('-');
+            label.push_str(&compact_reasoning_label(effort.as_str()));
+        }
+        if fast {
+            label.push_str("-fast");
+        }
+        // Canonical child paths identify V2 spawns even when resuming under different features.
+        let context_window = (!is_primary
+            && self
+                .agent_navigation
+                .get(&thread_id)
+                .is_some_and(|entry| entry.agent_path.is_some()))
+        .then(|| {
+            self.config
+                .subagent_model_context_windows
+                .get(&settings.model)
+                .copied()
+        })
+        .flatten()
+        .or(self.config.model_context_window);
+        if let Some(context_window) = context_window.filter(|window| *window > 0) {
+            label.push('-');
+            label.push_str(&format_tokens_compact(context_window).to_lowercase());
+        }
+        Some(label)
+    }
+
     pub(super) fn refresh_agent_picker_threads(
         &mut self,
         app_server: &AppServerSession,
@@ -161,6 +238,11 @@ impl App {
                 self.agent_navigation.mark_parent_owned(thread_id);
             }
             self.upsert_agent_picker_thread(thread_id, agent_nickname, agent_role, is_closed);
+            self.agent_navigation.set_model_settings(
+                thread_id,
+                thread.model,
+                thread.reasoning_effort,
+            );
             self.agent_navigation.set_agent_path(thread_id, agent_path);
             if !live && update_liveness {
                 self.agent_navigation.set_running(thread_id, is_running);
@@ -257,3 +339,7 @@ impl App {
             .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params);
     }
 }
+
+#[cfg(test)]
+#[path = "agent_picker_tests.rs"]
+mod tests;

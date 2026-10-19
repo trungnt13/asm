@@ -331,6 +331,7 @@ mod thread_processor_behavior_tests {
             },
         ))];
         let active_turn = Turn {
+            token_usage: None,
             id: "live-turn".to_string(),
             root_turn_id: None,
             items: vec![ThreadItem::UserMessage {
@@ -725,6 +726,10 @@ mod thread_processor_behavior_tests {
             initial_turns_page: None,
         };
         let config_snapshot = ThreadConfigSnapshot {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             turn_extension_init: Default::default(),
             disabled_plugin_ids: Vec::new(),
             model: "gpt-5".to_string(),

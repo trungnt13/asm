@@ -105,7 +105,7 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn on_collab_event(&mut self, cell: PlainHistoryCell) {
+    pub(super) fn on_collab_event(&mut self, cell: impl HistoryCell + 'static) {
         self.flush_answer_stream_with_separator();
         self.add_to_history(cell);
         self.request_redraw();
@@ -132,6 +132,25 @@ impl ChatWidget {
         } else {
             None
         };
+
+        if self.show_interagent_communication
+            && let Some(cell) = multi_agents::communication_history_cell(
+                &item,
+                &self.config.cwd,
+                /*own_agent_role*/ None,
+            )
+        {
+            self.on_collab_event(cell);
+            return;
+        }
+
+        let metadata = &self.collab_agent_metadata;
+        if let Some(cell) = self.agent_wait_history.cell(&item, |thread_id| {
+            metadata.get(&thread_id).cloned().unwrap_or_default()
+        }) {
+            self.on_collab_event(cell);
+            return;
+        }
 
         if let Some(cell) = multi_agents::tool_call_history_cell(
             &item,

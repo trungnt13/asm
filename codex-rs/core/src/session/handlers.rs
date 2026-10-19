@@ -301,9 +301,18 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
+    sess.stop_system1().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     super::async_compaction::shutdown(sess).await;
+    // Cancel the turn before starting the bounded, best-effort diagnostic drain.
+    if let Some(log) = sess
+        .services
+        .thread_extension_data
+        .get::<Arc<super::decision_log::DecisionLog>>()
+    {
+        log.close();
+    }
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();
     if let Some(shell_snapshot_prewarm) = shell_snapshot_prewarm {
         shell_snapshot_prewarm.abort();
@@ -609,21 +618,50 @@ pub(super) async fn submission_loop(
                     should_exit
                 }
                 Op::ThreadSettings {
-                    thread_settings,
+                    mut thread_settings,
                     reply,
                 } => {
-                    let _settings_guard = thread_settings::acquire_persistence_lock(&sess).await;
+                    let system1_enabled = thread_settings.system1_enabled.take();
+                    let persistent = thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default();
+                    let manual_reasoning = thread_settings.model.is_some()
+                        || thread_settings.effort.is_some()
+                        || thread_settings.collaboration_mode.is_some();
                     let thread_settings = WithTurnExtensionData {
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
                     };
-                    match thread_settings::update(&sess, thread_settings).await {
+                    let result = async {
+                        if system1_enabled.is_some() && persistent {
+                            return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
+                        }
+                        let _settings_guard = if system1_enabled.is_none() {
+                            Some(thread_settings::acquire_persistence_lock(&sess).await)
+                        } else {
+                            None
+                        };
+                        let snapshot = if system1_enabled.is_none() {
+                            Some(thread_settings::update(&sess, thread_settings).await
+                                .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?)
+                        } else {
+                            None
+                        };
+                        if manual_reasoning {
+                            sess.pause_system1().await;
+                        }
+                        if let Some(enabled) = system1_enabled {
+                            sess.set_system1_enabled(enabled).await?;
+                        }
+                        Ok::<_, CodexErr>(snapshot)
+                    }.await;
+                    match result {
                         Ok(snapshot) => {
                             // Reply first: the caller may hold a lock its event consumer needs.
                             if let Some(reply) = reply {
                                 let _ = reply.send(Ok(()));
                             }
-                            thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            if let Some(snapshot) = snapshot {
+                                thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            }
                         }
                         Err(error) => {
                             let message = format!("invalid thread settings override: {error}");

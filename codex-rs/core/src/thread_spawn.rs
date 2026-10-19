@@ -134,6 +134,10 @@ pub(crate) async fn spawn(
     } else {
         None
     };
+    let communication_prompt = match &message {
+        AgentMessage::Plaintext(text) => Some(text.clone()),
+        AgentMessage::Encrypted(_) => None,
+    };
     let (agent, config) = session
         .services
         .agent_control
@@ -159,6 +163,17 @@ pub(crate) async fn spawn(
             },
         })
         .await?;
+    if let Some(prompt) = communication_prompt {
+        crate::tools::handlers::multi_agents_v2::emit_inter_agent_communication(
+            session,
+            turn,
+            call_id,
+            codex_protocol::items::CollabAgentTool::SpawnAgent,
+            agent.thread_id,
+            prompt,
+        )
+        .await;
+    }
     Ok(ThreadSpawnResult {
         agent,
         config,

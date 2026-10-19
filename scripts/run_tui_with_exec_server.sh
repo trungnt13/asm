@@ -24,7 +24,7 @@ trap cleanup EXIT INT TERM HUP
 
 (
   cd "$cargo_root"
-  cargo run -p codex-cli --bin codex -- exec-server --listen "$listen_url"
+  cargo run --profile dev-small -p codex-cli --bin codex -- exec-server --listen "$listen_url"
 ) >"$stdout_log" 2>"$stderr_log" &
 server_pid="$!"
 
@@ -58,4 +58,4 @@ export CODEX_EXEC_SERVER_URL="$exec_server_url"
 echo "Starting codex-tui with CODEX_EXEC_SERVER_URL=$CODEX_EXEC_SERVER_URL" >&2
 
 cd "$cargo_root"
-cargo run -p codex-tui --bin codex-tui -- -c mcp_oauth_credentials_store=file "$@"
+cargo run --profile dev-small -p codex-tui --bin codex-tui -- -c mcp_oauth_credentials_store=file "$@"

@@ -5,25 +5,12 @@ use http::header::HeaderMap;
 
 use codex_core::config::Config;
 use codex_http_client::HttpClientFactory;
-use codex_http_client::OutboundProxyPolicy;
 use codex_login::AuthManager;
 use std::sync::Arc;
 
 pub fn set_user_agent_suffix(suffix: &str) {
     if let Ok(mut guard) = codex_login::default_client::USER_AGENT_SUFFIX.lock() {
         guard.replace(suffix.to_string());
-    }
-}
-
-pub fn append_error_log(message: impl AsRef<str>) {
-    let ts = Utc::now().to_rfc3339();
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("error.log")
-    {
-        use std::io::Write as _;
-        let _ = writeln!(f, "[{ts}] {}", message.as_ref());
     }
 }
 
@@ -77,19 +64,9 @@ pub(crate) fn validate_chatgpt_base_url(input: &str) -> anyhow::Result<String> {
 }
 
 pub async fn load_auth_manager(
+    config: &Config,
     chatgpt_base_url: Option<String>,
 ) -> (Option<Arc<AuthManager>>, HttpClientFactory) {
-    // TODO: pass in cli overrides once cloud tasks properly support them.
-    let config = match Config::load_with_cli_overrides(Vec::new()).await {
-        Ok(config) => config,
-        Err(error) => {
-            append_error_log(format!(
-                "failed to load auth config; using transport-default proxy handling: {error}"
-            ));
-            let http_client_factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
-            return (None, http_client_factory);
-        }
-    };
     let http_client_factory = config.http_client_factory();
     let mut auth_config = config.auth_config();
     auth_config.chatgpt_base_url = chatgpt_base_url.or(Some(config.chatgpt_base_url.clone()));
@@ -101,7 +78,7 @@ pub async fn load_auth_manager(
     {
         Ok(auth_manager) => auth_manager,
         Err(error) => {
-            append_error_log(format!("failed to load auth: {error}"));
+            tracing::debug!("failed to load auth: {error}");
             return (None, http_client_factory);
         }
     };
@@ -110,7 +87,7 @@ pub async fn load_auth_manager(
 
 /// Build headers for ChatGPT-backed requests: `User-Agent`, optional `Authorization`,
 /// and optional `ChatGPT-Account-Id`.
-pub async fn build_chatgpt_headers() -> HeaderMap {
+pub async fn build_chatgpt_headers(config: &Config) -> HeaderMap {
     use http::header::HeaderValue;
     use http::header::USER_AGENT;
 
@@ -121,7 +98,7 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
         USER_AGENT,
         HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("codex-cli")),
     );
-    if let Some(am) = load_auth_manager(/*chatgpt_base_url*/ None).await.0
+    if let Some(am) = load_auth_manager(config, /*chatgpt_base_url*/ None).await.0
         && let Some(auth) = am.auth().await
         && auth.uses_codex_backend()
     {

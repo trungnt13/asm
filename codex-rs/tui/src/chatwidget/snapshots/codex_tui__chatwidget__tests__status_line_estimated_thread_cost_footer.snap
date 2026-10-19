@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/status_and_layout.rs
 expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
-"                                                                                "
-"  GPT-5.6-Sol default · 5.2 credits · ~$0.21                                    "
+"  sol56 def·5.2 credits·~$0.21                                                  "

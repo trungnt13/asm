@@ -47,6 +47,7 @@ fn turn(items: Vec<ThreadItem>) -> Turn {
         root_turn_id: None,
         items,
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,
@@ -62,6 +63,8 @@ fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
         items.iter().cloned(),
         RawReasoningVisibility::Hidden,
         Some(&app.config),
+        /*show_communication*/ false,
+        /*own_agent_role*/ None,
     )
 }
 

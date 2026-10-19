@@ -73,6 +73,12 @@ impl ChatWidget {
         let connector_scope_changed = previous_thread_id != Some(session.thread_id)
             || self.config.cwd.as_path() != session.cwd.as_path();
         self.thread_id = Some(session.thread_id);
+        if let Some(role) = &session.agent_role {
+            self.collab_agent_metadata
+                .entry(session.thread_id)
+                .or_default()
+                .agent_role = Some(role.clone());
+        }
         self.daybreak_enabled = self.config.features.enabled(Feature::CliDaybreak)
             && session.daybreak_enabled
             && !matches!(display, SessionConfiguredDisplay::SideConversation);
@@ -99,14 +105,23 @@ impl ChatWidget {
             {
                 self.refresh_account_scoped_models();
             }
+            self.output_tps = None;
             self.backend_banner_notice_model = None;
             self.automatic_model_switch_state =
                 backend_banners::AutomaticModelSwitchState::default();
             self.review.recent_auto_review_denials = RecentAutoReviewDenials::default();
             self.clear_thread_usage_state();
         }
+        self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_system1_turn_id = None;
         self.clear_safety_buffering();
+        self.status_state.system1_enabled = session.system1_enabled;
+        self.status_state.system1_revision = session.system1_revision;
+        self.status_state.system1_warning = None;
+        self.status_state.system1_error = session.system1_error;
+        self.status_state.system1_failure_episode = session.system1_failure_episode;
         self.thread_name = session.thread_name.clone();
         self.current_goal_status_indicator = None;
         self.current_goal_status = None;
@@ -251,6 +266,7 @@ impl ChatWidget {
         {
             self.emit_forked_thread_event(forked_from_id, fork_parent_title);
         }
+        self.announce_system1_error();
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
         }
@@ -329,7 +345,10 @@ impl ChatWidget {
         self.on_task_complete(
             /*last_agent_message*/ None, /*completion*/ None, /*from_replay*/ true,
         );
+        self.agent_wait_history.clear();
         self.turn_lifecycle.reset_thread();
+        self.status_state.captured_step_reasoning = None;
+        self.status_state.suppressed_system1_turn_id = None;
         self.review = Default::default();
         self.transcript.take_active_cell();
         self.transcript.reset_copy_history();

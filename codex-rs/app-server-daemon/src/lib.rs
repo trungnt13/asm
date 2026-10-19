@@ -292,6 +292,9 @@ pub async fn run_pid_update_loop(
     http_client_factory: codex_http_client::HttpClientFactory,
     restore_release: Option<String>,
 ) -> Result<()> {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        return Err(anyhow!(codex_install_context::EXTERNAL_UPDATE_MESSAGE));
+    }
     ensure_supported_platform()?;
     #[cfg(windows)]
     backend::windows::ensure_not_elevated()?;
@@ -301,6 +304,9 @@ pub async fn run_pid_update_loop(
 pub async fn update(
     http_client_factory: codex_http_client::HttpClientFactory,
 ) -> Result<UpdateOutput> {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        return Err(anyhow!(codex_install_context::EXTERNAL_UPDATE_MESSAGE));
+    }
     ensure_supported_platform()?;
     #[cfg(windows)]
     backend::windows::ensure_not_elevated()?;
@@ -484,7 +490,7 @@ impl Daemon {
         prepare_install::prepare(self, &settings).await?;
         let mut managed = self.clone();
         managed.managed_codex_bin = self.current_managed_codex_bin()?;
-        if !settings.auto_update_enabled {
+        if !codex_install_context::BUILT_IN_UPDATES_ENABLED || !settings.auto_update_enabled {
             backend::pid_update_loop_backend(self.backend_paths(&settings))
                 .stop()
                 .await?;
@@ -973,7 +979,7 @@ impl Daemon {
 
     async fn ensure_managed_updater(&self, settings: &DaemonSettings) -> Result<bool> {
         let updater = backend::pid_update_loop_backend(self.backend_paths(settings));
-        if !settings.auto_update_enabled {
+        if !codex_install_context::BUILT_IN_UPDATES_ENABLED || !settings.auto_update_enabled {
             updater.stop().await?;
             return Ok(false);
         }
@@ -1044,7 +1050,8 @@ impl Daemon {
     }
 
     async fn is_bootstrapped(&self, settings: &DaemonSettings) -> Result<bool> {
-        if !settings.auto_update_enabled
+        if !codex_install_context::BUILT_IN_UPDATES_ENABLED
+            || !settings.auto_update_enabled
             || !self.is_stable_standalone_release()?
             || !managed_install::supports_daemon_update_loop(&self.managed_codex_bin).await
         {

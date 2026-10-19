@@ -2456,6 +2456,30 @@
             },
             "method": {
               "enum": [
+                "thread/system1Stats/read"
+              ],
+              "title": "Thread/system1Stats/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ThreadSystem1StatsReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/system1Stats/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/read"
               ],
               "title": "Thread/readRequestMethod",
@@ -14425,6 +14449,39 @@
       ],
       "type": "object"
     },
+    "ReasoningEffortUpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Reports captured step effort without changing the thread's saved settings.",
+      "properties": {
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "system1": {
+          "description": "Automatic mode is active, including when a decision falls back to current effort.",
+          "type": "boolean"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "system1",
+        "threadId",
+        "turnId"
+      ],
+      "title": "ReasoningEffortUpdatedNotification",
+      "type": "object"
+    },
     "ReasoningItemContent": {
       "oneOf": [
         {
@@ -16765,6 +16822,46 @@
           "properties": {
             "method": {
               "enum": [
+                "turn/reasoningEffortUpdated"
+              ],
+              "title": "Turn/reasoningEffortUpdatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ReasoningEffortUpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Turn/reasoningEffortUpdatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "thread/system1Updated"
+              ],
+              "title": "Thread/system1UpdatedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/System1UpdatedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/system1UpdatedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "hook/started"
               ],
               "title": "Hook/startedNotificationMethod",
@@ -18662,6 +18759,315 @@
       ],
       "type": "object"
     },
+    "System1DecisionConnection": {
+      "description": "Identifies the session-fixed decision connection without endpoint or credential settings. Resolution does not imply successful initialization or provider use.",
+      "properties": {
+        "backend": {
+          "type": "string"
+        },
+        "clientInitialized": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string"
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend",
+        "clientInitialized",
+        "model"
+      ],
+      "type": "object"
+    },
+    "System1Error": {
+      "description": "Describes a Decisions failure without exposing request or response content.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "credentials"
+              ],
+              "title": "CredentialsSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "CredentialsSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidRequest"
+              ],
+              "title": "InvalidRequestSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidRequestSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "transport"
+              ],
+              "title": "TransportSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TransportSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "timeout"
+              ],
+              "title": "TimeoutSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "TimeoutSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "format": "uint16",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "http"
+              ],
+              "title": "HttpSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "type"
+          ],
+          "title": "HttpSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "responseTooLarge"
+              ],
+              "title": "ResponseTooLargeSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "ResponseTooLargeSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "invalidResponse"
+              ],
+              "title": "InvalidResponseSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "InvalidResponseSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "rejected"
+              ],
+              "title": "RejectedSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "RejectedSystem1Error",
+          "type": "object"
+        }
+      ]
+    },
+    "System1FailureWarning": {
+      "properties": {
+        "cooldownSeconds": {
+          "description": "Initial retry delay in seconds; absent when recovery is blocked.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warmupTimeoutSeconds": {
+          "default": null,
+          "description": "Deadline for a synthetic startup warmup timeout; absent for decision failures.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "System1Stats": {
+      "description": "Decision totals for one loaded thread runtime, excluding warmup. Totals reset when the runtime unloads; each child has separate totals. Setup failures do not contribute completed attempts or elapsed time.",
+      "properties": {
+        "accepted": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "completedAttempts": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "effortChanges": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "errors": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "ignored": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "lastElapsedMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "setupFailures": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "totalElapsedMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accepted",
+        "completedAttempts",
+        "effortChanges",
+        "errors",
+        "ignored",
+        "setupFailures",
+        "totalElapsedMs"
+      ],
+      "type": "object"
+    },
+    "System1UpdatedNotification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Reports an immediate runtime-mode change, before any subsequent model step.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1Error"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "failureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "system1Revision": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1FailureWarning"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "enabled",
+        "threadId"
+      ],
+      "title": "System1UpdatedNotification",
+      "type": "object"
+    },
     "TerminalInteractionNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -19568,6 +19974,35 @@
             "null"
           ]
         },
+        "system1Enabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "system1Error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1Error"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "system1FailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "system1Revision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "thread": {
           "$ref": "#/definitions/Thread"
         }
@@ -19906,6 +20341,38 @@
             "type"
           ],
           "title": "HookPromptThreadItem",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "author": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "recipient": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "interAgentMessage"
+              ],
+              "title": "InterAgentMessageThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "author",
+            "id",
+            "recipient",
+            "text",
+            "type"
+          ],
+          "title": "InterAgentMessageThreadItem",
           "type": "object"
         },
         {
@@ -22137,6 +22604,35 @@
             "null"
           ]
         },
+        "system1Enabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "system1Error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1Error"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "system1FailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "system1Revision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "thread": {
           "$ref": "#/definitions/Thread"
         },
@@ -22584,6 +23080,35 @@
               "type": "null"
             }
           ]
+        },
+        "system1Enabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "system1Error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1Error"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "system1FailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "system1Revision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
         }
       },
       "required": [
@@ -22860,6 +23385,35 @@
             "null"
           ]
         },
+        "system1Enabled": {
+          "default": false,
+          "description": "Current session-only automatic reasoning mode; never a saved preference.",
+          "type": "boolean"
+        },
+        "system1Error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1Error"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "system1FailureEpisode": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "system1Revision": {
+          "default": 0,
+          "description": "Monotonic session revision for ordering mode updates.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "thread": {
           "$ref": "#/definitions/Thread"
         }
@@ -22986,6 +23540,78 @@
         "threadId"
       ],
       "title": "ThreadStatusChangedNotification",
+      "type": "object"
+    },
+    "ThreadSystem1StatsReadParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "title": "ThreadSystem1StatsReadParams",
+      "type": "object"
+    },
+    "ThreadSystem1StatsReadResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "decisionConnection": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1DecisionConnection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/System1Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "failureEpisode": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stats": {
+          "$ref": "#/definitions/System1Stats"
+        }
+      },
+      "required": [
+        "enabled",
+        "failureEpisode",
+        "revision",
+        "stats"
+      ],
+      "title": "ThreadSystem1StatsReadResponse",
       "type": "object"
     },
     "ThreadTimelineEntry": {
@@ -23168,6 +23794,15 @@
     "ThreadTokenUsageUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "outputTokensPerSecond": {
+          "default": null,
+          "description": "Successful ordinary response throughput, including request latency and reasoning output. Other usage updates and replayed updates carry `None`.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "threadId": {
           "type": "string"
         },
@@ -23657,6 +24292,18 @@
         },
         "status": {
           "$ref": "#/definitions/TurnStatus"
+        },
+        "tokenUsage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TokenUsageBreakdown"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Provider-reported token totals for this turn, including compaction, when available."
         }
       },
       "required": [

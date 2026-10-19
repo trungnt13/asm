@@ -59,6 +59,11 @@ impl ChatWidget {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                if let Some(tps) = notification.output_tokens_per_second
+                    && let Ok(thread_id) = ThreadId::from_string(&notification.thread_id)
+                {
+                    self.cache_output_tps(thread_id, tps);
+                }
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
                 )));
@@ -83,10 +88,50 @@ impl ChatWidget {
             ServerNotification::ThreadGoalCleared(notification) => {
                 self.on_thread_goal_cleared(notification.thread_id.as_str());
             }
-            ServerNotification::ThreadSettingsUpdated(notification) => {
+            ServerNotification::ThreadSettingsUpdated(mut notification) => {
+                if from_replay {
+                    notification.thread_settings.system1_enabled = self.system1_enabled();
+                    notification.thread_settings.system1_revision =
+                        self.status_state.system1_revision;
+                    notification.thread_settings.system1_error = self.status_state.system1_error;
+                    notification.thread_settings.system1_failure_episode =
+                        self.status_state.system1_failure_episode;
+                }
                 self.on_thread_settings_updated(notification);
             }
+            ServerNotification::System1Updated(notification) => {
+                if !from_replay
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                {
+                    self.set_system1_state(
+                        notification.enabled,
+                        notification.system1_revision,
+                        notification.error,
+                        notification.failure_episode,
+                        notification.warning,
+                    );
+                }
+            }
+            ServerNotification::ReasoningEffortUpdated(notification) => {
+                if !(from_replay
+                    || notification.system1
+                        && self.status_state.suppressed_system1_turn_id.as_deref()
+                            == Some(&notification.turn_id))
+                    && self
+                        .thread_id
+                        .is_some_and(|id| id.to_string() == notification.thread_id)
+                    && self.turn_lifecycle.last_turn_id.as_deref() == Some(&notification.turn_id)
+                    && !self.input_queue.user_turn_pending_start
+                {
+                    self.status_state.captured_step_reasoning = Some(notification);
+                    self.refresh_status_surfaces();
+                }
+            }
             ServerNotification::TurnStarted(notification) => {
+                self.status_state.captured_step_reasoning = None;
+                self.status_state.suppressed_system1_turn_id = None;
                 if from_replay {
                     self.restore_realtime_transcripts_before_turn(&notification.turn.id);
                 } else {

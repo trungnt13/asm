@@ -428,7 +428,7 @@ pub(crate) struct ThreadManagerState {
     thread_id_generator: ThreadIdGenerator,
     agent_control_factory: Option<AgentControlFactory>,
     auth_manager: Arc<AuthManager>,
-    models_manager: SharedModelsManager,
+    pub(crate) models_manager: SharedModelsManager,
     git_root_discovery: Arc<GitRootDiscovery>,
     environment_manager: Arc<EnvironmentManager>,
     starting_mcp_runtimes: std::sync::Mutex<Vec<std::sync::Weak<AtomicBool>>>,
@@ -686,12 +686,14 @@ impl ThreadManager {
             Arc::new(
                 crate::code_mode_host::ProcessOwnedGrpcCodeModeSessionProvider::with_host_program(
                     host_program,
-                ),
+                )
+                .with_diagnostic_log_capture(config.diagnostic_log_capture),
             )
         } else {
-            Arc::new(ProcessOwnedCodeModeSessionProvider::with_host_program(
-                host_program,
-            ))
+            Arc::new(
+                ProcessOwnedCodeModeSessionProvider::with_host_program(host_program)
+                    .with_diagnostic_log_capture(config.diagnostic_log_capture),
+            )
         }
     }
 

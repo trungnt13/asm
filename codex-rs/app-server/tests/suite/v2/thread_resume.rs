@@ -4044,6 +4044,7 @@ async fn cold_paginated_resume_restores_usage_without_loading_turns() -> Result<
     append_rollout_item_to_path(
         &path,
         &RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
+            output_tokens_per_second: None,
             info: Some(TokenUsageInfo {
                 total_token_usage: TokenUsage {
                     input_tokens: 120,
@@ -4125,6 +4126,7 @@ async fn cold_paginated_resume_omits_usage_when_its_turn_is_ambiguous() -> Resul
     append_rollout_item_to_path(
         &path,
         &RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
+            output_tokens_per_second: None,
             info: Some(TokenUsageInfo {
                 total_token_usage: TokenUsage {
                     total_tokens: 150,
@@ -4404,6 +4406,7 @@ async fn thread_resume_token_usage_replay_can_belong_to_interrupted_turn() -> Re
             "timestamp": meta_rfc3339,
             "type": "event_msg",
             "payload": serde_json::to_value(EventMsg::TokenCount(TokenCountEvent {
+                output_tokens_per_second: None,
                 info: Some(TokenUsageInfo {
                     total_token_usage: TokenUsage {
                         input_tokens: 180,
@@ -4559,6 +4562,7 @@ async fn thread_resume_prefers_persisted_git_metadata_for_local_threads() -> Res
         creator_user_id: None,
         creator_account_id: None,
         session_id: conversation_id.into(),
+        prompt_cache_key: None,
         id: conversation_id,
         forked_from_id: None,
         forked_from_ordinal_exclusive: None,

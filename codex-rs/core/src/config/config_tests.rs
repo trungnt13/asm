@@ -290,6 +290,47 @@ async fn load_config_rejects_thread_unload_delay_overflow() -> anyhow::Result<()
 }
 
 #[tokio::test]
+async fn load_config_resolves_background_terminal_timeout_bounds() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    let config = Config::load_from_base_config_with_overrides(
+        toml::from_str(
+            "background_terminal_min_timeout = 100\nbackground_terminal_max_timeout = 7200000",
+        )?,
+        ConfigOverrides::default(),
+        codex_home.abs(),
+    )
+    .await?;
+    assert_eq!(
+        (
+            config.background_terminal_min_timeout,
+            config.background_terminal_max_timeout,
+        ),
+        (100, 7_200_000)
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn load_config_rejects_invalid_background_terminal_timeout_bounds() -> anyhow::Result<()> {
+    let codex_home = tempdir()?;
+    for toml in [
+        "background_terminal_min_timeout = 0",
+        "background_terminal_min_timeout = 6000\nbackground_terminal_max_timeout = 5000",
+        "background_terminal_max_timeout = 4000",
+    ] {
+        let error = Config::load_from_base_config_with_overrides(
+            toml::from_str(toml)?,
+            ConfigOverrides::default(),
+            codex_home.abs(),
+        )
+        .await
+        .expect_err("invalid terminal bounds must fail at config load");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_toml_parsing() {
     let history_with_persistence = r#"
 [history]
@@ -334,6 +375,8 @@ min_rollout_idle_hours = 24
 min_rate_limit_remaining_percent = 12
 extract_model = "gpt-5-mini"
 consolidation_model = "gpt-5.2"
+extract_reasoning_effort = "max"
+consolidation_reasoning_effort = "high"
 "#;
     let memories_cfg =
         toml::from_str::<ConfigToml>(memories).expect("TOML deserialization should succeed");
@@ -353,6 +396,8 @@ consolidation_model = "gpt-5.2"
             min_rate_limit_remaining_percent: Some(12),
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
+            extract_reasoning_effort: Some(ReasoningEffort::Max),
+            consolidation_reasoning_effort: Some(ReasoningEffort::High),
         }),
         memories_cfg.memories
     );
@@ -381,8 +426,75 @@ consolidation_model = "gpt-5.2"
             min_rate_limit_remaining_percent: 12,
             extract_model: Some("gpt-5-mini".to_string()),
             consolidation_model: Some("gpt-5.2".to_string()),
+            extract_reasoning_effort: Some(ReasoningEffort::Max),
+            consolidation_reasoning_effort: Some(ReasoningEffort::High),
         }
     );
+
+    let system1 = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[system1]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\nlow_effort_description = 'Custom routine effort.'\n";
+    let system1_config = Config::load_from_base_config_with_overrides(
+        toml::from_str(system1).expect("system1 settings should parse"),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("enabled system1 settings should load with both features");
+    assert_eq!(
+        system1_config.system1,
+        codex_config::System1Config {
+            enabled: true,
+            decision_model_api_env: Some("CUSTOM_DECISION_KEY".to_string()),
+            min_effort: ReasoningEffort::Minimal,
+            max_effort: ReasoningEffort::High,
+            update_on: vec![codex_config::System1Trigger::ToolResult],
+            rubric_instructions: Some("Select effort using my policy.".to_string()),
+            low_effort_description: "Custom routine effort.".to_string(),
+            ..config.system1.clone()
+        }
+    );
+    for (patch, expected) in [
+        ("min_effort = 'ultra'", "ordinary levels"),
+        ("max_effort = 'persistent'", "ordinary levels"),
+        ("min_effort = 'high'\nmax_effort = 'low'", "must not exceed"),
+        ("decision_model = ' '", "must not be blank"),
+        ("decision_model_api_env = 'KEY-SECRET'", "ASCII environment"),
+        ("decision_every_n_turns = 0", "positive integers"),
+        ("decision_every_n_steps = 0", "positive integers"),
+        ("decision_timeout_ms = 5001", "between 1 and 5000"),
+        ("max_context_bytes = 32769", "between 128 and 32768"),
+        ("rubric_instructions = '  '", "must not be blank"),
+    ]
+    .into_iter()
+    .map(|(patch, expected)| (patch.to_string(), expected))
+    .chain([(
+        format!("rubric_instructions = '{}'", "é".repeat(/*n*/ 2049)),
+        "4096 UTF-8 bytes",
+    )]) {
+        let error = Config::load_from_base_config_with_overrides(
+            toml::from_str(&format!("[system1]\n{patch}"))
+                .expect("invalid bounds still deserialize"),
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").abs(),
+        )
+        .await
+        .expect_err("invalid system1 settings should fail config loading");
+        assert!(error.to_string().contains(expected), "{patch}: {error}");
+    }
+    for missing in ["reasoning_effort_override", "step_model_switching"] {
+        let error = Config::load_from_base_config_with_overrides(
+            toml::from_str(
+                &system1.replace(&format!("{missing} = true"), &format!("{missing} = false")),
+            )
+            .expect("feature settings should parse"),
+            ConfigOverrides::default(),
+            tempdir().expect("tempdir").abs(),
+        )
+        .await
+        .expect_err("System1 requires both feature gates");
+        assert!(error.to_string().contains(
+            "requires features.reasoning_effort_override and features.step_model_switching"
+        ));
+    }
 
     let legacy_memories_cfg =
         toml::from_str::<ConfigToml>("[memories]\nno_memories_if_mcp_or_web_search = true\n")
@@ -399,7 +511,7 @@ consolidation_model = "gpt-5.2"
 
 #[tokio::test]
 async fn goal_max_token_budget_requires_positive_integer() {
-    let config_toml = toml::from_str::<ConfigToml>("[goals]\nmax_goal_token_budget = 25000\n")
+    let config_toml = toml::from_str::<ConfigToml>("subagent_model_context_windows = { \"gpt-6-astra\" = 272000 }\n[goals]\nmax_goal_token_budget = 25000\n")
         .expect("positive goal token budget should deserialize");
     let config = Config::load_from_base_config_with_overrides(
         config_toml,
@@ -409,6 +521,28 @@ async fn goal_max_token_budget_requires_positive_integer() {
     .await
     .expect("positive goal token budget should load");
     assert_eq!(config.max_goal_token_budget, Some(25_000));
+    assert_eq!(
+        config.subagent_model_context_windows,
+        HashMap::from([("gpt-6-astra".to_string(), 272_000)])
+    );
+
+    let mut config_toml = ConfigToml::default();
+    config_toml.subagent_model_context_windows.insert(
+        "gpt-6-astra".to_string(),
+        std::num::NonZeroU64::new(u64::MAX).expect("positive overflow value"),
+    );
+    let error = Config::load_from_base_config_with_overrides(
+        config_toml,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect_err("child context window exceeding i64 must be rejected");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    assert_eq!(
+        error.to_string(),
+        "subagent_model_context_windows[\"gpt-6-astra\"] must not exceed 9223372036854775807 tokens"
+    );
 
     for invalid in ["0", "-1", "1.5", "\"100\""] {
         let config = format!("[goals]\nmax_goal_token_budget = {invalid}\n");
@@ -1267,10 +1401,14 @@ fn config_toml_deserializes_model_availability_nux() {
             auto_recap: true,
             disable_paste_burst: None,
             vim_mode_default: false,
+            click_to_quote: false,
+            multiline_enter: false,
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
             mouse_scroll_speed: None,
+            collapse_tool_calls: false,
+            collapse_tool_calls_max_lines: None,
             copy_on_select: Default::default(),
             copy_on_select_clear_selection: false,
             right_click_paste: Default::default(),
@@ -1344,6 +1482,19 @@ async fn runtime_config_defaults_model_availability_nux() {
         cfg.model_availability_nux,
         ModelAvailabilityNuxConfig::default()
     );
+
+    let cfg = Config::load_from_base_config_with_overrides(
+        toml::from_str("diagnostic_log_capture = true").expect("capture config"),
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load capture config");
+    assert!(cfg.diagnostic_log_capture);
+    assert_eq!(
+        cfg.sqlite_config().diagnostic_log_capture(),
+        codex_state::DiagnosticLogCapture::Enabled
+    );
 }
 
 #[test]
@@ -1366,6 +1517,7 @@ async fn runtime_config_uses_tui_raw_output_mode() {
     let toml = r#"
         [tui]
         raw_output_mode = true
+        multiline_enter = true
 
         [tui.presets.1]
         input = "/model gpt-5.6-sol high fast"
@@ -1384,6 +1536,7 @@ async fn runtime_config_uses_tui_raw_output_mode() {
     .expect("load config");
 
     assert!(cfg.tui_raw_output_mode);
+    assert!(cfg.tui_multiline_enter);
     assert_eq!(
         cfg.tui_quick_dials,
         [
@@ -4507,10 +4660,14 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             auto_recap: true,
             disable_paste_burst: None,
             vim_mode_default: false,
+            click_to_quote: false,
+            multiline_enter: false,
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
             mouse_scroll_speed: None,
+            collapse_tool_calls: false,
+            collapse_tool_calls_max_lines: None,
             copy_on_select: Default::default(),
             copy_on_select_clear_selection: false,
             right_click_paste: Default::default(),
@@ -7182,15 +7339,25 @@ pane = { selected = "console", expanded = false }
     Ok(())
 }
 
+#[test_case::test_case("", true; "resource_helpers_default")]
+#[test_case::test_case("mcp_resource_tools_enabled = true", true; "resource_helpers_enabled")]
+#[test_case::test_case("mcp_resource_tools_enabled = false", false; "resource_helpers_disabled")]
 #[tokio::test]
-async fn to_mcp_config_preserves_apps_feature_from_config() -> std::io::Result<()> {
+async fn to_mcp_config_preserves_apps_feature_from_config(
+    config_contents: &str,
+    expected_resource_tools_enabled: bool,
+) -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let mut config = Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
+        toml::from_str::<ConfigToml>(config_contents).expect("valid MCP resource tools config"),
         ConfigOverrides::default(),
         codex_home.abs(),
     )
     .await?;
+    assert_eq!(
+        config.mcp_resource_tools_enabled,
+        expected_resource_tools_enabled
+    );
     let plugins_manager =
         plugins_manager_for_config(&config, auth_manager_from_optional_auth(/*auth*/ None));
 
@@ -9991,7 +10158,7 @@ async fn legacy_profile_selection_is_rejected() -> std::io::Result<()> {
 }
 
 #[tokio::test]
-async fn metrics_exporter_defaults_to_statsig_when_missing() -> std::io::Result<()> {
+async fn metrics_exporter_defaults_to_none_when_missing() -> std::io::Result<()> {
     let fixture = create_test_fixture()?;
 
     let config = Config::load_from_base_config_with_overrides(
@@ -10004,7 +10171,7 @@ async fn metrics_exporter_defaults_to_statsig_when_missing() -> std::io::Result<
     )
     .await?;
 
-    assert_eq!(config.otel.metrics_exporter, OtelExporterKind::Statsig);
+    assert_eq!(config.otel.metrics_exporter, OtelExporterKind::None);
     assert!(!config.otel.agent_response_logging_enabled());
     assert!(!config.otel.guardian_assessment_logging_enabled());
     Ok(())
@@ -12012,6 +12179,8 @@ async fn prompt_instruction_blocks_can_be_disabled_from_config() -> std::io::Res
         r#"include_permissions_instructions = false
 include_apps_instructions = false
 include_collaboration_mode_instructions = false
+include_model_catalog_in_spawn_agent_list = false
+include_web_search_copyright_compliance = false
 include_environment_context = false
 include_environment_context_time = false
 
@@ -12029,9 +12198,12 @@ include_instructions = false
     assert!(!config.include_permissions_instructions);
     assert!(!config.include_apps_instructions);
     assert!(!config.include_collaboration_mode_instructions);
+    assert!(!config.include_model_catalog_in_spawn_agent_list);
+    assert!(!config.include_web_search_copyright_compliance);
     assert!(!config.include_skill_instructions);
     assert!(!config.include_environment_context);
     assert!(!config.include_environment_context_time);
+
     Ok(())
 }
 

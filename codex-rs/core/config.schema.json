@@ -422,6 +422,102 @@
         }
       ]
     },
+    "AutoRenameConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "additional_naming_guidance": {
+          "default": null,
+          "description": "Additional naming guidance, limited to 512 UTF-8 bytes.",
+          "type": "string"
+        },
+        "auto_update": {
+          "default": false,
+          "type": "boolean"
+        },
+        "auto_update_interval_turns": {
+          "default": 5,
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AutoRenameContext"
+            }
+          ],
+          "default": "user_message"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "first_trigger": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/AutoRenameFirstTrigger"
+            }
+          ],
+          "default": "first_user_message"
+        },
+        "max_context_bytes": {
+          "default": null,
+          "description": "Source-text budget from 128 to 8192 bytes, separate from additional naming guidance. Omission retains the original source-text budget.",
+          "format": "uint",
+          "maximum": 8192.0,
+          "minimum": 128.0,
+          "type": "integer"
+        },
+        "max_title_chars": {
+          "default": null,
+          "format": "uint",
+          "maximum": 128.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "max_title_words": {
+          "default": null,
+          "description": "Request at most this many words without truncating generated titles. Omission retains the default soft word-count guidance.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "type": "string"
+        },
+        "reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": null
+        },
+        "recent_message_limit": {
+          "default": null,
+          "format": "uint",
+          "maximum": 32.0,
+          "minimum": 1.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "AutoRenameContext": {
+      "enum": [
+        "user_message",
+        "recent_conversation"
+      ],
+      "type": "string"
+    },
+    "AutoRenameFirstTrigger": {
+      "enum": [
+        "first_user_message",
+        "first_completed_turn"
+      ],
+      "type": "string"
+    },
     "AutoReviewToml": {
       "properties": {
         "circuit_break_action": {
@@ -729,6 +825,9 @@
         },
         "chatgpt_base_url": {
           "type": "string"
+        },
+        "diagnostic_log_capture": {
+          "type": "boolean"
         },
         "experimental_compact_prompt_file": {
           "$ref": "#/definitions/AbsolutePathBuf"
@@ -2636,6 +2735,14 @@
           "description": "Model used for memory consolidation.",
           "type": "string"
         },
+        "consolidation_reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "description": "Overrides consolidation reasoning effort; defaults to `medium` when omitted."
+        },
         "dedicated_tools": {
           "description": "When `true`, expose dedicated memory tools through the extension tool surface.",
           "type": "boolean"
@@ -2651,6 +2758,14 @@
         "extract_model": {
           "description": "Model used for thread summarisation.",
           "type": "string"
+        },
+        "extract_reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "description": "Overrides extraction reasoning effort; defaults to `low` when omitted."
         },
         "generate_memories": {
           "description": "When `false`, newly created threads are stored with `memory_mode = \"disabled\"` in the state DB.",
@@ -3516,7 +3631,7 @@
               "$ref": "#/definitions/OtelExporterKind"
             }
           ],
-          "description": "Metrics exporter. Defaults to `statsig`, which follows `analytics.enabled`. Custom OTLP exporters are independent of `analytics.enabled`; `none` disables metrics export."
+          "description": "Metrics exporter. Defaults to none; the built-in Statsig exporter is inactive in ASM. Custom OTLP exporters are independent of `analytics.enabled`; `none` disables metrics export."
         },
         "span_attributes": {
           "additionalProperties": {
@@ -4409,6 +4524,13 @@
     "SkillConfig": {
       "additionalProperties": false,
       "properties": {
+        "allowed_agent_roles": {
+          "description": "Limits visibility to the named agent roles without changing filesystem access. Missing allows every role; an empty list allows none.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -4485,6 +4607,148 @@
           "type": "string"
         }
       ]
+    },
+    "System1Backend": {
+      "enum": [
+        "openai",
+        "typesafe"
+      ],
+      "type": "string"
+    },
+    "System1Config": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_every_n_steps": {
+          "default": 1,
+          "description": "Wait N model steps after each accepted decision in selected turns. The first eligible step is due; failures do not restart the spacing. Each new turn starts without a previous accepted decision.",
+          "format": "uint64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "decision_every_n_turns": {
+          "default": 1,
+          "description": "Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.",
+          "format": "uint64",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "decision_model": {
+          "default": null,
+          "type": "string"
+        },
+        "decision_model_api_env": {
+          "default": null,
+          "type": "string"
+        },
+        "decision_timeout_ms": {
+          "default": 200,
+          "format": "uint64",
+          "maximum": 5000.0,
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "high_effort_description": {
+          "default": "Deep reasoning for difficult debugging, interacting constraints, substantial uncertainty, and complex decisions.",
+          "type": "string"
+        },
+        "low_effort_description": {
+          "default": "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use.",
+          "type": "string"
+        },
+        "max_context_bytes": {
+          "default": 8192,
+          "format": "uint",
+          "maximum": 32768.0,
+          "minimum": 128.0,
+          "type": "integer"
+        },
+        "max_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "max"
+        },
+        "medium_effort_description": {
+          "default": "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding.",
+          "type": "string"
+        },
+        "min_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "low"
+        },
+        "profile": {
+          "default": null,
+          "type": "string"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "$ref": "#/definitions/System1Profile"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "rubric_instructions": {
+          "default": null,
+          "type": "string"
+        },
+        "update_on": {
+          "default": [
+            "turn_start",
+            "tool_result"
+          ],
+          "items": {
+            "$ref": "#/definitions/System1Trigger"
+          },
+          "type": "array"
+        },
+        "xhigh_effort_description": {
+          "default": "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "System1Profile": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key_env": {
+          "description": "Environment variable name, never the credential itself.",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": null,
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "protocol": {
+          "$ref": "#/definitions/System1Backend"
+        }
+      },
+      "required": [
+        "api_key_env",
+        "model",
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "System1Trigger": {
+      "enum": [
+        "turn_start",
+        "tool_result"
+      ],
+      "type": "string"
     },
     "ThreadStoreToml": {
       "oneOf": [
@@ -4736,6 +5000,23 @@
           "description": "Generate automatic conversation recaps when the terminal is unfocused. Defaults to `true`. Disabling this leaves `/recap` available on demand.",
           "type": "boolean"
         },
+        "click_to_quote": {
+          "default": false,
+          "description": "Attach a fresh transcript selection when clicking the fullscreen composer. Defaults to `false`; native scrollback does not support this gesture.",
+          "type": "boolean"
+        },
+        "collapse_tool_calls": {
+          "default": false,
+          "description": "Group consecutive tool calls into compact fullscreen transcript summaries. Defaults to `false` to preserve existing tool previews.",
+          "type": "boolean"
+        },
+        "collapse_tool_calls_max_lines": {
+          "default": null,
+          "description": "Maximum physical lines in a collapsed activity summary, including counts and names. Omit to use one line; values must be positive.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
         "copy_on_select": {
           "allOf": [
             {
@@ -4982,6 +5263,11 @@
           "exclusiveMinimum": 0.0,
           "format": "double",
           "type": "number"
+        },
+        "multiline_enter": {
+          "default": false,
+          "description": "Plain Enter inserts a newline in multiline drafts when also bound to editor newline. Single-line drafts and modified submit bindings still send. Defaults to `false`.",
+          "type": "boolean"
         },
         "notification_condition": {
           "allOf": [
@@ -7034,6 +7320,14 @@
       "default": null,
       "description": "Machine-local realtime audio device preferences used by realtime voice."
     },
+    "auto_rename": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AutoRenameConfig"
+        }
+      ],
+      "description": "Automatic naming in the TUI; Desktop naming is unaffected."
+    },
     "auto_review": {
       "allOf": [
         {
@@ -7045,6 +7339,12 @@
     },
     "background_terminal_max_timeout": {
       "description": "Maximum poll window for background terminal output (`write_stdin`), in milliseconds. Default: `300000` (5 minutes).",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "background_terminal_min_timeout": {
+      "description": "Minimum poll window for background terminal output (`write_stdin`), in milliseconds. Default: `5000` (5 seconds).",
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
@@ -7102,6 +7402,10 @@
       "default": null,
       "description": "Developer instructions inserted as a `developer` role message.",
       "type": "string"
+    },
+    "diagnostic_log_capture": {
+      "description": "Opt in to process-local Rust logs and feedback diagnostics at startup. Defaults to false; saved conversation history is independent.",
+      "type": "boolean"
     },
     "disable_paste_burst": {
       "description": "Legacy fallback for `tui.disable_paste_burst`. Prefer the setting under `[tui]`.",
@@ -7828,8 +8132,16 @@
       "description": "Whether environment context includes the current date and timezone.",
       "type": "boolean"
     },
+    "include_model_catalog_in_spawn_agent_list": {
+      "description": "Include the generated spawn-model catalog in tool descriptions or context. Defaults to true. Disabling it preserves model and reasoning-effort arguments.",
+      "type": "boolean"
+    },
     "include_permissions_instructions": {
       "description": "Whether to inject the `<permissions instructions>` developer block.",
+      "type": "boolean"
+    },
+    "include_web_search_copyright_compliance": {
+      "description": "Include the Copyright compliance subsection in the local `web.run` description. Defaults to true. Other quotation and word limits remain unchanged.",
       "type": "boolean"
     },
     "instructions": {
@@ -7842,7 +8154,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Directory where Codex writes log files. Setting this value explicitly also enables the TUI text log in this directory. Defaults to `$CODEX_HOME/log`."
+      "description": "Directory where Codex writes log files. Setting this value explicitly also enables the TUI text log when diagnostic capture is enabled. Defaults to `$CODEX_HOME/log`."
     },
     "marketplaces": {
       "additionalProperties": {
@@ -7885,6 +8197,10 @@
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
+    },
+    "mcp_resource_tools_enabled": {
+      "description": "Enable the built-in MCP resource listing and reading tools. Defaults to true. Disabling them leaves MCP server connections and other tools unchanged.",
+      "type": "boolean"
     },
     "mcp_servers": {
       "additionalProperties": {
@@ -8159,9 +8475,33 @@
       ],
       "description": "Directory where Codex stores the SQLite state DB. Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`."
     },
+    "subagent_model_context_windows": {
+      "additionalProperties": {
+        "format": "uint64",
+        "minimum": 1.0,
+        "type": "integer"
+      },
+      "default": {},
+      "description": "Model-specific context windows for V2 spawned children, in tokens.",
+      "type": "object"
+    },
+    "subagent_service_tiers": {
+      "additionalProperties": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "default": {},
+      "description": "Child-only routing overrides, keyed by model and reasoning effort.",
+      "type": "object"
+    },
     "suppress_unstable_features_warning": {
       "description": "Suppress warnings about unstable (under development) features.",
       "type": "boolean"
+    },
+    "system1": {
+      "$ref": "#/definitions/System1Config"
     },
     "thread_unload_delay_secs": {
       "description": "Seconds a thread must have no subscribers and no activity before app-server unloads it. Defaults to 1800 (30 minutes); zero unloads immediately. Resolved when each thread is loaded; request config overrides apply per thread.",

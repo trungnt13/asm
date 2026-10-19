@@ -4,7 +4,7 @@ expression: "frames.join(\"\\n---\\n\").replace(crate::version::CODEX_CLI_VERSIO
 ---
 terminal_app_over_ssh=false, owned=true
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
 
@@ -15,17 +15,17 @@ terminal_app_over_ssh=false, owned=true
 
 
 
-
-› Ask Codex to do anything
+                                           Main
+› Ask ASM to do anything
 
   ? for shortcuts
 ---
 terminal_app_over_ssh=true, owned=false
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
-
-› Ask Codex to do anything
+                                           Main
+› Ask ASM to do anything
 
   ? for shortcuts

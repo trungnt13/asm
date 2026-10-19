@@ -411,7 +411,11 @@ async fn collect_compaction_output(
                         incomplete,
                     )
                     .await;
-                    sess.send_token_count_event(turn_context).await;
+                    sess.send_token_count_event(
+                        turn_context,
+                        /*output_tokens_per_second*/ None,
+                    )
+                    .await;
                 }
             }
         }
@@ -1304,6 +1308,7 @@ mod tests {
                     amount: Some("0.125".to_string()),
                     metadata: Some(serde_json::json!({ "extra": { "label": "example" } })),
                 }),
+                request_duration_ms: None,
                 end_turn: Some(true),
             }),
         ]);

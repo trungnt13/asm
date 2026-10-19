@@ -403,6 +403,9 @@ impl Session {
             if model_overrides_available
                 && turn_context
                     .config
+                    .include_model_catalog_in_spawn_agent_list
+                && turn_context
+                    .config
                     .features
                     .enabled(Feature::ModelCatalogInContext)
             {

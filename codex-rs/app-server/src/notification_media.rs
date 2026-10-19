@@ -78,6 +78,8 @@ pub(crate) fn without_notification_media(notification: ServerNotification) -> Se
         | ServerNotification::ThreadSettingsUpdated(_)
         | ServerNotification::ThreadTokenUsageUpdated(_)
         | ServerNotification::TurnStarted(_)
+        | ServerNotification::ReasoningEffortUpdated(_)
+        | ServerNotification::System1Updated(_)
         | ServerNotification::HookStarted(_)
         | ServerNotification::TurnCompleted(_)
         | ServerNotification::HookCompleted(_)
@@ -197,6 +199,7 @@ fn without_thread_item_media(mut item: ThreadItem) -> ThreadItem {
             };
         }
         ThreadItem::HookPrompt { .. }
+        | ThreadItem::InterAgentMessage { .. }
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::Plan { .. }
         | ThreadItem::Reasoning { .. }

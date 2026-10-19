@@ -7,6 +7,7 @@ use crate::history_cell::RequestUserInputResultCell;
 use crate::history_cell::ThreadRecapHistoryCell;
 use codex_app_server_protocol::ToolRequestUserInputAnswer;
 use codex_app_server_protocol::ToolRequestUserInputQuestion;
+use codex_protocol::ThreadId;
 use codex_protocol::plan_tool::PlanItemArg;
 use codex_protocol::plan_tool::StepStatus;
 use codex_protocol::plan_tool::UpdatePlanArgs;
@@ -118,9 +119,11 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
 fn recap_copy_preserves_hard_lines_and_reflows_only_soft_wraps() {
     let recap = "The café review is paused at https://example.com/review/42. 日本語\n  An indented hard line.";
     let next_action = "Review https://example.com/integration/report before continuing.";
+    let session_id = ThreadId::from_string("019abc12-3456-7890-abcd-1234567890ab").unwrap();
     let cell = ThreadRecapHistoryCell::new(recap.to_owned())
-        .with_next_action(Some(next_action.to_owned()));
-    let expected_text = format!("{recap}\nNext: {next_action}");
+        .with_next_action(Some(next_action.to_owned()))
+        .with_session_id(session_id);
+    let expected_text = format!("{recap}\nNext: {next_action}\nSession: {session_id}");
     let retained = TextLayout::new(
         cell.display_hyperlink_lines(/*width*/ 80),
         /*width*/ 80,

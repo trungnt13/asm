@@ -630,6 +630,7 @@ async fn thread_search_occurrences_reads_paginated_projection() -> Result<()> {
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -1729,6 +1730,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -1824,6 +1826,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
         .await?;
 
     let expected_turn_1_full = Turn {
+        token_usage: None,
         id: "turn-1".to_string(),
         root_turn_id: None,
         items: vec![
@@ -1854,6 +1857,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
         duration_ms: Some(10_000),
     };
     let expected_turn_2_full = Turn {
+        token_usage: None,
         id: "turn-2".to_string(),
         root_turn_id: None,
         items: vec![ThreadItem::UserMessage {
@@ -2019,6 +2023,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
     assert_eq!(
         first_page.data,
         vec![Turn {
+            token_usage: None,
             id: "turn-1".to_string(),
             root_turn_id: None,
             items: vec![
@@ -2057,6 +2062,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
     assert_eq!(
         second_page.data,
         vec![Turn {
+            token_usage: None,
             id: "turn-2".to_string(),
             root_turn_id: None,
             items: Vec::new(),
@@ -2634,6 +2640,7 @@ async fn seed_pathless_store_thread(
             creator_user_id: None,
             creator_account_id: None,
             session_id: thread_id.into(),
+            prompt_cache_key: None,
             thread_id,
             extra_config: None,
             forked_from_id: None,

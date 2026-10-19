@@ -245,6 +245,8 @@ mod computer_activity_tests;
 mod config_errors;
 #[path = "tests/copy_export_picker_tests.rs"]
 mod copy_export_picker_tests;
+#[path = "tests/copy_session_id_tests.rs"]
+mod copy_session_id_tests;
 #[path = "tests/dynamic_activity_tests.rs"]
 mod dynamic_activity_tests;
 mod exec_flow;
@@ -266,6 +268,8 @@ mod misalignment_policy;
 mod model_display_name_tests;
 #[path = "tests/model_picker_tests.rs"]
 mod model_picker_tests;
+#[path = "tests/parallel_tests.rs"]
+mod parallel_tests;
 #[path = "tests/permission_picker_tests.rs"]
 mod permission_picker_tests;
 #[path = "tests/permission_shortcuts_tests.rs"]

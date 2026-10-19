@@ -49,6 +49,7 @@ use crate::parse_turn_item;
 use crate::realtime_conversation::RealtimeConversationManager;
 use crate::realtime_history::RealtimeEventOrder;
 use crate::session::step_context::StepContext;
+use crate::session::step_settings::ModelInfoOverrides;
 use crate::session::step_settings::ResolvedStepSettings;
 use crate::session::step_settings::StepSettings;
 use crate::session::turn_context::TurnEnvironment;
@@ -255,6 +256,7 @@ mod reasoning_effort;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
+mod decision_log;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -273,6 +275,9 @@ pub(crate) mod startup_prewarm;
 mod step_activation;
 pub(crate) mod step_context;
 pub(crate) mod step_settings;
+mod system1;
+mod system1_evidence;
+mod system1_task;
 mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
@@ -798,12 +803,21 @@ impl Session {
             );
         }
 
+        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
+            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
+        });
+        let model_info_overrides =
+            ModelInfoOverrides::for_session(&config, &session_source, multi_agent_version);
+
         // Resolve base instructions for the session. Priority order:
         // 1. config.base_instructions override
         // 2. conversation history => session_meta.base_instructions
         // 3. rendered instructions_template for current model
         let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .get_model_info(
+                model.as_str(),
+                &model_info_overrides.models_manager_config(&model, config.personality),
+            )
             .await;
         let auth = auth_manager.auth_cached();
         // Forked subagents keep their parent's activation with the copied history.
@@ -823,9 +837,6 @@ impl Session {
             token_budget::apply_model_defaults(Arc::make_mut(&mut config), &model_info);
         }
         let configured_config = Arc::clone(&config);
-        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
-            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
-        });
         let history_mode = conversation_history.get_history_mode(
             requested_history_mode.unwrap_or_else(|| thread_store.default_history_mode()),
         );
@@ -925,7 +936,7 @@ impl Session {
                 approvals_reviewer: config.approvals_reviewer,
             }),
             environments: environment_selections.clone(),
-            model_info_overrides: config.to_models_manager_config().into(),
+            model_info_overrides,
             developer_instructions: config.developer_instructions.clone(),
             base_instructions,
             permission_profile_state: session_permission_profile_state_from_config(&config)?,
@@ -1752,7 +1763,7 @@ impl Session {
                     ForkPersistence::Referenced {
                         inherited_item_count,
                         ..
-                    } => {
+                    } if self.ephemeral_rollout_items.is_none() => {
                         // Ancestor records remain behind history_base; only effective child
                         // settings and boundaries synthesized by snapshot processing are local.
                         rollout_items.drain(..*inherited_item_count);
@@ -1766,13 +1777,20 @@ impl Session {
                         rollout_items.clear();
                         rollout_items.push(thread_settings_applied);
                     }
-                    ForkPersistence::Copied | ForkPersistence::CopiedDeferred => {
+                    ForkPersistence::Copied
+                    | ForkPersistence::CopiedDeferred
+                    | ForkPersistence::Referenced { .. } => {
                         // Keep the copied prefix and effective child settings in one append so a
                         // cold resume cannot observe inherited settings as the latest value.
                         rollout_items.push(thread_settings_applied);
                     }
                 }
-                self.persist_rollout_items(&rollout_items).await;
+                if let Some(history) = &self.ephemeral_rollout_items {
+                    // Transfer the inherited prefix once; later writes append only their new items.
+                    *history.lock().await = rollout_items;
+                } else {
+                    self.persist_rollout_items(&rollout_items).await;
+                }
 
                 // Agent spawn owns its final durability barrier so it can overlap the edge write.
                 let persist_context = match self.fork_persistence {
@@ -2108,9 +2126,15 @@ impl Session {
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
         let state = self.state.lock().await;
-        state
+        let mut snapshot = state
             .session_configuration
-            .thread_config_snapshot(state.session_configuration.environments.clone())
+            .thread_config_snapshot(state.session_configuration.environments.clone());
+        let system1 = self.system1_state(snapshot.system1_enabled, snapshot.system1_revision);
+        snapshot.system1_enabled = system1.enabled;
+        snapshot.system1_revision = system1.revision;
+        snapshot.system1_error = system1.error;
+        snapshot.system1_failure_episode = system1.failure_episode;
+        snapshot
     }
 
     pub(crate) async fn configured_environment_selections(&self) -> Vec<TurnEnvironmentSelection> {
@@ -3727,6 +3751,17 @@ impl Session {
                         });
                 }
             }
+            if items.iter().any(|envelope| {
+                matches!(&envelope.item,
+                ResponseItem::Message { role, .. } if role == "assistant")
+                    || matches!(
+                        &envelope.item,
+                        ResponseItem::FunctionCallOutput { .. }
+                            | ResponseItem::CustomToolCallOutput { .. }
+                    )
+            }) {
+                self.invalidate_system1();
+            }
             state
                 .history
                 .record_annotated_items(&mut items, model_info.truncation_policy.into());
@@ -3890,10 +3925,16 @@ impl Session {
             turn_context.session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
         ) {
-            let root_service_tier = self.services.agent_control.service_tier();
-            if settings.selected().service_tier != root_service_tier {
+            let child_service_tier = crate::agent::child_config::select_subagent_service_tier(
+                &turn_context.config,
+                &settings.model_info,
+                settings.effective_reasoning_effort().as_ref(),
+                self.services.agent_control.service_tier(),
+            )
+            .map_err(CodexErr::InvalidRequest)?;
+            if settings.selected().service_tier != child_service_tier {
                 let mut selected = settings.selected().clone();
-                selected.service_tier = root_service_tier;
+                selected.service_tier = child_service_tier;
                 let mut inherited_settings = ResolvedStepSettings::new(
                     Arc::new(selected),
                     Arc::clone(&settings.model_info),
@@ -4761,6 +4802,9 @@ impl Session {
             error!("failed to record rollout items: {e:#}");
             return false;
         }
+        if let Some(history) = &self.ephemeral_rollout_items {
+            history.lock().await.extend_from_slice(items);
+        }
         true
     }
 
@@ -5031,7 +5075,8 @@ impl Session {
                 TokenUsageContext::Sampling,
             )
             .await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
         result
     }
 
@@ -5187,7 +5232,8 @@ impl Session {
             estimated_total_tokens,
         )
         .await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn update_rate_limits(
@@ -5196,7 +5242,8 @@ impl Session {
         new_rate_limits: RateLimitSnapshot,
     ) {
         self.record_rate_limits_info(new_rate_limits).await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
@@ -5224,12 +5271,20 @@ impl Session {
         state.set_server_reasoning_included(included);
     }
 
-    pub(crate) async fn send_token_count_event(&self, turn_context: &TurnContext) {
+    pub(crate) async fn send_token_count_event(
+        &self,
+        turn_context: &TurnContext,
+        output_tokens_per_second: Option<f64>,
+    ) {
         let (info, rate_limits) = {
             let state = self.state.lock().await;
             state.token_info_and_rate_limits()
         };
-        let event = EventMsg::TokenCount(TokenCountEvent { info, rate_limits });
+        let event = EventMsg::TokenCount(TokenCountEvent {
+            info,
+            rate_limits,
+            output_tokens_per_second,
+        });
         self.send_event(turn_context, event).await;
     }
 
@@ -5238,7 +5293,8 @@ impl Session {
             let mut state = self.state.lock().await;
             state.set_token_usage_full(context_window);
         }
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn record_response_item_and_emit_turn_item(

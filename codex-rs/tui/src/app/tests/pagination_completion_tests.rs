@@ -180,10 +180,14 @@ async fn older_pagination_completion_footers_follow_answers_without_overlap_dupl
     }
     // Canonicalize the fixture's afternoon clock while retaining minute differences.
     let afternoon_clock = regex_lite::Regex::new(r"at 14:(\d\d)").unwrap();
-    insta::assert_snapshot!(afternoon_clock.replace_all(
-        &snapshots.join("\n\n--- next overlapping page ---\n\n"),
-        "at 2:$1 PM",
-    ));
+    insta::assert_snapshot!(
+        afternoon_clock.replace_all(
+            &snapshots
+                .join("\n\n--- next overlapping page ---\n\n")
+                .replace(&thread_id.to_string(), "[session id]"),
+            "at 2:$1 PM",
+        )
+    );
     app_server.shutdown().await?;
     proxy.await??;
     Ok(())
@@ -214,6 +218,8 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
             started.turns.iter().flat_map(|turn| turn.items.clone()),
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             Some(&app.config),
+            /*show_communication*/ false,
+            /*own_agent_role*/ None,
         );
         app.enqueue_primary_thread_session(started.session, started.turns)
             .await?;
@@ -334,6 +340,8 @@ async fn returning_to_latest_retains_pending_pages_without_continuing_to_the_beg
         started.turns.iter().flat_map(|turn| turn.items.clone()),
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         Some(&app.config),
+        /*show_communication*/ false,
+        /*own_agent_role*/ None,
     );
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;

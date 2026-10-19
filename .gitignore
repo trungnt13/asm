@@ -1,3 +1,6 @@
+# agents
+.agents
+
 # deps
 # Node.js dependencies
 node_modules
@@ -94,3 +97,4 @@ CHANGELOG.ignore.md
 # Python bytecode files
 __pycache__/
 *.pyc
+tmp*.md

@@ -3774,6 +3774,21 @@ class ReasoningEffortOption(BaseModel):
     reasoning_effort: Annotated[ReasoningEffort, Field(alias="reasoningEffort")]
 
 
+class ReasoningEffortUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    system1: Annotated[
+        bool,
+        Field(
+            description="Automatic mode is active, including when a decision falls back to current effort."
+        ),
+    ]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class ReasoningTextReasoningItemContent(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4445,6 +4460,24 @@ class ThreadEnvironmentDisconnectedServerNotification(BaseModel):
     params: EnvironmentConnectionNotification
 
 
+class TurnReasoningEffortUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["turn/reasoningEffortUpdated"],
+        Field(title="Turn/reasoningEffortUpdatedNotificationMethod"),
+    ]
+    params: ReasoningEffortUpdatedNotification
+
+
 class ItemAgentMessageDeltaServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5078,6 +5111,152 @@ class SubagentMigration(BaseModel):
     name: str
 
 
+class System1DecisionConnection(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    backend: str
+    client_initialized: Annotated[bool, Field(alias="clientInitialized")]
+    model: str
+    profile: str | None = None
+
+
+class CredentialsSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["credentials"], Field(title="CredentialsSystem1ErrorType")]
+
+
+class InvalidRequestSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["invalidRequest"], Field(title="InvalidRequestSystem1ErrorType")]
+
+
+class TransportSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["transport"], Field(title="TransportSystem1ErrorType")]
+
+
+class TimeoutSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["timeout"], Field(title="TimeoutSystem1ErrorType")]
+
+
+class HttpSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    status: Annotated[int, Field(ge=0)]
+    type: Annotated[Literal["http"], Field(title="HttpSystem1ErrorType")]
+
+
+class ResponseTooLargeSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["responseTooLarge"], Field(title="ResponseTooLargeSystem1ErrorType")]
+
+
+class InvalidResponseSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["invalidResponse"], Field(title="InvalidResponseSystem1ErrorType")]
+
+
+class RejectedSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["rejected"], Field(title="RejectedSystem1ErrorType")]
+
+
+class System1Error(
+    RootModel[
+        CredentialsSystem1Error
+        | InvalidRequestSystem1Error
+        | TransportSystem1Error
+        | TimeoutSystem1Error
+        | HttpSystem1Error
+        | ResponseTooLargeSystem1Error
+        | InvalidResponseSystem1Error
+        | RejectedSystem1Error
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        CredentialsSystem1Error
+        | InvalidRequestSystem1Error
+        | TransportSystem1Error
+        | TimeoutSystem1Error
+        | HttpSystem1Error
+        | ResponseTooLargeSystem1Error
+        | InvalidResponseSystem1Error
+        | RejectedSystem1Error,
+        Field(
+            description="Describes a Decisions failure without exposing request or response content."
+        ),
+    ]
+
+
+class System1FailureWarning(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cooldown_seconds: Annotated[
+        int | None,
+        Field(
+            alias="cooldownSeconds",
+            description="Initial retry delay in seconds; absent when recovery is blocked.",
+            ge=0,
+        ),
+    ] = None
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    warmup_timeout_seconds: Annotated[
+        int | None,
+        Field(
+            alias="warmupTimeoutSeconds",
+            description="Deadline for a synthetic startup warmup timeout; absent for decision failures.",
+            ge=0,
+        ),
+    ] = None
+
+
+class System1Stats(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    accepted: Annotated[int, Field(ge=0)]
+    completed_attempts: Annotated[int, Field(alias="completedAttempts", ge=0)]
+    effort_changes: Annotated[int, Field(alias="effortChanges", ge=0)]
+    errors: Annotated[int, Field(ge=0)]
+    ignored: Annotated[int, Field(ge=0)]
+    last_elapsed_ms: Annotated[int | None, Field(alias="lastElapsedMs", ge=0)] = None
+    setup_failures: Annotated[int, Field(alias="setupFailures", ge=0)]
+    total_elapsed_ms: Annotated[int, Field(alias="totalElapsedMs", ge=0)]
+
+
+class System1UpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    enabled: bool
+    error: System1Error | None = None
+    failure_episode: Annotated[int | None, Field(alias="failureEpisode", ge=0)] = 0
+    system1_revision: Annotated[int | None, Field(alias="system1Revision", ge=0)] = 0
+    thread_id: Annotated[str, Field(alias="threadId")]
+    warning: System1FailureWarning | None = None
+
+
 class TerminalInteractionNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5423,6 +5602,17 @@ class HookPromptThreadItem(BaseModel):
     fragments: list[HookPromptFragment]
     id: str
     type: Annotated[Literal["hookPrompt"], Field(title="HookPromptThreadItemType")]
+
+
+class InterAgentMessageThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    author: str
+    id: str
+    recipient: str
+    text: str
+    type: Annotated[Literal["interAgentMessage"], Field(title="InterAgentMessageThreadItemType")]
 
 
 class PlanThreadItem(BaseModel):
@@ -6371,6 +6561,28 @@ class ThreadStatusChangedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
+class ThreadSystem1StatsReadParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadSystem1StatsReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    decision_connection: Annotated[
+        System1DecisionConnection | None, Field(alias="decisionConnection")
+    ] = None
+    enabled: bool
+    error: System1Error | None = None
+    failure_episode: Annotated[int, Field(alias="failureEpisode", ge=0)]
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    revision: Annotated[int, Field(ge=0)]
+    stats: System1Stats
+
+
 class TurnStartedThreadTimelineEntry(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7248,6 +7460,17 @@ class ThreadLoadedListRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/loaded/list"], Field(title="Thread/loaded/listRequestMethod")]
     params: ThreadLoadedListParams
+
+
+class ThreadSystem1StatsReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/system1Stats/read"], Field(title="Thread/system1Stats/readRequestMethod")
+    ]
+    params: ThreadSystem1StatsReadParams
 
 
 class ThreadReadRequest(BaseModel):
@@ -9515,6 +9738,23 @@ class ThreadProjectUpdatedServerNotification(BaseModel):
     params: ThreadProjectUpdatedNotification
 
 
+class ThreadSystem1UpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/system1Updated"], Field(title="Thread/system1UpdatedNotificationMethod")
+    ]
+    params: System1UpdatedNotification
+
+
 class HookStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10507,6 +10747,23 @@ class ThreadSettings(BaseModel):
     sandbox_policy: Annotated[SandboxPolicy, Field(alias="sandboxPolicy")]
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
     summary: ReasoningSummary | None = None
+    system1_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="system1Enabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    system1_error: Annotated[System1Error | None, Field(alias="system1Error")] = None
+    system1_failure_episode: Annotated[int | None, Field(alias="system1FailureEpisode", ge=0)] = 0
+    system1_revision: Annotated[
+        int | None,
+        Field(
+            alias="system1Revision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
 
 
 class ThreadSettingsUpdatedNotification(BaseModel):
@@ -10577,6 +10834,13 @@ class ThreadTokenUsageUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    output_tokens_per_second: Annotated[
+        float | None,
+        Field(
+            alias="outputTokensPerSecond",
+            description="Successful ordinary response throughput, including request latency and reasoning output. Other usage updates and replayed updates carry `None`.",
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
     turn_id: Annotated[str, Field(alias="turnId")]
@@ -11691,6 +11955,7 @@ class ThreadItem(
     RootModel[
         UserMessageThreadItem
         | HookPromptThreadItem
+        | InterAgentMessageThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
         | PlanThreadItem
@@ -11717,6 +11982,7 @@ class ThreadItem(
     root: (
         UserMessageThreadItem
         | HookPromptThreadItem
+        | InterAgentMessageThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
         | PlanThreadItem
@@ -11870,6 +12136,13 @@ class Turn(BaseModel):
         Field(alias="startedAt", description="Unix timestamp (in seconds) when the turn started."),
     ] = None
     status: TurnStatus
+    token_usage: Annotated[
+        TokenUsageBreakdown | None,
+        Field(
+            alias="tokenUsage",
+            description="Provider-reported token totals for this turn, including compaction, when available.",
+        ),
+    ] = None
 
 
 class TurnCompletedNotification(BaseModel):
@@ -12499,6 +12772,23 @@ class ThreadForkResponse(BaseModel):
         ),
     ]
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+    system1_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="system1Enabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    system1_error: Annotated[System1Error | None, Field(alias="system1Error")] = None
+    system1_failure_episode: Annotated[int | None, Field(alias="system1FailureEpisode", ge=0)] = 0
+    system1_revision: Annotated[
+        int | None,
+        Field(
+            alias="system1Revision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     thread: Thread
 
 
@@ -12588,6 +12878,23 @@ class ThreadResumeResponse(BaseModel):
         ),
     ]
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+    system1_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="system1Enabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    system1_error: Annotated[System1Error | None, Field(alias="system1Error")] = None
+    system1_failure_episode: Annotated[int | None, Field(alias="system1FailureEpisode", ge=0)] = 0
+    system1_revision: Annotated[
+        int | None,
+        Field(
+            alias="system1Revision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     thread: Thread
     turns_backwards_cursor: Annotated[
         str | None,
@@ -12669,6 +12976,23 @@ class ThreadStartResponse(BaseModel):
         ),
     ]
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+    system1_enabled: Annotated[
+        bool | None,
+        Field(
+            alias="system1Enabled",
+            description="Current session-only automatic reasoning mode; never a saved preference.",
+        ),
+    ] = False
+    system1_error: Annotated[System1Error | None, Field(alias="system1Error")] = None
+    system1_failure_episode: Annotated[int | None, Field(alias="system1FailureEpisode", ge=0)] = 0
+    system1_revision: Annotated[
+        int | None,
+        Field(
+            alias="system1Revision",
+            description="Monotonic session revision for ordering mode updates.",
+            ge=0,
+        ),
+    ] = 0
     thread: Thread
 
 
@@ -12871,6 +13195,7 @@ class ClientRequest(
         | ThreadSectionUpdateRequest
         | ThreadSectionDeleteRequest
         | ThreadLoadedListRequest
+        | ThreadSystem1StatsReadRequest
         | ThreadReadRequest
         | ThreadTurnsListRequest
         | ThreadItemsListRequest
@@ -12982,6 +13307,7 @@ class ClientRequest(
         | ThreadSectionUpdateRequest
         | ThreadSectionDeleteRequest
         | ThreadLoadedListRequest
+        | ThreadSystem1StatsReadRequest
         | ThreadReadRequest
         | ThreadTurnsListRequest
         | ThreadItemsListRequest
@@ -13259,6 +13585,8 @@ class ServerNotification(
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
+        | TurnReasoningEffortUpdatedServerNotification
+        | ThreadSystem1UpdatedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
         | HookCompletedServerNotification
@@ -13350,6 +13678,8 @@ class ServerNotification(
         | ThreadSettingsUpdatedServerNotification
         | ThreadTokenUsageUpdatedServerNotification
         | TurnStartedServerNotification
+        | TurnReasoningEffortUpdatedServerNotification
+        | ThreadSystem1UpdatedServerNotification
         | HookStartedServerNotification
         | TurnCompletedServerNotification
         | HookCompletedServerNotification

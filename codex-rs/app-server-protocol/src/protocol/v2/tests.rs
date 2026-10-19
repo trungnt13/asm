@@ -246,6 +246,9 @@ fn turn_defaults_legacy_missing_items_view_to_full() {
     .expect("legacy turn should deserialize");
 
     assert_eq!(turn.items_view, TurnItemsView::Full);
+    assert_eq!(turn.token_usage, None);
+    let value = serde_json::to_value(&turn).expect("turn should serialize");
+    assert_eq!(value.get("tokenUsage"), Some(&JsonValue::Null));
 }
 
 #[test]
@@ -289,6 +292,10 @@ fn thread_resume_params_accept_turns_page_bootstrap() {
 #[test]
 fn thread_resume_response_round_trips_initial_turns_page() {
     let response = ThreadResumeResponse {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         disabled_plugin_ids: Vec::new(),
         thread: Thread {
             originator: Some("future_client".to_string()),

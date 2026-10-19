@@ -11,11 +11,15 @@ use std::borrow::Cow;
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
     pub(super) session: Option<ThreadSessionState>,
+    pub(super) inferred_session: bool,
     pub(super) delegated_turns: Vec<String>,
     pub(super) turns: Vec<Turn>,
     pub(super) events: Vec<ThreadBufferedEvent>,
     pub(super) active_reasoning_item: Option<codex_app_server_protocol::ItemStartedNotification>,
+    pub(super) reasoning_state: crate::session_state::ThreadReasoningState,
+    pub(super) latest_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
+    pub(super) output_tps: Option<(ThreadId, f64)>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,16 +66,20 @@ pub(super) enum ThreadEventAttachment {
 #[derive(Debug)]
 pub(super) struct ThreadEventStore {
     pub(super) session: Option<ThreadSessionState>,
+    pub(super) inferred_session: bool,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
     pub(super) pending_interactive_replay: PendingInteractiveReplayState,
     pub(super) active_turn_id: Option<String>,
     // Retain the active item even if its start falls out of the bounded replay buffer.
     pub(super) active_reasoning_item: Option<codex_app_server_protocol::ItemStartedNotification>,
+    pub(super) reasoning_state: crate::session_state::ThreadReasoningState,
     // Lifecycle identity must survive bounded replay-buffer eviction.
     pub(super) latest_turn_id: Option<String>,
     pub(super) pending_interrupt_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
+    // Successful throughput survives bounded buffer eviction and session refresh.
+    pub(super) output_tps: Option<(ThreadId, f64)>,
     pub(super) capacity: usize,
     pub(super) active: bool,
     pub(super) buffered_agent_message_delta_bytes: usize,
@@ -109,14 +117,17 @@ impl ThreadEventStore {
     pub(super) fn new(capacity: usize) -> Self {
         Self {
             session: None,
+            inferred_session: false,
             turns: Vec::new(),
             buffer: VecDeque::new(),
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
             latest_turn_id: None,
             pending_interrupt_turn_id: None,
             input_state: None,
+            output_tps: None,
             capacity,
             active: false,
             buffered_agent_message_delta_bytes: 0,
@@ -138,7 +149,22 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_session(&mut self, session: ThreadSessionState, turns: Vec<Turn>) {
+        if self
+            .output_tps
+            .is_some_and(|(thread_id, _)| thread_id != session.thread_id)
+        {
+            self.output_tps = None;
+        }
+        if self
+            .session
+            .as_ref()
+            .is_some_and(|previous| previous.thread_id != session.thread_id)
+        {
+            self.reasoning_state = Default::default();
+            self.latest_turn_id = None;
+        }
         self.session = Some(session);
+        self.inferred_session = false;
         self.set_turns(turns);
     }
 
@@ -163,11 +189,26 @@ impl ThreadEventStore {
             .rev()
             .find(|turn| matches!(turn.status, TurnStatus::InProgress))
             .map(|turn| turn.id.clone());
-        self.latest_turn_id = turns.last().map(|turn| turn.id.clone());
+        self.latest_turn_id = turns
+            .last()
+            .map(|turn| turn.id.clone())
+            .or_else(|| self.latest_turn_id.clone());
+        if self
+            .reasoning_state
+            .captured_step
+            .as_ref()
+            .is_some_and(|step| self.latest_turn_id.as_deref() != Some(&step.turn_id))
+        {
+            self.reasoning_state.captured_step = None;
+        }
+        if self.reasoning_state.suppressed_turn_id != self.latest_turn_id {
+            self.reasoning_state.suppressed_turn_id = None;
+        }
         self.turns = turns;
     }
 
     pub(super) fn set_active_turn_id(&mut self, turn_id: String) {
+        self.reasoning_state = Default::default();
         self.latest_turn_id = Some(turn_id.clone());
         self.active_turn_id = Some(turn_id);
     }
@@ -181,6 +222,18 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        if let ServerNotification::ThreadTokenUsageUpdated(usage) = notification.as_ref()
+            && let Some(tps) = usage.output_tokens_per_second
+            && tps.is_finite()
+            && tps >= 0.0
+            && let Ok(thread_id) = ThreadId::from_string(&usage.thread_id)
+            && self
+                .session
+                .as_ref()
+                .is_none_or(|session| session.thread_id == thread_id)
+        {
+            self.output_tps = Some((thread_id, tps));
+        }
         let user_item = match notification.as_ref() {
             ServerNotification::ItemStarted(n) => Some((&n.turn_id, &n.item)),
             ServerNotification::ItemCompleted(n) => Some((&n.turn_id, &n.item)),
@@ -235,7 +288,20 @@ impl ThreadEventStore {
             {
                 self.latest_turn_id = Some(n.turn_id.clone());
             }
+            ServerNotification::ReasoningEffortUpdated(step)
+                if self.latest_turn_id.as_deref() == Some(&step.turn_id)
+                    && self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.thread_id.to_string() == step.thread_id)
+                    && !(step.system1
+                        && self.reasoning_state.suppressed_turn_id.as_deref()
+                            == Some(&step.turn_id)) =>
+            {
+                self.reasoning_state.captured_step = Some(step.clone());
+            }
             ServerNotification::ThreadClosed(_) => {
+                self.reasoning_state = Default::default();
                 self.active_turn_id = None;
                 self.active_reasoning_item = None;
                 self.pending_interrupt_turn_id = None;
@@ -356,6 +422,7 @@ impl ThreadEventStore {
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         let mut snapshot = ThreadEventSnapshot {
             session: self.session.clone(),
+            inferred_session: self.inferred_session,
             delegated_turns: self.delegated_turns.iter().cloned().collect(),
             turns: self.turns.clone(),
             // Thread switches replay buffered events into a rebuilt ChatWidget. Only replay
@@ -374,7 +441,10 @@ impl ThreadEventStore {
                 .cloned()
                 .collect(),
             active_reasoning_item: self.active_reasoning_item.clone(),
+            reasoning_state: self.reasoning_state.clone(),
+            latest_turn_id: self.latest_turn_id.clone(),
             input_state: self.input_state.clone(),
+            output_tps: self.output_tps,
         };
         if let Some(latest_turn_id) = &self.latest_turn_id {
             replay_filter::omit_resolved_misalignment_errors(&mut snapshot, latest_turn_id);
@@ -662,6 +732,12 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,
@@ -691,6 +767,7 @@ mod tests {
             id: turn_id.to_string(),
             root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
+            token_usage: None,
             items,
             status,
             error: None,
@@ -947,7 +1024,29 @@ mod tests {
     #[test]
     fn thread_event_store_rebase_preserves_resolved_request_state() {
         let thread_id = ThreadId::new();
-        let mut store = ThreadEventStore::new(/*capacity*/ 8);
+        let mut store = ThreadEventStore::new(/*capacity*/ 2);
+        let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+        store.set_session(session.clone(), Vec::new());
+        let usage = codex_app_server_protocol::TokenUsageBreakdown {
+            total_tokens: 100,
+            input_tokens: 50,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            output_tokens: 50,
+            reasoning_output_tokens: 20,
+        };
+        store.push_notification(ServerNotification::ThreadTokenUsageUpdated(
+            codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "turn-background".to_string(),
+                output_tokens_per_second: Some(50.0),
+                token_usage: codex_app_server_protocol::ThreadTokenUsage {
+                    total: usage.clone(),
+                    last: usage,
+                    model_context_window: None,
+                },
+            },
+        ));
         store.push_request(exec_approval_request(
             thread_id,
             "turn-approval",
@@ -961,10 +1060,19 @@ mod tests {
             },
         ));
 
+        store.push_notification(turn_started_notification(thread_id, "turn-next"));
+        assert!(!store.snapshot().events.iter().any(|event| matches!(
+            event,
+            ThreadBufferedEvent::Notification(notification)
+                if matches!(notification.as_ref(), ServerNotification::ThreadTokenUsageUpdated(_))
+        )));
+        assert_eq!(store.snapshot().output_tps, Some((thread_id, 50.0)));
+        store.set_session(session, Vec::new());
         store.rebase_buffer_after_session_refresh();
 
         let snapshot = store.snapshot();
         assert!(snapshot.events.is_empty());
+        assert_eq!(snapshot.output_tps, Some((thread_id, 50.0)));
         assert_eq!(store.has_pending_thread_approvals(), false);
     }
 

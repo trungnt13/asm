@@ -1,12 +1,11 @@
 ---
 source: tui/src/bottom_pane/chat_composer/warning_notice_tests.rs
-assertion_line: 105
 expression: styled
 ---
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 5 },
     content: [
-        "                                                                                ",
+        "                                                                           Main ",
         "› keep this draft                                                               ",
         "                                                                                ",
         "  MODEL · ~/project                                                             ",
@@ -14,6 +13,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Rgb(44, 44, 44), underline: Reset, modifier: NONE,
+        x: 74, y: 0, fg: Rgb(222, 222, 222), bg: Rgb(61, 61, 61), underline: Reset, modifier: BOLD,
         x: 0, y: 1, fg: Reset, bg: Rgb(44, 44, 44), underline: Reset, modifier: BOLD,
         x: 1, y: 1, fg: Reset, bg: Rgb(44, 44, 44), underline: Reset, modifier: NONE,
         x: 0, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,

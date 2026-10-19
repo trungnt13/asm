@@ -318,6 +318,9 @@ pub struct DynamicToolCallItem {
     pub duration: Option<Duration>,
 }
 
+/// Marks display-only communication items that must not count as tool calls.
+pub const INTER_AGENT_COMMUNICATION_ITEM_PREFIX: &str = "inter-agent-communication:";
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CollabAgentTool {

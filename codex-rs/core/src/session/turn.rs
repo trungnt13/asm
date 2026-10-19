@@ -272,6 +272,18 @@ pub(crate) async fn run_turn(
     required_servers.sort_unstable();
     required_servers.dedup();
 
+    // A same-turn reentry may have queued steering but no direct input. Decide after
+    // that input is drained below, rather than consuming this step's slot on old evidence.
+    if !input.is_empty() {
+        sess.adapt_reasoning(
+            &turn_context,
+            &input,
+            codex_config::System1Trigger::TurnStart,
+            &cancellation_token,
+        )
+        .await;
+    }
+
     // run_turn owns the step used to seed context and make the first sampling request.
     let first_step_context = match sess
         .capture_step_context_with_required_mcp_servers(
@@ -456,7 +468,11 @@ pub(crate) async fn run_turn(
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
     // 2. After auto-compact, while a model/tool continuation is pending.
 
-    let mut next_step_context = Some(first_step_context);
+    let mut next_step_context = if input.is_empty() {
+        None
+    } else {
+        Some(first_step_context)
+    };
     let mut guardian_budget_compacted = false;
     loop {
         // Note that pending_input would be something like a message the user
@@ -492,6 +508,25 @@ pub(crate) async fn run_turn(
             &window_id,
         )
         .await;
+
+        if next_step_context.is_none() || !pending_input.is_empty() {
+            sess.adapt_reasoning(
+                &turn_context,
+                &pending_input,
+                if input.is_empty()
+                    && turn_context
+                        .extension_data
+                        .get::<super::system1::System1ModelStepStarted>()
+                        .is_none()
+                {
+                    codex_config::System1Trigger::TurnStart
+                } else {
+                    codex_config::System1Trigger::ToolResult
+                },
+                &cancellation_token,
+            )
+            .await;
+        }
 
         // Capture once so context, advertised tools, and tool calls share one request view.
         let step_context = match next_step_context.take() {
@@ -564,6 +599,9 @@ pub(crate) async fn run_turn(
             }
             .instrument(trace_span!("run_turn.prepare_sampling_request_input"))
             .await;
+
+            sess.report_reasoning_effort(step_context.as_ref()).await;
+            sess.record_system1_model_step(&turn_context);
 
             run_sampling_request(
                 Arc::clone(&sess),
@@ -2228,6 +2266,8 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::ThreadRolledBack(_)
         | EventMsg::TurnStarted(_)
         | EventMsg::ThreadSettingsApplied(_)
+        | EventMsg::ReasoningEffortUpdated(_)
+        | EventMsg::System1Updated(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)
         | EventMsg::UserMessage(_)
@@ -2753,6 +2793,7 @@ async fn try_run_sampling_request(
     )> = None;
     let mut should_emit_turn_diff = false;
     let mut should_emit_token_count = false;
+    let mut output_tokens_per_second = None;
     const MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE: usize = 256;
     let mut analytics_tool_call_ids = Vec::new();
     let reasoning_effort = step_context
@@ -3133,8 +3174,16 @@ async fn try_run_sampling_request(
                 response_id,
                 token_usage,
                 usage_metadata,
+                request_duration_ms,
                 end_turn,
             } => {
+                output_tokens_per_second = token_usage
+                    .as_ref()
+                    .zip(request_duration_ms)
+                    .filter(|(usage, duration)| usage.output_tokens >= 0 && *duration > 0)
+                    .map(|(usage, duration)| {
+                        usage.output_tokens as f64 * 1_000.0 / duration as f64
+                    });
                 response_completed = true;
                 request_token_usage = token_usage.clone();
                 sess.services
@@ -3372,7 +3421,8 @@ async fn try_run_sampling_request(
         // counts only after pending tools resolve so clients do not see progress events while the
         // turn is waiting on the user. This also needs to happen before returning cancellation so
         // token usage already recorded from the completed response is still persisted.
-        sess.send_token_count_event(&turn_context).await;
+        sess.send_token_count_event(&turn_context, output_tokens_per_second)
+            .await;
     }
 
     if cancellation_token.is_cancelled() {

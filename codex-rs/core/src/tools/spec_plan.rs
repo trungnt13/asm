@@ -1255,7 +1255,9 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     };
     if features.enabled(Feature::UnifiedExec) {
         registry.add(ExecCommandHandler::new(options));
-        registry.add(WriteStdinHandler);
+        registry.add(WriteStdinHandler::new(
+            turn_context.config.background_terminal_timeout_bounds(),
+        ));
     } else {
         // Managed requirements are the only configuration path that can keep
         // unified exec disabled. Preserve command execution without exposing a
@@ -1266,6 +1268,9 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
 
 #[instrument(level = "trace", skip_all)]
 fn add_mcp_resource_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
+    if !context.turn_context.config.mcp_resource_tools_enabled {
+        return;
+    }
     if context.mcp.has_servers()
         || effective_tool_mode(context.turn_context, context.model_info) == ToolMode::CodeModeOnly
     {
@@ -1458,6 +1463,9 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                         SpawnAgentToolOptions {
                             available_models: turn_context.available_models.clone(),
                             multi_agent_version: turn_context.multi_agent_version,
+                            include_model_catalog_in_spawn_agent_list: turn_context
+                                .config
+                                .include_model_catalog_in_spawn_agent_list,
                             model_catalog_in_context: turn_context
                                 .config
                                 .features
@@ -1546,6 +1554,9 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 SpawnAgentHandler::new(SpawnAgentToolOptions {
                     available_models: turn_context.available_models.clone(),
                     multi_agent_version: turn_context.multi_agent_version,
+                    include_model_catalog_in_spawn_agent_list: turn_context
+                        .config
+                        .include_model_catalog_in_spawn_agent_list,
                     model_catalog_in_context: turn_context
                         .config
                         .features

@@ -650,6 +650,16 @@ impl ConfigLayerStack {
 /// Validates before merging so mixed forms and malformed filter entries cannot be normalized away.
 pub(crate) fn validate_enabled_config_layers(layers: &[ConfigLayerEntry]) -> std::io::Result<()> {
     for layer in layers.iter().filter(|layer| !layer.is_disabled()) {
+        if layer.config.get("system1").is_some() && layer.config.get("adaptive_reasoning").is_some()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "system1 and its legacy alias adaptive_reasoning cannot appear together in {}",
+                    format_config_layer_source(&layer.name, CONFIG_TOML_FILE)
+                ),
+            ));
+        }
         validate_shell_environment_policy_filter_config(&layer.config).map_err(|error| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

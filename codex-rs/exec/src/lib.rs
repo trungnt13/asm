@@ -340,11 +340,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             supports_color::on_cached(Stream::Stderr).is_some(),
         ),
     };
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_ansi(stderr_with_ansi)
-        .with_writer(std::io::stderr)
-        .with_filter(exec_stderr_env_filter());
-
     let sandbox_mode = if dangerously_bypass_approvals_and_sandbox {
         Some(SandboxMode::DangerFullAccess)
     } else {
@@ -685,6 +680,12 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
 
     let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
 
+    let fmt_layer = config.diagnostic_log_capture.then(|| {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(stderr_with_ansi)
+            .with_writer(std::io::stderr)
+            .with_filter(exec_stderr_env_filter())
+    });
     let _ = tracing_subscriber::registry()
         .with(fmt_layer)
         .with(otel_tracing_layer)
@@ -736,7 +737,11 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         strict_config,
         cloud_config_bundle: run_cloud_config_bundle,
         embedded_network_policy,
-        feedback: CodexFeedback::new(),
+        feedback: if config.diagnostic_log_capture {
+            CodexFeedback::new()
+        } else {
+            CodexFeedback::disabled()
+        },
         log_db: None,
         state_db: state_db.clone(),
         environment_manager: std::sync::Arc::new(environment_manager),
@@ -1143,6 +1148,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             response.active_permission_profile.map(Into::into),
             response.cwd,
             response.reasoning_effort,
+            response.system1_enabled,
+            response.system1_revision,
+            response.system1_error,
+            response.system1_failure_episode,
         )
         .map_err(anyhow::Error::msg)?;
         daybreak_enabled = daybreak_override
@@ -1574,6 +1583,10 @@ fn session_configured_from_thread_start_response(
         response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort.clone(),
+        response.system1_enabled,
+        response.system1_revision,
+        response.system1_error,
+        response.system1_failure_episode,
     )
 }
 
@@ -1598,6 +1611,10 @@ fn session_configured_from_thread_resume_response(
         response.active_permission_profile.clone().map(Into::into),
         response.cwd.clone(),
         response.reasoning_effort.clone(),
+        response.system1_enabled,
+        response.system1_revision,
+        response.system1_error,
+        response.system1_failure_episode,
     )
 }
 
@@ -1631,6 +1648,10 @@ fn session_configured_from_thread_response(
     active_permission_profile: Option<codex_protocol::models::ActivePermissionProfile>,
     cwd: AbsolutePathBuf,
     reasoning_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
+    system1_enabled: bool,
+    system1_revision: u64,
+    system1_error: Option<codex_protocol::protocol::System1Error>,
+    system1_failure_episode: u64,
 ) -> Result<SessionConfiguredEvent, String> {
     let session_id = SessionId::from_string(session_id)
         .map_err(|err| format!("session id `{session_id}` is invalid: {err}"))?;
@@ -1661,6 +1682,10 @@ fn session_configured_from_thread_response(
         active_permission_profile,
         cwd,
         reasoning_effort,
+        system1_enabled,
+        system1_revision,
+        system1_error,
+        system1_failure_episode,
         network_proxy: None,
         rollout_path,
     })

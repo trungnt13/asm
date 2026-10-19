@@ -93,7 +93,10 @@ pub(super) async fn try_submit_user_turn(
     let eligible_account = app.chat_widget.daybreak_account_eligible();
     let enabled = app.chat_widget.daybreak_enabled
         && !app.chat_widget.side_conversation_active()
-        && !app.side_threads.contains_key(&thread_id);
+        && app
+            .side_threads
+            .get(&thread_id)
+            .is_none_or(|side| side.kind == CompanionKind::Parallel);
     let cyber_access_program = match crate::daybreak::program_for_turn(
         &app.chat_widget.model_catalog().models,
         model,
@@ -144,6 +147,7 @@ pub(super) async fn try_submit_user_turn(
         .as_ref()
         .filter(|profile| {
             profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
+                && profile.matches_config(config)
         });
     let permissions_override = App::turn_permissions_override_from_config(
         config,

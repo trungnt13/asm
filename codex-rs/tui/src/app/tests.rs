@@ -5,6 +5,10 @@ mod terminal_size_telemetry_tests;
 
 #[path = "tests/copy_mode_tests.rs"]
 mod copy_mode_tests;
+
+#[path = "tests/durable_side_lifecycle_tests.rs"]
+mod durable_side_lifecycle_tests;
+
 #[path = "tests/mcp_login_tests.rs"]
 mod mcp_login_tests;
 
@@ -713,6 +717,7 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         AppServerStartedThread {
             session: test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf()),
             turns: Vec::new(),
@@ -979,17 +984,7 @@ async fn reset_thread_event_state_aborts_listener_tasks() {
     }
 
     let mut app = make_test_app().await;
-    let app_server = crate::start_embedded_app_server_for_picker(&app.config)
-        .await
-        .expect("embedded app server");
     let thread_id = ThreadId::new();
-    let side_thread_id = ThreadId::new();
-    let side_request = exec_approval_request(
-        side_thread_id,
-        "turn-1",
-        "call-1",
-        /*approval_id*/ None,
-    );
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
     let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(async move {
@@ -998,25 +993,6 @@ async fn reset_thread_event_state_aborts_listener_tasks() {
         std::future::pending::<()>().await;
     });
     app.thread_event_listener_tasks.insert(thread_id, handle);
-    app.thread_event_listener_tasks
-        .insert(side_thread_id, tokio::spawn(std::future::pending()));
-    app.thread_event_channels.insert(
-        side_thread_id,
-        ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY),
-    );
-    app.thread_event_channels[&side_thread_id]
-        .store
-        .lock()
-        .await
-        .push_request(side_request.clone());
-    app.side_threads
-        .insert(side_thread_id, SideThreadState::new(thread_id));
-    let buffered = super::app_server_requests::BufferedServerRequest::new(
-        side_request.clone(),
-        &app_server.request_handle(),
-    );
-    app.pending_app_server_requests
-        .note_buffered_request(&buffered);
     app.pending_server_profiles.insert(
         thread_id,
         PermissionProfileSelection {
@@ -1032,25 +1008,12 @@ async fn reset_thread_event_state_aborts_listener_tasks() {
 
     app.reset_thread_event_state().await;
 
-    assert_eq!(
-        app.thread_event_listener_tasks
-            .keys()
-            .copied()
-            .collect::<Vec<_>>(),
-        vec![side_thread_id]
-    );
-    assert!(app.thread_event_channels.contains_key(&side_thread_id));
-    assert!(app.side_threads.contains_key(&side_thread_id));
-    assert!(
-        app.pending_app_server_requests
-            .contains_server_request(&side_request)
-    );
+    assert_eq!(app.thread_event_listener_tasks.is_empty(), true);
     assert!(app.pending_server_profiles.is_empty());
     time::timeout(Duration::from_millis(50), dropped_rx)
         .await
         .expect("timed out waiting for listener task abort")
         .expect("listener task drop notification should succeed");
-    app_server.shutdown().await.expect("app server shutdown");
 }
 
 #[tokio::test]
@@ -1181,8 +1144,9 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         app.enqueue_thread_notification(thread_id, event).await?;
     }
 
+    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.drain_active_thread_events_until(&mut tui, Instant::now())
+    app.drain_active_thread_events_until(&mut tui, &app_server, Instant::now())
         .await?;
     assert_eq!(
         app.chat_widget.token_usage(),
@@ -1205,7 +1169,8 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         "ordinary notifications left by the frame deadline must not block terminal input"
     );
 
-    app.drain_active_thread_events(&mut tui).await?;
+    app.drain_active_thread_events(&mut tui, &app_server)
+        .await?;
     assert!(
         app.active_thread_rx
             .as_ref()
@@ -1223,6 +1188,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         }
     );
 
+    app_server.shutdown().await?;
     Ok(())
 }
 
@@ -1429,8 +1395,13 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
             .thread_event_channels
             .get(&thread_id)
             .expect("thread channel should exist");
-        let store = channel.store.lock().await;
+        let mut store = channel.store.lock().await;
         assert_eq!(store.input_state, Some(expected_input_state));
+        let mut notification = token_usage_notification(thread_id, "turn-background", Some(100));
+        if let ServerNotification::ThreadTokenUsageUpdated(usage) = &mut notification {
+            usage.output_tokens_per_second = Some(50.0);
+        }
+        store.push_notification(notification);
         store.snapshot()
     };
 
@@ -1459,7 +1430,15 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
     app.chat_widget
         .set_queue_autosend_suppressed(/*suppressed*/ false);
 
+    app.chat_widget.setup_status_line(
+        vec![crate::bottom_pane::StatusLineItem::OutputTps],
+        /*use_theme_colors*/ false,
+    );
     app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+    assert_eq!(
+        app.chat_widget.status_line_text(),
+        Some("50tps".to_string())
+    );
 
     assert_eq!(app.chat_widget.composer_text_with_pending(), "draft prompt");
     assert!(app.chat_widget.queued_user_message_texts().is_empty());
@@ -1577,6 +1556,8 @@ async fn replayed_turn_complete_submits_restored_queued_follow_up() {
     while new_op_rx.try_recv().is_ok() {}
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -1584,6 +1565,8 @@ async fn replayed_turn_complete_submits_restored_queued_follow_up() {
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -1642,6 +1625,8 @@ async fn replay_only_thread_keeps_restored_queue_visible() {
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -1649,6 +1634,8 @@ async fn replay_only_thread_keeps_restored_queue_visible() {
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ false,
@@ -1695,11 +1682,15 @@ async fn replay_thread_snapshot_keeps_queue_when_running_state_only_comes_from_s
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
             events: vec![],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -1719,7 +1710,10 @@ async fn replay_thread_snapshot_keeps_queue_when_running_state_only_comes_from_s
 async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() {
     let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let thread_id = ThreadId::new();
-    let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    let mut session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
+    session.system1_enabled = true;
+    session.reasoning_effort = Some(ReasoningEffortConfig::High);
+    app.chat_widget.local_settings.tui.status_line = Some(vec!["reasoning".into()]);
     app.chat_widget.handle_thread_session(session.clone());
     app.chat_widget.handle_server_notification(
         turn_started_notification(thread_id, "turn-1"),
@@ -1729,32 +1723,55 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() 
         agent_message_delta_notification(thread_id, "turn-1", "agent-1", "streaming"),
         /*replay_kind*/ None,
     );
+    let captured = codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+        thread_id: thread_id.to_string(),
+        turn_id: "turn-1".into(),
+        reasoning_effort: Some(ReasoningEffortConfig::Low),
+        system1: true,
+    };
+    app.chat_widget.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(captured.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
     app.chat_widget
         .apply_external_edit("queued follow-up".to_string());
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-    let input_state = app
-        .chat_widget
-        .capture_thread_input_state()
-        .expect("expected queued follow-up state");
+    assert!(app.chat_widget.capture_thread_input_state().is_some());
+
+    app.active_thread_id = Some(thread_id);
+    {
+        let channel = app.ensure_thread_channel(thread_id);
+        let mut store = channel.store.lock().await;
+        store.set_session(
+            session.clone(),
+            vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+        );
+    }
+    app.store_active_thread_receiver().await;
+    let mut snapshot = {
+        let channel = app
+            .thread_event_channels
+            .get(&thread_id)
+            .expect("live thread channel");
+        let mut store = channel.store.lock().await;
+        // The runtime capture remains after its notification is no longer in the replay buffer.
+        store.rebase_buffer_after_session_refresh();
+        assert_eq!(store.reasoning_state.captured_step, Some(captured.clone()));
+        store.snapshot()
+    };
 
     let (chat_widget, _app_event_tx, _rx, mut new_op_rx) =
         make_chatwidget_manual_with_sender().await;
-    app.chat_widget = chat_widget;
+    app.replace_chat_widget(chat_widget);
+    app.chat_widget.local_settings.tui.status_line = Some(vec!["reasoning".into()]);
     app.chat_widget.handle_thread_session(session.clone());
     while new_op_rx.try_recv().is_ok() {}
 
-    app.replay_thread_snapshot(
-        ThreadEventSnapshot {
-            delegated_turns: Vec::new(),
-            session: None,
-            turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
-            events: Vec::new(),
-            active_reasoning_item: None,
-            input_state: Some(input_state),
-        },
-        /*resume_restored_queue*/ true,
-    );
+    // This widget is already attached; replay must not issue session startup requests again.
+    snapshot.session = None;
+    app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
 
     assert_eq!(
         app.chat_widget.queued_user_message_texts(),
@@ -1764,6 +1781,10 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() 
         new_op_rx.try_recv().is_err(),
         "restored queue should stay queued while replayed turn is still running"
     );
+    assert_eq!(app.chat_widget.status_line_text(), Some("low·auto".into()));
+    let other = test_thread_session(ThreadId::new(), test_path_buf("/tmp/other"));
+    app.chat_widget.handle_thread_session(other);
+    assert!(!app.chat_widget.status_line_text().unwrap().contains("low"));
 }
 
 #[tokio::test]
@@ -1773,16 +1794,20 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_state_without_
     let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
     let (chat_widget, _app_event_tx, _rx, _new_op_rx) =
         boxed_future!(make_chatwidget_manual_with_sender()).await;
-    app.chat_widget = chat_widget;
+    app.replace_chat_widget(chat_widget);
     app.chat_widget.handle_thread_session(session);
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -1833,6 +1858,8 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -1862,6 +1889,8 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
                 ))),
             ],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -1991,11 +2020,15 @@ async fn replay_thread_snapshot_restores_collaboration_mode_for_draft_submit() {
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
             events: vec![],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -2078,11 +2111,15 @@ async fn replay_thread_snapshot_restores_collaboration_mode_without_input() {
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
             events: vec![],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -2138,6 +2175,8 @@ async fn replayed_interrupted_turn_restores_queued_input_to_composer() {
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -2145,6 +2184,8 @@ async fn replayed_interrupted_turn_restores_queued_input_to_composer() {
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Interrupted),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: Some(input_state),
         },
         /*resume_restored_queue*/ true,
@@ -2180,10 +2221,7 @@ async fn token_usage_update_refreshes_status_line_with_runtime_context_window() 
         token_usage_notification(ThreadId::new(), "turn-1", Some(950_000)),
     )));
 
-    assert_eq!(
-        app.chat_widget.status_line_text(),
-        Some("950K window".into())
-    );
+    assert_eq!(app.chat_widget.status_line_text(), Some("950K".into()));
 }
 
 #[tokio::test]
@@ -2893,7 +2931,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
                 .await?;
             // A queued close from the old runtime must not undo the new attachment.
             app.handle_backend_event(&app_server, closed).await;
-            app.drain_active_thread_events(&mut tui).await?;
+            app.drain_active_thread_events(&mut tui, &app_server).await?;
             assert_eq!(app.active_thread_id, Some(child_thread_id));
             assert!(!matches!(
                 app_server.thread_read(child_thread_id, /*include_turns*/ false).await?.status,
@@ -2977,6 +3015,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(resumed.blocks_direct_input);
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &app_server,
             resumed,
             crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
             /*initial_user_message*/ None,
@@ -3119,17 +3158,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         )
         .expect("create source rollout"),
     )?;
-    let other_thread_id = ThreadId::from_string(
-        &app_test_support::create_fake_rollout(
-            config.codex_home.as_path(),
-            "2025-01-06T12-00-00",
-            "2025-01-06T12:00:00Z",
-            "Other task",
-            Some(config.model_provider_id.as_str()),
-            /*git_info*/ None,
-        )
-        .expect("create other rollout"),
-    )?;
     let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
     let started = app_server
         .resume_thread(
@@ -3158,10 +3186,11 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     )
     .await;
 
-    let control = Box::pin(app.handle_start_side(
+    let control = Box::pin(app.start_companion_conversation(
         &mut tui,
         &mut app_server,
         parent_thread_id,
+        CompanionKind::Parallel,
         /*user_message*/ None,
     ))
     .await?;
@@ -3210,19 +3239,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             app.chat_widget.config_ref()
         ))
     );
-    app.select_agents_overview_thread(&mut tui, &mut app_server, other_thread_id)
-        .await?;
-    app.select_agents_overview_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
-    Box::pin(app.handle_start_side(
-        &mut tui,
-        &mut app_server,
-        parent_thread_id,
-        /*user_message*/ None,
-    ))
-    .await?;
-    assert_eq!(app.active_thread_id, Some(side_thread_id));
-    assert_eq!(app.side_threads.len(), 1);
     app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
         .await?;
     app.select_permission_profile(
@@ -4245,6 +4261,8 @@ async fn replay_snapshot_with_pending_request_retains_warnings_without_covering_
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(thread_id, test_path_buf("/tmp/main"))),
             turns: Vec::new(),
@@ -4263,6 +4281,8 @@ async fn replay_snapshot_with_pending_request_retains_warnings_without_covering_
                 ))),
             ],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -4647,6 +4667,8 @@ async fn replayed_file_change_approval_recovers_snapshot_changes() {
     let cwd = test_path_buf("/tmp/project").abs();
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(thread_id, cwd.clone().into_path_buf())),
             turns: vec![test_turn(
@@ -4676,6 +4698,8 @@ async fn replayed_file_change_approval_recovers_snapshot_changes() {
                 },
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -5219,7 +5243,7 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
     let original_approval_policy = app.config.permissions.approval_policy.value();
     let original_sandbox_policy = app.config.legacy_sandbox_policy();
 
-    let fork_config = app.side_fork_config();
+    let fork_config = app.side_fork_config(CompanionKind::Side);
 
     assert!(fork_config.ephemeral);
     assert_eq!(
@@ -5281,7 +5305,7 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
     app.chat_widget
         .set_approvals_reviewer(ApprovalsReviewer::AutoReview);
 
-    let fork_config = app.side_fork_config();
+    let fork_config = app.side_fork_config(CompanionKind::Side);
 
     assert_eq!(
         (
@@ -5304,15 +5328,15 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
 }
 
 #[tokio::test]
-async fn side_start_block_message_allows_replacing_open_side_conversation() {
+async fn side_start_block_message_rejects_temporary_but_allows_parallel_replacement() {
     let mut app = make_test_app().await;
     assert_eq!(
-        app.side_start_block_message(),
+        app.side_start_block_message(CompanionKind::Side),
         Some("'/side' is unavailable until the main thread is ready.")
     );
 
     app.primary_thread_id = Some(ThreadId::new());
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 
     let parent_thread_id = ThreadId::new();
     let side_thread_id = ThreadId::new();
@@ -5320,18 +5344,32 @@ async fn side_start_block_message_allows_replacing_open_side_conversation() {
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
 
     app.active_thread_id = Some(parent_thread_id);
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 
     app.active_thread_id = Some(side_thread_id);
-    assert_eq!(
-        app.side_start_block_message(),
-        Some(
-            "A side conversation is already open. Press ctrl + c to return before starting another."
-        )
-    );
+    for kind in [CompanionKind::Side, CompanionKind::Parallel] {
+        assert_eq!(
+            app.side_start_block_message(kind),
+            Some(
+                "A side conversation is already open. Press ctrl + c to return before starting another."
+            )
+        );
+    }
+    app.side_threads
+        .insert(side_thread_id, SideThreadState::parallel(parent_thread_id));
+    for thread_id in [parent_thread_id, side_thread_id] {
+        app.active_thread_id = Some(thread_id);
+        assert_eq!(
+            app.side_start_block_message(CompanionKind::Side),
+            Some(
+                "'/side' and '/btw' are unavailable while a parallel conversation is open. Switch to the parallel chat and press Ctrl+C to close it first."
+            )
+        );
+        assert_eq!(app.side_start_block_message(CompanionKind::Parallel), None);
+    }
 
     app.side_threads.remove(&side_thread_id);
-    assert_eq!(app.side_start_block_message(), None);
+    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
 }
 
 #[tokio::test]
@@ -5610,6 +5648,8 @@ async fn side_thread_snapshot_does_not_refresh_from_fork_history() {
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
 
     let snapshot = ThreadEventSnapshot {
+        output_tps: None,
+        inferred_session: true,
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
             rollout_path: None,
@@ -5618,6 +5658,8 @@ async fn side_thread_snapshot_does_not_refresh_from_fork_history() {
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     };
 
@@ -5640,6 +5682,8 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
 
     let snapshot = ThreadEventSnapshot {
+        output_tps: None,
+        inferred_session: false,
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
             daybreak_enabled: false,
@@ -5651,6 +5695,8 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     };
 
@@ -5825,6 +5871,8 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
     app.activate_thread_channel(side_thread_id).await;
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 side_thread_id,
@@ -5833,6 +5881,8 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
             turns: Vec::new(),
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -5907,35 +5957,6 @@ async fn side_restore_user_message_puts_inline_question_back_in_composer() {
 }
 
 #[tokio::test]
-async fn side_discard_selection_only_closes_the_active_side() {
-    let mut app = make_test_app().await;
-    let parent_thread_id = ThreadId::new();
-    let side_thread_id = ThreadId::new();
-    app.active_thread_id = Some(side_thread_id);
-    app.side_threads
-        .insert(side_thread_id, SideThreadState::new(parent_thread_id));
-
-    assert_eq!(
-        app.side_thread_to_discard_after_switch(side_thread_id),
-        None
-    );
-    assert_eq!(
-        app.side_thread_to_discard_after_switch(parent_thread_id),
-        Some(side_thread_id)
-    );
-
-    app.active_thread_id = Some(parent_thread_id);
-    assert_eq!(
-        app.side_thread_to_discard_after_switch(ThreadId::new()),
-        None
-    );
-    assert_eq!(
-        app.side_thread_to_discard_after_switch(side_thread_id),
-        None
-    );
-}
-
-#[tokio::test]
 async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
     Box::pin(async {
         let mut app = make_test_app().await;
@@ -6003,9 +6024,9 @@ async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Resu
 }
 
 #[tokio::test]
-async fn background_side_cleanup_removes_local_state_and_ignores_late_events() -> Result<()> {
+async fn closed_side_cleanup_removes_local_state_and_ignores_late_events() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let mut app_server =
+    let app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
     let parent_thread_id = ThreadId::new();
     let side_thread_id = ThreadId::new();
@@ -6027,8 +6048,7 @@ async fn background_side_cleanup_removes_local_state_and_ignores_late_events() -
             tokio::spawn(std::future::pending::<()>()),
         ),
     );
-    app.discard_side_thread_in_background(&mut app_server, side_thread_id)
-        .await;
+    app.discard_closed_side_thread(side_thread_id).await;
 
     assert_matches!(
         events.try_recv(),
@@ -6224,6 +6244,12 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
     };
     let make_header = |is_first| -> Arc<dyn HistoryCell> {
         let session = ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id: ThreadId::new(),
@@ -6362,7 +6388,7 @@ async fn ctrl_l_clears_owned_history_and_preserves_the_draft() -> Result<()> {
             .is::<history_cell::SessionHeaderHistoryCell>()
     );
     let header = lines_to_single_string(&app.transcript_cells[0].display_lines(/*width*/ 80));
-    assert!(header.contains("OpenAI Codex"));
+    assert!(header.contains("ASM"));
     let raw_header = lines_to_single_string(&app.transcript_cells[0].raw_lines());
     assert!(raw_header.contains("gpt-test"));
     assert!(!header.contains("old transcript row"));
@@ -6459,8 +6485,10 @@ async fn make_test_app() -> Box<App> {
         background_voice_error: None,
         temporary_structured_requests: HashMap::new(),
         pending_thread_titles: HashMap::new(),
+        automatic_thread_titles: HashMap::new(),
         thread_event_listener_tasks: HashMap::new(),
         agent_navigation: AgentNavigationState::default(),
+        turn_agent_counts: Default::default(),
         pending_server_profiles: HashMap::new(),
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
@@ -6585,8 +6613,10 @@ pub(super) async fn make_test_app_with_channels() -> (
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashMap::new(),
+            automatic_thread_titles: HashMap::new(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
+            turn_agent_counts: Default::default(),
             pending_server_profiles: HashMap::new(),
             agents_overview: Default::default(),
             side_threads: HashMap::new(),
@@ -6848,6 +6878,12 @@ async fn replace_goal_confirmation_snapshot() {
 
 pub(super) fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
+        agent_role: None,
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -6889,6 +6925,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     while events.try_recv().is_ok() {}
     app.transcript_cells = vec![plain_line_cell("Previous thread transcript")];
     app.deferred_history_lines = vec![Line::from("Previous pending history").into()];
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.insert_history_lines(vec![Line::from("Previous pending history")]);
     app.chat_widget
@@ -6899,6 +6936,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     let next_thread_id = ThreadId::new();
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &app_server,
         AppServerStartedThread {
             session: test_thread_session(next_thread_id, test_path_buf("/tmp/next")),
             turns: vec![test_turn(
@@ -6925,7 +6963,6 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     assert!(!tui.is_alt_screen_active());
     assert!(app.transcript_cells.is_empty());
     assert!(app.deferred_history_lines.is_empty());
-    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     // The reset must still run if the transport disconnects before queued events are handled.
     app.reconnect.offline = true;
     while let Ok(event) = events.try_recv() {
@@ -6961,7 +6998,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
         .join("\n");
     assert!(!rendered.contains("Previous thread transcript"));
     assert!(!rendered.contains("Previous queued history"));
-    assert_snapshot!(rendered);
+    assert_snapshot!(rendered.replace(CODEX_CLI_VERSION, "<VERSION>"));
     app_server.shutdown().await?;
     Ok(())
 }
@@ -6980,6 +7017,8 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
         &app_server,
         next_thread_id,
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 next_thread_id,
@@ -6999,6 +7038,8 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
             )],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -7494,6 +7535,7 @@ fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItem>) -> Turn 
         id: turn_id.to_string(),
         root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,
+        token_usage: None,
         items,
         status,
         error: None,
@@ -7540,6 +7582,7 @@ fn token_usage_notification(
     model_context_window: Option<i64>,
 ) -> ServerNotification {
     ServerNotification::ThreadTokenUsageUpdated(ThreadTokenUsageUpdatedNotification {
+        output_tokens_per_second: None,
         thread_id: thread_id.to_string(),
         turn_id: turn_id.to_string(),
         token_usage: ThreadTokenUsage {
@@ -7949,6 +7992,12 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     let make_header = |is_first| {
         let session = ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id: ThreadId::new(),
@@ -8022,6 +8071,12 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
     let base_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id: base_id,
@@ -9093,6 +9148,8 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
     let thread_id = ThreadId::new();
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(
                 thread_id,
@@ -9103,6 +9160,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
+                    token_usage: None,
                     items: vec![ThreadItem::UserMessage {
                         id: "user-1".to_string(),
                         client_id: None,
@@ -9121,6 +9179,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     id: "turn-2".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
+                    token_usage: None,
                     items: vec![
                         ThreadItem::UserMessage {
                             id: "user-2".to_string(),
@@ -9148,6 +9207,8 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
             ],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -9213,6 +9274,8 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
 
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: None,
             turns: Vec::new(),
@@ -9238,6 +9301,8 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
                 ),
             ))],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -9290,11 +9355,15 @@ async fn refreshed_snapshot_session_persists_resumed_turns() {
         ..initial_session.clone()
     };
     let mut snapshot = ThreadEventSnapshot {
+        output_tps: None,
+        inferred_session: false,
         delegated_turns: Vec::new(),
         session: Some(initial_session),
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     };
 
@@ -9340,6 +9409,12 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
 
         let thread_id = ThreadId::new();
         let event = crate::session_state::ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,
@@ -10037,6 +10112,10 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
     let notification = ThreadSettingsUpdatedNotification {
         thread_id: inactive_thread_id.to_string(),
         thread_settings: ThreadSettings {
+            system1_enabled: true,
+            system1_revision: 1,
+            system1_error: Some(codex_protocol::protocol::System1Error::Timeout),
+            system1_failure_episode: 1,
             disabled_plugin_ids: Vec::new(),
             cwd: test_absolute_path("/tmp/thread-settings"),
             approval_policy: AskForApproval::OnRequest,
@@ -10075,12 +10154,20 @@ async fn inactive_thread_settings_notification_updates_cached_collaboration_mode
         .clone()
         .expect("inactive session should remain cached");
     assert_eq!(cached_session.model, "gpt-test");
+    assert!(cached_session.system1_enabled);
+    assert_eq!(
+        cached_session.system1_error,
+        Some(codex_protocol::protocol::System1Error::Timeout)
+    );
+    assert_eq!(cached_session.system1_failure_episode, 1);
+    assert!(!app.chat_widget.system1_enabled());
     assert_eq!(
         cached_session.collaboration_mode.as_deref(),
         Some(&collaboration_mode)
     );
 
     app.chat_widget.handle_thread_session(cached_session);
+    assert!(app.chat_widget.system1_enabled());
     assert_eq!(
         app.chat_widget.active_collaboration_mode_kind(),
         ModeKind::Plan
@@ -10102,6 +10189,12 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     let thread_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,

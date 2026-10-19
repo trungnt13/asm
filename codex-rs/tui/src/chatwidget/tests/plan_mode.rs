@@ -15,6 +15,12 @@ fn paste_hidden_plan_shell_payload(chat: &mut ChatWidget) -> String {
 
 fn plan_test_session(thread_id: ThreadId) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
+        agent_role: None,
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -812,6 +818,7 @@ async fn plan_implementation_popup_skips_replayed_turn_complete() {
             id: "turn-1".to_string(),
             root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
+            token_usage: None,
             items: vec![AppServerThreadItem::AgentMessage {
                 id: "msg-plan".to_string(),
                 text: "Plan details".to_string(),
@@ -853,6 +860,7 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
             id: "turn-1".to_string(),
             root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
+            token_usage: None,
             items: vec![AppServerThreadItem::AgentMessage {
                 id: "msg-plan-replay".to_string(),
                 text: "Plan details".to_string(),
@@ -1163,6 +1171,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
                 error: None,
@@ -1209,6 +1218,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
+                token_usage: None,
                 items: Vec::new(),
                 status: AppServerTurnStatus::Completed,
                 error: None,
@@ -1238,6 +1248,12 @@ async fn submit_user_message_emits_structured_plugin_mentions_from_bindings() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
+        agent_role: None,
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1586,10 +1602,10 @@ async fn vim_mode_default_disabled_starts_composer_in_insert_mode() {
 
 #[tokio::test]
 async fn vim_mode_default_enabled_starts_composer_in_insert_mode() {
-    let chat = make_startup_chat_with_cli_overrides(vec![(
-        "tui.vim_mode_default".to_string(),
-        TomlValue::Boolean(true),
-    )])
+    let chat = make_startup_chat_with_cli_overrides(vec![
+        ("tui.vim_mode_default".to_string(), TomlValue::Boolean(true)),
+        ("tui.multiline_enter".to_string(), TomlValue::Boolean(true)),
+    ])
     .await;
 
     assert!(chat.bottom_pane.composer_is_vim_enabled());
@@ -1602,6 +1618,11 @@ async fn vim_mode_default_enabled_starts_composer_in_insert_mode() {
     chat.handle_key_event(KeyCode::Esc.into());
     chat.handle_key_event(KeyCode::Char('.').into());
     assert_eq!(chat.bottom_pane.composer_text(), "xx");
+
+    chat.handle_key_event(KeyCode::Char('i').into());
+    chat.apply_external_edit("first\nsecond".to_string());
+    chat.handle_key_event(KeyCode::Enter.into());
+    assert_eq!(chat.bottom_pane.composer_text(), "first\nsecond\n");
 }
 
 async fn make_startup_chat_with_cli_overrides(

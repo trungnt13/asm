@@ -209,6 +209,22 @@ impl App {
 
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
+            if store.session.as_ref().is_some_and(|session| {
+                let (mode, model, effort) = session.collaboration_mode.as_deref().map_or(
+                    (
+                        ModeKind::Default,
+                        session.model.as_str(),
+                        session.reasoning_effort.clone(),
+                    ),
+                    |mode| (mode.mode, mode.model(), mode.reasoning_effort()),
+                );
+                mode != settings.collaboration_mode.mode
+                    || model != settings.model
+                    || effort != settings.effort
+            }) {
+                store.reasoning_state.captured_step = None;
+                store.reasoning_state.suppressed_turn_id = store.latest_turn_id.clone();
+            }
             if let Some(session) = store.session.as_mut() {
                 apply_thread_settings_to_session(session, settings);
             }
@@ -257,6 +273,12 @@ impl App {
 }
 
 fn apply_thread_settings_to_session(session: &mut ThreadSessionState, settings: &ThreadSettings) {
+    if settings.system1_revision >= session.system1_revision {
+        session.system1_enabled = settings.system1_enabled;
+        session.system1_revision = settings.system1_revision;
+        session.system1_error = settings.system1_error;
+        session.system1_failure_episode = settings.system1_failure_episode;
+    }
     if settings.collaboration_mode.mode == ModeKind::Default {
         session.model = settings.model.clone();
         session.reasoning_effort = settings.effort.clone();

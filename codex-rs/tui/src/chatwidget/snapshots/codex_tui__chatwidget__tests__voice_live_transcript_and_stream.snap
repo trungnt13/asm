@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: rendered
+expression: normalized_backend_snapshot(terminal.backend())
 ---
 "                                                            "
 "• Agent answer arriving                                     "
@@ -9,9 +9,9 @@ expression: rendered
 "› pick a number                                             "
 "                                                            "
 "                                                            "
-"                                                            "
+"                                                       Main "
 " voice ● listening                  f9 mute     /voice stop "
 "                                                            "
-"› Ask Codex to do anything                                  "
+"› Ask ASM to do anything                                    "
 "                                                            "
-"  GPT-5.6-Sol default · /tmp/project                        "
+"  sol56 def·/tmp/project                                    "

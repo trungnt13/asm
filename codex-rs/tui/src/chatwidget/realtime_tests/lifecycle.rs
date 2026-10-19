@@ -550,3 +550,33 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
         .join("\n");
     insta::assert_snapshot!("voice_device_failure_cleanup", rendered);
 }
+
+#[tokio::test]
+async fn parallel_voice_requires_started_thread() {
+    let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
+    chat.set_parallel_conversation_active(/*active*/ true);
+
+    chat.toggle_realtime_conversation();
+
+    commit_realtime_history_events(&mut chat, &mut events);
+    let Ok(AppEvent::InsertHistoryCell(cell)) = events.try_recv() else {
+        panic!("expected voice availability error");
+    };
+    let rendered = cell
+        .display_lines(/*width*/ 200)
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let expected = if codex_realtime_webrtc::RealtimeWebrtcSession::is_supported() {
+        "■ Start a conversation before using voice mode."
+    } else {
+        "■ Voice requires macOS, an MSVC-based Windows build, or a glibc-based Linux build."
+    };
+    assert_eq!(rendered, expected);
+    assert_eq!(
+        chat.realtime_conversation.phase,
+        RealtimeConversationPhase::Inactive
+    );
+    assert!(ops.try_recv().is_err());
+}

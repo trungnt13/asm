@@ -6,7 +6,7 @@ expression: terminal.backend()
 "› deploy (plugin)  [Skill] Example skill used in tests.                                             "
 "                                                                                                    "
 "  enter insert · esc close                                                                          "
-"                                                                                                    "
+"                                                                                               Main "
 "› $1x  $plugin:d                                                                                    "
 "                                                                                                    "
 "                                                                                                    "
