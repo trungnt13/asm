@@ -49,23 +49,38 @@ impl LocalThreadStore {
         &self,
         segment: &RolloutLineageSegment,
     ) -> ThreadStoreResult<()> {
-        if super::thread_history::projection_state(self, segment.rollout_id())
-            .await?
-            .is_none()
+        let coordination = self
+            .live_writer_locks
+            .coordination(segment.rollout_id())
+            .await;
+        let _projection_guard = coordination.writer.lock().await;
+        let mut completed = coordination.history_projection.lock().await;
+        let revision = super::history_revision::read(&segment.rollout_path).await;
+        let state = super::thread_history::projection_state(self, segment.rollout_id()).await?;
+        if let (Some(revision), Some(state)) = (&revision, &state)
+            && completed.as_ref()
+                == Some(&(revision.clone(), state.next_byte_offset, state.next_ordinal))
         {
-            let _projection_guard = self.live_writer_locks.lock(segment.rollout_id()).await;
-            // Another reader may have rebuilt this segment while we waited for its writer.
-            if super::thread_history::projection_state(self, segment.rollout_id())
-                .await?
-                .is_none()
-            {
-                super::thread_history_materialization::materialize_to_sqlite(
-                    self,
-                    segment.rollout_id(),
-                    &segment.rollout_path,
-                )
-                .await?;
-            }
+            return Ok(());
+        }
+        // A committed batch is not a completed rebuild. Errors and cancellation must leave
+        // the segment retryable, while unchanged successful reads avoid decoding it again.
+        *completed = None;
+        super::thread_history_materialization::materialize_to_sqlite(
+            self,
+            segment.rollout_id(),
+            &segment.rollout_path,
+        )
+        .await?;
+        if let Some(revision) = revision
+            && super::history_revision::read(&segment.rollout_path)
+                .await
+                .as_ref()
+                == Some(&revision)
+            && let Some(state) =
+                super::thread_history::projection_state(self, segment.rollout_id()).await?
+        {
+            *completed = Some((revision, state.next_byte_offset, state.next_ordinal));
         }
         Ok(())
     }
