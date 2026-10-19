@@ -375,7 +375,7 @@ impl Session {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .child_token(),
-            deadline: Instant::now() + Duration::from_secs(/*secs*/ 3),
+            deadline: Instant::now() + super::system1_task::WARMUP_TIMEOUT,
         };
         let warmup = AbortOnDropHandle::new(tokio::spawn(run_decision(
             client,
@@ -697,6 +697,7 @@ impl Session {
             Err((error, generation, guard)) => {
                 let error = health::classify_error(error);
                 self.publish_system1_error(
+                    /*warmup_timeout_seconds*/ None,
                     Some(error),
                     Some(generation),
                     Some(health::System1DecisionHealthGuard {

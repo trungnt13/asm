@@ -281,7 +281,8 @@ impl Session {
         if outcome == TurnSettingsUpdateOutcome::Applied {
             self.accept_system1_decision(turn);
             self.publish_system1_error(
-                /*error*/ None, /*generation*/ None, /*guard*/ None,
+                /*warmup_timeout_seconds*/ None, /*error*/ None,
+                /*generation*/ None, /*guard*/ None,
             )
             .await;
         }

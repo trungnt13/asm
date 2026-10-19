@@ -4337,6 +4337,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
             error: Some(codex_protocol::protocol::System1Error::Credentials),
             failure_episode: 1,
             warning: Some(codex_protocol::protocol::System1FailureWarning {
+                warmup_timeout_seconds: None,
                 reasoning_effort: Some(ReasoningEffortConfig::Low),
                 cooldown_seconds: None,
             }),

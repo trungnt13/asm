@@ -136,6 +136,7 @@ impl Session {
     #[tracing::instrument(skip_all)]
     pub(in crate::session) async fn publish_system1_error(
         &self,
+        warmup_timeout_seconds: Option<u64>,
         error: Option<System1Error>,
         generation: Option<u64>,
         guard: Option<System1DecisionHealthGuard<'_>>,
@@ -176,6 +177,7 @@ impl Session {
                 error: updated.error,
                 failure_episode: updated.failure_episode,
                 warning: error.map(|_| System1FailureWarning {
+                    warmup_timeout_seconds,
                     reasoning_effort,
                     cooldown_seconds,
                 }),
