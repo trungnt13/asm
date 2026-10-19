@@ -968,6 +968,18 @@ impl ModelClient {
             // Unsupported models and disabled overrides must also accept saved history.
             // Filter only the request copy; persisted history remains unchanged.
             input.retain(|item| !matches!(item, ResponseItem::ConfigurationUpdate { .. }));
+        } else {
+            input.dedup_by(|next, previous| {
+                if matches!(next, ResponseItem::ConfigurationUpdate { .. })
+                    && matches!(previous, ResponseItem::ConfigurationUpdate { .. })
+                {
+                    // Keep the latest update; dedup_by removes `next`.
+                    std::mem::swap(previous, next);
+                    true
+                } else {
+                    false
+                }
+            });
         }
         let is_openai = self.state.provider.info().is_openai();
         // These prompt-only items are rebuilt on every request. Hash their visible payloads
@@ -1860,9 +1872,6 @@ impl ResponsesHttpExecutor<'_> {
             )?;
             self.client
                 .prepare_response_items_for_request(&mut request.input);
-            if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
-                crate::guardian::observe_guardian_request(session_telemetry, &request);
-            }
             let request_session_telemetry =
                 session_telemetry_for_request(session_telemetry, &request);
             options.extra_headers.extend(responses_headers);
@@ -2073,12 +2082,6 @@ impl ModelClientSession {
                 Err(err) => return Err(provider.map_api_error(err)),
             }
 
-            // Measure the complete logical request, not only the websocket delta.
-            if !warmup
-                && crate::guardian::is_basic_session_source(&self.client.state.session_source)
-            {
-                crate::guardian::observe_guardian_request(session_telemetry, &request);
-            }
             let mut client_metadata = self.client.build_ws_client_metadata(
                 responses_metadata,
                 include_internal,
