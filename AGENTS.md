@@ -41,9 +41,7 @@ For model-visible context:
 
 - Build history incrementally; do not rewrite it.
 - Avoid frequent context changes that break caching.
-- Give every injected item a hard size cap; no item may exceed 10K tokens.
 - Flag new individual items that can exceed 1K tokens as P0 for additional manual review.
-- Define injected fragments as structs in `core/context` implementing `ContextualUserFragment`.
 
 Preserve inherited Linux, macOS, Windows, and mixed app-server/exec-server OS compatibility unless an approved change is explicitly platform-specific. Local checks, fork CI, and release coverage follow the fork guide; they are not proof of every supported configuration. Use the `remote-tests` skill when writing tests for mixed-OS execution.
 
