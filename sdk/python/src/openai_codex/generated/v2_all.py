@@ -5604,6 +5604,17 @@ class HookPromptThreadItem(BaseModel):
     type: Annotated[Literal["hookPrompt"], Field(title="HookPromptThreadItemType")]
 
 
+class InterAgentMessageThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    author: str
+    id: str
+    recipient: str
+    text: str
+    type: Annotated[Literal["interAgentMessage"], Field(title="InterAgentMessageThreadItemType")]
+
+
 class PlanThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11944,6 +11955,7 @@ class ThreadItem(
     RootModel[
         UserMessageThreadItem
         | HookPromptThreadItem
+        | InterAgentMessageThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
         | PlanThreadItem
@@ -11970,6 +11982,7 @@ class ThreadItem(
     root: (
         UserMessageThreadItem
         | HookPromptThreadItem
+        | InterAgentMessageThreadItem
         | AgentMessageThreadItem
         | FunctionCallOutputThreadItem
         | PlanThreadItem

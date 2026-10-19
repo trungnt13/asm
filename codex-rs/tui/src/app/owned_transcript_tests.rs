@@ -39,6 +39,7 @@ pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
         system1_revision: 0,
         system1_error: None,
         system1_failure_episode: 0,
+        agent_role: None,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

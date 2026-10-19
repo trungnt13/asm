@@ -65,7 +65,7 @@ pub(super) async fn handle_message_string_tool(
             target: AgentTarget::Id(receiver_thread_id),
             resume_config,
             input: AgentInput::Message {
-                message: AgentMessage::Plaintext(message),
+                message: AgentMessage::Plaintext(message.clone()),
                 mode,
             },
             start_options: TurnStartOptions {
@@ -82,6 +82,18 @@ pub(super) async fn handle_message_string_tool(
     let receiver_agent_path = receipt.metadata.agent_path.ok_or_else(|| {
         FunctionCallError::RespondToModel("target agent is missing an agent_path".to_string())
     })?;
+    emit_inter_agent_communication(
+        &session,
+        &turn,
+        &call_id,
+        match mode {
+            MessageDeliveryMode::QueueOnly => CollabAgentTool::SendMessage,
+            MessageDeliveryMode::TriggerTurn => CollabAgentTool::FollowupTask,
+        },
+        receiver_thread_id,
+        message,
+    )
+    .await;
     emit_sub_agent_activity(
         &session,
         &turn,

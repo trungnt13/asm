@@ -4607,6 +4607,7 @@ async fn session_configured_clears_goal_status_footer() {
         system1_revision: 0,
         system1_error: None,
         system1_failure_episode: 0,
+        agent_role: None,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,

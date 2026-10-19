@@ -63,6 +63,8 @@ fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
         items.iter().cloned(),
         RawReasoningVisibility::Hidden,
         Some(&app.config),
+        /*show_communication*/ false,
+        /*own_agent_role*/ None,
     )
 }
 

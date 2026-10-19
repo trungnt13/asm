@@ -685,6 +685,7 @@ pub(crate) struct ChatWidget {
     active_side_conversation: bool,
     active_parallel_conversation: bool,
     blocks_direct_input: bool,
+    show_interagent_communication: bool,
     external_writer_view: bool,
     /// Covers both queued and executing forks so repeated shortcuts cannot queue another one.
     pub(crate) fork_in_progress: bool,
@@ -983,7 +984,7 @@ impl ChatWidget {
     }
 
     /// Returns the cached metadata for a thread, defaulting to empty if none has been registered.
-    fn collab_agent_metadata(&self, thread_id: ThreadId) -> AgentMetadata {
+    pub(crate) fn collab_agent_metadata(&self, thread_id: ThreadId) -> AgentMetadata {
         self.collab_agent_metadata
             .get(&thread_id)
             .cloned()

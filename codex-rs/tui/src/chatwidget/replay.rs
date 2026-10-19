@@ -479,6 +479,19 @@ impl ChatWidget {
                 reasoning_effort,
                 agents_states,
             }),
+            item @ ThreadItem::InterAgentMessage { .. } => {
+                if self.show_interagent_communication
+                    && let Some(cell) = multi_agents::communication_history_cell(
+                        &item,
+                        &self.config.cwd,
+                        self.thread_id
+                            .and_then(|id| self.collab_agent_metadata.get(&id))
+                            .and_then(|metadata| metadata.agent_role.as_deref()),
+                    )
+                {
+                    self.on_collab_event(cell);
+                }
+            }
             item @ ThreadItem::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
             item @ ThreadItem::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
             ThreadItem::Sleep(_) => {}

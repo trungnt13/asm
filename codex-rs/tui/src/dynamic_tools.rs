@@ -1033,7 +1033,8 @@ async fn execute_inner(
                                         "id": item.id, "turnId": turn.id, "type": "webSearch",
                                         "name": "webSearch", "status": null
                                     })),
-                                    ThreadItem::UserMessage { .. }
+                                    ThreadItem::InterAgentMessage { .. }
+                                    | ThreadItem::UserMessage { .. }
                                     | ThreadItem::FunctionCallOutput { .. }
                                     | ThreadItem::HookPrompt { .. }
                                     | ThreadItem::AgentMessage { .. }
@@ -1533,6 +1534,9 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
                 "status": status, "senderThreadId": sender_thread_id,
                 "receiverThreadIds": receiver_thread_ids, "prompt": prompt,
                 "model": model, "reasoningEffort": reasoning_effort
+            }),
+            ThreadItem::InterAgentMessage { id, .. } => json!({
+                "type": "interAgentMessage", "id": id
             }),
             ThreadItem::SubAgentActivity {
                 id,

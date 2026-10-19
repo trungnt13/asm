@@ -37,6 +37,7 @@ pub(crate) struct ThreadSessionState {
     pub(crate) system1_revision: u64,
     pub(crate) system1_error: Option<codex_protocol::protocol::System1Error>,
     pub(crate) system1_failure_episode: u64,
+    pub(crate) agent_role: Option<String>,
     pub(crate) thread_source: Option<codex_protocol::protocol::ThreadSource>,
     pub(crate) daybreak_enabled: bool,
     pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,

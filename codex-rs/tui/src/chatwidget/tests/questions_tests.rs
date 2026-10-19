@@ -1004,6 +1004,8 @@ async fn desktop_async_answer_dismisses_only_its_question_and_preserves_the_othe
             [item],
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
+            /*show_communication*/ false,
+            /*own_agent_role*/ None,
         );
         insta::assert_snapshot!(
             "desktop_async_question_reply",

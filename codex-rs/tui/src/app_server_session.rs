@@ -2486,6 +2486,7 @@ async fn thread_session_state_from_thread_start_response(
     session.system1_revision = response.system1_revision;
     session.system1_error = response.system1_error;
     session.system1_failure_episode = response.system1_failure_episode;
+    session.agent_role = response.thread.agent_role.clone();
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response
         .thread
@@ -2529,6 +2530,7 @@ async fn thread_session_state_from_thread_resume_response(
     session.system1_revision = response.system1_revision;
     session.system1_error = response.system1_error;
     session.system1_failure_episode = response.system1_failure_episode;
+    session.agent_role = response.thread.agent_role.clone();
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.collaboration_mode = response.collaboration_mode.clone().map(Box::new);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
@@ -2571,6 +2573,7 @@ async fn thread_session_state_from_thread_fork_response(
     session.system1_revision = response.system1_revision;
     session.system1_error = response.system1_error;
     session.system1_failure_episode = response.system1_failure_episode;
+    session.agent_role = response.thread.agent_role.clone();
     session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
@@ -2641,6 +2644,7 @@ async fn thread_session_state_from_thread_response(
         system1_revision: 0,
         system1_error: None,
         system1_failure_episode: 0,
+        agent_role: None,
         thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host,
