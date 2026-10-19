@@ -442,7 +442,7 @@ allowed_agent_roles = ["reviewer"]
             fragments
                 .iter()
                 .map(|fragment| {
-                    let text = fragment.render();
+                    let text = fragment.render().expect_text();
                     (
                         fragment.role(),
                         text.contains("- demo: Demo skill."),
