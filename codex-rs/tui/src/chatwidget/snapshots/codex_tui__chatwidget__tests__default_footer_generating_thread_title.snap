@@ -1,8 +1,0 @@
----
-source: tui/src/chatwidget/tests/terminal_title.rs
-expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 100))"
----
-                                                                                               Main
-› Ask ASM to do anything
-
-  sol56 def·/tmp/project·⠋

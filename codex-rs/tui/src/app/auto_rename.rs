@@ -323,7 +323,6 @@ impl App {
                 cancellation.cancel();
             }
         }
-        self.sync_thread_title_progress();
     }
 
     pub(super) fn observe_automatic_thread_name(
