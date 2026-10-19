@@ -697,8 +697,7 @@ impl Session {
             Err((error, generation, guard)) => {
                 let error = health::classify_error(error);
                 self.publish_system1_error(
-                    /*warmup_timeout_seconds*/ None,
-                    Some(error),
+                    health::System1HealthUpdate::Decision(Some(error)),
                     Some(generation),
                     Some(health::System1DecisionHealthGuard {
                         freshness: &guard.freshness,

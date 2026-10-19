@@ -149,10 +149,12 @@ pub(super) async fn run_decision(
     {
         session
             .publish_system1_error(
-                matches!(target, DecisionTarget::Warmup { .. })
-                    .then_some(WARMUP_TIMEOUT.as_secs())
-                    .filter(|_| error == System1Error::Timeout),
-                Some(error),
+                if matches!(target, DecisionTarget::Warmup { .. }) && error == System1Error::Timeout
+                {
+                    super::system1::health::System1HealthUpdate::WarmupTimeout
+                } else {
+                    super::system1::health::System1HealthUpdate::Decision(Some(error))
+                },
                 generation,
                 Some(super::system1::health::System1DecisionHealthGuard {
                     freshness: &guard.freshness,
