@@ -214,8 +214,11 @@ def completed_publication(run, candidate, tag, candidate_ref):
         for job in jobs
         if job["name"] == "Advance main only after release verification"
     )
+    # Logs may contain ANSI bytes. Keep them in memory, never render them to a terminal.
+    api_help = subprocess.check_output(["gh", "api", "--help"], text=True)
+    raw_logs = ["--allow-escape-sequences"] if "--allow-escape-sequences" in api_help else []
     logs = subprocess.check_output(
-        ["gh", "api", f"repos/{REPOSITORY}/actions/jobs/{sync_job['id']}/logs"],
+        ["gh", "api", *raw_logs, f"repos/{REPOSITORY}/actions/jobs/{sync_job['id']}/logs"],
         text=True,
     )
     # Job environment ties both original and successful resume runs to the frozen candidate.

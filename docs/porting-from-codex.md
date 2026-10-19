@@ -156,6 +156,7 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
    - Inspect failures; fix relevant code/package errors.
    - For runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not infer code defects or change build settings from runner failure alone.
    - If the owner requires recovery first, verify successful retry before dispatch.
+   - Read prior candidate job logs in memory with the GitHub CLI raw-output opt-in when supported; never render untrusted log escapes to a terminal.
 3. **Check live use.**
    - Before dispatch, run one time-limited local live turn with default config/existing sign-in. Do not override profile/model.
    - Use the release-source CLI/helper pair and [real-session isolation](#real-session-checks).
