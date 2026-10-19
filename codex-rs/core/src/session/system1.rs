@@ -375,7 +375,7 @@ impl Session {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .child_token(),
-            deadline: Instant::now() + Duration::from_secs(/*secs*/ 2),
+            deadline: Instant::now() + Duration::from_secs(/*secs*/ 3),
         };
         let warmup = AbortOnDropHandle::new(tokio::spawn(run_decision(
             client,
