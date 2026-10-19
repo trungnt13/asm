@@ -18944,6 +18944,16 @@
               "type": "null"
             }
           ]
+        },
+        "warmupTimeoutSeconds": {
+          "default": null,
+          "description": "Deadline for a synthetic startup warmup timeout; absent for decision failures.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "type": "object"

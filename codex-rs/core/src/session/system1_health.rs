@@ -13,6 +13,12 @@ use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone, Copy)]
+pub(in crate::session) enum System1HealthUpdate {
+    Decision(Option<System1Error>),
+    WarmupTimeout,
+}
+
 pub(in crate::session) struct System1DecisionHealthGuard<'a> {
     pub(in crate::session) freshness: &'a CancellationToken,
     pub(in crate::session) cancellation: &'a CancellationToken,
@@ -72,7 +78,7 @@ impl Session {
             && let Err(error) = state.client(config)
         {
             self.update_system1_error(
-                Some(classify_error(error)),
+                System1HealthUpdate::Decision(Some(classify_error(error))),
                 /*generation*/ None,
                 /*guard*/ None,
             );
@@ -81,10 +87,14 @@ impl Session {
 
     fn update_system1_error(
         &self,
-        error: Option<System1Error>,
+        update: System1HealthUpdate,
         generation: Option<u64>,
         guard: Option<System1DecisionHealthGuard<'_>>,
     ) -> Option<(System1State, Option<u64>)> {
+        let error = match update {
+            System1HealthUpdate::Decision(error) => error,
+            System1HealthUpdate::WarmupTimeout => Some(System1Error::Timeout),
+        };
         let state = self
             .services
             .thread_extension_data
@@ -111,7 +121,7 @@ impl Session {
             return None;
         }
         let mut cooldown_seconds = None;
-        if let Some(error) = error {
+        if let System1HealthUpdate::Decision(Some(error)) = update {
             recovery.failures = recovery.failures.saturating_add(/*rhs*/ 1);
             recovery.blocked = permanent_error(error);
             if !recovery.blocked {
@@ -136,10 +146,17 @@ impl Session {
     #[tracing::instrument(skip_all)]
     pub(in crate::session) async fn publish_system1_error(
         &self,
-        error: Option<System1Error>,
+        update: System1HealthUpdate,
         generation: Option<u64>,
         guard: Option<System1DecisionHealthGuard<'_>>,
     ) {
+        let (error, warmup_timeout_seconds) = match update {
+            System1HealthUpdate::Decision(error) => (error, None),
+            System1HealthUpdate::WarmupTimeout => (
+                Some(System1Error::Timeout),
+                Some(super::super::system1_task::WARMUP_TIMEOUT.as_secs()),
+            ),
+        };
         let reasoning_effort = if error.is_some() {
             let active = self
                 .active_turn
@@ -162,7 +179,8 @@ impl Session {
         } else {
             None
         };
-        let Some((updated, cooldown_seconds)) = self.update_system1_error(error, generation, guard)
+        let Some((updated, cooldown_seconds)) =
+            self.update_system1_error(update, generation, guard)
         else {
             return;
         };
@@ -176,6 +194,7 @@ impl Session {
                 error: updated.error,
                 failure_episode: updated.failure_episode,
                 warning: error.map(|_| System1FailureWarning {
+                    warmup_timeout_seconds,
                     reasoning_effort,
                     cooldown_seconds,
                 }),

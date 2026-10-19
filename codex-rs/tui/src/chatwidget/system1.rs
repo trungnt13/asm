@@ -165,15 +165,19 @@ impl ChatWidget {
             codex_protocol::protocol::System1Error::Rejected => "REJECTED".to_string(),
         };
         let message = if let Some(warning) = &self.status_state.system1_warning {
-            let effort = warning
-                .reasoning_effort
-                .as_ref()
-                .map_or("model default", ReasoningEffortConfig::as_str);
-            let recovery = warning.cooldown_seconds.map_or_else(
-                || "recovery blocked".to_string(),
-                |seconds| format!("cool down {seconds}s"),
-            );
-            format!("System 1 error {code}, fallback to {effort}, {recovery}")
+            if let Some(seconds) = warning.warmup_timeout_seconds {
+                format!("System1 warmup request timed out after {seconds}s.")
+            } else {
+                let effort = warning
+                    .reasoning_effort
+                    .as_ref()
+                    .map_or("model default", ReasoningEffortConfig::as_str);
+                let recovery = warning.cooldown_seconds.map_or_else(
+                    || "recovery blocked".to_string(),
+                    |seconds| format!("cool down {seconds}s"),
+                );
+                format!("System 1 error {code}, fallback to {effort}, {recovery}")
+            }
         } else {
             format!("System 1 error {code}, fallback and cooldown unavailable")
         };

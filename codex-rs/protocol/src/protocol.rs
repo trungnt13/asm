@@ -2369,6 +2369,9 @@ impl std::fmt::Display for System1Error {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct System1FailureWarning {
+    /// Deadline for a synthetic startup warmup timeout; absent for decision failures.
+    #[serde(default)]
+    pub warmup_timeout_seconds: Option<u64>,
     pub reasoning_effort: Option<ReasoningEffortConfig>,
     /// Initial retry delay in seconds; absent when recovery is blocked.
     pub cooldown_seconds: Option<u64>,

@@ -14,6 +14,9 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+pub(super) const WARMUP_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(/*secs*/ 3);
+
 pub(super) struct DecisionRequest {
     pub(super) model: String,
     pub(super) input: String,
@@ -75,6 +78,7 @@ pub(super) async fn run_decision(
         span.record("thread.id", session.thread_id().to_string());
     }
     let started = Instant::now();
+    let timeout = guard.deadline.saturating_duration_since(started);
     tracing::debug!(
         input_bytes = request.input.len(),
         instructions_bytes = request.instructions.len(),
@@ -92,7 +96,16 @@ pub(super) async fn run_decision(
                 client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices).await
             }
         ) => match result {
-            Err(_) => (DecisionApiOutcome::Timeout, DecisionDisposition::TargetUnavailable, None, Some(System1Error::Timeout)),
+            Err(_) => {
+                tracing::warn!(
+                    backend = client.backend_name(),
+                    model = %request.model,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    remaining_deadline_at_start_ms = timeout.as_millis(),
+                    "System1 request timed out"
+                );
+                (DecisionApiOutcome::Timeout, DecisionDisposition::TargetUnavailable, None, Some(System1Error::Timeout))
+            },
             Ok(Err(error)) => (DecisionApiOutcome::Error(error), DecisionDisposition::TargetUnavailable, None, Some(super::system1::health::classify_error(error))),
             Ok(Ok(selected)) => {
                 tracing::debug!(selected_effort = %selected, latency_ms = started.elapsed().as_millis(),
@@ -136,7 +149,12 @@ pub(super) async fn run_decision(
     {
         session
             .publish_system1_error(
-                Some(error),
+                if matches!(target, DecisionTarget::Warmup { .. }) && error == System1Error::Timeout
+                {
+                    super::system1::health::System1HealthUpdate::WarmupTimeout
+                } else {
+                    super::system1::health::System1HealthUpdate::Decision(Some(error))
+                },
                 generation,
                 Some(super::system1::health::System1DecisionHealthGuard {
                     freshness: &guard.freshness,

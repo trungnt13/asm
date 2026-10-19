@@ -5221,6 +5221,14 @@ class System1FailureWarning(BaseModel):
         ),
     ] = None
     reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    warmup_timeout_seconds: Annotated[
+        int | None,
+        Field(
+            alias="warmupTimeoutSeconds",
+            description="Deadline for a synthetic startup warmup timeout; absent for decision failures.",
+            ge=0,
+        ),
+    ] = None
 
 
 class System1Stats(BaseModel):
