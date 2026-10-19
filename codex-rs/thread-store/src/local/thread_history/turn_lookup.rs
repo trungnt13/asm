@@ -54,7 +54,7 @@ async fn find_turn<'a>(
     })
 }
 
-async fn query_turn_row(
+pub(super) async fn query_turn_row(
     pool: &sqlx::SqlitePool,
     segment: &RolloutLineageSegment,
     turn_id: &str,

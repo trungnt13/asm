@@ -18,6 +18,7 @@ use super::read::serialize_cursor;
 use super::read::stored_thread_item_row;
 use super::read::stored_turn_row;
 use super::thread_history_error;
+use super::turn_lookup::query_turn_row;
 use crate::ItemSortKey;
 use crate::ListItemsParams;
 use crate::ListItemsPosition;
@@ -249,6 +250,20 @@ pub(super) async fn page_item_rows(
         )
         .await;
     }
+    let mut first_segment = 0;
+    if let Some(turn_id) = params.turn_id.as_deref() {
+        for (index, segment) in lineage.segments().iter().enumerate().rev() {
+            store.ensure_history_projection(segment).await?;
+            if let Some(turn) = query_turn_row(pool, segment, turn_id).await? {
+                // A synthetic fork-boundary abort has no local start: retain its inherited
+                // items. A real local start cannot have items in earlier rollout segments.
+                if turn.rollout_end_ordinal != Some(turn.rollout_ordinal) {
+                    first_segment = index;
+                }
+                break;
+            }
+        }
+    }
     let cursor = if let Some(anchor_item_id) = anchor_item_id {
         let turn_id = params
             .turn_id
@@ -261,7 +276,7 @@ pub(super) async fn page_item_rows(
             return Err(invalid_item_anchor());
         }
         let mut anchor = None;
-        for segment in lineage.segments() {
+        for segment in &lineage.segments()[first_segment..] {
             store.ensure_history_projection(segment).await?;
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT rollout_ordinal FROM thread_items WHERE thread_id = ",
@@ -297,6 +312,8 @@ pub(super) async fn page_item_rows(
     let mut rows = Vec::new();
     for (_, segment, segment_cursor) in
         segments_from_cursor(lineage, params.sort_direction, cursor.as_ref())?
+            .into_iter()
+            .filter(|(index, _, _)| *index >= first_segment)
     {
         let remaining = remaining_limit(params.page_size, rows.len())?;
         if remaining == 0 {
