@@ -420,10 +420,10 @@ async fn run_conversation(
         session
             .send_token_count_event(turn, /*output_tokens_per_second*/ None)
             .await;
-        budget_result?;
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
         runtime.save_checkpoint()?;
+        budget_result?;
         drop(lease);
         session
             .input_queue

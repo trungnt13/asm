@@ -304,7 +304,13 @@ codex --no-daemon --model claude-code/claude-sonnet-5-5
   groups; preserve primary failures and retain diagnostics only when requested.
 - Keep text-only local execution initially. Reject unsupported history forks,
   rollback, runtime switches and native-only operations explicitly. Suppress native
-  model prewarm, title/memory inference and System1 for external threads.
+  model prewarm, title inference and System1 for external threads. Native memory
+  extraction may summarize their saved ASM transcripts; private Claude tool and
+  internal-subagent history is not synchronized for extraction.
+- External threads use Default collaboration mode only and never use guardian
+  approval review. Mandatory managed-execution restrictions still apply.
+- Native turns have no total-duration deadline; cancellation and bounded cleanup
+  remain available while tools and background agents are running.
 - Do not impose a separate approximate-token prompt cap or truncate instructions.
   Claude Code manages its context; transport bounds still apply.
 - Report checked per-process usage deltas from native cumulative model counters.

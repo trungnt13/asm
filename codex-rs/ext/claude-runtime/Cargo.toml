@@ -14,11 +14,10 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+codex-utils-pty = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time", "macros"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-
-[target.'cfg(unix)'.dependencies]
-libc = { workspace = true }

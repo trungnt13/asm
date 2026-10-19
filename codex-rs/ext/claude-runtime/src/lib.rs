@@ -6,6 +6,7 @@ mod frames;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use codex_utils_pty::process_group;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::VecDeque;
@@ -14,6 +15,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Child;
 use tokio::process::ChildStdin;
@@ -38,7 +40,6 @@ pub struct ClaudeOptions {
     pub effort: Option<String>,
     pub session: ClaudeSession,
     pub mcp_config: Option<Value>,
-    pub turn_timeout: Duration,
 }
 
 pub struct ClaudeRuntime {
@@ -49,7 +50,7 @@ pub struct ClaudeRuntime {
     stderr_reader: Option<JoinHandle<()>>,
     stderr: Arc<Mutex<VecDeque<u8>>>,
     session_id: String,
-    turn_timeout: Duration,
+    mcp_config: Option<NamedTempFile>,
     usable: bool,
     failure_result: Option<Value>,
     exit_status: Option<String>,
@@ -70,14 +71,11 @@ impl Drop for TurnGuard {
 }
 
 fn kill_group(pid: Option<u32>) {
-    #[cfg(unix)]
-    if let Some(pid) = pid.and_then(|pid| i32::try_from(pid).ok()) {
-        // SAFETY: the child is spawned as its own process-group leader. Negative PID
-        // signals that group only; no process identifiers are supplied by the model.
-        unsafe { libc::kill(-pid, libc::SIGKILL) };
+    if let Some(pid) = pid
+        && let Err(error) = process_group::kill_process_group(pid)
+    {
+        tracing::warn!(pid, %error, "failed to kill Claude process group");
     }
-    #[cfg(not(unix))]
-    let _ = pid;
 }
 
 impl ClaudeRuntime {
@@ -85,9 +83,6 @@ impl ClaudeRuntime {
     pub async fn spawn(options: ClaudeOptions) -> Result<Self> {
         if !cfg!(any(target_os = "linux", target_os = "macos")) {
             bail!("Claude runtime currently supports Linux and macOS only");
-        }
-        if options.turn_timeout.is_zero() {
-            bail!("Claude turn timeout must be positive");
         }
         let (session_id, session_flag) = match options.session {
             ClaudeSession::New { id } => (id, "--session-id"),
@@ -129,14 +124,35 @@ impl ClaudeRuntime {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(/*kill_on_drop*/ true);
-        if let Some(mcp_config) = options.mcp_config {
-            command.arg("--mcp-config").arg(mcp_config.to_string());
+        // Keep credentials out of argv. The owner-only file is removed on spawn
+        // failure or runtime teardown, after the child no longer needs it.
+        let mcp_config = options
+            .mcp_config
+            .map(|config| -> Result<NamedTempFile> {
+                let mut file =
+                    NamedTempFile::new().context("creating private Claude MCP config")?;
+                serde_json::to_writer(file.as_file_mut(), &config)
+                    .context("writing private Claude MCP config")?;
+                Ok(file)
+            })
+            .transpose()?;
+        if let Some(config) = &mcp_config {
+            command.arg("--mcp-config").arg(config.path());
         }
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
         }
         #[cfg(unix)]
-        command.process_group(/*pgroup*/ 0);
+        {
+            let parent_pid = std::process::id() as i32;
+            // SAFETY: only async-signal-safe system calls run in the child.
+            unsafe {
+                command.pre_exec(move || {
+                    process_group::set_process_group()?;
+                    process_group::set_parent_death_signal(parent_pid)
+                });
+            }
+        }
         let mut child = command.spawn().context("starting official Claude CLI")?;
         let stdin = child.stdin.take().context("Claude stdin unavailable")?;
         let stdout = child.stdout.take().context("Claude stdout unavailable")?;
@@ -156,7 +172,7 @@ impl ClaudeRuntime {
             stderr_reader,
             stderr,
             session_id,
-            turn_timeout: options.turn_timeout,
+            mcp_config,
             usable: true,
             failure_result: None,
             exit_status: None,
@@ -203,7 +219,7 @@ impl ClaudeRuntime {
             pid: self.child.id(),
             armed: true,
         };
-        let result = timeout(self.turn_timeout, async {
+        let result = async {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
@@ -221,7 +237,7 @@ impl ClaudeRuntime {
                     self.read_result(&events).await
                 } => result,
             }
-        }).await.context("Claude turn deadline exceeded").and_then(|result| result);
+        }.await;
         if result.is_ok() {
             self.usable = true;
         }
@@ -357,6 +373,7 @@ impl ClaudeRuntime {
                 self.exit_status = Some(status.to_string());
             }
         }
+        self.mcp_config.take();
         // Let stderr finish before callers capture diagnostics. Keep the task owned
         // while awaiting, so cancellation still lets Drop stop it.
         if let Some(reader) = self.stderr_reader.as_mut() {

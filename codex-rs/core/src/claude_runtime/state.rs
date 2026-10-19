@@ -92,7 +92,6 @@ impl ClaudeSession {
                 serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
                 "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}})
             }),
-            turn_timeout: std::time::Duration::from_secs(/*secs*/ 3600),
         })
         .await
     }

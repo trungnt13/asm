@@ -800,6 +800,37 @@ impl Session {
         }
         let trusted_guardian_reviewer = crate::guardian::is_basic_session_source(&session_source)
             && !matches!(conversation_history, InitialHistory::Resumed(_));
+        if uses_claude {
+            if crate::guardian::is_basic_session_source(&session_source)
+                || config
+                    .config_layer_stack
+                    .requirements()
+                    .auto_review_required_for_model(&model)
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "Claude runtime cannot perform required Guardian review; use an ASM-managed model"
+                        .to_string(),
+                ));
+            }
+            config
+                .config_layer_stack
+                .requirements()
+                .approvals_reviewer
+                .can_set(&ApprovalsReviewer::User)
+                .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            let config = Arc::make_mut(&mut config);
+            config.approvals_reviewer = ApprovalsReviewer::User;
+            for feature in [
+                Feature::GuardianApproval,
+                Feature::GuardianV2,
+                Feature::GuardianV2DecisionsComparison,
+            ] {
+                config
+                    .features
+                    .disable(feature)
+                    .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            }
+        }
         if config
             .config_layer_stack
             .requirements()
