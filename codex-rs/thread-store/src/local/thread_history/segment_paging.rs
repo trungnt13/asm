@@ -55,6 +55,7 @@ pub(super) async fn page_turn_rows(
 ) -> ThreadStoreResult<SegmentPage<StoredTurnRow>> {
     let cursor = parse_cursor(cursor, requested_thread_id, CursorScope::Turns)?;
     let mut rows = Vec::new();
+    let mut ensured_from = lineage.segments().len();
     for (segment_index, segment, segment_cursor) in
         segments_from_cursor(lineage, direction, cursor.as_ref())?
     {
@@ -63,8 +64,11 @@ pub(super) async fn page_turn_rows(
             break;
         }
         // Newer segments can shadow this segment's turns, even for ascending pages.
-        for required_segment in &lineage.segments()[segment_index..] {
-            store.ensure_history_projection(required_segment).await?;
+        if segment_index < ensured_from {
+            for required_segment in &lineage.segments()[segment_index..ensured_from] {
+                store.ensure_history_projection(required_segment).await?;
+            }
+            ensured_from = segment_index;
         }
         let mut query = QueryBuilder::<Sqlite>::new("");
         if matches!(items_view, StoredTurnItemsView::Summary) {
