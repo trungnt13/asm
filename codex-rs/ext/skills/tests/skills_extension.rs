@@ -421,22 +421,23 @@ allowed_agent_roles = ["reviewer"]
             .await;
         let turn_store = ExtensionData::new("scoped-turn");
         turn_store.insert(snapshot);
-        let fragments = registry.turn_input_contributors()[0]
-            .contribute(
-                TurnInputContext {
-                    turn_id: "scoped-turn".to_string(),
-                    user_input: vec![UserInput::Text {
-                        text: "$demo".to_string(),
-                        text_elements: Vec::new(),
-                    }],
-                    environments: Vec::new(),
-                },
-                /*extension_metrics*/ None,
-                &session_store,
-                &thread_store,
-                &turn_store,
-            )
-            .await;
+        let fragments = prepared_turn_input(
+            &registry,
+            TurnInputContext {
+                step_store: &ExtensionData::new("scoped-step"),
+                turn_id: "scoped-turn".to_string(),
+                user_input: vec![UserInput::Text {
+                    text: "$demo".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                environments: Vec::new(),
+            },
+            /*extension_metrics*/ None,
+            &session_store,
+            &thread_store,
+            &turn_store,
+        )
+        .await;
         assert_eq!(
             fragments
                 .iter()
