@@ -207,9 +207,10 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 
 | Platform | Target | Runner | Build timeout |
 | --- | --- | --- | --- |
-| macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 180 minutes |
+| macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 90 minutes |
 
+- Normal macOS candidates allow 315 total job minutes, including publication. Two optimized builds exceeded 180 minutes while Rust remained busy under memory pressure. Keep optimization, flags, runner, and candidate unchanged; allow more time. Concurrency experiments keep their 180-minute build limit. Resume existing candidates; never replace ready platform assets.
 - Legacy lookup step limit: 190 minutes; wait guards: macOS 150, Linux 185. Timeout fails, not duplicate builds. Only legacy tag jobs allow 360 minutes total for lookup/build/checks. Candidates allow build limit plus 15 publication minutes. Actual builds keep table limits; fresh candidates do not wait for postmerge.
 - Linux minimum: Ubuntu 22.04 / glibc 2.35. Keep builds/native smoke there; a GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the runtime minimum.
 - Use optimized `--release`, not `dev-small`; `CARGO_PROFILE_RELEASE_STRIP=debuginfo`. Retain function symbols and optimization. Fix timeouts without weakening the profile. Upstream tests do not justify further symbol/dependency removal.
