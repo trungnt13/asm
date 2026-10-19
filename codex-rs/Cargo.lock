@@ -2168,6 +2168,7 @@ dependencies = [
  "futures",
  "hmac 0.12.1",
  "http 1.4.0",
+ "insta",
  "keyring",
  "libc",
  "opentelemetry",
@@ -2877,6 +2878,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "toml 0.9.11+spec-1.1.0",
  "toml_edit 0.24.0+spec-1.1.0",
  "tonic",
@@ -3383,6 +3385,7 @@ dependencies = [
  "codex-api",
  "codex-config",
  "codex-context-fragments",
+ "codex-core-plugin-common",
  "codex-exec-server-protocol",
  "codex-file-system",
  "codex-guardian-context",
@@ -4478,15 +4481,22 @@ name = "codex-responses-api-proxy"
 version = "0.164.1-alpha.3.2"
 dependencies = [
  "anyhow",
+ "bytes",
  "clap",
+ "codex-http-client",
  "codex-process-hardening",
  "ctor 0.6.3",
+ "http 1.4.0",
  "libc",
  "pretty_assertions",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tiny_http",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "url",
  "zeroize",
 ]
 
@@ -4559,6 +4569,7 @@ dependencies = [
  "codex-utils-path",
  "codex-utils-process",
  "codex-utils-string",
+ "libc",
  "memchr",
  "pretty_assertions",
  "regex",
@@ -4686,6 +4697,7 @@ dependencies = [
  "codex-analytics",
  "codex-attachment-store",
  "codex-config",
+ "codex-core-plugin-common",
  "codex-exec-server",
  "codex-extension-api",
  "codex-mcp",
@@ -17869,6 +17881,7 @@ version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

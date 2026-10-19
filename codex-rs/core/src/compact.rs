@@ -54,7 +54,6 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
-use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use codex_rollout_trace::InferenceTraceContext;
 use codex_utils_output_truncation::approx_token_count;
@@ -441,10 +440,6 @@ async fn run_compact_task_inner_impl(
 
     sess.emit_turn_item_completed(&turn_context, compaction_item)
         .await;
-    let warning = EventMsg::Warning(WarningEvent {
-        message: "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted.".to_string(),
-    });
-    sess.send_event(&turn_context, warning).await;
     Ok(summary_suffix)
 }
 

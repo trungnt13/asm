@@ -182,6 +182,8 @@ struct LiveWriterLocks {
 struct ThreadCoordination {
     // Serialize writes and capture consistent fork snapshots.
     writer: Arc<Mutex<()>>,
+    // Successful catch-up for an unchanged source and checkpoint; never seed from partial batches.
+    history_projection: Mutex<Option<(String, u64, u64)>>,
     // Forks hold a shared lease until their child reference is durable; deletion, archive, and
     // unarchive require exclusive access. Keeping this separate from `writer` lets the source
     // accept writes during child initialization, including MCP startup that can take 30 seconds.
