@@ -390,15 +390,37 @@ async fn run_conversation(
                 /*usage_metadata*/ None,
             )
             .await;
-        if let Some(usage) = usage {
-            let budget_result = session
-                .record_token_usage_info(turn, settings, Some(&usage), TokenUsageContext::Sampling)
-                .await;
-            session
-                .send_token_count_event(turn, /*output_tokens_per_second*/ None)
-                .await;
-            budget_result?;
+        let budget_result = session
+            .record_token_usage_info(
+                turn,
+                settings,
+                usage.as_ref(),
+                TokenUsageContext::SpendingOnly,
+            )
+            .await;
+        let model_context_window = stream.context.as_ref().and_then(|context| {
+            result["modelUsage"].get(&context.model)?["contextWindow"]
+                .as_i64()
+                .filter(|window| *window > 0 && context.usage.input_tokens <= *window)
+        });
+        if stream.context.is_none() || model_context_window.is_none() {
+            session.send_event(turn, EventMsg::Warning(WarningEvent {
+                message: "Claude context fill is unavailable: the latest main request usage or its model context window was not reported.".to_owned(),
+            })).await;
         }
+        session
+            .set_reported_context_usage(
+                stream
+                    .context
+                    .map(|context| context.usage)
+                    .unwrap_or_default(),
+                model_context_window,
+            )
+            .await;
+        session
+            .send_token_count_event(turn, /*output_tokens_per_second*/ None)
+            .await;
+        budget_result?;
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
         runtime.save_checkpoint()?;

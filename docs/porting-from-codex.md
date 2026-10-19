@@ -310,6 +310,10 @@ codex --no-daemon --model claude-code/claude-sonnet-5-5
 - Report checked per-process usage deltas from native cumulative model counters.
   First cold-resume usage and missing/reset counters are unknown, not zero; warn
   that ASM totals and token-budget accounting are partial in those cases.
+- Thinking is a reported subset of output, never an additional output charge.
+  Display context fill from the latest main request input, not cumulative billing
+  or child requests. Use its native model window; hide unknown context metrics.
+  Cache rate is the cached share of that latest main request.
 - Require native stream-json result followed by session-idle completion; CLI 2.1.296
   is the verified protocol target. Revalidate compatibility when upgrading it.
 - Keep opt-in until real Claude-main and Sol-parent/Claude-child sessions pass with

@@ -61,7 +61,13 @@ pub(crate) struct ClaudeSession {
     pub(super) checkpoint_path: PathBuf,
     pub(super) _lock: File,
     pub(super) diagnostic_capture: bool,
-    pub(super) usage_baseline: Option<BTreeMap<String, [i64; 4]>>,
+    pub(super) usage_baseline: Option<BTreeMap<String, ModelUsage>>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ModelUsage {
+    billing: [i64; 4],
+    thinking: Option<i64>,
 }
 
 impl ClaudeSession {
@@ -111,7 +117,20 @@ impl ClaudeSession {
                         {
                             counters[index] = usage[field].as_i64().filter(|value| *value >= 0)?;
                         }
-                        Some((model.clone(), counters))
+                        let thinking = match usage.get("thinkingTokens") {
+                            Some(tokens) => Some(tokens.as_i64().filter(|tokens| *tokens >= 0)?),
+                            None => None,
+                        };
+                        if thinking.is_some_and(|thinking| thinking > counters[3]) {
+                            return None;
+                        }
+                        Some((
+                            model.clone(),
+                            ModelUsage {
+                                billing: counters,
+                                thinking,
+                            },
+                        ))
                     })
                     .collect::<Option<BTreeMap<_, _>>>()
             });
@@ -120,29 +139,46 @@ impl ClaudeSession {
         let (Some(previous), Some(current)) = (previous, &self.usage_baseline) else {
             return None;
         };
+        let mut reasoning_available = true;
         let delta = (|| {
             if previous.keys().any(|model| !current.contains_key(model)) {
                 return None;
             }
-            let mut totals = [0i64; 4];
+            let mut totals = [0i64; 5];
             for (model, counters) in current {
-                let baseline = previous.get(model).copied().unwrap_or_default();
+                let baseline = previous.get(model).copied().unwrap_or(ModelUsage {
+                    billing: [0; 4],
+                    thinking: Some(0),
+                });
+                let mut billing = [0i64; 4];
                 for index in 0..4 {
-                    let delta = counters[index]
-                        .checked_sub(baseline[index])
+                    billing[index] = counters.billing[index]
+                        .checked_sub(baseline.billing[index])
                         .filter(|delta| *delta >= 0)?;
-                    totals[index] = totals[index].checked_add(delta)?;
+                    totals[index] = totals[index].checked_add(billing[index])?;
                 }
+                let thinking = match (counters.thinking, baseline.thinking) {
+                    (Some(current), Some(previous)) => current
+                        .checked_sub(previous)
+                        .filter(|thinking| *thinking >= 0 && *thinking <= billing[3])?,
+                    // An inactive legacy model cannot add thinking without adding output.
+                    _ if billing[3] == 0 => 0,
+                    _ => {
+                        reasoning_available = false;
+                        0
+                    }
+                };
+                totals[4] = totals[4].checked_add(thinking)?;
             }
-            let [uncached, cached, written, output] = totals;
+            let [uncached, cached, written, output, thinking] = totals;
             let input = uncached.checked_add(cached)?.checked_add(written)?;
             Some(TokenUsage {
                 input_tokens: input,
                 cached_input_tokens: cached,
                 cache_write_input_tokens: written,
                 output_tokens: output,
-                // modelUsage includes thinking in output but does not expose its separate count.
-                reasoning_output_tokens: 0,
+                // Thinking is a subset of output, not additional billable tokens.
+                reasoning_output_tokens: thinking,
                 total_tokens: input.checked_add(output)?,
                 codex_rollout_budget_units: None,
             })
@@ -150,7 +186,8 @@ impl ClaudeSession {
         if delta.is_none() {
             self.usage_baseline = None;
         }
-        delta
+        // Keep a valid snapshot even when legacy reasoning data needs a new baseline.
+        delta.filter(|_| reasoning_available)
     }
 
     pub(super) fn save_checkpoint(&self) -> anyhow::Result<()> {

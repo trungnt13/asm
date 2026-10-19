@@ -5,6 +5,7 @@ use codex_protocol::items::AgentMessageItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::TokenUsage;
 use serde_json::Value;
 use serde_json::json;
 
@@ -13,6 +14,12 @@ pub(super) struct MessageStream {
     id: Option<String>,
     text: String,
     started: bool,
+    pub(super) context: Option<RequestContext>,
+}
+
+pub(super) struct RequestContext {
+    pub(super) model: String,
+    pub(super) usage: TokenUsage,
 }
 
 #[tracing::instrument(skip_all)]
@@ -25,6 +32,40 @@ pub(super) async fn record_assistant_frame(
     // Native Claude agents have their own streams; do not present them as this thread.
     if !frame["parent_tool_use_id"].is_null() {
         return Ok(None);
+    }
+    let message = if frame["type"] == "assistant" {
+        Some(&frame["message"])
+    } else if frame["type"] == "stream_event" && frame["event"]["type"] == "message_start" {
+        Some(&frame["event"]["message"])
+    } else {
+        None
+    };
+    if let Some(message) = message {
+        stream.context = (|| {
+            let model = message["model"].as_str()?.to_owned();
+            let usage = &message["usage"];
+            let uncached = usage["input_tokens"]
+                .as_i64()
+                .filter(|tokens| *tokens >= 0)?;
+            let cached = usage["cache_read_input_tokens"]
+                .as_i64()
+                .filter(|tokens| *tokens >= 0)?;
+            let written = usage["cache_creation_input_tokens"]
+                .as_i64()
+                .filter(|tokens| *tokens >= 0)?;
+            let input = uncached.checked_add(cached)?.checked_add(written)?;
+            Some(RequestContext {
+                model,
+                // Claude's context fill excludes output; spending is tracked separately.
+                usage: TokenUsage {
+                    input_tokens: input,
+                    cached_input_tokens: cached,
+                    cache_write_input_tokens: written,
+                    total_tokens: input,
+                    ..TokenUsage::default()
+                },
+            })
+        })();
     }
     if frame["type"] == "stream_event" {
         let event = &frame["event"];

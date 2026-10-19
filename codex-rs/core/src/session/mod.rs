@@ -1635,6 +1635,23 @@ impl Session {
         state.token_info()
     }
 
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn set_reported_context_usage(
+        &self,
+        usage: TokenUsage,
+        model_context_window: Option<i64>,
+    ) {
+        let mut state = self.state.lock().await;
+        let mut info = state.token_info().unwrap_or(TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            model_context_window: None,
+        });
+        info.last_token_usage = usage;
+        info.model_context_window = model_context_window;
+        state.set_token_info(Some(info));
+    }
+
     pub(crate) async fn get_estimated_token_count(
         &self,
         turn_context: &TurnContext,
@@ -2489,13 +2506,21 @@ impl Session {
     }
 
     pub(crate) async fn emit_turn_started(&self, turn_context: &TurnContext, task_kind: TaskKind) {
+        let model_context_window =
+            if crate::claude_runtime::is_claude_model(&turn_context.model_info().slug) {
+                self.token_usage_info()
+                    .await
+                    .and_then(|info| info.model_context_window)
+            } else {
+                turn_context.model_context_window()
+            };
         let event = TurnStartedEvent {
             turn_attribution: (task_kind == TaskKind::Regular).then(|| turn_context.attribution()),
             turn_id: turn_context.sub_id.clone(),
             root_turn_id: Some(turn_context.root_turn_id()),
             trace_id: turn_context.trace_id.clone(),
             started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
-            model_context_window: turn_context.model_context_window(),
+            model_context_window,
             collaboration_mode_kind: turn_context.mode(),
         };
         self.send_event(turn_context, EventMsg::TurnStarted(event))
