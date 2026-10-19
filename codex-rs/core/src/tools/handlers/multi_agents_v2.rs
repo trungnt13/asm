@@ -50,3 +50,31 @@ pub(crate) async fn emit_sub_agent_activity(
     session.emit_turn_item_started(turn, &item).await;
     session.emit_turn_item_completed(turn, item).await;
 }
+
+#[tracing::instrument(level = "trace", skip_all)]
+pub(crate) async fn emit_inter_agent_communication(
+    session: &crate::session::session::Session,
+    turn: &crate::session::turn_context::TurnContext,
+    call_id: &str,
+    tool: CollabAgentTool,
+    receiver_thread_id: codex_protocol::ThreadId,
+    prompt: String,
+) {
+    let item = TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
+        id: format!(
+            "{}{call_id}",
+            codex_protocol::items::INTER_AGENT_COMMUNICATION_ITEM_PREFIX
+        ),
+        tool,
+        status: CollabAgentToolCallStatus::Completed,
+        sender_thread_id: session.thread_id,
+        receiver_thread_ids: vec![receiver_thread_id],
+        receiver_agents: Vec::new(),
+        prompt: Some(prompt),
+        model: None,
+        reasoning_effort: None,
+        agents_states: Default::default(),
+    });
+    session.emit_turn_item_started(turn, &item).await;
+    session.emit_turn_item_completed(turn, item).await;
+}

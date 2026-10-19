@@ -1868,6 +1868,38 @@
         },
         {
           "properties": {
+            "author": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "recipient": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "interAgentMessage"
+              ],
+              "title": "InterAgentMessageThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "author",
+            "id",
+            "recipient",
+            "text",
+            "type"
+          ],
+          "title": "InterAgentMessageThreadItem",
+          "type": "object"
+        },
+        {
+          "properties": {
             "delivery": {
               "anyOf": [
                 {

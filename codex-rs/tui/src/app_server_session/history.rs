@@ -464,6 +464,10 @@ fn rendered_history_rows(
         items,
         visibility,
         Some(config),
+        matches!(
+            thread.source,
+            codex_app_server_protocol::SessionSource::SubAgent(_)
+        ),
     )
     .into_iter()
     .fold(rendered_rows, |rows, cell| {

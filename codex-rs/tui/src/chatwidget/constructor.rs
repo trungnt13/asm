@@ -259,6 +259,7 @@ impl ChatWidget {
             active_side_conversation: false,
             active_parallel_conversation: false,
             blocks_direct_input: false,
+            show_interagent_communication: false,
             external_writer_view: false,
             fork_in_progress: false,
             misalignment_policy_violation: None,

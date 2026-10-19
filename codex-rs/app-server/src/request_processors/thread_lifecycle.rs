@@ -348,6 +348,23 @@ pub(super) async fn ensure_listener_task_running(
                             .then(|| thread_state.turn_summary.clone());
                         (thread_state.experimental_raw_events, terminal)
                     };
+                    if let EventMsg::RawResponseItem(raw) = &event.msg
+                        && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(&raw.item, &event.id)
+                    {
+                        let recipients = thread_state_manager
+                            .subscribed_connection_ids(conversation_id)
+                            .await;
+                        ThreadScopedOutgoingMessageSender::new(
+                            outgoing_for_task.clone(), recipients, conversation_id,
+                        ).send_server_notification(ServerNotification::ItemCompleted(
+                            codex_app_server_protocol::ItemCompletedNotification {
+                                thread_id: conversation_id.to_string(),
+                                turn_id: event.id.clone(),
+                                item,
+                                completed_at_ms: chrono::Utc::now().timestamp_millis(),
+                            },
+                        )).await;
+                    }
                     if matches!(
                         &event.msg,
                         EventMsg::RawResponseItem(_) | EventMsg::RawResponseCompleted(_)

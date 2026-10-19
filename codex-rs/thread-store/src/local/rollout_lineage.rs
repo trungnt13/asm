@@ -30,6 +30,32 @@ pub(super) struct RolloutLineage {
 }
 
 impl LocalThreadStore {
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(super) async fn resolve_rollout_lineage_for_history(
+        &self,
+        requested_thread_id: ThreadId,
+    ) -> ThreadStoreResult<RolloutLineage> {
+        let lineage = self
+            .resolve_rollout_lineage(requested_thread_id, /*initial_path*/ None)
+            .await?;
+        for segment in lineage.segments() {
+            // Rebuild caches invalidated by projection-schema migrations on the first read.
+            if super::thread_history::projection_state(self, segment.rollout_id())
+                .await?
+                .is_none()
+            {
+                let _projection_guard = self.live_writer_locks.lock(segment.rollout_id()).await;
+                super::thread_history_materialization::materialize_to_sqlite(
+                    self,
+                    segment.rollout_id(),
+                    &segment.rollout_path,
+                )
+                .await?;
+            }
+        }
+        Ok(lineage)
+    }
+
     pub(super) async fn resolve_rollout_lineage(
         &self,
         requested_thread_id: ThreadId,

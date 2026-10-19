@@ -135,7 +135,8 @@ pub(super) fn cells(item: ThreadItem, cwd: &AbsolutePathBuf) -> TranscriptCells 
                 cells.push(Arc::new(cell));
             }
         }
-        ThreadItem::UserMessage { .. }
+        ThreadItem::InterAgentMessage { .. }
+        | ThreadItem::UserMessage { .. }
         | ThreadItem::AgentMessage { .. }
         | ThreadItem::FunctionCallOutput { .. }
         | ThreadItem::Plan { .. }

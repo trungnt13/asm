@@ -417,6 +417,14 @@ impl ThreadHistoryBuilder {
             EventMsg::ItemCompleted(payload) => self.handle_item_completed(payload),
             EventMsg::HookStarted(_) | EventMsg::HookCompleted(_) => {}
             EventMsg::Error(payload) => self.handle_error(payload),
+            EventMsg::RawResponseItem(payload)
+                if matches!(
+                    payload.item,
+                    codex_protocol::models::ResponseItem::AgentMessage { .. }
+                ) =>
+            {
+                self.handle_response_item(&payload.item);
+            }
             EventMsg::TokenCount(_) => {}
             EventMsg::ThreadRolledBack(payload) => self.handle_thread_rollback(payload),
             EventMsg::TurnAborted(payload) => self.handle_turn_aborted(payload),
@@ -447,8 +455,10 @@ impl ThreadHistoryBuilder {
                     self.record_changed_turn(changed_turn);
                 }
             }
-            RolloutItem::InterAgentCommunication(_)
-            | RolloutItem::InterAgentCommunicationMetadata { .. }
+            RolloutItem::InterAgentCommunication(communication) => {
+                self.handle_response_item(&communication.to_model_input_item());
+            }
+            RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::TurnContext(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::RealtimeItem(_)
@@ -495,6 +505,17 @@ impl ThreadHistoryBuilder {
     }
 
     fn handle_response_item(&mut self, item: &codex_protocol::models::ResponseItem) {
+        if matches!(
+            item,
+            codex_protocol::models::ResponseItem::AgentMessage { .. }
+        ) {
+            let fallback_id = format!("inter-agent-{}", self.next_item_index);
+            if let Some(item) = ThreadItem::from_inter_agent_message(item, &fallback_id) {
+                self.next_item_index += 1;
+                self.upsert_item_in_current_turn(item);
+            }
+            return;
+        }
         let codex_protocol::models::ResponseItem::Message {
             role, content, id, ..
         } = item

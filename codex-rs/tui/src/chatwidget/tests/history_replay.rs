@@ -352,6 +352,7 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
         [item],
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
+        /*show_communication*/ false,
     );
     assert_eq!(
         projected

@@ -42,6 +42,7 @@ fn project(items: &[ThreadItem]) -> TranscriptCells {
         items.to_vec(),
         RawReasoningVisibility::Hidden,
         /*config*/ None,
+        /*show_communication*/ false,
     )
 }
 

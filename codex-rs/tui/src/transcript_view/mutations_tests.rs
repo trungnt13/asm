@@ -395,6 +395,7 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
             items.iter().cloned(),
             RawReasoningVisibility::Hidden,
             /*config*/ None,
+            /*show_communication*/ false,
         )
     };
     for selecting in [false, true] {

@@ -165,6 +165,7 @@ impl App {
             user_items.iter().map(|(_, item)| item.clone()),
             visibility,
             Some(&self.config),
+            self.agent_navigation.is_parent_owned(thread_id),
         );
         let persisted_user_cells = user_items
             .into_iter()
@@ -234,6 +235,7 @@ impl App {
                     visible.iter().cloned(),
                     visibility,
                     Some(&self.config),
+                    self.agent_navigation.is_parent_owned(thread_id),
                 ));
             }
             if let Some(turn) = completed_turn

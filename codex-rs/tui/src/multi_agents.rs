@@ -29,6 +29,9 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use std::collections::HashSet;
 
+mod communication;
+pub(crate) use communication::communication_history_cell;
+
 mod wait_history;
 pub(crate) use wait_history::AgentWaitHistory;
 
@@ -212,6 +215,7 @@ pub(crate) fn tool_call_history_cell(
     mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
 ) -> Option<PlainHistoryCell> {
     let ThreadItem::CollabAgentToolCall {
+        id,
         tool,
         status,
         receiver_thread_ids,
@@ -222,6 +226,12 @@ pub(crate) fn tool_call_history_cell(
     else {
         return None;
     };
+
+    // Fork communication projections are visible only in parent-owned chat views.
+    // Their lifecycle activity already supplies the ordinary transcript summary.
+    if id.starts_with(codex_protocol::items::INTER_AGENT_COMMUNICATION_ITEM_PREFIX) {
+        return None;
+    }
 
     let first_receiver = receiver_thread_ids
         .first()
