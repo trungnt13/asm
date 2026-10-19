@@ -42,6 +42,7 @@ async fn browsing_loads_before_the_oldest_prompt_after_a_partial_answer() -> Res
                 crate::thread_transcript::RawReasoningVisibility::Hidden,
                 Some(&app.config),
                 /*show_communication*/ false,
+                /*own_agent_role*/ None,
             ));
         app.enqueue_primary_thread_session(started.session, started.turns)
             .await?;

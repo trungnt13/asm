@@ -114,6 +114,7 @@ pub(crate) fn thread_to_transcript_cells(
                     thread.source,
                     codex_app_server_protocol::SessionSource::SubAgent(_)
                 ),
+                thread.agent_role.as_deref(),
             )
         })
         .collect::<TranscriptCells>();
@@ -132,6 +133,7 @@ pub(crate) fn thread_items_to_transcript_cells(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     show_communication: bool,
+    own_agent_role: Option<&str>,
 ) -> TranscriptCells {
     let inline_visualization_context = config.and_then(|config| {
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
@@ -140,7 +142,8 @@ pub(crate) fn thread_items_to_transcript_cells(
     let mut pending = None;
     for item in items {
         if show_communication
-            && let Some(cell) = crate::multi_agents::communication_history_cell(&item, cwd)
+            && let Some(cell) =
+                crate::multi_agents::communication_history_cell(&item, cwd, own_agent_role)
         {
             PendingActivity::flush(&mut pending, &mut cells);
             cells.push(Arc::new(cell));

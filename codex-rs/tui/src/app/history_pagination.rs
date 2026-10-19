@@ -166,6 +166,10 @@ impl App {
             visibility,
             Some(&self.config),
             self.agent_navigation.is_parent_owned(thread_id),
+            self.chat_widget
+                .collab_agent_metadata(thread_id)
+                .agent_role
+                .as_deref(),
         );
         let persisted_user_cells = user_items
             .into_iter()
@@ -236,6 +240,10 @@ impl App {
                     visibility,
                     Some(&self.config),
                     self.agent_navigation.is_parent_owned(thread_id),
+                    self.chat_widget
+                        .collab_agent_metadata(thread_id)
+                        .agent_role
+                        .as_deref(),
                 ));
             }
             if let Some(turn) = completed_turn

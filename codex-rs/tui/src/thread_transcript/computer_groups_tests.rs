@@ -43,6 +43,7 @@ fn project(items: &[ThreadItem]) -> TranscriptCells {
         RawReasoningVisibility::Hidden,
         /*config*/ None,
         /*show_communication*/ false,
+        /*own_agent_role*/ None,
     )
 }
 

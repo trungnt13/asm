@@ -219,6 +219,7 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             Some(&app.config),
             /*show_communication*/ false,
+            /*own_agent_role*/ None,
         );
         app.enqueue_primary_thread_session(started.session, started.turns)
             .await?;
@@ -340,6 +341,7 @@ async fn returning_to_latest_retains_pending_pages_without_continuing_to_the_beg
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         Some(&app.config),
         /*show_communication*/ false,
+        /*own_agent_role*/ None,
     );
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;

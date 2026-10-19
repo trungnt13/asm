@@ -34,6 +34,7 @@ impl HistoryCell for InterAgentCommunicationCell {
 pub(crate) fn communication_history_cell(
     item: &codex_app_server_protocol::ThreadItem,
     cwd: &std::path::Path,
+    own_agent_role: Option<&str>,
 ) -> Option<impl HistoryCell + 'static> {
     use codex_app_server_protocol::CollabAgentTool;
     use codex_app_server_protocol::CollabAgentToolCallStatus;
@@ -45,7 +46,16 @@ pub(crate) fn communication_history_cell(
             recipient,
             text,
             ..
-        } => (format!("Received · {author} → {recipient}"), text.clone()),
+        } => {
+            let role = own_agent_role
+                .filter(|_| text.starts_with("Message Type: NEW_TASK\n"))
+                .map(|role| format!(" [{role}]"))
+                .unwrap_or_default();
+            (
+                format!("Received · {author} → {recipient}{role}"),
+                text.clone(),
+            )
+        }
         ThreadItem::CollabAgentToolCall {
             tool,
             status,

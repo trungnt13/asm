@@ -468,6 +468,7 @@ fn rendered_history_rows(
             thread.source,
             codex_app_server_protocol::SessionSource::SubAgent(_)
         ),
+        thread.agent_role.as_deref(),
     )
     .into_iter()
     .fold(rendered_rows, |rows, cell| {

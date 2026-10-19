@@ -73,6 +73,12 @@ impl ChatWidget {
         let connector_scope_changed = previous_thread_id != Some(session.thread_id)
             || self.config.cwd.as_path() != session.cwd.as_path();
         self.thread_id = Some(session.thread_id);
+        if let Some(role) = &session.agent_role {
+            self.collab_agent_metadata
+                .entry(session.thread_id)
+                .or_default()
+                .agent_role = Some(role.clone());
+        }
         self.daybreak_enabled = self.config.features.enabled(Feature::CliDaybreak)
             && session.daybreak_enabled
             && !matches!(display, SessionConfiguredDisplay::SideConversation);

@@ -50,6 +50,7 @@ fn dynamic_status_and_output_match_persisted_presentations() {
             RawReasoningVisibility::Hidden,
             /*config*/ None,
             /*show_communication*/ false,
+            /*own_agent_role*/ None,
         );
         assert_eq!(replayed.len(), 1);
         let cell = &replayed[0];
