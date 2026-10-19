@@ -220,7 +220,7 @@ ORDER BY rollout_ordinal ASC
             } else if let Some(ordinal) = effective_turn_ordinals.get(&row.turn_id) {
                 *ordinal
             } else {
-                let ordinal = find_visible_turn(pool, &lineage, row.turn_id.as_str())
+                let ordinal = find_visible_turn(store, pool, &lineage, row.turn_id.as_str())
                     .await?
                     .rollout_ordinal;
                 effective_turn_ordinals.insert(row.turn_id.clone(), ordinal);

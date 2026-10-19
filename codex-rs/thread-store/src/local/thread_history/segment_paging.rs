@@ -3,6 +3,7 @@ use sqlx::FromRow;
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
 
+use super::super::LocalThreadStore;
 use super::super::rollout_lineage::RolloutLineage;
 use super::super::rollout_lineage::RolloutLineageSegment;
 use super::read::CursorScope;
@@ -43,6 +44,7 @@ pub(super) fn validate_page_size(page_size: usize) -> ThreadStoreResult<()> {
 }
 
 pub(super) async fn page_turn_rows(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     requested_thread_id: ThreadId,
     lineage: &RolloutLineage,
@@ -59,6 +61,10 @@ pub(super) async fn page_turn_rows(
         let remaining = remaining_limit(page_size, rows.len())?;
         if remaining == 0 {
             break;
+        }
+        // Newer segments can shadow this segment's turns, even for ascending pages.
+        for required_segment in &lineage.segments()[segment_index..] {
+            store.ensure_history_projection(required_segment).await?;
         }
         let mut query = QueryBuilder::<Sqlite>::new("");
         if matches!(items_view, StoredTurnItemsView::Summary) {
@@ -192,6 +198,7 @@ fn push_summary_item_join(
 }
 
 pub(super) async fn page_item_rows(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     lineage: &RolloutLineage,
     params: &ListItemsParams,
@@ -228,6 +235,7 @@ pub(super) async fn page_item_rows(
                 message: "update-ordinal item paging requires one rollout segment".to_string(),
             });
         };
+        store.ensure_history_projection(segment).await?;
         return page_updated_item_rows(
             pool,
             segment.rollout_id(),
@@ -250,6 +258,7 @@ pub(super) async fn page_item_rows(
         }
         let mut anchor = None;
         for segment in lineage.segments() {
+            store.ensure_history_projection(segment).await?;
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT rollout_ordinal FROM thread_items WHERE thread_id = ",
             );
@@ -289,6 +298,7 @@ pub(super) async fn page_item_rows(
         if remaining == 0 {
             break;
         }
+        store.ensure_history_projection(segment).await?;
         let mut query = QueryBuilder::<Sqlite>::new(
             r#"
 SELECT turn_id, item_id, rollout_ordinal, updated_at_ordinal, created_at_ms, started_at_ms, completed_at_ms, item_json
