@@ -1092,3 +1092,7 @@ and interruption. When new input interrupts sleep, remind the model to handle it
 and resume pending work unless canceled, paused, replaced, or blocked. This is
 model guidance, not guaranteed continuation or automatic resumption of the wait.
 Keep the existing sleep lifecycle items and app-server API unchanged.
+
+### Test-only dependencies
+
+Keep `codex-ollama`'s `wiremock` dependency under `[dev-dependencies]` while only tests use it. This removes its test-server dependency chain from production builds, not necessarily the linked binary. Drop this drift if upstream adopts it; restore the normal dependency if production code needs it.
