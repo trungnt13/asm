@@ -60,13 +60,13 @@ pub(crate) async fn emit_inter_agent_communication(
     receiver_thread_id: codex_protocol::ThreadId,
     prompt: String,
 ) {
-    let item = TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
+    let mut item = CollabAgentToolCallItem {
         id: format!(
             "{}{call_id}",
             codex_protocol::items::INTER_AGENT_COMMUNICATION_ITEM_PREFIX
         ),
         tool,
-        status: CollabAgentToolCallStatus::Completed,
+        status: CollabAgentToolCallStatus::InProgress,
         sender_thread_id: session.thread_id,
         receiver_thread_ids: vec![receiver_thread_id],
         receiver_agents: Vec::new(),
@@ -74,7 +74,12 @@ pub(crate) async fn emit_inter_agent_communication(
         model: None,
         reasoning_effort: None,
         agents_states: Default::default(),
-    });
-    session.emit_turn_item_started(turn, &item).await;
-    session.emit_turn_item_completed(turn, item).await;
+    };
+    session
+        .emit_turn_item_started(turn, &TurnItem::CollabAgentToolCall(item.clone()))
+        .await;
+    item.status = CollabAgentToolCallStatus::Completed;
+    session
+        .emit_turn_item_completed(turn, TurnItem::CollabAgentToolCall(item))
+        .await;
 }
