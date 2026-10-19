@@ -1,5 +1,5 @@
 //! Applies captured Multi-Agent V2 catalog overrides and namespaces to tool specifications.
-//! Parameter schemas retain harness-owned encryption annotations; execution is unchanged.
+//! Parameter schemas drop encryption annotations; execution is unchanged.
 
 use crate::session::session::Session;
 use crate::tools::context::ToolInvocation;
@@ -26,20 +26,14 @@ pub(super) fn multi_agent_v2_handler(
 ) -> Arc<dyn CoreToolRuntime> {
     let parameters_override = parameters_override.map(|parameters| -> Result<JsonSchema, &str> {
         let mut parameters = super::catalog_parameters::parse(parameters)?;
-        if let ToolSpec::Function(tool) = handler.spec()
-            && let Some(properties) = tool.parameters.properties
+        // ASM delivers inter-agent messages as plaintext, so catalog markers must not
+        // make the server encrypt arguments.
+        for property in parameters
+            .properties
+            .iter_mut()
+            .flat_map(|properties| properties.values_mut())
         {
-            // Argument transport requires these markers even without server encryption config.
-            for (name, schema) in *properties {
-                if schema.encrypted == Some(true) {
-                    let property = parameters
-                        .properties
-                        .as_mut()
-                        .and_then(|properties| properties.get_mut(&name))
-                        .ok_or("schema omits an encrypted parameter")?;
-                    property.encrypted = Some(true);
-                }
-            }
+            property.encrypted = None;
         }
         Ok(parameters)
     });
