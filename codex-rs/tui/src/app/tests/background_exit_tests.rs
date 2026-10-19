@@ -583,7 +583,8 @@ async fn daemon_ctrl_c_closes_running_parallel_thread_and_returns_to_parent() ->
                 .next_event()
                 .await
                 .expect("app-server event stream");
-            if let codex_app_server_client::AppServerEvent::ServerNotification(notification) = event
+            if let codex_app_server_client::AppServerEvent::ServerNotification(notification) =
+                event.event
             {
                 match notification.as_ref() {
                     ServerNotification::TurnStarted(notification)
