@@ -236,21 +236,21 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
-        if crate::claude_runtime::is_claude_model(requested_model) {
-            config.model = Some(requested_model.to_string());
-            config.model_reasoning_effort = requested_reasoning_effort;
-            return Ok(());
-        }
-        let available_models = session
-            .services
-            .models_manager
-            .list_models(RefreshStrategy::Offline, config.http_client_factory())
-            .await;
-        let selected_model_name = find_spawn_agent_model_name(
-            &available_models,
-            requested_model,
-            turn.multi_agent_version,
-        )?;
+        let native_model = crate::claude_runtime::is_claude_model(requested_model);
+        let selected_model_name = if native_model {
+            requested_model.to_string()
+        } else {
+            let available_models = session
+                .services
+                .models_manager
+                .list_models(RefreshStrategy::Offline, config.http_client_factory())
+                .await;
+            find_spawn_agent_model_name(
+                &available_models,
+                requested_model,
+                turn.multi_agent_version,
+            )?
+        };
         let selected_model_info = session
             .services
             .models_manager
@@ -259,14 +259,21 @@ async fn apply_requested_spawn_agent_model_overrides(
 
         config.model = Some(selected_model_name.clone());
         if let Some(reasoning_effort) = requested_reasoning_effort {
-            validate_spawn_agent_reasoning_effort(
-                &selected_model_name,
-                &selected_model_info.supported_reasoning_levels,
-                &reasoning_effort,
-            )?;
+            if !native_model {
+                validate_spawn_agent_reasoning_effort(
+                    &selected_model_name,
+                    &selected_model_info.supported_reasoning_levels,
+                    &reasoning_effort,
+                )?;
+            }
             config.model_reasoning_effort = Some(reasoning_effort);
         } else {
-            config.model_reasoning_effort = selected_model_info.default_reasoning_level;
+            config.model_reasoning_effort =
+                if native_model && selected_model_info.used_fallback_model_metadata {
+                    None
+                } else {
+                    selected_model_info.default_reasoning_level
+                };
         }
 
         return Ok(());
@@ -300,6 +307,20 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         "spawn_agent could not resolve the child model for service tier validation".to_string()
     })?;
     if crate::claude_runtime::is_claude_model(&model) {
+        let model_info = session
+            .services
+            .models_manager
+            .get_model_info(&model, &config.to_models_manager_config())
+            .await;
+        if !model_info.used_fallback_model_metadata
+            && let Some(effort) = config.model_reasoning_effort.as_ref()
+        {
+            validate_spawn_agent_reasoning_effort(
+                &model,
+                &model_info.supported_reasoning_levels,
+                effort,
+            )?;
+        }
         if matching_subagent_service_tier(config, &model, config.model_reasoning_effort.as_ref())
             .is_some_and(|tier| tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
         {

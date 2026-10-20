@@ -283,6 +283,15 @@ Keep the upstream built-in catalog unchanged; select the runtime explicitly:
 codex --no-daemon --model claude-code/claude-sonnet-5-5
 ```
 
+Personal catalogs may also list `claude-code/<model>` entries with empty instruction
+templates and native effort choices. Keep them visible independently of OpenAI login;
+do not mark them API-supported to bypass filtering. Preserve ordinary model defaults.
+The model picker starts a fresh session after confirmation when entering/leaving this
+runtime or changing its fixed model/effort. Keep the original history; never replay it
+into the new native conversation or change saved defaults as part of this action.
+ASM child selections use catalog defaults and supported efforts when present; native
+model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
+
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,

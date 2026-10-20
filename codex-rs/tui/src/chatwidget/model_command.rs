@@ -158,6 +158,13 @@ impl ChatWidget {
             effort,
             service_tier,
         } = command;
+        if self.model_selection_needs_new_session(&model, Some(effort.clone())) {
+            self.confirm_model_session(model, Some(effort));
+            return;
+        }
+        if model.starts_with("claude-code/") {
+            return;
+        }
         let warning = self.ultra_reasoning_concurrency_warning(&effort);
         let thread_id = self.sparkle_thread_for_picker_action(&model);
         self.set_queue_autosend_suppressed(/*suppressed*/ true);
