@@ -1,0 +1,98 @@
+{
+  "models": [
+    {
+      "slug": "claude-code/claude-sonnet-5-5",
+      "display_name": "Sonnet 5.5 · CC",
+      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 100,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true
+    },
+    {
+      "slug": "claude-code/claude-opus-5-5",
+      "display_name": "Opus 5.5 · CC",
+      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 101,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true
+    }
+  ]
+}

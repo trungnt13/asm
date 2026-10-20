@@ -283,6 +283,18 @@ Keep the upstream built-in catalog unchanged; select the runtime explicitly:
 codex --no-daemon --model claude-code/claude-sonnet-5-5
 ```
 
+[Reference runtime catalog](example-model-catalog.json) is the authoritative, complete
+CC catalog example: Sonnet 5.5 and Opus 5.5 with `low`, `medium`, `high`, and `xhigh`
+effort, defaulting to `high`. Keep personal CC entries aligned with these objects.
+Do not copy personal instruction templates into this reference or modify the upstream
+built-in catalog. Claude Code remains responsible for native model access and effort
+acceptance; catalog metadata does not grant account access.
+
+Load it with `-c model_catalog_json="docs/example-model-catalog.json"` from the source
+checkout, or use an absolute path. A custom catalog replaces the ordinary catalog;
+this CC-only example does not merge in OpenAI entries. To retain both, copy its model
+objects into the existing personal catalog's `models` array.
+
 Personal catalogs may also list `claude-code/<model>` entries with empty instruction
 templates and native effort choices. Keep them visible independently of OpenAI login;
 do not mark them API-supported to bypass filtering. Preserve ordinary model defaults.
