@@ -2357,6 +2357,10 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn record_local_user_message_history(&mut self, entry: HistoryEntry) {
+        self.composer.record_local_user_message_history(entry);
+    }
+
     pub(crate) fn record_replayed_user_message_history(&mut self, entry: HistoryEntry) {
         self.composer.record_replayed_user_message_history(entry);
     }

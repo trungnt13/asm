@@ -1321,6 +1321,9 @@
             "subagent_default_context_limits": {
               "type": "boolean"
             },
+            "subagent_thread_environments": {
+              "type": "boolean"
+            },
             "system_proxy_fallback": {
               "type": "boolean"
             },
@@ -3145,7 +3148,7 @@
           "type": "boolean"
         },
         "preserve_fork_prefix": {
-          "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to false. Legacy compaction without a reusable context baseline still rebuilds.",
+          "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to true. Legacy compaction without a reusable context baseline still rebuilds.",
           "type": "boolean"
         },
         "root_agent_usage_hint_text": {
@@ -7933,6 +7936,9 @@
           "type": "boolean"
         },
         "subagent_default_context_limits": {
+          "type": "boolean"
+        },
+        "subagent_thread_environments": {
           "type": "boolean"
         },
         "system_proxy_fallback": {
