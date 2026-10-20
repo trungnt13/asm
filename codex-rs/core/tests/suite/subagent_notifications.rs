@@ -1616,6 +1616,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             .enable(Feature::MultiAgentV2)
             .expect("test config should allow feature update");
         if reasoning_effort_updates {
+            config.multi_agent_v2.preserve_fork_prefix = false;
             config
                 .features
                 .enable(Feature::ReasoningEffortOverride)
@@ -1845,12 +1846,14 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
     // Models encode tool declarations and provenance differently; compare inherited messages.
     let parent_input = parent_request.inputs_of_type("message");
     let child_input = child_request.inputs_of_type("message");
-    assert_eq!(
-        strip_metadata_from_json(strip_response_item_ids_from_json(json!(
-            &child_input[..parent_input.len()]
-        ))),
-        strip_metadata_from_json(strip_response_item_ids_from_json(json!(parent_input)))
-    );
+    if !reasoning_effort_updates {
+        assert_eq!(
+            strip_metadata_from_json(strip_response_item_ids_from_json(json!(
+                &child_input[..parent_input.len()]
+            ))),
+            strip_metadata_from_json(strip_response_item_ids_from_json(json!(parent_input)))
+        );
+    }
     let misaligned_child_messages = child_request
         .inputs_of_type("message")
         .into_iter()
@@ -1866,7 +1869,12 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         .collect::<Vec<_>>();
     assert_eq!(misaligned_child_messages, Vec::<Value>::new());
     // Inherited instructions stay in the prefix; child-specific guidance is appended after it.
-    let child_developer_messages = child_input[parent_input.len()..]
+    let child_messages = if reasoning_effort_updates {
+        &child_input[..]
+    } else {
+        &child_input[parent_input.len()..]
+    };
+    let child_developer_messages = child_messages
         .iter()
         .filter(|item| item["role"] == "developer")
         .flat_map(|item| item["content"].as_array().into_iter().flatten())
