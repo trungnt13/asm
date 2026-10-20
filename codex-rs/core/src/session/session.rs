@@ -791,6 +791,7 @@ impl Session {
     pub(crate) async fn new(
         startup: Option<Arc<super::startup::SessionStartup>>,
         mut session_configuration: SessionConfiguration,
+        prompt_cache_key_policy: PromptCacheKey,
         environment_selections: &[TurnEnvironmentSelection],
         config: Arc<Config>,
         mut instructions: SessionInstructions,
@@ -1503,6 +1504,7 @@ impl Session {
                 inherited_environments.clone(),
                 config.features.enabled(Feature::DeferredExecutor),
             ));
+            turn_environments.update_configured_selections(environment_selections);
             turn_environments.update_selections(environment_selections);
             session_configuration.environments = turn_environments.selections();
             let resolved_environments = turn_environments.snapshot().await;
@@ -1829,6 +1831,7 @@ impl Session {
                     InitialHistory::Resumed(_) | InitialHistory::Forked(_)
                 ))
                 .with_session_context(
+                    prompt_cache_key_policy,
                     crate::guardian::prompt_cache_key_override_for_review_session(
                         &session_configuration.session_source,
                         session_configuration.parent_thread_id,
@@ -1984,12 +1987,13 @@ impl Session {
             } else {
                 mcp_projection
             };
-            sess.install_initial_mcp_runtime(
+            // Keep MCP startup's large future out of the surrounding session initialization frame.
+            Box::pin(sess.install_initial_mcp_runtime(
                 &session_configuration,
                 latest_auth,
                 mcp_projection,
                 &resolved_environments,
-            )
+            ))
             .await?;
             sess.start_mcp_prewarm_worker(mcp_prewarm_rx, mcp_auth_changes);
             sess.follow_inherited_environment_configurations(

@@ -117,9 +117,9 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `c953dacb42d2773d0ca9cc25a01129bba2ca36a8`.
-- Date: 2026-10-19.
-- Subject: Enable incremental tools by default for Responses Lite (#55368).
+- Last incorporated commit: `ab6095dde0040bb8cdf8592acb89c344e5f27a56`.
+- Date: 2026-10-20.
+- Subject: Allow callers to control prompt cache keys independently of session IDs (#55587).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:

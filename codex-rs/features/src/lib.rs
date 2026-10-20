@@ -101,7 +101,7 @@ pub enum Feature {
     ApiKeyCyberAccessPrograms,
     /// Enable Daybreak controls and automatic access-program selection in CLI clients.
     CliDaybreak,
-    /// Deprecated no-op; use `tui.fullscreen_transcript` instead.
+    /// Removed no-op; use `tui.fullscreen_transcript` instead.
     TranscriptV2,
     // Stable.
     /// Enable the default shell tool.
@@ -232,6 +232,8 @@ pub enum Feature {
     ModelCatalogInContext,
     /// Inherit client-defined dynamic tools in fresh V2 subagents.
     MultiAgentV2DynamicTools,
+    /// Inherit configured thread environments instead of temporary turn selections.
+    SubagentThreadEnvironments,
     /// Use each subagent model's default context window and auto-compaction threshold.
     SubagentDefaultContextLimits,
     /// Keep sampling through reasoning and commentary boundaries when agent mail arrives.
@@ -1050,7 +1052,7 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::TranscriptV2,
         key: "transcript_v2",
-        stage: Stage::Deprecated,
+        stage: Stage::Removed,
         default_enabled: false,
     },
     // Stable features.
@@ -1509,6 +1511,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::MultiAgentV2DynamicTools,
         key: "multi_agent_v2_dynamic_tools",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::SubagentThreadEnvironments,
+        key: "subagent_thread_environments",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
