@@ -65,6 +65,14 @@ pub(crate) struct McpInvocation {
 }
 
 impl McpInvocation {
+    fn display_server(&self) -> Cow<'_, str> {
+        if self.is_claude_activity() {
+            Cow::Owned(format!("cc{}", &self.server["claude-code".len()..]))
+        } else {
+            Cow::Borrowed(&self.server)
+        }
+    }
+
     pub(crate) fn is_claude_activity(&self) -> bool {
         self.server == "claude-code" || self.server.starts_with("claude-code/")
     }
@@ -185,7 +193,11 @@ impl McpToolCallCell {
                 title
                     .clone()
                     .unwrap_or_else(|| {
-                        format!("{}.{}", self.invocation.server, self.invocation.tool)
+                        format!(
+                            "{}.{}",
+                            self.invocation.display_server(),
+                            self.invocation.tool
+                        )
                     })
                     .fg(accent_color()),
             )
@@ -402,7 +414,7 @@ impl HistoryCell for McpToolCallCell {
                 running: self.duration.is_none(),
                 names: vec![format!(
                     "{}/{}",
-                    self.invocation.server,
+                    self.invocation.display_server(),
                     name.split_whitespace().collect::<Vec<_>>().join(" ")
                 )],
             });
@@ -982,7 +994,10 @@ fn format_mcp_invocation(invocation: &McpInvocation) -> Line<'_> {
         .unwrap_or_default();
 
     let invocation_spans = vec![
-        invocation.server.as_str().fg(accent_color()),
+        Span::styled(
+            invocation.display_server(),
+            Style::default().fg(accent_color()),
+        ),
         ".".into(),
         invocation.tool.as_str().fg(accent_color()),
         "(".into(),

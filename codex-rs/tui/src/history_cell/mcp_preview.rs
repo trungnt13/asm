@@ -50,9 +50,13 @@ impl McpToolCallCell {
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| {
                 if native_message {
-                    format!("{} native agent", self.invocation.server)
+                    format!("{} native agent", self.invocation.display_server())
                 } else {
-                    format!("{}.{}", self.invocation.server, self.invocation.tool)
+                    format!(
+                        "{}.{}",
+                        self.invocation.display_server(),
+                        self.invocation.tool
+                    )
                 }
             });
         let mut lines = vec![clipped_line(
