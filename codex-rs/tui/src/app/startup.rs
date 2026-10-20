@@ -1609,6 +1609,7 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        app.chat_widget.mention_usage_mut().flush().await;
         if let Err(err) = backends.shutdown().await {
             tracing::warn!(error = %err, "failed to shut down embedded app server");
         }
