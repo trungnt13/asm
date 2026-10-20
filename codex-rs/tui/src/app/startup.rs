@@ -1572,7 +1572,10 @@ See the Codex keymap documentation for supported actions and examples."
                 ) {
                     waiting_for_initial_session_configured = false;
                     let had_active_modal = app.chat_widget.has_active_modal();
-                    if let Err(err) = app.drain_active_thread_events(tui, &app_server).await {
+                    if let Err(err) = app
+                        .drain_active_thread_events(tui, backends.session_at(displayed_session))
+                        .await
+                    {
                         break Err(err);
                     }
                     if !had_active_modal
