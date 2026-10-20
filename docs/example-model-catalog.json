@@ -1,7 +1,7 @@
 {
   "models": [
     {
-      "slug": "claude-code/claude-sonnet-5-5",
+      "slug": "claude-code/sonnet-5-5",
       "display_name": "Sonnet 5.5 · CC",
       "description": "Runs through Claude Code with native tools, instructions, and subscription.",
       "default_reasoning_level": "high",
@@ -48,7 +48,7 @@
       "node_repl_disabled": true
     },
     {
-      "slug": "claude-code/claude-opus-5-5",
+      "slug": "claude-code/opus-5-5",
       "display_name": "Opus 5.5 · CC",
       "description": "Runs through Claude Code with native tools, instructions, and subscription.",
       "default_reasoning_level": "high",
