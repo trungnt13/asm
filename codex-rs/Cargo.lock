@@ -4580,7 +4580,7 @@ dependencies = [
 
 [[package]]
 name = "codex-runtime-agent-instance"
-version = "0.0.0"
+version = "0.164.1-alpha.5"
 dependencies = [
  "base64 0.22.1",
  "codex-agent-identity",
