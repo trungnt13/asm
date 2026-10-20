@@ -195,10 +195,6 @@ impl ClaudeRuntime {
         self.send_now.subscribe()
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
-    }
-
     /// These bounded diagnostics can contain private information.
     /// Save them only when private diagnostic capture is enabled.
     pub fn diagnostic_snapshot(&self) -> Value {
@@ -301,7 +297,6 @@ impl ClaudeRuntime {
         let mut latest_command_succeeded = false;
         let mut cancelled_commands = HashSet::new();
         let mut aborted_commands = HashSet::new();
-        let mut steered = false;
         let mut submitted_steering_count = 0;
         let mut interrupt_id = None;
         let mut interrupt_deadline = None;
@@ -359,7 +354,6 @@ impl ClaudeRuntime {
                     latest_command = command_uuid;
                     steering_requests.insert(request_id, Instant::now() + STOP_TIMEOUT);
                     latest_command_succeeded = false;
-                    steered = true;
                     submitted_steering_count += 1;
                     pending_result = None;
                     idle = false;
@@ -532,7 +526,7 @@ impl ClaudeRuntime {
                         .and_then(Value::as_str)
                         .is_some_and(|id| commands.contains(id) || cancelled_commands.contains(id));
                 let result_command = frame.get("user_message_uuid").and_then(Value::as_str);
-                let steering_abort = steered
+                let steering_abort = submitted_steering_count > 0
                     && result_command.is_some_and(|id| {
                         id != latest_command
                             && (commands.contains(id) || cancelled_commands.contains(id))
@@ -571,7 +565,7 @@ impl ClaudeRuntime {
                 if result_command == Some(latest_command.as_str()) && !interrupted_execution {
                     latest_command_succeeded = true;
                 }
-                if !steered
+                if submitted_steering_count == 0
                     || (result_command.is_some_and(|id| submitted_commands.contains(id))
                         && !steering_abort
                         && !interrupted_execution)
@@ -606,7 +600,7 @@ impl ClaudeRuntime {
                     });
                 }
             } else if idle
-                && (!steered
+                && (submitted_steering_count == 0
                     || (latest_command_succeeded
                         && commands.is_empty()
                         && steering_requests.is_empty()

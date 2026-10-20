@@ -298,9 +298,8 @@ checkout, or use an absolute path. A custom catalog replaces the ordinary catalo
 this CC-only example does not merge in OpenAI entries. To retain both, copy its model
 objects into the existing personal catalog's `models` array.
 
-Personal catalogs may also list `claude-code/<model>` entries with empty instruction
-templates and native effort choices. Keep them visible independently of OpenAI login;
-do not mark them API-supported to bypass filtering. Preserve ordinary model defaults.
+Keep CC entries visible independently of OpenAI login; never bypass filtering by
+marking them API-supported. Preserve ordinary model defaults.
 The model picker starts a fresh session after confirmation when entering/leaving this
 runtime or changing its fixed model/effort. Keep the original history; never replay it
 into the new native conversation or change saved defaults as part of this action.
@@ -356,8 +355,7 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - Keep text-only local execution initially. Reject unsupported history forks,
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
-  extraction may summarize their saved ASM transcripts. Native activity is retained
-  for display replay, not synchronized into the model's conversation context.
+  extraction may summarize their saved ASM transcripts.
 - External threads use Default collaboration mode only and never use guardian
   approval review. Mandatory managed-execution restrictions still apply.
 - Native turns have no total-duration deadline; cancellation and bounded cleanup

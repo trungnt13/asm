@@ -74,7 +74,7 @@ struct BridgeTurn {
     tracker: crate::tools::context::SharedTurnDiffTracker,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(PartialEq)]
 struct MessageTool {
     name: ToolName,
     spec: Value,
