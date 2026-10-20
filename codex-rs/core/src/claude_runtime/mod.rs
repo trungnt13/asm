@@ -369,18 +369,67 @@ async fn run_conversation(
         runtime.checkpoint.input_count = messages.len();
         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
         runtime.checkpoint.in_flight = true;
-        runtime.save_checkpoint()?;
+        runtime.checkpoint.save(&runtime.checkpoint_path)?;
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
         stream.activity.messaging = messaging;
+        let mut supports_send_now = runtime.runtime.subscribe_send_now();
+        let turn_state = session
+            .input_queue
+            .turn_state_for_sub_id(&session.active_turn, &turn.sub_id)
+            .await;
+        let (mut activity, mut pending_activity) = session
+            .input_queue
+            .subscribe_activity(turn_state.as_deref())
+            .await;
+        let (steering_tx, steering_rx) = tokio::sync::mpsc::channel(1);
+        let mut submitted_steering_count = 0;
         let result = {
-            let run = runtime
-                .runtime
-                .run_turn(&prompt, events_tx, cancellation.clone());
+            let run = runtime.runtime.run_turn(
+                &prompt,
+                events_tx,
+                cancellation.clone(),
+                messaging.then_some(steering_rx),
+            );
             tokio::pin!(run);
             loop {
                 tokio::select! {
+                    biased;
                     result = &mut run => break result,
+                    _ = async {
+                        if pending_activity.is_some() { return; }
+                        let _ = activity.changed().await;
+                    }, if messaging && *supports_send_now.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
+                        pending_activity = None;
+                        session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
+                        let (pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
+                        if pending.is_empty() { continue; }
+                        for item in &pending {
+                            let supported = match item {
+                                TurnInput::InterAgentCommunication(message) => message.encrypted_content.is_none(),
+                                TurnInput::UserInput { content, .. } => content.iter().all(|part| matches!(part, UserInput::Text { .. })),
+                                _ => false,
+                            };
+                            if !supported {
+                                bail!("only text input and unencrypted agent messages can steer the native Claude turn");
+                            }
+                        }
+                        for item in pending {
+                            record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
+                                codex_thread_store::PersistContext::TurnStart).await;
+                        }
+                        let messages = input_messages(&session.clone_history().await)?;
+                        let prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
+                        runtime.checkpoint.input_count = messages.len();
+                        runtime.checkpoint.input_prefix = input_prefix(&messages)?;
+                        session.flush_rollout().await?;
+                        runtime.checkpoint.save(&runtime.checkpoint_path)?;
+                        steering_tx.try_send(prompt).context("Claude steering channel was not ready; explicit recovery is required")?;
+                        submitted_steering_count += 1;
+                    }
+                    changed = supports_send_now.changed(), if messaging => {
+                        if changed.is_err() { bail!("Claude steering capability channel closed"); }
+                    }
                     Some(frame) = events_rx.recv() => {
                         if let Some(text) = record_assistant_frame(session, turn, &frame, &mut stream).await? {
                             last_message = Some(text);
@@ -411,6 +460,11 @@ async fn run_conversation(
                 return Err(error);
             }
         };
+        if outcome.submitted_steering_count != submitted_steering_count {
+            bail!(
+                "Claude did not submit all recorded steering messages; explicit recovery is required"
+            );
+        }
         let interrupted = outcome.interrupted;
         let has_result = outcome.result.is_some();
         let result = outcome.result.unwrap_or(Value::Null);
@@ -472,7 +526,7 @@ async fn run_conversation(
             .await;
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
-        runtime.save_checkpoint()?;
+        runtime.checkpoint.save(&runtime.checkpoint_path)?;
         if interrupted {
             if let Err(error) = budget_result {
                 tracing::warn!(%error, "Claude interrupted-turn accounting failed");

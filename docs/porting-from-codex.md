@@ -317,6 +317,14 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - Main sessions have no injected ASM MCP server. ASM-managed Claude children may
   receive only inter-agent messaging tools over authenticated loopback MCP. Never
   forward executable ASM tools or create a second agent registry.
+- Deliver messages during a busy Claude child's native run using UUID-correlated
+  Send now only when `system/init` advertises `interrupt_send_now_v1`. Persist input
+  before submission; reconcile every submitted command and control receipt before
+  saving clean idle. Native cutover may stop current tools but must not cancel
+  unrelated background children. Without the capability, retain turn-boundary delivery;
+  never send an unsupported control that could become an ordinary Stop. Idle
+  `send_message` remains queue-only, Codex delivery stays unchanged, and explicit
+  interruption retains its separate confirmed-idle or kill-and-dirty rules.
 - Project native tool, skill and task activity into existing MCP display cells for
   streaming, disclosure, grouping and replay. These are display events, not tool
   execution requests or model-context items. Attribute native child activity without

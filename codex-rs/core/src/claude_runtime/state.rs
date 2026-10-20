@@ -52,6 +52,24 @@ impl Checkpoint {
         );
         Ok(())
     }
+    pub(super) fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(&serde_json::to_vec(self)?)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        if let Some(parent) = path.parent() {
+            File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    }
 }
 
 pub(crate) struct ClaudeSession {
@@ -192,27 +210,6 @@ impl ClaudeSession {
         }
         // Keep a valid snapshot even when legacy reasoning data needs a new baseline.
         delta.filter(|_| reasoning_available)
-    }
-
-    pub(super) fn save_checkpoint(&self) -> anyhow::Result<()> {
-        let temporary = self
-            .checkpoint_path
-            .with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary)?;
-        file.write_all(&serde_json::to_vec(&self.checkpoint)?)?;
-        file.sync_all()?;
-        std::fs::rename(&temporary, &self.checkpoint_path)?;
-        if let Some(parent) = self.checkpoint_path.parent() {
-            File::open(parent)?.sync_all()?;
-        }
-        Ok(())
     }
 }
 

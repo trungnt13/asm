@@ -22,6 +22,7 @@ use tokio::process::Child;
 use tokio::process::ChildStdin;
 use tokio::process::Command;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
@@ -48,6 +49,7 @@ pub struct ClaudeOptions {
 pub struct ClaudeTurnOutcome {
     pub result: Option<Value>,
     pub interrupted: bool,
+    pub submitted_steering_count: usize,
 }
 
 pub struct ClaudeRuntime {
@@ -62,6 +64,7 @@ pub struct ClaudeRuntime {
     usable: bool,
     failure_result: Option<Value>,
     exit_status: Option<String>,
+    send_now: watch::Sender<bool>,
 }
 
 // A dropped turn future must not leave a live agent executing outside ASM's task lifetime.
@@ -184,7 +187,12 @@ impl ClaudeRuntime {
             usable: true,
             failure_result: None,
             exit_status: None,
+            send_now: watch::channel(false).0,
         })
+    }
+
+    pub fn subscribe_send_now(&self) -> watch::Receiver<bool> {
+        self.send_now.subscribe()
     }
 
     pub fn session_id(&self) -> &str {
@@ -214,6 +222,7 @@ impl ClaudeRuntime {
         prompt: &str,
         events: mpsc::Sender<Value>,
         cancel: CancellationToken,
+        steering: Option<mpsc::Receiver<String>>,
     ) -> Result<ClaudeTurnOutcome> {
         if !self.usable {
             bail!("Claude session requires explicit recovery after an unfinished turn");
@@ -237,7 +246,8 @@ impl ClaudeRuntime {
                 result = self.write_frame(json!({"type":"user", "uuid":user_message_uuid,
                     "message":{"role":"user","content":prompt}})) => result?,
             }
-            self.read_result(&events, cancel, &user_message_uuid).await
+            self.read_result(&events, cancel, &user_message_uuid, steering)
+                .await
         }
         .await;
         if result.is_ok() {
@@ -281,13 +291,22 @@ impl ClaudeRuntime {
         events: &mpsc::Sender<Value>,
         cancel: CancellationToken,
         user_message_uuid: &str,
+        mut steering: Option<mpsc::Receiver<String>>,
     ) -> Result<ClaudeTurnOutcome> {
         let mut pending_result = None;
+        let mut latest_command = user_message_uuid.to_owned();
+        let mut commands = HashSet::from([latest_command.clone()]);
+        let mut submitted_commands = commands.clone();
+        let mut steering_requests = std::collections::HashMap::new();
+        let mut latest_command_succeeded = false;
+        let mut cancelled_commands = HashSet::new();
+        let mut aborted_commands = HashSet::new();
+        let mut steered = false;
+        let mut submitted_steering_count = 0;
         let mut interrupt_id = None;
         let mut interrupt_deadline = None;
         let mut interrupt_acknowledged = false;
-        let mut command_cancelled = false;
-        let mut requires_cancelled_command = false;
+        let mut interrupted_commands = HashSet::new();
         let mut idle = false;
         let mut active_agents = HashSet::new();
         loop {
@@ -312,6 +331,47 @@ impl ClaudeRuntime {
                         std::future::pending::<()>().await;
                     }
                 } => bail!("Claude interrupt acknowledgement and idle timed out"),
+                prompt = async {
+                    match steering.as_mut() {
+                        Some(receiver) => receiver.recv().await,
+                        None => std::future::pending().await,
+                    }
+                }, if interrupt_id.is_none() => {
+                    let Some(prompt) = prompt else {
+                        steering = None;
+                        continue;
+                    };
+                    if !*self.send_now.borrow() {
+                        bail!("Claude steering was submitted without Send now capability");
+                    }
+                    let command_uuid = Uuid::new_v4().to_string();
+                    let request_id = Uuid::new_v4().to_string();
+                    // Persisted input is never replayed if either write fails partway through.
+                    timeout(STOP_TIMEOUT, async {
+                        self.write_frame(json!({"type":"user", "uuid":command_uuid,
+                            "message":{"role":"user","content":prompt}})).await?;
+                        self.write_frame(json!({"type":"control_request", "request_id":request_id,
+                            "request":{"subtype":"interrupt", "send_now":true,
+                                "message_uuid":command_uuid}})).await
+                    }).await.context("Claude steering submission timed out")??;
+                    commands.insert(command_uuid.clone());
+                    submitted_commands.insert(command_uuid.clone());
+                    latest_command = command_uuid;
+                    steering_requests.insert(request_id, Instant::now() + STOP_TIMEOUT);
+                    latest_command_succeeded = false;
+                    steered = true;
+                    submitted_steering_count += 1;
+                    pending_result = None;
+                    idle = false;
+                    continue;
+                }
+                _ = async {
+                    if let Some(deadline) = steering_requests.values().min() {
+                        sleep_until(*deadline).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => bail!("Claude Send now acknowledgement timed out; explicit recovery is required"),
                 frame = self.frames.recv() => frame.context("Claude stream reader stopped")??,
             };
             if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
@@ -321,6 +381,55 @@ impl ClaudeRuntime {
                 && id != self.session_id
             {
                 bail!("Claude returned a different session ID than requested");
+            }
+            if frame.get("type").and_then(Value::as_str) == Some("system")
+                && frame.get("subtype").and_then(Value::as_str) == Some("init")
+            {
+                self.send_now.send_replace(
+                    frame
+                        .get("capabilities")
+                        .and_then(Value::as_array)
+                        .is_some_and(|items| {
+                            items
+                                .iter()
+                                .any(|item| item.as_str() == Some("interrupt_send_now_v1"))
+                        }),
+                );
+            }
+            if frame.get("type").and_then(Value::as_str) == Some("control_response")
+                && let Some(response) = frame.get("response")
+                && let Some(id) = response.get("request_id").and_then(Value::as_str)
+                && steering_requests.remove(id).is_some()
+            {
+                if response.get("subtype").and_then(Value::as_str) != Some("success")
+                    || !matches!(
+                        response
+                            .pointer("/response/send_now")
+                            .and_then(Value::as_str),
+                        Some("stopped" | "delivering" | "nothing_waiting")
+                    )
+                {
+                    self.failure_result = Some(frame);
+                    bail!("Claude did not acknowledge Send now; explicit recovery is required");
+                }
+            }
+            if frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
+                && let Some(id) = frame.get("command_uuid").and_then(Value::as_str)
+                && submitted_commands.contains(id)
+            {
+                match frame.get("state").and_then(Value::as_str) {
+                    Some("cancelled") => {
+                        cancelled_commands.insert(id.to_owned());
+                        commands.remove(id);
+                    }
+                    Some("completed") => {
+                        commands.remove(id);
+                        if id == latest_command {
+                            latest_command_succeeded = true;
+                        }
+                    }
+                    _ => {}
+                }
             }
             if frame.get("type").and_then(Value::as_str) == Some("control_request") {
                 self.failure_result = Some(frame.clone());
@@ -361,13 +470,6 @@ impl ClaudeRuntime {
                     bail!("Claude interrupt did not confirm an empty input queue");
                 }
                 interrupt_acknowledged = true;
-            }
-            if interrupt_id.is_some()
-                && frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
-                && frame.get("command_uuid").and_then(Value::as_str) == Some(user_message_uuid)
-                && frame.get("state").and_then(Value::as_str) == Some("cancelled")
-            {
-                command_cancelled = true;
             }
             if frame.get("type").and_then(Value::as_str) == Some("system") {
                 let subtype = frame.get("subtype").and_then(Value::as_str);
@@ -425,10 +527,31 @@ impl ClaudeRuntime {
                         == Some("error_during_execution")
                     && frame.get("terminal_reason").and_then(Value::as_str)
                         == Some("aborted_streaming")
-                    && frame.get("user_message_uuid").and_then(Value::as_str)
-                        == Some(user_message_uuid);
-                requires_cancelled_command |= interrupted_execution;
+                    && frame
+                        .get("user_message_uuid")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| commands.contains(id) || cancelled_commands.contains(id));
+                let result_command = frame.get("user_message_uuid").and_then(Value::as_str);
+                let steering_abort = steered
+                    && result_command.is_some_and(|id| {
+                        id != latest_command
+                            && (commands.contains(id) || cancelled_commands.contains(id))
+                    })
+                    && frame.get("is_error").and_then(Value::as_bool) == Some(true)
+                    && frame.get("subtype").and_then(Value::as_str)
+                        == Some("error_during_execution")
+                    && matches!(
+                        frame.get("terminal_reason").and_then(Value::as_str),
+                        Some("aborted_streaming" | "aborted_tools")
+                    );
+                if steering_abort && let Some(id) = result_command {
+                    aborted_commands.insert(id.to_owned());
+                }
+                if interrupted_execution && let Some(id) = result_command {
+                    interrupted_commands.insert(id.to_owned());
+                }
                 if !interrupted_execution
+                    && !steering_abort
                     && (frame.get("is_error").and_then(Value::as_bool) != Some(false)
                         || frame.get("subtype").and_then(Value::as_str) != Some("success"))
                 {
@@ -445,7 +568,24 @@ impl ClaudeRuntime {
                     self.failure_result = Some(frame);
                     bail!("Claude returned an unsuccessful turn result: {category}");
                 }
-                pending_result = Some(frame);
+                if result_command == Some(latest_command.as_str()) && !interrupted_execution {
+                    latest_command_succeeded = true;
+                }
+                if !steered
+                    || (result_command.is_some_and(|id| submitted_commands.contains(id))
+                        && !steering_abort
+                        && !interrupted_execution)
+                    || (result_command.is_none()
+                        && latest_command_succeeded
+                        && commands.is_empty()
+                        && frame.pointer("/origin/kind").and_then(Value::as_str)
+                            == Some("task-notification"))
+                {
+                    pending_result = Some(frame.clone());
+                }
+                if !steering_abort && let Some(id) = result_command {
+                    commands.remove(id);
+                }
             }
             // A result ends one generation, not necessarily the native agent's run.
             // Require explicit idle before the next ASM turn can consume this stream.
@@ -456,17 +596,27 @@ impl ClaudeRuntime {
                 if interrupt_acknowledged
                     && idle
                     && active_agents.is_empty()
-                    && (!requires_cancelled_command || command_cancelled)
+                    && interrupted_commands.is_subset(&cancelled_commands)
+                    && aborted_commands.is_subset(&cancelled_commands)
                 {
                     return Ok(ClaudeTurnOutcome {
                         result: pending_result,
                         interrupted: true,
+                        submitted_steering_count,
                     });
                 }
-            } else if is_idle && let Some(result) = pending_result.take() {
+            } else if idle
+                && (!steered
+                    || (latest_command_succeeded
+                        && commands.is_empty()
+                        && steering_requests.is_empty()
+                        && aborted_commands.is_subset(&cancelled_commands)))
+                && let Some(result) = pending_result.take()
+            {
                 return Ok(ClaudeTurnOutcome {
                     result: Some(result),
                     interrupted: false,
+                    submitted_steering_count,
                 });
             }
         }
