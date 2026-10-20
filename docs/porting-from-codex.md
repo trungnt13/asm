@@ -276,11 +276,14 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 ### Claude Code thread runtime
 
 Explicit `claude-code/<model>` IDs select the official persistent `claude -p` CLI
-for main threads and ASM-managed children. Other models retain upstream inference.
+for main threads and ASM-managed children. Versioned `sonnet-` and `opus-` suffixes
+are expanded to native `claude-` model names at CLI launch; other native suffixes pass
+through unchanged. Saved session model IDs remain unchanged for safe resume.
+Other models retain upstream inference.
 Keep the upstream built-in catalog unchanged; select the runtime explicitly:
 
 ```bash
-codex --no-daemon --model claude-code/claude-sonnet-5-5
+codex --no-daemon --model claude-code/sonnet-5-5
 ```
 
 [Reference runtime catalog](example-model-catalog.json) is the authoritative, complete

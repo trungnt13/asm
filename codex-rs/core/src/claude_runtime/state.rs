@@ -78,14 +78,19 @@ impl ClaudeSession {
         session: codex_claude_runtime::ClaudeSession,
     ) -> anyhow::Result<ClaudeRuntime> {
         use anyhow::Context;
+        let model = checkpoint
+            .model
+            .strip_prefix("claude-code/")
+            .context("not a Claude model")?;
+        let model = if model.starts_with("sonnet-") || model.starts_with("opus-") {
+            format!("claude-{model}")
+        } else {
+            model.to_owned()
+        };
         ClaudeRuntime::spawn(codex_claude_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
-            model: checkpoint
-                .model
-                .strip_prefix("claude-code/")
-                .context("not a Claude model")?
-                .to_owned(),
+            model,
             effort: checkpoint.effort.clone(),
             session,
             mcp_config: bridge.map(|bridge| {
