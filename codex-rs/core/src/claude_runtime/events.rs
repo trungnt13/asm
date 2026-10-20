@@ -81,19 +81,7 @@ pub(super) async fn record_assistant_frame(
             && let (Some(id), Some(delta)) = (stream.id.as_ref(), event["delta"]["text"].as_str())
         {
             if !stream.started {
-                session
-                    .emit_turn_item_started(
-                        turn,
-                        &TurnItem::AgentMessage(AgentMessageItem {
-                            id: id.clone(),
-                            content: Vec::new(),
-                            phase: None,
-                            memory_citation: None,
-                            delivery: None,
-                            questions: None,
-                        }),
-                    )
-                    .await;
+                emit_message_started(session, turn, id).await;
                 stream.started = true;
             }
             stream.text.push_str(delta);
@@ -143,19 +131,7 @@ pub(super) async fn record_assistant_frame(
         .record_conversation_items(turn, &turn.capture_current_model_info(), &[item])
         .await;
     if !stream.started {
-        session
-            .emit_turn_item_started(
-                turn,
-                &TurnItem::AgentMessage(AgentMessageItem {
-                    id: id.clone(),
-                    content: Vec::new(),
-                    phase: None,
-                    memory_citation: None,
-                    delivery: None,
-                    questions: None,
-                }),
-            )
-            .await;
+        emit_message_started(session, turn, &id).await;
     }
     stream.started = false;
     session
@@ -172,4 +148,20 @@ pub(super) async fn record_assistant_frame(
         )
         .await;
     Ok(Some(text))
+}
+
+async fn emit_message_started(session: &Session, turn: &TurnContext, id: &str) {
+    session
+        .emit_turn_item_started(
+            turn,
+            &TurnItem::AgentMessage(AgentMessageItem {
+                id: id.to_owned(),
+                content: Vec::new(),
+                phase: None,
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            }),
+        )
+        .await;
 }
