@@ -766,3 +766,14 @@ Keep the active prompt destination visible in the composer’s top-right padding
 ### Concise built-in agent roles
 
 Keep the built-in explorer purpose and worker task list, but omit their verbose delegation Rules blocks from the spawn-agent schema. Shared orchestration instructions govern delegation instead.
+
+### Subagent global instructions
+
+For spawned subagents, `$CODEX_HOME/SUBAGENTS.md`, when present, replaces the global
+user-instruction contribution from `AGENTS.md` or `AGENTS.override.md`. An empty
+file clears that contribution. A missing file retains the existing inheritance
+contract; other read errors fail startup rather than silently use root instructions.
+Resolve the file at child startup, including cold reload, for fresh and full-history
+children. Keep project instructions, host thread instructions, and root/internal
+worker behavior unchanged. Full-history children retain history and receive the
+replacement through normal incremental context updates, not history rewriting.

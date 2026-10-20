@@ -2358,6 +2358,25 @@ impl ThreadManagerState {
             instructions.user_provider = None;
             config.startup_warnings.extend(supplied.warnings);
         }
+        // Resolve only the global contribution here, after host and inherited snapshots.
+        // Forked history keeps its baseline so normal context updates replace the active text.
+        if matches!(
+            session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            let path = config.codex_home.join("SUBAGENTS.md");
+            match tokio::fs::read(&path).await {
+                Ok(contents) => {
+                    instructions.user = Some(codex_extension_api::Instructions {
+                        text: String::from_utf8_lossy(&contents).trim().to_owned(),
+                        source: Some(path),
+                    });
+                    instructions.user_provider = None;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         let parent_rollout_thread_trace = self
             .parent_rollout_thread_trace_for_source(&session_source, &initial_history)
             .await;
