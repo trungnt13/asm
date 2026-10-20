@@ -30,7 +30,7 @@ impl RegularTask {
 
 impl SessionTask for RegularTask {
     async fn abort(&self, session: Arc<Session>, _ctx: Arc<TurnContext>) {
-        crate::claude_runtime::shutdown(&session).await;
+        crate::claude_runtime::abort(&session).await;
     }
 
     fn kind(&self) -> TaskKind {

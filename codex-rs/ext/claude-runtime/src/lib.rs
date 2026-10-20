@@ -9,6 +9,7 @@ use anyhow::bail;
 use codex_utils_pty::process_group;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -22,6 +23,8 @@ use tokio::process::ChildStdin;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
+use tokio::time::sleep_until;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -40,6 +43,11 @@ pub struct ClaudeOptions {
     pub effort: Option<String>,
     pub session: ClaudeSession,
     pub mcp_config: Option<Value>,
+}
+
+pub struct ClaudeTurnOutcome {
+    pub result: Option<Value>,
+    pub interrupted: bool,
 }
 
 pub struct ClaudeRuntime {
@@ -206,7 +214,7 @@ impl ClaudeRuntime {
         prompt: &str,
         events: mpsc::Sender<Value>,
         cancel: CancellationToken,
-    ) -> Result<Value> {
+    ) -> Result<ClaudeTurnOutcome> {
         if !self.usable {
             bail!("Claude session requires explicit recovery after an unfinished turn");
         }
@@ -219,25 +227,19 @@ impl ClaudeRuntime {
             pid: self.child.id(),
             armed: true,
         };
+        let user_message_uuid = Uuid::new_v4().to_string();
         let result = async {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => {
-                    let interrupt = json!({"type":"control_request", "request_id":Uuid::new_v4().to_string(),
-                        "request":{"subtype":"interrupt"}});
-                    timeout(STOP_TIMEOUT, async {
-                        self.write_frame(interrupt).await?;
-                        self.read_result(&events).await
-                    }).await.context("Claude interrupt acknowledgement timed out")??;
-                    bail!("Claude turn interrupted; explicit recovery is required");
+                    bail!("Claude turn cancelled during submission; explicit recovery is required");
                 }
-                result = async {
-                    self.write_frame(json!({"type":"user",
-                        "message":{"role":"user","content":prompt}})).await?;
-                    self.read_result(&events).await
-                } => result,
+                result = self.write_frame(json!({"type":"user", "uuid":user_message_uuid,
+                    "message":{"role":"user","content":prompt}})) => result?,
             }
-        }.await;
+            self.read_result(&events, cancel, &user_message_uuid).await
+        }
+        .await;
         if result.is_ok() {
             self.usable = true;
         }
@@ -274,14 +276,44 @@ impl ClaudeRuntime {
         stdin.flush().await.context("flushing Claude input")
     }
 
-    async fn read_result(&mut self, events: &mpsc::Sender<Value>) -> Result<Value> {
+    async fn read_result(
+        &mut self,
+        events: &mpsc::Sender<Value>,
+        cancel: CancellationToken,
+        user_message_uuid: &str,
+    ) -> Result<ClaudeTurnOutcome> {
         let mut pending_result = None;
+        let mut interrupt_id = None;
+        let mut interrupt_deadline = None;
+        let mut interrupt_acknowledged = false;
+        let mut command_cancelled = false;
+        let mut requires_cancelled_command = false;
+        let mut idle = false;
+        let mut active_agents = HashSet::new();
         loop {
-            let frame = self
-                .frames
-                .recv()
-                .await
-                .context("Claude stream reader stopped")??;
+            let frame = tokio::select! {
+                biased;
+                _ = cancel.cancelled(), if interrupt_id.is_none() => {
+                    let request_id = Uuid::new_v4().to_string();
+                    let deadline = Instant::now() + STOP_TIMEOUT;
+                    timeout(STOP_TIMEOUT, self.write_frame(json!({
+                        "type":"control_request", "request_id":request_id,
+                        "request":{"subtype":"interrupt"}
+                    }))).await.context("Claude interrupt submission timed out")??;
+                    interrupt_id = Some(request_id);
+                    interrupt_deadline = Some(deadline);
+                    idle = false;
+                    continue;
+                }
+                _ = async {
+                    if let Some(deadline) = interrupt_deadline {
+                        sleep_until(deadline).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => bail!("Claude interrupt acknowledgement and idle timed out"),
+                frame = self.frames.recv() => frame.context("Claude stream reader stopped")??,
+            };
             if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
                 bail!("Claude emitted a JSON frame without an event type");
             }
@@ -308,6 +340,59 @@ impl ClaudeRuntime {
                     "Claude requested an unsupported approval or control callback; no permission was granted"
                 );
             }
+            if frame.get("type").and_then(Value::as_str) == Some("control_response")
+                && let Some(response) = frame.get("response")
+                && interrupt_id.as_deref().is_some_and(|id| {
+                    response.get("request_id").and_then(Value::as_str) == Some(id)
+                })
+            {
+                if response.get("subtype").and_then(Value::as_str) != Some("success") {
+                    self.failure_result = Some(frame);
+                    bail!("Claude refused the interrupt request");
+                }
+                // Queued commands survive interrupt. UUID-stamped inputs make the
+                // native acknowledgement report them instead of silently omitting them.
+                if !response
+                    .pointer("/response/still_queued")
+                    .and_then(Value::as_array)
+                    .is_some_and(Vec::is_empty)
+                {
+                    self.failure_result = Some(frame);
+                    bail!("Claude interrupt did not confirm an empty input queue");
+                }
+                interrupt_acknowledged = true;
+            }
+            if interrupt_id.is_some()
+                && frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
+                && frame.get("command_uuid").and_then(Value::as_str) == Some(user_message_uuid)
+                && frame.get("state").and_then(Value::as_str) == Some("cancelled")
+            {
+                command_cancelled = true;
+            }
+            if frame.get("type").and_then(Value::as_str) == Some("system") {
+                let subtype = frame.get("subtype").and_then(Value::as_str);
+                if subtype == Some("task_started")
+                    && frame.get("task_type").and_then(Value::as_str) == Some("local_agent")
+                {
+                    let task_id = frame
+                        .get("task_id")
+                        .and_then(Value::as_str)
+                        .context("Claude local agent started without a task ID")?;
+                    active_agents.insert(task_id.to_owned());
+                }
+                if subtype == Some("task_notification")
+                    && matches!(
+                        frame.get("status").and_then(Value::as_str),
+                        Some("stopped" | "completed" | "failed" | "killed")
+                    )
+                    && let Some(task_id) = frame.get("task_id").and_then(Value::as_str)
+                {
+                    active_agents.remove(task_id);
+                }
+                if subtype == Some("session_state_changed") {
+                    idle = frame.get("state").and_then(Value::as_str) == Some("idle");
+                }
+            }
             let is_result = frame.get("type").and_then(Value::as_str) == Some("result");
             let is_idle = frame.get("type").and_then(Value::as_str) == Some("system")
                 && frame.get("subtype").and_then(Value::as_str) == Some("session_state_changed")
@@ -318,18 +403,34 @@ impl ClaudeRuntime {
             ) && frame.get("parent_tool_use_id").is_none_or(Value::is_null)
             {
                 pending_result = None;
+                idle = false;
             }
-            events
-                .send(frame.clone())
-                .await
-                .context("Claude event consumer closed")?;
+            let send = events.send(frame.clone());
+            if let Some(deadline) = interrupt_deadline {
+                tokio::time::timeout_at(deadline, send)
+                    .await
+                    .context("Claude interrupt event delivery timed out")?
+                    .context("Claude event consumer closed")?;
+            } else {
+                send.await.context("Claude event consumer closed")?;
+            }
             if is_result {
                 if frame.get("session_id").and_then(Value::as_str) != Some(self.session_id.as_str())
                 {
                     bail!("Claude result did not confirm the requested session ID");
                 }
-                if frame.get("is_error").and_then(Value::as_bool) != Some(false)
-                    || frame.get("subtype").and_then(Value::as_str) != Some("success")
+                let interrupted_execution = interrupt_id.is_some()
+                    && frame.get("is_error").and_then(Value::as_bool) == Some(true)
+                    && frame.get("subtype").and_then(Value::as_str)
+                        == Some("error_during_execution")
+                    && frame.get("terminal_reason").and_then(Value::as_str)
+                        == Some("aborted_streaming")
+                    && frame.get("user_message_uuid").and_then(Value::as_str)
+                        == Some(user_message_uuid);
+                requires_cancelled_command |= interrupted_execution;
+                if !interrupted_execution
+                    && (frame.get("is_error").and_then(Value::as_bool) != Some(false)
+                        || frame.get("subtype").and_then(Value::as_str) != Some("success"))
                 {
                     // Only known categories enter the user error. Arbitrary provider prose can
                     // contain prompts or credentials and remains in opt-in private diagnostics.
@@ -348,8 +449,25 @@ impl ClaudeRuntime {
             }
             // A result ends one generation, not necessarily the native agent's run.
             // Require explicit idle before the next ASM turn can consume this stream.
-            if is_idle && let Some(result) = pending_result.take() {
-                return Ok(result);
+            if interrupt_id.is_some() {
+                if is_idle && !active_agents.is_empty() {
+                    bail!("Claude became idle before interrupted local agents stopped");
+                }
+                if interrupt_acknowledged
+                    && idle
+                    && active_agents.is_empty()
+                    && (!requires_cancelled_command || command_cancelled)
+                {
+                    return Ok(ClaudeTurnOutcome {
+                        result: pending_result,
+                        interrupted: true,
+                    });
+                }
+            } else if is_idle && let Some(result) = pending_result.take() {
+                return Ok(ClaudeTurnOutcome {
+                    result: Some(result),
+                    interrupted: false,
+                });
             }
         }
     }

@@ -10,6 +10,7 @@ use state::ClaudeSession;
 use state::RuntimeLease;
 pub(crate) use state::RuntimeSlot;
 
+use serde_json::Value;
 use std::io::Write;
 use std::sync::Arc;
 
@@ -38,6 +39,25 @@ use crate::tasks::SessionTaskResult;
 
 pub(crate) fn is_claude_model(model: &str) -> bool {
     model.starts_with("claude-code/")
+}
+
+#[tracing::instrument(skip_all)]
+pub(crate) async fn abort(session: &Session) {
+    let preserve = match RuntimeLease::take(&session.claude_runtime) {
+        Ok(lease) => lease
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| !runtime.checkpoint.in_flight),
+        Err(error) => {
+            tracing::warn!(%error, "Claude abort could not inspect runtime");
+            false
+        }
+    };
+    // A clean checkpoint is written only after the native idle boundary and rollout flush.
+    // Forced cancellation leaves it dirty and must still dispose of the process.
+    if !preserve {
+        shutdown(session).await;
+    }
 }
 
 #[tracing::instrument(skip_all)]
@@ -108,17 +128,33 @@ pub(crate) async fn run_turn(
         return Err(CodexErr::TurnAborted);
     }
     let result = run_conversation(&session, &turn, &mut input, &cancellation).await;
-    if result.is_err() {
+    if result
+        .as_ref()
+        .is_err_and(|error| !error.is::<ConfirmedInterrupt>())
+    {
         shutdown(&session).await;
     }
     match result {
         Ok(text) => Ok(text),
-        Err(_) if cancellation.is_cancelled() => Err(CodexErr::TurnAborted),
+        Err(error) if error.is::<ConfirmedInterrupt>() || cancellation.is_cancelled() => {
+            Err(CodexErr::TurnAborted)
+        }
         Err(error) => Err(CodexErr::InvalidRequest(format!(
             "Claude runtime: {error:#}"
         ))),
     }
 }
+
+#[derive(Debug)]
+struct ConfirmedInterrupt;
+
+impl std::fmt::Display for ConfirmedInterrupt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Claude turn interrupted at a confirmed idle boundary")
+    }
+}
+
+impl std::error::Error for ConfirmedInterrupt {}
 
 #[tracing::instrument(skip_all)]
 async fn run_conversation(
@@ -363,7 +399,7 @@ async fn run_conversation(
             Some(bridge) => bridge.clear_turn().await,
             None => Ok(()),
         };
-        let result = match result {
+        let outcome = match result {
             Ok(result) => {
                 cleanup?;
                 result
@@ -375,7 +411,16 @@ async fn run_conversation(
                 return Err(error);
             }
         };
-        let usage = runtime.measure_usage_delta(&result);
+        let interrupted = outcome.interrupted;
+        let has_result = outcome.result.is_some();
+        let result = outcome.result.unwrap_or(Value::Null);
+        let usage = if has_result {
+            runtime.measure_usage_delta(&result)
+        } else {
+            // No cumulative snapshot means the interrupted spend cannot be separated safely.
+            runtime.usage_baseline = None;
+            None
+        };
         if usage.is_none() {
             session.send_event(turn, EventMsg::Warning(WarningEvent {
                 message: "Claude token usage is unavailable for this response: the first result after resume or missing/reset cumulative counters cannot be counted safely.".to_owned(),
@@ -385,14 +430,16 @@ async fn run_conversation(
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        session
-            .record_observed_response_completed(
-                turn,
-                &response_id,
-                usage.as_ref(),
-                /*usage_metadata*/ None,
-            )
-            .await;
+        if has_result {
+            session
+                .record_observed_response_completed(
+                    turn,
+                    &response_id,
+                    usage.as_ref(),
+                    /*usage_metadata*/ None,
+                )
+                .await;
+        }
         let budget_result = session
             .record_token_usage_info(
                 turn,
@@ -426,6 +473,12 @@ async fn run_conversation(
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
         runtime.save_checkpoint()?;
+        if interrupted {
+            if let Err(error) = budget_result {
+                tracing::warn!(%error, "Claude interrupted-turn accounting failed");
+            }
+            return Err(ConfirmedInterrupt.into());
+        }
         budget_result?;
         drop(lease);
         session

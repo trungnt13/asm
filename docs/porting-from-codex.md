@@ -304,6 +304,15 @@ codex --no-daemon --model claude-code/claude-sonnet-5-5
 - Keep one CLI process per loaded Claude session, with private external-session
   linkage and unfinished-turn state. Resume only a known clean session; never replay
   an uncertain submitted turn or completed tool calls automatically.
+- On interrupt, stop native work and retain the process only after a matching
+  successful interrupt acknowledgement with an explicit empty queued-input receipt,
+  explicit idle, and termination of observed
+  native child tasks. Persist clean linkage before allowing another turn. Missing
+  confirmation, timeout, disconnect or forced abort kills the owned group and keeps
+  linkage dirty. Give only external tasks a bounded cleanup grace period.
+  UUID-stamp submitted native user inputs so the receipt accounts for queued work.
+  A native aborted-streaming result is resumable only for that submitted UUID with
+  its cancelled-command receipt; other execution errors still require recovery.
 - Bound framing, stderr and cleanup waits. Interrupt and kill only owned process
   groups; preserve primary failures and retain diagnostics only when requested.
 - Keep text-only local execution initially. Reject unsupported history forks,

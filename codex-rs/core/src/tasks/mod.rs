@@ -973,11 +973,18 @@ impl Session {
             .cancel_git_enrichment_task();
         let session_task = task.task;
 
+        let interruption_timeout =
+            if crate::claude_runtime::is_claude_model(&task.turn_context.model_info().slug) {
+                Duration::from_secs(15)
+            } else {
+                Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS)
+            };
+
         select! {
             _ = task.done.notified() => {
             },
-            _ = tokio::time::sleep(Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS)) => {
-                warn!("task {sub_id} didn't complete gracefully after {}ms", GRACEFULL_INTERRUPTION_TIMEOUT_MS);
+            _ = tokio::time::sleep(interruption_timeout) => {
+                warn!("task {sub_id} didn't complete gracefully after {}ms", interruption_timeout.as_millis());
             }
         }
 
