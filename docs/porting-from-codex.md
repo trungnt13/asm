@@ -306,6 +306,9 @@ runtime or changing its fixed model/effort. Keep the original history; never rep
 into the new native conversation or change saved defaults as part of this action.
 ASM child selections use catalog defaults and supported efforts when present; native
 model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
+Keep the V2 spawn tool description explicit: `claude-code/*` requires
+`fork_turns="none"` and a self-contained task message, including with custom tool
+descriptions or hidden catalogs. Do not rely on a failed spawn to teach this constraint.
 
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
