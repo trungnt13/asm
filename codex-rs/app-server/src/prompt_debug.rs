@@ -78,6 +78,7 @@ pub async fn build_prompt_request(
             thread_extensions(
                 &config,
                 ThreadExtensionDependencies {
+                    cloud_skill_provider: None,
                     sample_responses: Arc::new(
                         crate::thread_sample::SampleResponseRegistry::default(),
                     ),

@@ -1261,6 +1261,9 @@
             "rollout_budget": {
               "$ref": "#/definitions/FeatureToml_for_RolloutBudgetConfigToml"
             },
+            "runtime_agent_instances": {
+              "$ref": "#/definitions/FeatureToml_for_RuntimeAgentInstancesConfigToml"
+            },
             "runtime_metrics": {
               "type": "boolean"
             },
@@ -1319,6 +1322,9 @@
               "type": "boolean"
             },
             "subagent_default_context_limits": {
+              "type": "boolean"
+            },
+            "subagent_thread_environments": {
               "type": "boolean"
             },
             "system_proxy_fallback": {
@@ -1812,6 +1818,16 @@
         },
         {
           "$ref": "#/definitions/RolloutBudgetConfigToml"
+        }
+      ]
+    },
+    "FeatureToml_for_RuntimeAgentInstancesConfigToml": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/RuntimeAgentInstancesConfigToml"
         }
       ]
     },
@@ -3145,7 +3161,7 @@
           "type": "boolean"
         },
         "preserve_fork_prefix": {
-          "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to false. Legacy compaction without a reusable context baseline still rebuilds.",
+          "description": "Preserve the parent's model-visible history on full forks and append child instructions. Defaults to true. Legacy compaction without a reusable context baseline still rebuilds.",
           "type": "boolean"
         },
         "root_agent_usage_hint_text": {
@@ -4385,6 +4401,36 @@
         }
       },
       "type": "object"
+    },
+    "RuntimeAgentInstancesConfigToml": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/RuntimeAuthMode"
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeAuthMode": {
+      "oneOf": [
+        {
+          "description": "Send the actor credential and a runtime assertion together during migration.",
+          "enum": [
+            "dual_header"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send only the runtime assertion as the request credential.",
+          "enum": [
+            "assertion_only"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "SandboxMode": {
       "enum": [
@@ -7875,6 +7921,9 @@
         "rollout_budget": {
           "$ref": "#/definitions/FeatureToml_for_RolloutBudgetConfigToml"
         },
+        "runtime_agent_instances": {
+          "$ref": "#/definitions/FeatureToml_for_RuntimeAgentInstancesConfigToml"
+        },
         "runtime_metrics": {
           "type": "boolean"
         },
@@ -7933,6 +7982,9 @@
           "type": "boolean"
         },
         "subagent_default_context_limits": {
+          "type": "boolean"
+        },
+        "subagent_thread_environments": {
           "type": "boolean"
         },
         "system_proxy_fallback": {

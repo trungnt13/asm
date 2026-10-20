@@ -1456,7 +1456,7 @@ async fn serve_environment_info(listener: TcpListener) {
     send_environment_info(&mut websocket).await;
 }
 
-async fn serve_environment_with_agents_md(
+pub(super) async fn serve_environment_with_agents_md(
     listener: TcpListener,
     contents: &str,
     attach: tokio::sync::oneshot::Receiver<()>,
@@ -1622,7 +1622,9 @@ impl NoiseRendezvousConnectProvider for OfflineThenReadyNoiseConnectProvider {
 struct NoopRegistryAuthProvider;
 
 impl AuthProvider for NoopRegistryAuthProvider {
-    fn add_auth_headers(&self, _: &mut HeaderMap) {}
+    fn add_auth_headers(&self, _: &mut HeaderMap) -> Result<(), codex_api::AuthError> {
+        Ok(())
+    }
 }
 
 async fn wait_for_response_request_count(response_mock: &ResponseMock, expected_count: usize) {
