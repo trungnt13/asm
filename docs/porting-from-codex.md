@@ -766,3 +766,7 @@ Keep the active prompt destination visible in the composer’s top-right padding
 ### Concise built-in agent roles
 
 Keep the built-in explorer purpose and worker task list, but omit their verbose delegation Rules blocks from the spawn-agent schema. Shared orchestration instructions govern delegation instead.
+
+### Test-only dependencies
+
+`codex-ollama` declares `wiremock` under `[dev-dependencies]`; only `#[cfg(test)]` code uses it. Shipped binaries no longer compile `wiremock` and its `deadpool`/`assert-json-diff` dependencies. If upstream moves it there too, drop this note; if upstream adds non-test use, keep upstream's declaration.
