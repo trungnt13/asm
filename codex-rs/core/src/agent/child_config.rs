@@ -306,12 +306,12 @@ pub(crate) async fn apply_spawn_agent_service_tier(
     let model = config.model.clone().ok_or_else(|| {
         "spawn_agent could not resolve the child model for service tier validation".to_string()
     })?;
+    let model_info = session
+        .services
+        .models_manager
+        .get_model_info(&model, &config.to_models_manager_config())
+        .await;
     if crate::claude_runtime::is_claude_model(&model) {
-        let model_info = session
-            .services
-            .models_manager
-            .get_model_info(&model, &config.to_models_manager_config())
-            .await;
         if !model_info.used_fallback_model_metadata
             && let Some(effort) = config.model_reasoning_effort.as_ref()
         {
@@ -329,12 +329,6 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         config.service_tier = None;
         return Ok(());
     }
-    let model_info = session
-        .services
-        .models_manager
-        .get_model_info(model.as_str(), &config.to_models_manager_config())
-        .await;
-
     let effort = config
         .model_reasoning_effort
         .as_ref()
