@@ -315,6 +315,9 @@ model IDs absent from the catalog remain usable without OpenAI fallback effort m
   streaming, disclosure, grouping and replay. These are display events, not tool
   execution requests or model-context items. Attribute native child activity without
   inventing ASM threads; preserve failures and avoid duplicate bridge-tool events.
+  Include distinct observed native child tasks in the completed turn's `ag` count,
+  deduplicated across lifecycle events and display replay. Historical child activity
+  must not inflate a currently active ancestor turn's count.
 - Use native Claude Code settings and subscription login; resolve `claude` through
   PATH. Do not extract subscription credentials or enable API billing implicitly.
   Do not disable native tools, skills or instructions to emulate ASM inference.

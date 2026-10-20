@@ -229,6 +229,7 @@ impl App {
         cwd: &AbsolutePathBuf,
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
+        self.turn_agent_counts.record_native_turns(thread_id, turns);
         let mut cells = Vec::new();
         for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
             // Internal prompts stay invisible, but still separate adjacent tool groups.
