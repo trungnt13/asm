@@ -87,7 +87,7 @@ pub async fn load_auth_manager(
 
 /// Build headers for ChatGPT-backed requests: `User-Agent`, optional `Authorization`,
 /// and optional `ChatGPT-Account-Id`.
-pub async fn build_chatgpt_headers(config: &Config) -> HeaderMap {
+pub async fn build_chatgpt_headers(config: &Config) -> anyhow::Result<HeaderMap> {
     use http::header::HeaderValue;
     use http::header::USER_AGENT;
 
@@ -102,9 +102,9 @@ pub async fn build_chatgpt_headers(config: &Config) -> HeaderMap {
         && let Some(auth) = am.auth().await
         && auth.uses_codex_backend()
     {
-        headers.extend(codex_model_provider::auth_provider_from_auth(&auth).to_auth_headers());
+        headers.extend(codex_model_provider::auth_provider_from_auth(&auth).to_auth_headers()?);
     }
-    headers
+    Ok(headers)
 }
 
 /// Construct a browser-friendly task URL for the given backend base URL.

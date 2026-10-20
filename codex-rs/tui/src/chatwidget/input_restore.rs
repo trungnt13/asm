@@ -6,12 +6,17 @@ use codex_protocol::models::local_image_label_text;
 
 use crate::bottom_pane::ComposerDraftSnapshot;
 use crate::bottom_pane::KillBufferSnapshot;
+use crate::bottom_pane::MentionUsage;
 
 use super::user_messages::merge_composer_messages;
 use super::user_messages::remap_colliding_paste_placeholders;
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn mention_usage_mut(&mut self) -> &mut MentionUsage {
+        self.bottom_pane.mention_usage_mut()
+    }
+
     pub(crate) fn take_kill_buffer_snapshot(&mut self) -> KillBufferSnapshot {
         self.bottom_pane.take_kill_buffer_snapshot()
     }
