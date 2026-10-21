@@ -2223,8 +2223,17 @@ impl ThreadRequestProcessor {
                 "Claude runtime history cannot be reverted; start a fresh thread",
             ));
         }
+        let mut config = thread.config().await.as_ref().clone();
+        // Give the replacement its own pending lifetime before removal revokes the old runtime.
+        let ema_cancellation = config
+            .config_layer_stack
+            .mcp_ema_cancellation()
+            .for_startup();
+        config.config_layer_stack = config
+            .config_layer_stack
+            .with_mcp_ema_cancellation(ema_cancellation);
         let runtime_snapshot = ThreadRevertRuntimeSnapshot {
-            config: thread.config().await.as_ref().clone(),
+            config,
             settings: thread.restorable_thread_settings().await,
             client_mcp_extensions: thread.client_mcp_extensions(),
         };
