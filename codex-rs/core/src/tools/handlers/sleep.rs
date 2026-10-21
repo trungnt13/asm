@@ -47,7 +47,7 @@ fn create_sleep_tool() -> ToolSpec {
         (
             "reason".to_string(),
             JsonSchema::string(Some(
-                "Pending work to resume after waking. At most 500 characters after trimming whitespace. Use an empty string for no reminder.".to_string(),
+                "Pending work to resume after being interrupted during sleep. Use an empty string for no reminder.".to_string(),
             )),
         ),
     ]);
