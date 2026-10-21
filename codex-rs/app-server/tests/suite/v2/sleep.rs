@@ -40,7 +40,7 @@ async fn clock_tools_emit_control_tool_analytics() -> Result<()> {
         ("curr_time", json!({}), "completed"),
         (
             "sleep",
-            json!({"duration_ms": 1, "reason": "Waiting for pending work"}),
+            json!({"duration_ms": 1, "reason": ""}),
             "completed",
         ),
         (
@@ -50,7 +50,7 @@ async fn clock_tools_emit_control_tool_analytics() -> Result<()> {
         ),
         (
             "sleep",
-            json!({"duration_ms": 43_200_000, "reason": "Waiting for pending work"}),
+            json!({"duration_ms": 43_200_000, "reason": " \t "}),
             "interrupted",
         ),
     ];
