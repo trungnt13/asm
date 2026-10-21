@@ -88,6 +88,45 @@ pub(super) struct ModelUsage {
     thinking: Option<i64>,
 }
 
+fn decode_model_usage(result: &serde_json::Value) -> Option<BTreeMap<String, ModelUsage>> {
+    result["modelUsage"]
+        .as_object()
+        .filter(|models| !models.is_empty())
+        .and_then(|models| {
+            models
+                .iter()
+                .map(|(model, usage)| {
+                    let mut counters = [0; 4];
+                    for (index, field) in [
+                        "inputTokens",
+                        "cacheReadInputTokens",
+                        "cacheCreationInputTokens",
+                        "outputTokens",
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        counters[index] = usage[field].as_i64().filter(|value| *value >= 0)?;
+                    }
+                    let thinking = match usage.get("thinkingTokens") {
+                        Some(tokens) => Some(tokens.as_i64().filter(|tokens| *tokens >= 0)?),
+                        None => None,
+                    };
+                    if thinking.is_some_and(|thinking| thinking > counters[3]) {
+                        return None;
+                    }
+                    Some((
+                        model.clone(),
+                        ModelUsage {
+                            billing: counters,
+                            thinking,
+                        },
+                    ))
+                })
+                .collect::<Option<BTreeMap<_, _>>>()
+        })
+}
+
 impl ClaudeSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
@@ -120,42 +159,7 @@ impl ClaudeSession {
     }
 
     pub(super) fn measure_usage_delta(&mut self, result: &serde_json::Value) -> Option<TokenUsage> {
-        let current = result["modelUsage"]
-            .as_object()
-            .filter(|models| !models.is_empty())
-            .and_then(|models| {
-                models
-                    .iter()
-                    .map(|(model, usage)| {
-                        let mut counters = [0; 4];
-                        for (index, field) in [
-                            "inputTokens",
-                            "cacheReadInputTokens",
-                            "cacheCreationInputTokens",
-                            "outputTokens",
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        {
-                            counters[index] = usage[field].as_i64().filter(|value| *value >= 0)?;
-                        }
-                        let thinking = match usage.get("thinkingTokens") {
-                            Some(tokens) => Some(tokens.as_i64().filter(|tokens| *tokens >= 0)?),
-                            None => None,
-                        };
-                        if thinking.is_some_and(|thinking| thinking > counters[3]) {
-                            return None;
-                        }
-                        Some((
-                            model.clone(),
-                            ModelUsage {
-                                billing: counters,
-                                thinking,
-                            },
-                        ))
-                    })
-                    .collect::<Option<BTreeMap<_, _>>>()
-            });
+        let current = decode_model_usage(result);
         // Native resume restores cost-state only when present; its first baseline is unknown.
         let previous = std::mem::replace(&mut self.usage_baseline, current);
         let (Some(previous), Some(current)) = (previous, &self.usage_baseline) else {
