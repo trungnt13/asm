@@ -7121,11 +7121,16 @@ class ApplicationNetworkRequirements(BaseModel):
     ]
 
 
-class ApplicationRequirements(BaseModel):
+class ApplicationStorageRequirements(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    network: ApplicationNetworkRequirements | None = None
+    default_project_parent: Annotated[
+        LegacyAppPathString | None, Field(alias="defaultProjectParent")
+    ] = None
+    projectless_workspace_root: Annotated[
+        LegacyAppPathString | None, Field(alias="projectlessWorkspaceRoot")
+    ] = None
 
 
 class AppsConfig(BaseModel):
@@ -8516,6 +8521,40 @@ class ExternalAgentImportedConnectorCandidate(BaseModel):
     name: str
     session_count: Annotated[int, Field(alias="sessionCount", ge=0)]
     source: ExternalAgentImportedConnectorSource
+
+
+class FeedbackSaveParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    classification: str
+    extra_log_files: Annotated[list[str] | None, Field(alias="extraLogFiles")] = None
+    include_logs: Annotated[bool | None, Field(alias="includeLogs")] = None
+    reason: str | None = None
+    save_path: Annotated[
+        LegacyAppPathString,
+        Field(
+            alias="savePath",
+            description="Absolute, previously unused ZIP path on the app-server host. The caller owns this file, including after a disconnected RPC.",
+        ),
+    ]
+    tags: dict[str, Any] | None = None
+    thread_id: Annotated[str | None, Field(alias="threadId")] = None
+
+
+class FeedbackSaveResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    prompt_hash: Annotated[
+        str | None,
+        Field(
+            alias="promptHash",
+            description="Same prompt hash as feedback/upload; null when prompt metadata is absent.",
+        ),
+    ] = None
+    saved_path: Annotated[LegacyAppPathString, Field(alias="savedPath")]
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class PathFileSystemPath(BaseModel):
@@ -11031,6 +11070,14 @@ class AppListUpdatedNotification(BaseModel):
     data: list[AppInfo]
 
 
+class ApplicationRequirements(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    network: ApplicationNetworkRequirements | None = None
+    storage: ApplicationStorageRequirements | None = None
+
+
 class AppsListResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11160,6 +11207,15 @@ class AccountLoginStartRequest(BaseModel):
         Literal["account/login/start"], Field(title="Account/login/startRequestMethod")
     ]
     params: LoginAccountParams
+
+
+class FeedbackSaveRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["feedback/save"], Field(title="Feedback/saveRequestMethod")]
+    params: FeedbackSaveParams
 
 
 class CommandExecRequest(BaseModel):
@@ -13287,6 +13343,7 @@ class ClientRequest(
         | AccountWorkspaceMessagesReadRequest
         | AccountSendAddCreditsNudgeEmailRequest
         | FeedbackUploadRequest
+        | FeedbackSaveRequest
         | CommandExecRequest
         | CommandExecWriteRequest
         | CommandExecTerminateRequest
@@ -13399,6 +13456,7 @@ class ClientRequest(
         | AccountWorkspaceMessagesReadRequest
         | AccountSendAddCreditsNudgeEmailRequest
         | FeedbackUploadRequest
+        | FeedbackSaveRequest
         | CommandExecRequest
         | CommandExecWriteRequest
         | CommandExecTerminateRequest

@@ -334,6 +334,10 @@ async fn inline_server_permission_selection_holds_queued_prompt_until_confirmati
 #[tokio::test]
 async fn custom_permission_selection_uses_server_definition_and_preserves_state_on_rejection()
 -> Result<()> {
+    boxed_future!(custom_permission_selection_scenario()).await
+}
+
+async fn custom_permission_selection_scenario() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     app.config.ephemeral = false;
     let home = tempdir()?;
@@ -502,16 +506,17 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     }))?]).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     while events.try_recv().is_ok() {}
-    let side = server
-        .fork_side_thread(
+    let side = Box::pin(
+        server.fork_side_thread(
             &app.local_settings,
             app.config.clone(),
             thread_id,
             app.agents_overview
                 .requested_permission_profiles
                 .get(&thread_id),
-        )
-        .await?;
+        ),
+    )
+    .await?;
     assert_eq!(
         (
             side.session.permission_profile,
