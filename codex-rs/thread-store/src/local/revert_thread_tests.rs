@@ -118,7 +118,6 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         replacement_meta.runtime_workspace_roots,
         Some(vec![home.path().join("workspace")])
     );
-    assert_eq!(turn_ids(&store, thread_id).await, vec!["turn-1"]);
 
     // Simulate an older binary replacing the rollout without the creator fields it does not know.
     let rollout = tokio::fs::read_to_string(&first_replacement_path)
@@ -137,6 +136,8 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     )
     .await
     .expect("write legacy replacement rollout");
+    // Finish the legacy writer fixture before a read snapshots its immutable byte offsets.
+    assert_eq!(turn_ids(&store, thread_id).await, vec!["turn-1"]);
 
     store
         .revert_thread(RevertThreadParams {

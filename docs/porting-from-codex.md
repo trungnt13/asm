@@ -117,9 +117,9 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `89461ea6833832b0551ce24ee32205824d5c108d`.
-- Date: 2026-10-19.
-- Subject: Prune unused standalone releases after successful installation (#55149).
+- Last incorporated commit: `87f3c3284e1669b90ad9f4925039e9e3bc769b61`.
+- Date: 2026-10-20.
+- Subject: Track code-mode cell lifecycle and result buffering time (#55653).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
@@ -156,6 +156,7 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
    - Inspect failures; fix relevant code/package errors.
    - For runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not infer code defects or change build settings from runner failure alone.
    - If the owner requires recovery first, verify successful retry before dispatch.
+   - Read prior candidate job logs in memory with the GitHub CLI raw-output opt-in when supported; never render untrusted log escapes to a terminal.
 3. **Check live use.**
    - Before dispatch, run one time-limited local live turn with default config/existing sign-in. Do not override profile/model.
    - Use the release-source CLI/helper pair and [real-session isolation](#real-session-checks).
@@ -834,7 +835,7 @@ Multi-Agent V2 sends parent/child messages as plaintext. Upstream marks `message
 - Bundled schemas omit the marker. Catalog parameter overrides drop `encrypted` from top-level properties, where the server places it; nested markers are not stripped. A catalog schema that omits `message` is accepted like other V2 catalog schemas instead of falling back.
 - Spawn and message tools always deliver `AgentMessage::Plaintext`, for direct, code-mode, and namespaced calls, whatever `encrypted_function_args` the server reports. Responses Lite omits that field for unmarked tools, so the upstream rule would treat plaintext as ciphertext.
 - Keep reasoning, compaction, and output-replay encryption unchanged. Old rollouts keep ciphertext and replay it through the unchanged `AgentMessage::Encrypted` delivery branch. Message delivery APIs stay unchanged; raw response items, transcripts, and tool-result logs outside the `collaboration` namespace now show message text. The subagent transcript display adds a typed `interAgentMessage` item to app-server history and notifications.
-- The TUI shows full plaintext incoming assignments/messages and outgoing communication in parent-owned subagent transcripts, live and on replay. Initial task headers show the child’s actual role when available. Main transcripts keep their existing summaries. This is presentation only: do not change model context or delivery, rewrite history, or attempt to display encrypted payloads. Keep the renderer isolated from upstream generic tool rendering. Thread-history migration `0009_inter_agent_communication_projection.sql` clears only derived SQLite history so existing plaintext is projected again; preserve this cache rebuild when resolving an upstream migration-number conflict. Rebuild invalidated projections only as paginated reads visit segments, including newer turn-shadowing dependencies; do not eagerly replay unused ancestors for bounded recent-history pages. Older outgoing messages without display records are not backfilled. Paginated incoming records require saved turn metadata; records without it are not assigned to a guessed turn.
+- The TUI shows full plaintext incoming assignments/messages and outgoing communication in parent-owned subagent transcripts, live and on replay. Initial task headers show the child’s actual role when available. Main transcripts keep their existing summaries. This is presentation only: do not change model context or delivery, rewrite history, or attempt to display encrypted payloads. Keep the renderer isolated from upstream generic tool rendering. Thread-history migration `0009_inter_agent_communication_projection.sql` clears only derived SQLite history so existing plaintext is projected again; preserve this cache rebuild when resolving an upstream migration-number conflict. Rebuild invalidated projections only as paginated reads visit segments, including newer turn-shadowing dependencies; do not eagerly replay unused ancestors for bounded recent-history pages. Serialize catch-up for each visited segment. A committed batch does not prove completion; retry failed or cancelled rebuilds. Reuse completed catch-up only while its source revision and SQLite checkpoint still match, without decoding unchanged compressed history again. Older outgoing messages without display records are not backfilled. Paginated incoming records require saved turn metadata; records without it are not assigned to a guessed turn.
 - On every upstream sync, search for new `with_encrypted`, `encrypted` schema markers, and `AgentMessage::Encrypted` producers on agent tools. A missed marker sends ciphertext to a child as plaintext text.
 
 ### Multiline-aware Enter
@@ -867,3 +868,14 @@ Keep the active prompt destination visible in the composer’s top-right padding
 ### Concise built-in agent roles
 
 Keep the built-in explorer purpose and worker task list, but omit their verbose delegation Rules blocks from the spawn-agent schema. Shared orchestration instructions govern delegation instead.
+
+### Subagent global instructions
+
+For spawned subagents, `$CODEX_HOME/SUBAGENTS.md`, when present, replaces the global
+user-instruction contribution from `AGENTS.md` or `AGENTS.override.md`. An empty
+file clears that contribution. A missing file retains the existing inheritance
+contract; other read errors fail startup rather than silently use root instructions.
+Resolve the file at child startup, including cold reload, for fresh and full-history
+children. Keep project instructions, host thread instructions, and root/internal
+worker behavior unchanged. Full-history children retain history and receive the
+replacement through normal incremental context updates, not history rewriting.

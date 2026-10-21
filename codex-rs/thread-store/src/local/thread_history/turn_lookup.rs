@@ -54,6 +54,23 @@ async fn find_turn<'a>(
     })
 }
 
+// Fork and revert capture boundaries under writer ownership after materializing the lineage.
+// Query those snapshots without trying to acquire the same writer lock again.
+pub(in crate::local) async fn find_materialized_turn<'a>(
+    pool: &sqlx::SqlitePool,
+    segments: impl Iterator<Item = &'a RolloutLineageSegment>,
+    turn_id: &str,
+) -> ThreadStoreResult<TurnRow> {
+    for segment in segments {
+        if let Some(row) = query_turn_row(pool, segment, turn_id).await? {
+            return Ok(row);
+        }
+    }
+    Err(ThreadStoreError::InvalidRequest {
+        message: format!("turn not found: {turn_id}"),
+    })
+}
+
 pub(super) async fn query_turn_row(
     pool: &sqlx::SqlitePool,
     segment: &RolloutLineageSegment,

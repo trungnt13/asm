@@ -78,6 +78,10 @@ pub async fn build_prompt_request(
             thread_extensions(
                 &config,
                 ThreadExtensionDependencies {
+                    cloud_skill_provider: None,
+                    sample_responses: Arc::new(
+                        crate::thread_sample::SampleResponseRegistry::default(),
+                    ),
                     event_sink: Arc::clone(&event_sink),
                     auth_manager: auth_manager.clone(),
                     state_db: state_db.clone(),

@@ -1,4 +1,5 @@
 use crate::agent::types::AgentMetadata;
+use crate::environment_selection::TurnEnvironmentSnapshot;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::AgentErrorContext;
@@ -37,15 +38,22 @@ struct ActiveAgents {
     nickname_reset_count: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub(crate) struct EvictedAgentRuntimeState {
-    pub(crate) environments: Vec<TurnEnvironmentSelection>,
+    pub(crate) environments: EvictedEnvironments,
     pub(crate) system1_enabled: bool,
     pub(crate) role_system1_disabled: bool,
     pub(crate) web_search_disabled: bool,
     pub(crate) system1_revision: u64,
     pub(crate) system1_error: Option<codex_protocol::protocol::System1Error>,
     pub(crate) system1_failure_episode: u64,
+}
+
+/// Thread defaults and executor bindings retained while a child's runtime is unloaded.
+#[derive(Clone, Debug)]
+pub(crate) struct EvictedEnvironments {
+    pub(crate) selections: Vec<TurnEnvironmentSelection>,
+    pub(crate) bindings: TurnEnvironmentSnapshot,
 }
 
 struct RegisteredAgent {
