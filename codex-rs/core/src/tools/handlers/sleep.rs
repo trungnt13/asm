@@ -47,7 +47,7 @@ fn create_sleep_tool() -> ToolSpec {
         (
             "reason".to_string(),
             JsonSchema::string(Some(
-                "Pending work to resume after waking. Must be nonempty and at most 500 characters after trimming whitespace.".to_string(),
+                "Pending work to resume after waking. At most 500 characters after trimming whitespace. Use an empty string for no reminder.".to_string(),
             )),
         ),
     ]);
@@ -109,16 +109,11 @@ impl ToolExecutor<ToolInvocation> for SleepHandler {
             }
 
             let reason = args.reason.trim();
-            if reason.is_empty() || reason.chars().count() > 500 {
+            if reason.chars().count() > 500 {
                 return Err(FunctionCallError::RespondToModel(
-                    "reason must be nonempty and at most 500 characters after trimming whitespace"
-                        .to_string(),
+                    "reason must be at most 500 characters after trimming whitespace".to_string(),
                 ));
             }
-            let reason = serde_json::to_string(reason).map_err(|err| {
-                FunctionCallError::Fatal(format!("failed to serialize sleep reason: {err}"))
-            })?;
-
             let started = Instant::now();
             let item = TurnItem::Extension(ExtensionItem::Sleep(SleepItem {
                 id: call_id,
@@ -167,15 +162,27 @@ impl ToolExecutor<ToolInvocation> for SleepHandler {
             })?;
 
             let message = if interrupted {
-                "Sleep interrupted by new input. Handle the new input, then resume the pending work unless canceled, paused, replaced, or blocked."
+                "Sleep interrupted by new input."
             } else {
-                "Sleep completed. Check the pending work after waking."
+                "Sleep completed."
             };
             let wall_time_seconds = started.elapsed().as_secs_f64();
+            let mut output = format!("Wall time: {wall_time_seconds:.4} seconds\n{message}");
+            if !reason.is_empty() {
+                let reason = serde_json::to_string(reason).map_err(|err| {
+                    FunctionCallError::Fatal(format!("failed to serialize sleep reason: {err}"))
+                })?;
+                let reminder = if interrupted {
+                    "Handle the new input, then resume the pending work unless canceled, paused, replaced, or blocked."
+                } else {
+                    "Check the pending work after waking."
+                };
+                output.push_str(&format!(
+                    " {reminder}\nReason for waiting (quoted context): {reason}"
+                ));
+            }
             Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                format!(
-                    "Wall time: {wall_time_seconds:.4} seconds\n{message}\nReason for waiting (quoted context): {reason}"
-                ),
+                output,
                 /*success*/ Some(true),
             )))
         })

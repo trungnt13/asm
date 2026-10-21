@@ -894,8 +894,9 @@ replacement through normal incremental context updates, not history rewriting.
 
 ### Sleep intent reminders
 
-`clock.sleep` requires a duration and a nonempty reason of at most 500 characters
-after trimming whitespace. Return the reason as JSON-quoted context on completion
+`clock.sleep` requires a duration and a reason field of at most 500 characters
+after trimming whitespace. An empty reason returns only the original sleep status,
+without a reminder or reason line. Otherwise, return the reason as JSON-quoted context on completion
 and interruption. When new input interrupts sleep, remind the model to handle it
 and resume pending work unless canceled, paused, replaced, or blocked. This is
 model guidance, not guaranteed continuation or automatic resumption of the wait.
