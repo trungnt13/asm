@@ -562,6 +562,16 @@ Example with defaults, all shown steps eligible, and times measured from session
 - Larger intervals reduce decision frequency, not necessarily total runtime. They
   can retain unsuitable effort between steps; do not claim speedups without measurement.
 
+### CLI resume matching
+
+`asm resume <text>` accepts a trimmed, lowercase-normalized substring of a displayed
+session name (or preview for unnamed sessions), or a UUID prefix. Search active
+sessions under the existing provider/source eligibility rules, across working
+directories. Resume a unique match directly; open the existing resume picker
+restricted to the matching IDs when several match. A full UUID retains direct
+lookup. Do not give exact names priority over other partial matches. Preserve
+exact matching and duplicate rejection for fork, archive/delete, and queue commands.
+
 ### TUI automatic session names
 
 `[auto_rename]` is TUI-only. Preserve Desktop naming, conversation model/history, and `/rename` suggestions. Defaults: enabled, first user message, user-message context, one-time naming, 36 characters, 960-byte initial prompt.
