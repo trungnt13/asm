@@ -98,6 +98,7 @@ use codex_model_provider_info::built_in_model_providers;
 use codex_model_provider_info::merge_configured_model_providers;
 use codex_models_manager::ModelsManagerConfig;
 use codex_prompts::ResolvedModelMessages;
+use codex_protocol::MemoryVersion;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ForcedLoginMethod;
@@ -1024,7 +1025,9 @@ pub struct Config {
     /// Enables diagnostic capture at process startup without changing session history.
     pub diagnostic_log_capture: bool,
 
-    /// Directory where Codex writes log files (defaults to `$CODEX_HOME/log`).
+    /// Directory for log files (defaults to `$CODEX_HOME/log`).
+    /// SQLite logs use this directory only when `log_dir` is explicitly configured
+    /// and no managed `sqlite_home` requirement applies.
     pub log_dir: PathBuf,
 
     /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
@@ -1677,6 +1680,21 @@ impl Config {
         &self.sqlite
     }
 
+    /// Returns `log_dir` when explicitly set by configuration or managed requirements.
+    pub fn configured_log_dir(&self) -> Option<&Path> {
+        let configured = self
+            .config_layer_stack
+            .effective_config()
+            .as_table()
+            .is_some_and(|table| table.contains_key("log_dir"))
+            || self
+                .config_layer_stack
+                .requirements_toml()
+                .log_dir
+                .is_some();
+        configured.then_some(self.log_dir.as_path())
+    }
+
     /// Resolves the configured, reviewer-catalog, or bundled Guardian policy.
     pub fn resolve_guardian_policy<'a>(
         &'a self,
@@ -2057,6 +2075,7 @@ impl Config {
             refreshed_layers.requirements_toml().clone(),
         )?
         .with_cloud_config_binding(refreshed_layers.cloud_config_binding().cloned())
+        .with_applied_config_server(refreshed_layers.applied_config_server().cloned())
         .with_user_and_project_exec_policy_rules_ignored(
             refreshed_layers.ignore_user_and_project_exec_policy_rules(),
         ))
@@ -3352,6 +3371,7 @@ impl Config {
         codex_home: AbsolutePathBuf,
         config_layer_stack: ConfigLayerStack,
     ) -> std::io::Result<Self> {
+        config_layer_stack.validate_project_mitm_profiles()?;
         // Keep the large config-construction future off small test thread stacks.
         Box::pin(async move {
         if cfg.experimental_thread_store_endpoint.is_some() {
@@ -3700,7 +3720,20 @@ impl Config {
             ));
         }
 
-        let memories_config: MemoriesConfig = cfg.memories.clone().unwrap_or_default().into();
+        let mut memories = cfg.memories.clone().unwrap_or_default();
+        // Fresh profiles have no V1 context to preserve or warm up before using V2.
+        // Keep explicit selections and transition opt-outs, and fail closed on IO errors.
+        if features.enabled(Feature::MemoryTool)
+            && memories.version.is_none()
+            && memories.dual_write != Some(false)
+            && matches!(
+                tokio::fs::try_exists(codex_home.join(MemoryVersion::V1.directory_name())).await,
+                Ok(false)
+            )
+        {
+            memories.version = Some(MemoryVersion::V2);
+        }
+        let memories_config: MemoriesConfig = memories.into();
         let memories_root = codex_home.join(memories_config.version.directory_name());
 
         let profiles_are_active = effective_permission_selection.profiles_are_active(
@@ -4329,6 +4362,11 @@ impl Config {
             .cloned()
             .or(sqlite_home_env)
             .unwrap_or_else(|| codex_home.clone());
+        let mut sqlite = codex_state::SqliteConfig::from_sqlite_home(sqlite_home);
+        let requirements = config_layer_stack.requirements_toml();
+        if cfg.log_dir.is_some() && requirements.sqlite_home.is_none() {
+            sqlite = sqlite.with_local_logs_home(log_dir.clone());
+        }
         let original_permission_profile = permission_profile.clone();
         apply_requirement_constrained_value(
             "approval_policy",
@@ -4634,12 +4672,11 @@ impl Config {
             memories: memories_config,
             agent_interrupt_message_enabled,
             codex_home,
-            sqlite: codex_state::SqliteConfig::from_sqlite_home(sqlite_home)
-                .with_diagnostic_log_capture(if cfg.diagnostic_log_capture.unwrap_or(false) {
-                    codex_state::DiagnosticLogCapture::Enabled
-                } else {
-                    codex_state::DiagnosticLogCapture::Disabled
-                }),
+            sqlite: sqlite.with_diagnostic_log_capture(if cfg.diagnostic_log_capture.unwrap_or(false) {
+                codex_state::DiagnosticLogCapture::Enabled
+            } else {
+                codex_state::DiagnosticLogCapture::Disabled
+            }),
             diagnostic_log_capture: cfg.diagnostic_log_capture.unwrap_or(false),
             log_dir,
             config_layer_stack,
