@@ -7,6 +7,7 @@
 
 mod apply_patch;
 mod apps;
+mod claude_runtime;
 mod client;
 mod client_common;
 mod model_request;
@@ -77,6 +78,7 @@ pub use agent::types::SpawnAgentForkMode;
 pub use agent::types::SpawnAgentOptions;
 pub use rollout_budget::RolloutBudgetReminder;
 mod agent_communication;
+pub use agent_communication::PendingAgentMessage;
 mod agent_message_board;
 pub use agent_message_board::install_agent_message_board;
 mod attestation;

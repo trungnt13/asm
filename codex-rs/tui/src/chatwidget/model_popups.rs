@@ -294,6 +294,20 @@ impl ChatWidget {
         effort_for_action: Option<ReasoningEffortConfig>,
         should_prompt_plan_mode_scope: bool,
     ) -> Vec<SelectionAction> {
+        if self.model_selection_needs_new_session(&model_for_action, effort_for_action.clone()) {
+            let thread_id = self.thread_id();
+            return vec![Box::new(move |tx| {
+                tx.send(AppEvent::StartModelSession {
+                    thread_id,
+                    model: model_for_action.clone(),
+                    effort: effort_for_action.clone(),
+                    confirmed: false,
+                })
+            })];
+        }
+        if model_for_action.starts_with("claude-code/") {
+            return Vec::new();
+        }
         let warning = effort_for_action
             .as_ref()
             .and_then(|effort| self.ultra_reasoning_concurrency_warning(effort));

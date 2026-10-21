@@ -1358,9 +1358,14 @@ async fn run_ratatui_app(
         }
     };
     // Workload identity bypasses interactive login; every other provider uses account/read.
-    let requires_openai_auth = startup_account
-        .as_ref()
-        .is_some_and(|account| account.requires_openai_auth);
+    let uses_claude_runtime = initial_config
+        .model
+        .as_deref()
+        .is_some_and(|model| model.starts_with("claude-code/"));
+    let requires_openai_auth = !uses_claude_runtime
+        && startup_account
+            .as_ref()
+            .is_some_and(|account| account.requires_openai_auth);
     let should_show_onboarding = should_show_onboarding(
         login_status,
         requires_openai_auth,

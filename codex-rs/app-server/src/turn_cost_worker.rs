@@ -166,7 +166,13 @@ impl TurnCostWorkerHandle {
         event: &Event,
         session_telemetry: impl FnOnce() -> SessionTelemetry,
     ) {
-        if thread_config.model_provider != self.config.model_provider {
+        // Claude-owned turns have no native billing identity, even with the OpenAI provider selected.
+        if thread_config
+            .model
+            .as_deref()
+            .is_some_and(|model| model.starts_with("claude-code/"))
+            || thread_config.model_provider != self.config.model_provider
+        {
             return;
         }
         if let TurnCostBackend::OpenAi(auth_manager) = &self.backend {

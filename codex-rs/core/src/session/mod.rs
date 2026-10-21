@@ -146,7 +146,6 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::FileChange;
 use codex_protocol::protocol::HasLegacyEvent;
 use codex_protocol::protocol::HistoryPosition;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ItemStartedEvent;
 use codex_protocol::protocol::MULTI_AGENT_MODE_OPEN_TAG;
@@ -564,6 +563,16 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
+pub(crate) fn history_uses_claude(history: &InitialHistory) -> bool {
+    history.get_rollout_items().iter().any(|item| match item {
+        RolloutItem::TurnContext(context) => crate::claude_runtime::is_claude_model(&context.model),
+        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+            crate::claude_runtime::is_claude_model(&event.thread_settings.model)
+        }
+        _ => false,
+    })
+}
+
 impl Session {
     /// Spawn and initialize a new session.
     /// Hide the concrete startup future from callers while keeping initialization lazy.
@@ -732,29 +741,60 @@ impl Session {
         };
 
         let mut config = Arc::new(config);
-        let refresh_strategy = if session_source.is_non_root_agent() {
+        let uses_claude = config
+            .model
+            .as_deref()
+            .is_some_and(crate::claude_runtime::is_claude_model);
+        if uses_claude
+            && config
+                .service_tier
+                .as_deref()
+                .is_some_and(|tier| tier != "default")
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Claude runtime does not support native service tiers; select the default tier"
+                    .to_string(),
+            ));
+        }
+        if (matches!(&conversation_history, InitialHistory::Forked(_))
+            && (uses_claude || history_uses_claude(&conversation_history)))
+            || (matches!(&conversation_history, InitialHistory::Resumed(_))
+                && history_uses_claude(&conversation_history) != uses_claude)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Claude runtime does not support history forks or cross-runtime resume; start a fresh thread".to_string(),
+            ));
+        }
+        let refresh_strategy = if uses_claude || session_source.is_non_root_agent() {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        if config.model.is_none()
-            || !matches!(
-                refresh_strategy,
-                codex_models_manager::manager::RefreshStrategy::Offline
-            )
+        if !uses_claude
+            && (config.model.is_none()
+                || !matches!(
+                    refresh_strategy,
+                    codex_models_manager::manager::RefreshStrategy::Offline
+                ))
         {
             let _ = models_manager
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = models_manager
-            .get_default_model(
-                &config.model,
-                allow_provider_model_fallback,
-                refresh_strategy,
-                config.http_client_factory(),
-            )
-            .await;
+        let model = if uses_claude {
+            config.model.clone().ok_or_else(|| {
+                CodexErr::InvalidRequest("Claude runtime requires an explicit model".to_owned())
+            })?
+        } else {
+            models_manager
+                .get_default_model(
+                    &config.model,
+                    allow_provider_model_fallback,
+                    refresh_strategy,
+                    config.http_client_factory(),
+                )
+                .await
+        };
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
@@ -762,6 +802,37 @@ impl Session {
         }
         let trusted_guardian_reviewer = crate::guardian::is_basic_session_source(&session_source)
             && !matches!(conversation_history, InitialHistory::Resumed(_));
+        if uses_claude {
+            if crate::guardian::is_basic_session_source(&session_source)
+                || config
+                    .config_layer_stack
+                    .requirements()
+                    .auto_review_required_for_model(&model)
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "Claude runtime cannot perform required Guardian review; use an ASM-managed model"
+                        .to_string(),
+                ));
+            }
+            config
+                .config_layer_stack
+                .requirements()
+                .approvals_reviewer
+                .can_set(&ApprovalsReviewer::User)
+                .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            let config = Arc::make_mut(&mut config);
+            config.approvals_reviewer = ApprovalsReviewer::User;
+            for feature in [
+                Feature::GuardianApproval,
+                Feature::GuardianV2,
+                Feature::GuardianV2DecisionsComparison,
+            ] {
+                config
+                    .features
+                    .disable(feature)
+                    .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            }
+        }
         if config
             .config_layer_stack
             .requirements()
@@ -1071,7 +1142,7 @@ impl SessionIo {
     ) -> CodexResult<String> {
         self.submit_with_trace(
             op, /*trace*/ None, /*parent_turn_id*/ None, /*root_turn_id*/ None,
-            /*residency_guard*/ None,
+            /*residency_guard*/ None, /*message_delivery*/ None,
         )
         .await
     }
@@ -1083,6 +1154,7 @@ impl SessionIo {
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
         residency_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        message_delivery: Option<crate::agent_communication::MessageDelivery>,
     ) -> CodexResult<String> {
         let id = new_submission_id();
         let WithTurnExtensionData {
@@ -1097,6 +1169,7 @@ impl SessionIo {
             parent_turn_id,
             root_turn_id,
             residency_guard,
+            message_delivery,
         };
         self.submit_with_id(sub).await?;
         Ok(id)
@@ -1142,6 +1215,7 @@ impl SessionIo {
             parent_turn_id: None,
             root_turn_id: None,
             residency_guard: None,
+            message_delivery: None,
         })
         .await?;
         reply_rx.await.unwrap_or(Err(CodexErr::InternalAgentDied))
@@ -1168,6 +1242,7 @@ impl SessionIo {
             parent_turn_id: None,
             root_turn_id: None,
             residency_guard: None,
+            message_delivery: None,
         })
         .await?;
         reply_rx.await.unwrap_or(Err(CodexErr::InternalAgentDied))
@@ -1596,6 +1671,23 @@ impl Session {
     pub(crate) async fn token_usage_info(&self) -> Option<TokenUsageInfo> {
         let state = self.state.lock().await;
         state.token_info()
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn set_reported_context_usage(
+        &self,
+        usage: TokenUsage,
+        model_context_window: Option<i64>,
+    ) {
+        let mut state = self.state.lock().await;
+        let mut info = state.token_info().unwrap_or(TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            model_context_window: None,
+        });
+        info.last_token_usage = usage;
+        info.model_context_window = model_context_window;
+        state.set_token_info(Some(info));
     }
 
     pub(crate) async fn get_estimated_token_count(
@@ -2472,13 +2564,21 @@ impl Session {
     }
 
     pub(crate) async fn emit_turn_started(&self, turn_context: &TurnContext, task_kind: TaskKind) {
+        let model_context_window =
+            if crate::claude_runtime::is_claude_model(&turn_context.model_info().slug) {
+                self.token_usage_info()
+                    .await
+                    .and_then(|info| info.model_context_window)
+            } else {
+                turn_context.model_context_window()
+            };
         let event = TurnStartedEvent {
             turn_attribution: (task_kind == TaskKind::Regular).then(|| turn_context.attribution()),
             turn_id: turn_context.sub_id.clone(),
             root_turn_id: Some(turn_context.root_turn_id()),
             trace_id: turn_context.trace_id.clone(),
             started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
-            model_context_window: turn_context.model_context_window(),
+            model_context_window,
             collaboration_mode_kind: turn_context.mode(),
         };
         self.send_event(turn_context, EventMsg::TurnStarted(event))
@@ -3910,7 +4010,7 @@ impl Session {
 
     /// Prepares a candidate step without replacing the active turn's retained context.
     /// The caller must retain it explicitly if it is selected for execution.
-    async fn capture_speculative_step_context(
+    pub(crate) async fn capture_speculative_step_context(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         cancellation_token: &CancellationToken,
@@ -4134,8 +4234,9 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         model_info: &ModelInfo,
-        communication: InterAgentCommunication,
+        communication: impl Into<crate::PendingAgentMessage>,
     ) {
+        let communication = communication.into();
         let mut response_item = communication.to_model_input_item();
         if let ResponseItem::AgentMessage {
             content,
@@ -4200,6 +4301,9 @@ impl Session {
                 std::slice::from_mut(&mut response_item),
                 model_info.truncation_policy.into(),
             );
+        }
+        if let Some(delivery) = &communication.delivery {
+            delivery.consumed(self.thread_id);
         }
         self.persist_rollout_items(&[
             RolloutItem::InterAgentCommunicationMetadata {
@@ -4458,7 +4562,7 @@ impl Session {
         }
         let world_state_item = WorldStateItem::full(world_state_baseline.into_object());
         let rollout_items = [
-            RolloutItem::Compacted(compacted_item),
+            RolloutItem::Compacted(Box::new(compacted_item)),
             RolloutItem::WorldState(world_state_item),
             RolloutItem::TurnContext(reference_context_item),
             // The frozen turn context must not override current settings in persisted metadata.
@@ -5591,6 +5695,13 @@ async fn build_hooks_config(
     environment: Option<&TurnEnvironment>,
     disabled_plugin_ids: &[String],
 ) -> HooksConfig {
+    if config
+        .model
+        .as_deref()
+        .is_some_and(crate::claude_runtime::is_claude_model)
+    {
+        return HooksConfig::default();
+    }
     let (hook_shell_program, hook_shell_argv) = environment
         .and_then(|environment| environment.shell.as_ref())
         .map(|shell| {

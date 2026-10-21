@@ -1532,6 +1532,8 @@ impl App {
                 }
             }
         }
+        self.turn_agent_counts
+            .record_native_turns(thread_id, &turns);
         let should_buffer_initial_replay = !turns.is_empty();
         let replayed_final_items = realtime_delivery::completed_agent_items_from_turns(&turns);
         let replayed_voice_texts = realtime_delivery::replayed_voice_texts_from_turns(&turns);
@@ -1779,6 +1781,10 @@ impl App {
         mut snapshot: ThreadEventSnapshot,
         resume_restored_queue: bool,
     ) {
+        if let Some(session) = snapshot.session.as_ref() {
+            self.turn_agent_counts
+                .record_native_turns(session.thread_id, &snapshot.turns);
+        }
         let mut reasoning_replay = reasoning_replay::ReasoningReplay::new(&mut snapshot);
         let replayed_final_items = realtime_delivery::completed_agent_items(&snapshot);
         let replayed_voice_texts = realtime_delivery::replayed_voice_texts(&snapshot);

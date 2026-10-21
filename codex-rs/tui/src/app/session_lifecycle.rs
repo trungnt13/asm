@@ -1041,6 +1041,26 @@ impl App {
         initial_user_message: Option<crate::chatwidget::UserMessage>,
         new_thread_name: Option<String>,
     ) {
+        self.start_model_session(
+            tui,
+            app_server,
+            session_start_source,
+            initial_user_message,
+            new_thread_name,
+            None,
+        )
+        .await;
+    }
+
+    pub(super) async fn start_model_session(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        session_start_source: Option<ThreadStartSource>,
+        initial_user_message: Option<crate::chatwidget::UserMessage>,
+        new_thread_name: Option<String>,
+        model_selection: Option<(String, Option<ReasoningEffortConfig>)>,
+    ) {
         if self.reject_pending_permission_root_switch() {
             if let Some(message) = initial_user_message {
                 self.chat_widget.restore_user_message_to_composer(message);
@@ -1090,6 +1110,11 @@ impl App {
             &self.cli_kv_overrides,
             &self.harness_overrides,
         );
+        if let Some((model, effort)) = model_selection {
+            config.model = Some(model);
+            config.model_reasoning_effort = effort;
+            config.service_tier = None;
+        }
         match app_server
             .start_thread_with_session_start_source(
                 &self.local_settings,

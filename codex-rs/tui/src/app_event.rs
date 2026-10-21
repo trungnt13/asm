@@ -592,6 +592,13 @@ pub(crate) enum AppEvent {
         name: Option<String>,
     },
 
+    StartModelSession {
+        thread_id: Option<ThreadId>,
+        model: String,
+        effort: Option<ReasoningEffort>,
+        confirmed: bool,
+    },
+
     /// Create a managed checkout and start or fork a session into it.
     StartManagedWorktree {
         mode: ManagedWorktreeMode,
