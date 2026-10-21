@@ -65,6 +65,10 @@ pub struct ResponseItemEnvelope {
 ///
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct CodexHarnessMetadata {
+    /// Original spawn arguments for transcript display, never model input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_arguments: Option<String>,
+
     /// Complete retained records actually delivered by this Guardian message. Host-only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub guardian_sources: Vec<RetainedSource>,
@@ -176,6 +180,37 @@ impl ResponseItemEnvelope {
             item,
             metadata: None,
         }
+    }
+
+    /// Adds local spawn details to a display copy without changing model history.
+    pub fn to_display_item(&self) -> std::borrow::Cow<'_, ResponseItem> {
+        let Some(arguments) = self
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.spawn_arguments.as_ref())
+        else {
+            return std::borrow::Cow::Borrowed(&self.item);
+        };
+        let ResponseItem::AgentMessage { content, .. } = &self.item else {
+            return std::borrow::Cow::Borrowed(&self.item);
+        };
+        if codex_protocol::models::plaintext_agent_message_content(content).is_none() {
+            return std::borrow::Cow::Borrowed(&self.item);
+        }
+        let arguments = arguments
+            .lines()
+            .map(|line| format!("    {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut item = self.item.clone();
+        if let ResponseItem::AgentMessage { content, .. } = &mut item {
+            content.push(
+                codex_protocol::models::AgentMessageInputContent::InputText {
+                    text: format!("\nSpawn arguments (message shown above):\n\n{arguments}"),
+                },
+            );
+        }
+        std::borrow::Cow::Owned(item)
     }
 
     /// Unwraps the raw Responses API item.

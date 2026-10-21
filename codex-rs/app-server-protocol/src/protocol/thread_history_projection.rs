@@ -87,7 +87,9 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             }],
             ..Default::default()
         },
-        RolloutItem::ResponseItem(response) => project_inter_agent_message(line, &response.item),
+        RolloutItem::ResponseItem(response) => {
+            project_inter_agent_message(line, &response.to_display_item())
+        }
         RolloutItem::InterAgentCommunication(communication) => {
             project_inter_agent_message(line, &communication.to_model_input_item())
         }

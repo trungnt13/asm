@@ -348,7 +348,18 @@ pub(super) async fn ensure_listener_task_running(
                         (thread_state.experimental_raw_events, terminal)
                     };
                     if let EventMsg::RawResponseItem(raw) = &event.msg
-                        && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(&raw.item, &event.id)
+                        && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(
+                            {
+                                if let Some(arguments) = &raw.spawn_arguments {
+                                    let mut display = codex_rollout::ResponseItemEnvelope::new(raw.item.clone());
+                                    display.metadata.get_or_insert_default().spawn_arguments = Some(arguments.clone());
+                                    std::borrow::Cow::Owned(display.to_display_item().into_owned())
+                                } else {
+                                    std::borrow::Cow::Borrowed(&raw.item)
+                                }
+                            }.as_ref(),
+                            &event.id,
+                        )
                     {
                         let recipients = thread_state_manager
                             .subscribed_connection_ids(conversation_id)

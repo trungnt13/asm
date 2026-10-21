@@ -440,7 +440,7 @@ impl ThreadHistoryBuilder {
         match item {
             RolloutItem::EventMsg(event) => self.handle_event(event),
             RolloutItem::Compacted(payload) => self.handle_compacted(payload),
-            RolloutItem::ResponseItem(item) => self.handle_response_item(&item.item),
+            RolloutItem::ResponseItem(item) => self.handle_response_item(&item.to_display_item()),
             RolloutItem::TokenUsageRecord(record) => {
                 let turn = self
                     .current_turn
