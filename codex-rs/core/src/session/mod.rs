@@ -4288,10 +4288,9 @@ impl Session {
                 self.pending_code_mode_message_recordings(),
             )
         };
-        response_item
-            .metadata
-            .get_or_insert_default()
-            .user_input_order = Some(order);
+        let metadata = response_item.metadata.get_or_insert_default();
+        metadata.user_input_order = Some(order);
+        metadata.spawn_arguments = communication.spawn_arguments.clone();
         for mut recording in pending {
             let _ = recording.changed().await;
         }
@@ -4314,7 +4313,16 @@ impl Session {
         ])
         .await;
         drop(boundary);
-        self.send_raw_response_items(turn_context, items).await;
+        for item in items {
+            self.send_event(
+                turn_context,
+                EventMsg::RawResponseItem(RawResponseItemEvent {
+                    item: item.clone(),
+                    spawn_arguments: communication.spawn_arguments.clone(),
+                }),
+            )
+            .await;
+        }
     }
 
     async fn maybe_warn_on_server_model_mismatch(
@@ -4621,7 +4629,10 @@ impl Session {
         for item in items {
             self.send_event(
                 turn_context,
-                EventMsg::RawResponseItem(RawResponseItemEvent { item: item.clone() }),
+                EventMsg::RawResponseItem(RawResponseItemEvent {
+                    item: item.clone(),
+                    spawn_arguments: None,
+                }),
             )
             .await;
         }

@@ -348,7 +348,11 @@ pub(super) async fn ensure_listener_task_running(
                         (thread_state.experimental_raw_events, terminal)
                     };
                     if let EventMsg::RawResponseItem(raw) = &event.msg
-                        && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(&raw.item, &event.id)
+                        && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(
+                            &raw.item,
+                            &event.id,
+                            raw.spawn_arguments.as_deref(),
+                        )
                     {
                         let recipients = thread_state_manager
                             .subscribed_connection_ids(conversation_id)

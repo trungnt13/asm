@@ -87,9 +87,16 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             }],
             ..Default::default()
         },
-        RolloutItem::ResponseItem(response) => project_inter_agent_message(line, &response.item),
+        RolloutItem::ResponseItem(response) => project_inter_agent_message(
+            line,
+            &response.item,
+            response
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.spawn_arguments.as_deref()),
+        ),
         RolloutItem::InterAgentCommunication(communication) => {
-            project_inter_agent_message(line, &communication.to_model_input_item())
+            project_inter_agent_message(line, &communication.to_model_input_item(), None)
         }
         RolloutItem::SessionMeta(_)
         | RolloutItem::InterAgentCommunicationMetadata { .. }
@@ -107,12 +114,14 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
 fn project_inter_agent_message(
     line: &RolloutLine,
     response: &codex_protocol::models::ResponseItem,
+    spawn_arguments: Option<&str>,
 ) -> ThreadHistoryChangeSet {
     let Some(turn_id) = response.turn_id() else {
         return ThreadHistoryChangeSet::default();
     };
     let fallback_id = format!("inter-agent-{}", line.ordinal.unwrap_or_default());
-    let Some(item) = ThreadItem::from_inter_agent_message(response, &fallback_id) else {
+    let Some(item) = ThreadItem::from_inter_agent_message(response, &fallback_id, spawn_arguments)
+    else {
         return ThreadHistoryChangeSet::default();
     };
     ThreadHistoryChangeSet {

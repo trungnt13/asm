@@ -87,8 +87,10 @@ impl AgentControl for LocalAgentControl {
                         .ok_or_else(|| {
                             CodexErr::InvalidRequest("spawn input needs a child path".to_string())
                         })?;
+                    let mut communication = message.into_communication(author, recipient, mode);
+                    communication.spawn_arguments = options.spawn_arguments.clone();
                     SpawnInitialInput::InterAgentCommunication(
-                        message.into_communication(author, recipient, mode),
+                        communication,
                         AgentCommunicationContext::new(AgentCommunicationKind::Spawn, caller),
                     )
                 }
