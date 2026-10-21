@@ -891,3 +891,13 @@ Resolve the file at child startup, including cold reload, for fresh and full-his
 children. Keep project instructions, host thread instructions, and root/internal
 worker behavior unchanged. Full-history children retain history and receive the
 replacement through normal incremental context updates, not history rewriting.
+
+### Sleep intent reminders
+
+`clock.sleep` requires a duration and a reason field of at most 500 characters
+after trimming whitespace. An empty reason returns only the original sleep status,
+without a reminder or reason line. Otherwise, return the reason as JSON-quoted context on completion
+and interruption. When new input interrupts sleep, remind the model to handle it
+and resume pending work unless canceled, paused, replaced, or blocked. This is
+model guidance, not guaranteed continuation or automatic resumption of the wait.
+Keep the existing sleep lifecycle items and app-server API unchanged.
