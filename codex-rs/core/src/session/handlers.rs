@@ -253,29 +253,12 @@ async fn reject_claude_operation(sess: &Session, sub_id: &str, operation: &str) 
     if !crate::claude_runtime::is_claude_model(&model) {
         return false;
     }
-    let error = ErrorEvent {
-        misalignment: None,
-        message: format!(
-            "Claude runtime does not support {operation}; start a fresh thread instead"
-        ),
-        codex_error_info: Some(CodexErrorInfo::BadRequest),
-    };
     sess.send_event_raw(Event {
         id: sub_id.to_string(),
-        msg: EventMsg::Error(error.clone()),
-    })
-    .await;
-    sess.send_event_raw(Event {
-        id: sub_id.to_string(),
-        msg: EventMsg::TurnComplete(codex_protocol::protocol::TurnCompleteEvent {
-            root_turn_id: None,
-            turn_id: sub_id.to_string(),
-            last_agent_message: None,
-            error: Some(error),
-            started_at: None,
-            completed_at: None,
-            duration_ms: None,
-            time_to_first_token_ms: None,
+        msg: EventMsg::Warning(WarningEvent {
+            message: format!(
+                "Claude runtime does not support {operation}; current work was not changed"
+            ),
         }),
     })
     .await;

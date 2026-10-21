@@ -1278,6 +1278,16 @@ impl TurnRequestProcessor {
         else {
             return Ok(None);
         };
+        if thread
+            .config_snapshot()
+            .await
+            .model
+            .starts_with("claude-code/")
+        {
+            return Err(invalid_request(
+                "Claude runtime does not support realtime conversations",
+            ));
+        }
         self.submit_core_op(
             request_id,
             thread.as_ref(),
@@ -1610,6 +1620,16 @@ impl TurnRequestProcessor {
         let (_, parent_thread) = self.load_thread(&thread_id).await?;
         self.ensure_direct_input_allowed(request_id, parent_thread.as_ref())
             .await?;
+        if parent_thread
+            .config_snapshot()
+            .await
+            .model
+            .starts_with("claude-code/")
+        {
+            return Err(invalid_request(
+                "Claude runtime does not support native review mode",
+            ));
+        }
         self.config_manager
             .check_thread_model_provider(parent_thread.config().await.as_ref())
             .await
