@@ -29,6 +29,7 @@ pub(in crate::session) fn classify_error(error: DecisionsError) -> System1Error 
         DecisionsError::Credentials => System1Error::Credentials,
         DecisionsError::InvalidRequest => System1Error::InvalidRequest,
         DecisionsError::Transport => System1Error::Transport,
+        DecisionsError::TransportDetails(code) => System1Error::TransportDetails { code },
         DecisionsError::Http(status) => System1Error::Http { status },
         DecisionsError::ResponseTooLarge => System1Error::ResponseTooLarge,
         DecisionsError::InvalidResponse => System1Error::InvalidResponse,
@@ -43,6 +44,7 @@ pub(super) fn permanent_error(error: System1Error) -> bool {
             (400..500).contains(&status) && !matches!(status, 408 | 429)
         }
         System1Error::Transport
+        | System1Error::TransportDetails { .. }
         | System1Error::Timeout
         | System1Error::ResponseTooLarge
         | System1Error::InvalidResponse => false,

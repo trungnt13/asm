@@ -1,4 +1,7 @@
 use codex_http_client::HttpClient;
+use codex_http_client::RouteAwareRequestError;
+use codex_http_client::RouteFailureClass;
+use codex_protocol::protocol::System1TransportCode;
 use serde_json::Value;
 use serde_json::json;
 use thiserror::Error;
@@ -17,6 +20,8 @@ pub enum DecisionsError {
     InvalidRequest,
     #[error("Decision transport failed")]
     Transport,
+    #[error("Decision transport failed ({})", .0.as_str())]
+    TransportDetails(System1TransportCode),
     #[error("Decision backend returned HTTP {0}")]
     Http(u16),
     #[error("Decision response exceeds the response limit")]
@@ -195,16 +200,18 @@ impl DecisionsClient {
             .json(&body)
             .send()
             .await
-            .map_err(|_| DecisionsError::Transport)?;
+            .map_err(|error| DecisionsError::TransportDetails(classify_send_error(&error)))?;
         if !response.status().is_success() {
             return Err(DecisionsError::Http(response.status().as_u16()));
         }
         let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| DecisionsError::Transport)?
-        {
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            DecisionsError::TransportDetails(if error.is_timeout() {
+                System1TransportCode::BodyTimeout
+            } else {
+                System1TransportCode::BodyRead
+            })
+        })? {
             if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
                 return Err(DecisionsError::ResponseTooLarge);
             }
@@ -245,6 +252,35 @@ impl DecisionsClient {
             .find(|(allowed, _)| allowed.as_str() == choice)
             .map(|(allowed, _)| allowed.clone())
             .ok_or(DecisionsError::InvalidResponse)
+    }
+}
+
+// Reuse the HTTP layer's typed classifier, never its potentially sensitive messages.
+fn classify_send_error(error: &RouteAwareRequestError) -> System1TransportCode {
+    use System1TransportCode as Code;
+    match error.failure_class() {
+        Some(RouteFailureClass::ConnectTimeout) => return Code::SendTimeout,
+        Some(RouteFailureClass::TlsError) => return Code::SendTls,
+        Some(RouteFailureClass::ProxyAuthenticationRequired) => {
+            return Code::SendProxyAuthentication;
+        }
+        Some(RouteFailureClass::InvalidProxyConfig | RouteFailureClass::UnsupportedProxyScheme) => {
+            return Code::SendProxyConfiguration;
+        }
+        Some(RouteFailureClass::ProxyResolutionUnavailable | RouteFailureClass::ResolverError) => {
+            return Code::SendProxyResolution;
+        }
+        None => {}
+    }
+    match error {
+        RouteAwareRequestError::Policy(_) => Code::SendPolicy,
+        RouteAwareRequestError::Build(_) => Code::SendBuild,
+        RouteAwareRequestError::UnsupportedRedirectScheme(_)
+        | RouteAwareRequestError::TooManyRedirects => Code::SendRedirect,
+        RouteAwareRequestError::Request(error) if error.is_connect() => Code::SendConnect,
+        RouteAwareRequestError::Request(error) if error.is_builder() => Code::SendBuild,
+        RouteAwareRequestError::Route(_) | RouteAwareRequestError::Request(_) => Code::SendOther,
+        RouteAwareRequestError::Timeout => Code::SendTimeout,
     }
 }
 
