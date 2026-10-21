@@ -10,6 +10,7 @@ struct InterAgentCommunicationCell {
     title: String,
     text: String,
     cwd: PathBuf,
+    spawn_arguments: Option<Vec<String>>,
 }
 
 impl HistoryCell for InterAgentCommunicationCell {
@@ -21,12 +22,27 @@ impl HistoryCell for InterAgentCommunicationCell {
             Some(&self.cwd),
             &mut lines,
         );
+        if let Some(arguments) = &self.spawn_arguments {
+            lines.push(Line::default());
+            lines.push(Line::from("Spawn arguments:").dim());
+            for text in arguments {
+                lines.extend(crate::wrapping::word_wrap_lines(
+                    [Line::from(text.clone()).dim()],
+                    crate::wrapping::RtOptions::new(usize::from(width)),
+                ));
+            }
+        }
         lines
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         std::iter::once(Line::from(self.title.clone()))
             .chain(self.text.lines().map(|line| Line::from(line.to_owned())))
+            .chain(self.spawn_arguments.iter().flat_map(|arguments| {
+                std::iter::once(Line::default())
+                    .chain(std::iter::once(Line::from("Spawn arguments:")))
+                    .chain(arguments.iter().map(|line| Line::from(line.clone())))
+            }))
             .collect()
     }
 }
@@ -84,9 +100,31 @@ pub(crate) fn communication_history_cell(
         }
         _ => return None,
     };
+    let spawn_arguments = match item {
+        ThreadItem::InterAgentMessage {
+            spawn_arguments, ..
+        } => spawn_arguments.as_deref(),
+        _ => None,
+    }
+    .and_then(|arguments| {
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(arguments).ok()
+    })
+    .map(|arguments| {
+        arguments
+            .into_iter()
+            .map(|(key, value)| {
+                let value = match value {
+                    serde_json::Value::String(value) => value,
+                    value => value.to_string(),
+                };
+                format!("{key}: {value}")
+            })
+            .collect()
+    });
     Some(InterAgentCommunicationCell {
         title,
         text,
         cwd: cwd.to_path_buf(),
+        spawn_arguments,
     })
 }

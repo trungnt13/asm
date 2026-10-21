@@ -22642,6 +22642,13 @@
               "recipient": {
                 "type": "string"
               },
+              "spawnArguments": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "text": {
                 "type": "string"
               },

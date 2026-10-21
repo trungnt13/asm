@@ -5613,6 +5613,7 @@ class InterAgentMessageThreadItem(BaseModel):
     author: str
     id: str
     recipient: str
+    spawn_arguments: Annotated[str | None, Field(alias="spawnArguments")] = None
     text: str
     type: Annotated[Literal["interAgentMessage"], Field(title="InterAgentMessageThreadItemType")]
 

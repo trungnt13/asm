@@ -256,6 +256,8 @@ pub enum ThreadItem {
         author: String,
         recipient: String,
         text: String,
+        #[serde(default)]
+        spawn_arguments: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -463,7 +465,11 @@ pub struct HookPromptFragment {
 
 impl ThreadItem {
     /// Projects readable inter-agent input without exposing encrypted message parts.
-    pub fn from_inter_agent_message(item: &ResponseItem, fallback_id: &str) -> Option<Self> {
+    pub fn from_inter_agent_message(
+        item: &ResponseItem,
+        fallback_id: &str,
+        spawn_arguments: Option<&str>,
+    ) -> Option<Self> {
         let ResponseItem::AgentMessage {
             id,
             author,
@@ -483,6 +489,7 @@ impl ThreadItem {
             author: author.clone(),
             recipient: recipient.clone(),
             text,
+            spawn_arguments: spawn_arguments.map(str::to_owned),
         })
     }
 
