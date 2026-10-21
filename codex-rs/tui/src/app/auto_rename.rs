@@ -70,6 +70,9 @@ impl App {
         &mut self,
         event: &ThreadBufferedEvent,
     ) -> Option<AutomaticTitlePrompt> {
+        if self.chat_widget.current_model().starts_with("claude-code/") {
+            return None;
+        }
         let settings = &self.local_settings.auto_rename;
         if !settings.enabled
             || self.active_thread_id.is_some_and(|thread_id| {

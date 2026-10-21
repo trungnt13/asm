@@ -449,7 +449,13 @@ impl ChatWidget {
         self.token_info
             .as_ref()
             .and_then(|info| info.model_context_window)
-            .or(self.config.model_context_window)
+            .or_else(|| {
+                if self.current_model().starts_with("claude-code/") {
+                    None
+                } else {
+                    self.config.model_context_window
+                }
+            })
     }
 
     pub(super) fn status_line_context_remaining_percent(&self) -> Option<i64> {
@@ -457,7 +463,7 @@ impl ChatWidget {
             return None;
         }
         let Some(context_window) = self.status_line_context_window_size() else {
-            return Some(100);
+            return (!self.current_model().starts_with("claude-code/")).then_some(100);
         };
         let default_usage = TokenUsage::default();
         let usage = self
@@ -465,11 +471,11 @@ impl ChatWidget {
             .as_ref()
             .map(|info| &info.last_token_usage)
             .unwrap_or(&default_usage);
-        Some(
-            usage
-                .percent_of_context_window_remaining(context_window)
-                .clamp(0, 100),
-        )
+        Some(context_window_remaining_percent(
+            usage,
+            context_window,
+            self.current_model().starts_with("claude-code/"),
+        ))
     }
 
     pub(super) fn status_line_context_used_percent(&self) -> Option<i64> {

@@ -1634,6 +1634,11 @@ impl ThreadManager {
             initial_history: history,
             persistence: fork_persistence,
         } = fork_history;
+        if crate::session::history_uses_claude(&history) {
+            return Err(CodexErr::InvalidRequest(
+                "Claude runtime history cannot be forked; start a fresh thread".to_string(),
+            ));
+        }
         // `forked_from_id()` describes this history's existing lineage. When
         // forking a resumed thread, the child copies the resumed thread itself.
         let source_thread_id = match &history {

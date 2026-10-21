@@ -2218,6 +2218,11 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
+        if config_snapshot.model.starts_with("claude-code/") {
+            return Err(invalid_request(
+                "Claude runtime history cannot be reverted; start a fresh thread",
+            ));
+        }
         let runtime_snapshot = ThreadRevertRuntimeSnapshot {
             config: thread.config().await.as_ref().clone(),
             settings: thread.restorable_thread_settings().await,
@@ -2514,6 +2519,16 @@ impl ThreadRequestProcessor {
 
         let (_, thread) = self.load_thread(&thread_id).await?;
         ensure_direct_input_allowed(thread.as_ref()).await?;
+        if thread
+            .config_snapshot()
+            .await
+            .model
+            .starts_with("claude-code/")
+        {
+            return Err(invalid_request(
+                "Claude runtime does not support manual compaction; start a fresh thread instead",
+            ));
+        }
         self.config_manager
             .check_thread_model_provider(thread.config().await.as_ref())
             .await

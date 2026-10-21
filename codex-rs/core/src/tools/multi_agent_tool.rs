@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub(crate) const MULTI_AGENT_V2_NAMESPACE_DESCRIPTION: &str =
     "Tools for spawning and managing sub-agents.";
 
-pub(super) fn multi_agent_v2_handler(
+pub(crate) fn multi_agent_v2_handler(
     handler: impl CoreToolRuntime + 'static,
     namespace: Option<&str>,
     description_override: Option<&str>,

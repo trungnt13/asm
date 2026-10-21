@@ -11,6 +11,7 @@ use codex_models_manager::manager::ModelsManager;
 use codex_otel::SessionTelemetry;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
@@ -337,6 +338,23 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
+        let current_claude =
+            crate::claude_runtime::is_claude_model(self.collaboration_mode.model());
+        let claude_settings_changed = current_claude
+            && (self.collaboration_mode.model() != next.collaboration_mode.model()
+                || self.collaboration_mode.reasoning_effort()
+                    != next.collaboration_mode.reasoning_effort());
+        if claude_settings_changed
+            || (!current_claude
+                && crate::claude_runtime::is_claude_model(next.collaboration_mode.model()))
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Claude runtime settings (start a fresh thread to change)",
+                candidate: next.collaboration_mode.model().to_string(),
+                allowed: self.collaboration_mode.model().to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         next.validate(constraints)?;
         Ok(next)
     }
@@ -346,6 +364,26 @@ impl StepSettings {
         &self,
         constraints: &StepSettingsConstraints<'_>,
     ) -> ConstraintResult<()> {
+        if crate::claude_runtime::is_claude_model(self.collaboration_mode.model())
+            && self.collaboration_mode.mode != ModeKind::Default
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Claude runtime collaboration mode",
+                candidate: self.collaboration_mode.mode.display_name().to_string(),
+                allowed: "default".to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
+        if crate::claude_runtime::is_claude_model(self.collaboration_mode.model())
+            && self.approvals_reviewer != ApprovalsReviewer::User
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Claude runtime approvals reviewer",
+                candidate: self.approvals_reviewer.to_string(),
+                allowed: "user".to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         if constraints.trusted_guardian_reviewer {
             return Ok(());
         }

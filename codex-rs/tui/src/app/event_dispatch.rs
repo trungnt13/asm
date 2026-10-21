@@ -214,6 +214,16 @@ impl App {
                     self.chat_widget.show_misalignment_policy_precaution();
                 }
             }
+            AppEvent::StartModelSession { thread_id, model, effort, confirmed } => {
+                if self.chat_widget.thread_id() != thread_id {
+                    return Ok(AppRunControl::Continue);
+                }
+                if confirmed {
+                    self.start_model_session(tui, app_server, None, None, None, Some((model, effort))).await;
+                } else {
+                    self.chat_widget.confirm_model_session(model, effort);
+                }
+            }
             AppEvent::StartManagedWorktree { mode, name } => {
                 if self.pending_start_managed_worktree.is_some() {
                     self.chat_widget

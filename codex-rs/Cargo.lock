@@ -2502,6 +2502,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-claude-runtime"
+version = "0.164.1-alpha.5"
+dependencies = [
+ "anyhow",
+ "codex-utils-pty",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "codex-cli"
 version = "0.164.1-alpha.5"
 dependencies = [
@@ -2935,6 +2949,7 @@ dependencies = [
  "assert_cmd",
  "assert_matches",
  "async-channel",
+ "axum",
  "base64 0.22.1",
  "bm25",
  "chrono",
@@ -2948,6 +2963,7 @@ dependencies = [
  "codex-apply-patch",
  "codex-async-utils",
  "codex-attachment-store",
+ "codex-claude-runtime",
  "codex-client",
  "codex-code-mode",
  "codex-config",

@@ -1,0 +1,312 @@
+use super::bridge::ClaudeMessageBridge;
+use codex_claude_runtime::ClaudeRuntime;
+use codex_protocol::protocol::TokenUsage;
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
+
+#[derive(Serialize, Deserialize)]
+pub(super) struct Checkpoint {
+    pub(super) format_version: u8,
+    pub(super) model: String,
+    pub(super) effort: Option<String>,
+    pub(super) cwd: PathBuf,
+    pub(super) session_id: String,
+    pub(super) messaging: bool,
+    pub(super) in_flight: bool,
+    pub(super) input_count: usize,
+    pub(super) input_prefix: String,
+}
+
+impl Checkpoint {
+    pub(super) fn validate(
+        &self,
+        model: &str,
+        effort: &Option<String>,
+        cwd: &std::path::Path,
+        messaging: bool,
+        messages: &[String],
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.format_version == 2,
+            "incompatible Claude linkage; start a new chat"
+        );
+        anyhow::ensure!(
+            !self.in_flight,
+            "previous Claude turn has an uncertain outcome; start a new chat to avoid replay"
+        );
+        anyhow::ensure!(
+            self.model == model
+                && &self.effort == effort
+                && self.cwd == cwd
+                && self.messaging == messaging,
+            "saved Claude model, effort, directory, or messaging configuration changed; start a new chat"
+        );
+        anyhow::ensure!(
+            self.input_count <= messages.len()
+                && self.input_prefix == super::input_prefix(&messages[..self.input_count])?,
+            "saved user input does not match the Claude checkpoint; refusing replay"
+        );
+        Ok(())
+    }
+    pub(super) fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(&serde_json::to_vec(self)?)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        if let Some(parent) = path.parent() {
+            File::open(parent)?.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) struct ClaudeSession {
+    pub(super) runtime: ClaudeRuntime,
+    pub(super) bridge: Option<ClaudeMessageBridge>,
+    pub(super) checkpoint: Checkpoint,
+    pub(super) checkpoint_path: PathBuf,
+    pub(super) _lock: File,
+    pub(super) diagnostic_capture: bool,
+    pub(super) usage_baseline: Option<BTreeMap<String, ModelUsage>>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ModelUsage {
+    billing: [i64; 4],
+    thinking: Option<i64>,
+}
+
+fn decode_model_usage(result: &serde_json::Value) -> Option<BTreeMap<String, ModelUsage>> {
+    result["modelUsage"]
+        .as_object()
+        .filter(|models| !models.is_empty())
+        .and_then(|models| {
+            models
+                .iter()
+                .map(|(model, usage)| {
+                    let mut counters = [0; 4];
+                    for (index, field) in [
+                        "inputTokens",
+                        "cacheReadInputTokens",
+                        "cacheCreationInputTokens",
+                        "outputTokens",
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        counters[index] = usage[field].as_i64().filter(|value| *value >= 0)?;
+                    }
+                    let thinking = match usage.get("thinkingTokens") {
+                        Some(tokens) => Some(tokens.as_i64().filter(|tokens| *tokens >= 0)?),
+                        None => None,
+                    };
+                    if thinking.is_some_and(|thinking| thinking > counters[3]) {
+                        return None;
+                    }
+                    Some((
+                        model.clone(),
+                        ModelUsage {
+                            billing: counters,
+                            thinking,
+                        },
+                    ))
+                })
+                .collect::<Option<BTreeMap<_, _>>>()
+        })
+}
+
+impl ClaudeSession {
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn spawn_runtime(
+        bridge: Option<&ClaudeMessageBridge>,
+        checkpoint: &Checkpoint,
+        session: codex_claude_runtime::ClaudeSession,
+    ) -> anyhow::Result<ClaudeRuntime> {
+        use anyhow::Context;
+        let model = checkpoint
+            .model
+            .strip_prefix("claude-code/")
+            .context("not a Claude model")?;
+        let model = if model.starts_with("sonnet-") || model.starts_with("opus-") {
+            format!("claude-{model}")
+        } else {
+            model.to_owned()
+        };
+        ClaudeRuntime::spawn(codex_claude_runtime::ClaudeOptions {
+            executable: PathBuf::from("claude"),
+            cwd: checkpoint.cwd.clone(),
+            model,
+            effort: checkpoint.effort.clone(),
+            session,
+            mcp_config: bridge.map(|bridge| {
+                serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
+                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}})
+            }),
+        })
+        .await
+    }
+
+    pub(super) fn measure_usage_delta(&mut self, result: &serde_json::Value) -> Option<TokenUsage> {
+        let current = decode_model_usage(result);
+        // Native resume restores cost-state only when present; its first baseline is unknown.
+        let previous = std::mem::replace(&mut self.usage_baseline, current);
+        let (Some(previous), Some(current)) = (previous, &self.usage_baseline) else {
+            return None;
+        };
+        let mut reasoning_available = true;
+        let delta = (|| {
+            if previous.keys().any(|model| !current.contains_key(model)) {
+                return None;
+            }
+            let mut totals = [0i64; 5];
+            for (model, counters) in current {
+                let baseline = previous.get(model).copied().unwrap_or(ModelUsage {
+                    billing: [0; 4],
+                    thinking: Some(0),
+                });
+                let mut billing = [0i64; 4];
+                for index in 0..4 {
+                    billing[index] = counters.billing[index]
+                        .checked_sub(baseline.billing[index])
+                        .filter(|delta| *delta >= 0)?;
+                    totals[index] = totals[index].checked_add(billing[index])?;
+                }
+                let thinking = match (counters.thinking, baseline.thinking) {
+                    (Some(current), Some(previous)) => current
+                        .checked_sub(previous)
+                        .filter(|thinking| *thinking >= 0 && *thinking <= billing[3])?,
+                    // An inactive legacy model cannot add thinking without adding output.
+                    _ if billing[3] == 0 => 0,
+                    _ => {
+                        reasoning_available = false;
+                        0
+                    }
+                };
+                totals[4] = totals[4].checked_add(thinking)?;
+            }
+            let [uncached, cached, written, output, thinking] = totals;
+            let input = uncached.checked_add(cached)?.checked_add(written)?;
+            Some(TokenUsage {
+                input_tokens: input,
+                cached_input_tokens: cached,
+                cache_write_input_tokens: written,
+                output_tokens: output,
+                // Thinking is a subset of output, not additional billable tokens.
+                reasoning_output_tokens: thinking,
+                total_tokens: input.checked_add(output)?,
+                codex_rollout_budget_units: None,
+            })
+        })();
+        if delta.is_none() {
+            self.usage_baseline = None;
+        }
+        // Keep a valid snapshot even when legacy reasoning data needs a new baseline.
+        delta.filter(|_| reasoning_available)
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct RuntimeSlot {
+    state: std::sync::Mutex<SlotState>,
+    returned: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct SlotState {
+    runtime: Option<ClaudeSession>,
+    leased: bool,
+    discard_on_return: bool,
+}
+
+impl RuntimeSlot {
+    pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ClaudeSession>> {
+        let returned = async {
+            loop {
+                // Register before inspecting state so all concurrent shutdown waiters wake.
+                let notification = self.returned.notified();
+                tokio::pin!(notification);
+                notification.as_mut().enable();
+                let ready = {
+                    let mut state = self
+                        .state
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if state.leased {
+                        None
+                    } else {
+                        Some(state.runtime.take())
+                    }
+                };
+                if let Some(runtime) = ready {
+                    return runtime;
+                }
+                notification.await;
+            }
+        };
+        match tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), returned).await {
+            Ok(runtime) => Ok(runtime),
+            Err(_) => {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                state.discard_on_return = true;
+                // A late return is killed by Drop rather than becoming an unowned idle process.
+                drop(state.runtime.take());
+                anyhow::bail!(
+                    "Claude runtime did not return from its aborted turn within five seconds"
+                )
+            }
+        }
+    }
+}
+
+/// Returns the process on success, error, or forced destruction of its turn future.
+pub(super) struct RuntimeLease<'a> {
+    slot: &'a RuntimeSlot,
+    pub(super) runtime: Option<ClaudeSession>,
+}
+
+impl<'a> RuntimeLease<'a> {
+    pub(super) fn take(slot: &'a RuntimeSlot) -> anyhow::Result<Self> {
+        let mut state = slot
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Claude session lock was poisoned"))?;
+        anyhow::ensure!(!state.leased, "Claude runtime is already in use");
+        anyhow::ensure!(
+            !state.discard_on_return,
+            "Claude runtime shutdown timed out; start a new chat"
+        );
+        state.leased = true;
+        let runtime = state.runtime.take();
+        Ok(Self { slot, runtime })
+    }
+}
+
+impl Drop for RuntimeLease<'_> {
+    fn drop(&mut self) {
+        let mut state = self
+            .slot
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.discard_on_return {
+            state.runtime = self.runtime.take();
+        }
+        state.leased = false;
+        self.slot.returned.notify_waiters();
+    }
+}

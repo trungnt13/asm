@@ -1,0 +1,514 @@
+//! Child-only MCP messaging; native agent control retains caller-scoped authority.
+
+use std::sync::Arc;
+use std::sync::Weak;
+use std::time::Duration;
+
+use anyhow::Context;
+use anyhow::bail;
+use axum::Json;
+use axum::Router;
+use axum::body::to_bytes;
+use axum::extract::Request;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::response::Response;
+use axum::routing::post;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::ToolMode;
+use codex_protocol::protocol::MultiAgentVersion;
+use codex_tools::ResponsesApiNamespaceTool;
+use codex_tools::ToolName;
+use codex_tools::ToolSpec;
+use serde_json::Value;
+use serde_json::json;
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
+use tokio::sync::Semaphore;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
+
+use crate::session::session::Session;
+use crate::session::step_context::StepContext;
+use crate::tools::context::ToolPayload;
+use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
+use crate::tools::handlers::multi_agents_v2::ListAgentsHandler;
+use crate::tools::handlers::multi_agents_v2::SendMessageHandler;
+use crate::tools::handlers::multi_agents_v2::WaitAgentHandler;
+use crate::tools::multi_agent_tool::multi_agent_v2_handler;
+use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::registry::ToolRegistry;
+use crate::tools::router::ToolCall;
+use crate::tools::router::ToolRouter;
+use crate::turn_diff_tracker::TurnDiffTracker;
+
+const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+
+pub(super) struct ClaudeMessageBridge {
+    state: Arc<BridgeState>,
+    stop: CancellationToken,
+    server: Option<JoinHandle<std::io::Result<()>>>,
+}
+
+struct BridgeState {
+    authority: String,
+    token: String,
+    session_id: String,
+    turn: Mutex<Option<Arc<BridgeTurn>>>,
+    requests: Semaphore,
+    stop: CancellationToken,
+    message_tools: Mutex<Option<Vec<MessageTool>>>,
+}
+
+struct BridgeTurn {
+    session: Weak<Session>,
+    stop: CancellationToken,
+    step: Arc<StepContext>,
+    cancel: CancellationToken,
+    tools: Vec<ToolName>,
+    execution: Arc<Semaphore>,
+    tracker: crate::tools::context::SharedTurnDiffTracker,
+}
+
+#[derive(PartialEq)]
+struct MessageTool {
+    name: ToolName,
+    spec: Value,
+}
+
+impl ClaudeMessageBridge {
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(super) async fn start() -> anyhow::Result<Self> {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
+        let authority = listener.local_addr()?.to_string();
+        let stop = CancellationToken::new();
+        let state = Arc::new(BridgeState {
+            authority,
+            token: Uuid::new_v4().to_string(),
+            session_id: Uuid::new_v4().to_string(),
+            turn: Mutex::new(/*t*/ None),
+            requests: Semaphore::new(/*permits*/ 8),
+            stop: stop.clone(),
+            message_tools: Mutex::new(/*t*/ None),
+        });
+        let app = Router::new()
+            .route("/mcp", post(serve_rpc))
+            .with_state(Arc::clone(&state));
+        let shutdown = stop.clone();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+        });
+        Ok(Self {
+            state,
+            stop,
+            server: Some(server),
+        })
+    }
+
+    pub(super) fn url(&self) -> String {
+        format!("http://{}/mcp", self.state.authority)
+    }
+
+    pub(super) fn bearer_token(&self) -> &str {
+        &self.state.token
+    }
+
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(super) async fn set_turn(
+        &self,
+        session: Arc<Session>,
+        mut step: Arc<StepContext>,
+        cancel: CancellationToken,
+    ) -> anyhow::Result<()> {
+        if self.stop.is_cancelled() {
+            bail!("Claude messaging bridge is stopped");
+        }
+        if step.turn.parent_thread_id.is_none()
+            || !step.turn.session_source.is_non_root_agent()
+            || step.turn.multi_agent_version != MultiAgentVersion::V2
+        {
+            bail!("Claude messaging is available only to native V2 child agents");
+        }
+        let (router, message_tools) = build_message_tools(&session, &step)?;
+        // The bridge owns a fresh captured step. Inference metadata must not hide
+        // caller-authorized messaging on a Claude child with no native model catalog.
+        Arc::get_mut(&mut step)
+            .context("Claude messaging requires an exclusively owned captured step")?
+            .tool_router = Arc::new(router);
+        let tools = message_tools.iter().map(|tool| tool.name.clone()).collect();
+        {
+            let mut original = self.state.message_tools.lock().await;
+            if original
+                .as_ref()
+                .is_some_and(|original| *original != message_tools)
+            {
+                bail!("Claude messaging definitions changed; start a new thread");
+            }
+            *original = Some(message_tools);
+        }
+        let mut turn = self.state.turn.lock().await;
+        if turn.is_some() {
+            bail!("Claude messaging bridge already has an active turn");
+        }
+        *turn = Some(Arc::new(BridgeTurn {
+            session: Arc::downgrade(&session),
+            stop: self.stop.clone(),
+            step,
+            cancel: cancel.child_token(),
+            tools,
+            execution: Arc::new(Semaphore::new(/*permits*/ 1)),
+            tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+        }));
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(super) async fn clear_turn(&self) -> anyhow::Result<()> {
+        let turn = self.state.turn.lock().await.take();
+        if let Some(turn) = turn {
+            turn.cancel.cancel();
+            // Revoke first, then drain. A timed-out runtime is permanently dirty.
+            if tokio::time::timeout(Duration::from_secs(/*secs*/ 5), turn.execution.acquire())
+                .await
+                .is_err()
+            {
+                self.stop.cancel();
+                bail!("Claude messaging cleanup exceeded 5 seconds; bridge cannot be reused");
+            }
+        }
+        Ok(())
+    }
+
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(super) async fn shutdown(&mut self) -> anyhow::Result<()> {
+        let drained = self.clear_turn().await;
+        self.stop.cancel();
+        if let Some(mut server) = self.server.take() {
+            match tokio::time::timeout(Duration::from_secs(/*secs*/ 5), &mut server).await {
+                Ok(result) => result.context("Claude messaging HTTP task failed")??,
+                Err(_) => {
+                    server.abort();
+                    bail!("Claude messaging HTTP shutdown exceeded 5 seconds");
+                }
+            }
+        }
+        drained
+    }
+}
+
+impl Drop for ClaudeMessageBridge {
+    fn drop(&mut self) {
+        self.stop.cancel();
+        if let Ok(mut turn) = self.state.turn.try_lock()
+            && let Some(turn) = turn.take()
+        {
+            turn.cancel.cancel();
+        }
+        // Graceful shutdown owns connection draining; aborting the accept loop here
+        // would detach HTTP tasks that still hold execution authority.
+    }
+}
+
+#[tracing::instrument(level = "trace", skip_all)]
+async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> Response {
+    let Ok(_request_slot) = state.requests.try_acquire() else {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    };
+    if state.stop.is_cancelled() {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    let headers = request.headers();
+    if headers.get("host").and_then(|v| v.to_str().ok()) != Some(state.authority.as_str())
+        || headers.get("authorization").and_then(|v| v.to_str().ok())
+            != Some(format!("Bearer {}", state.token).as_str())
+        || headers.contains_key("origin")
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let supplied_session = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
+    if supplied_session.is_some_and(|id| id != state.session_id) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let session_supplied = supplied_session.is_some();
+    if headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .is_none_or(|v| v.split(';').next() != Some("application/json"))
+    {
+        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
+    }
+    let bytes = match tokio::time::timeout(
+        Duration::from_secs(/*secs*/ 10),
+        to_bytes(request.into_body(), MAX_REQUEST_BYTES),
+    )
+    .await
+    {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
+        Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
+    };
+    let Ok(rpc) = serde_json::from_slice::<Value>(&bytes) else {
+        return rpc_error(Value::Null, /*code*/ -32700, "Invalid JSON");
+    };
+    let id = rpc.get("id").cloned().unwrap_or(Value::Null);
+    if rpc.get("jsonrpc").and_then(Value::as_str) != Some("2.0") || !rpc.is_object() {
+        return rpc_error(id, /*code*/ -32600, "Invalid request");
+    }
+    let method = rpc.get("method").and_then(Value::as_str).unwrap_or("");
+    if method == "initialize" {
+        let version = rpc
+            .pointer("/params/protocolVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let version = match version {
+            "2024-11-05" | "2025-03-26" | "2025-06-18" => version,
+            _ => "2025-03-26",
+        };
+        return (
+            [("mcp-session-id", state.session_id.clone())],
+            Json(json!({
+                "jsonrpc":"2.0", "id":id, "result": {
+                    "protocolVersion":version, "capabilities":{"tools":{}},
+                    "serverInfo":{"name":"asm", "version":env!("CARGO_PKG_VERSION")}
+                }
+            })),
+        )
+            .into_response();
+    }
+    if !session_supplied {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    if method == "notifications/initialized" || method == "notifications/cancelled" {
+        // Turn cancellation is controlled by ASM, not by an uncorrelated request id.
+        return StatusCode::ACCEPTED.into_response();
+    }
+    if method == "ping" {
+        return rpc_result(id, json!({}));
+    }
+    if method == "tools/list" && !state.stop.is_cancelled() {
+        // Discovery has no execution authority and must also work between turns.
+        let tools = state
+            .message_tools
+            .lock()
+            .await
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|tool| tool.spec.clone())
+            .collect::<Vec<_>>();
+        return rpc_result(id, json!({"tools": tools}));
+    }
+    let Some(turn) = state.turn.lock().await.clone() else {
+        return rpc_error(id, /*code*/ -32000, "No active ASM turn");
+    };
+    if turn.cancel.is_cancelled() {
+        return rpc_error(id, /*code*/ -32000, "ASM turn cancelled");
+    }
+    match method {
+        "tools/call" if !id.is_null() => {
+            let params = rpc.get("params").cloned().unwrap_or(Value::Null);
+            // Keep admitted work alive on HTTP disconnect until ASM cancels/drains it.
+            match tokio::spawn(invoke_message_tool(turn, params))
+                .await
+                .unwrap_or_else(|error| Err(error.into()))
+            {
+                Ok(result) => rpc_result(id, result),
+                Err(error) => rpc_result(
+                    id,
+                    json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}),
+                ),
+            }
+        }
+        _ => rpc_error(id, /*code*/ -32601, "Unsupported MCP method"),
+    }
+}
+
+fn rpc_result(id: Value, result: Value) -> Response {
+    Json(json!({"jsonrpc":"2.0","id":id,"result":result})).into_response()
+}
+
+fn rpc_error(id: Value, code: i64, message: &str) -> Response {
+    Json(json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})).into_response()
+}
+
+fn build_message_tools(
+    session: &Session,
+    step: &StepContext,
+) -> anyhow::Result<(ToolRouter, Vec<MessageTool>)> {
+    let config = &step.turn.config.multi_agent_v2;
+    let options = WaitAgentTimeoutOptions {
+        default_timeout_ms: config.default_wait_timeout_ms,
+        min_timeout_ms: config.min_wait_timeout_ms,
+        max_timeout_ms: config.max_wait_timeout_ms,
+    };
+    let namespace = config.tool_namespace.as_deref();
+    let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
+    let mut tools = Vec::new();
+    let mut specs = Vec::new();
+    // Build only native messaging handlers; never import the inference tool catalog.
+    for (enabled, runtime) in [
+        (
+            !config.disable_direct_message,
+            multi_agent_v2_handler(SendMessageHandler, namespace, None, None),
+        ),
+        (
+            true,
+            multi_agent_v2_handler(ListAgentsHandler, namespace, None, None),
+        ),
+        (
+            config.wait_agent_enabled,
+            multi_agent_v2_handler(WaitAgentHandler::new(options), namespace, None, None),
+        ),
+    ] {
+        if config.disable_native_tools || !enabled {
+            continue;
+        }
+        let name = runtime.tool_name();
+        let spec = runtime.spec();
+        registry.register_trusted(runtime);
+        if registry.registered_tool(&name).is_none() {
+            continue;
+        }
+        let tool = match spec.clone() {
+            ToolSpec::Function(tool) => tool,
+            ToolSpec::Namespace(mut namespace) if namespace.tools.len() == 1 => {
+                let Some(ResponsesApiNamespaceTool::Function(tool)) = namespace.tools.pop() else {
+                    bail!("Native messaging tool must use function arguments");
+                };
+                tool
+            }
+            _ => bail!("Native messaging tool must use function arguments"),
+        };
+        let wire_name = match &name.namespace {
+            Some(namespace) => format!("{namespace}__{}", name.name),
+            None => name.name.clone(),
+        };
+        if wire_name.len() > 64
+            || !wire_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        {
+            bail!("Messaging namespace is not MCP-compatible");
+        }
+        tools.push(MessageTool {
+            name,
+            spec: json!({"name":wire_name,"description":tool.description,"inputSchema":tool.parameters}),
+        });
+        specs.push(spec);
+    }
+    let router = ToolRouter::from_parts(
+        registry,
+        specs,
+        ToolMode::Direct,
+        Default::default(),
+        None,
+        &[],
+    );
+    Ok((router, tools))
+}
+
+#[tracing::instrument(level = "trace", skip_all, err)]
+async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Value> {
+    let _execution = tokio::select! {
+        permit = turn.execution.acquire() => permit?,
+        _ = turn.cancel.cancelled() => bail!("ASM turn cancelled"),
+        _ = turn.stop.cancelled() => bail!("ASM bridge stopped"),
+    };
+    if turn.cancel.is_cancelled() || turn.stop.is_cancelled() {
+        bail!("ASM turn cancelled");
+    }
+    let session = turn.session.upgrade().context("ASM thread stopped")?;
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .context("Missing tool name")?;
+    let tool = turn
+        .tools
+        .iter()
+        .find(|tool| match &tool.namespace {
+            Some(namespace) => name == format!("{namespace}__{}", tool.name),
+            None => name == tool.name,
+        })
+        .context("Only exposed native messaging tools are allowed")?;
+    let arguments = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if !arguments.is_object() {
+        bail!("Tool arguments must be an object");
+    }
+    let call_id = format!("claude-{}", Uuid::new_v4());
+    let arguments = arguments.to_string();
+    let payload = ToolPayload::Function {
+        arguments: arguments.clone(),
+    };
+    let item = ResponseItem::FunctionCall {
+        encrypted_content: None,
+        status: None,
+        id: None,
+        name: tool.name.clone(),
+        namespace: tool.namespace.clone(),
+        arguments,
+        encrypted_function_args: None,
+        call_id: call_id.clone(),
+        internal_chat_message_metadata_passthrough: None,
+    };
+    session
+        .record_conversation_items(&turn.step.turn, &turn.step.settings.model_info, &[item])
+        .await;
+    let call = ToolCall {
+        tool_name: tool.clone(),
+        call_id,
+        payload,
+        encrypted_function_args: None,
+    };
+    let runtime = ToolCallRuntime::new(
+        Arc::clone(&session),
+        Arc::clone(&turn.step),
+        Arc::clone(&turn.tracker),
+    );
+    let dispatch = runtime.handle_tool_call(call, turn.cancel.child_token());
+    tokio::pin!(dispatch);
+    let output = tokio::select! {
+        biased;
+        _ = turn.stop.cancelled() => {
+            turn.cancel.cancel();
+            dispatch.await?
+        }
+        result = &mut dispatch => result?,
+    };
+    let result = convert_output(&output.item);
+    session
+        .record_conversation_items(
+            &turn.step.turn,
+            &turn.step.settings.model_info,
+            &[output.item],
+        )
+        .await;
+    result
+}
+
+fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
+    let ResponseItem::FunctionCallOutput { output, .. } = item else {
+        bail!("Unsupported native messaging result");
+    };
+    let content = match &output.body {
+        FunctionCallOutputBody::Text(text) => vec![json!({"type":"text","text":text})],
+        FunctionCallOutputBody::ContentItems(items) => items
+            .iter()
+            .map(|item| match item {
+                FunctionCallOutputContentItem::InputText { text } => {
+                    Ok(json!({"type":"text","text":text}))
+                }
+                _ => bail!("Native messaging returned non-text content"),
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+    };
+    Ok(json!({"isError":output.success == Some(false), "content":content}))
+}
