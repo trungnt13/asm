@@ -53,10 +53,54 @@ pub(super) async fn lookup(
     source_kind_filters: &[Vec<ThreadSourceKind>],
     model_provider: Option<&str>,
 ) -> Result<Option<Thread>> {
-    if name.trim().is_empty() {
-        return Ok(None);
+    Ok(find_matches(
+        app_server,
+        codex_home,
+        name,
+        collections,
+        source_kind_filters,
+        model_provider,
+        SessionMatch::Exact,
+    )
+    .await?
+    .pop())
+}
+
+pub(super) enum SessionMatch {
+    Exact,
+    Partial,
+}
+
+impl SessionMatch {
+    fn matches(&self, thread: &Thread, query: &str) -> bool {
+        match self {
+            Self::Exact => display_label(thread) == query,
+            Self::Partial => {
+                display_label(thread).to_lowercase().contains(query)
+                    || thread.id.to_lowercase().starts_with(query)
+            }
+        }
     }
-    let mut matched: Option<Thread> = None;
+}
+
+#[tracing::instrument(skip_all)]
+pub(super) async fn find_matches(
+    app_server: &mut AppServerSession,
+    codex_home: &Path,
+    name: &str,
+    collections: &[SessionCollection],
+    source_kind_filters: &[Vec<ThreadSourceKind>],
+    model_provider: Option<&str>,
+    match_kind: SessionMatch,
+) -> Result<Vec<Thread>> {
+    let query = match match_kind {
+        SessionMatch::Exact => name.to_string(),
+        SessionMatch::Partial => name.trim().to_lowercase(),
+    };
+    if name.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut matched: Vec<Thread> = Vec::new();
     let mut unverified_pagination = false;
     for collection in collections {
         for source_kinds in source_kind_filters {
@@ -88,7 +132,7 @@ pub(super) async fn lookup(
                     !cursor.contains('|') || codex_rollout::parse_cursor(cursor).is_none()
                 });
                 for thread in response.data {
-                    if display_label(&thread) != name {
+                    if !match_kind.matches(&thread, &query) {
                         continue;
                     }
                     if !app_server.uses_remote_workspace()
@@ -135,10 +179,11 @@ pub(super) async fn lookup(
                             return Err(err);
                         }
                     };
-                    if current.id != thread.id || display_label(&current) != name {
+                    if current.id != thread.id || !match_kind.matches(&current, &query) {
                         continue;
                     }
-                    if let Some(previous) = matched.as_ref()
+                    if matches!(match_kind, SessionMatch::Exact)
+                        && let Some(previous) = matched.first()
                         && previous.id != current.id
                     {
                         return Err(AmbiguousSessionName::Multiple {
@@ -148,7 +193,9 @@ pub(super) async fn lookup(
                         }
                         .into());
                     }
-                    matched = Some(current);
+                    if !matched.iter().any(|thread| thread.id == current.id) {
+                        matched.push(current);
+                    }
                 }
                 let Some(next_cursor) = response.next_cursor else {
                     break;
@@ -158,7 +205,7 @@ pub(super) async fn lookup(
         }
     }
     // Older server cursors can skip equal timestamps at a page boundary.
-    if let Some(thread) = matched.as_ref()
+    if let Some(thread) = matched.first()
         && unverified_pagination
     {
         return Err(AmbiguousSessionName::Paginated(thread.id.clone()).into());
