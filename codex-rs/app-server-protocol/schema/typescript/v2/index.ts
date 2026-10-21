@@ -474,6 +474,7 @@ export type { SubAgentActivityKind } from "./SubAgentActivityKind";
 export type { SubagentMigration } from "./SubagentMigration";
 export type { System1Error } from "./System1Error";
 export type { System1FailureWarning } from "./System1FailureWarning";
+export type { System1TransportCode } from "./System1TransportCode";
 export type { System1UpdatedNotification } from "./System1UpdatedNotification";
 export type { TerminalInteractionNotification } from "./TerminalInteractionNotification";
 export type { TextElement } from "./TextElement";
