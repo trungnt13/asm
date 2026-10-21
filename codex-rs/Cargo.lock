@@ -5127,7 +5127,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-critical-path"
-version = "0.0.0"
+version = "0.164.1-alpha.8"
 dependencies = [
  "pretty_assertions",
 ]
