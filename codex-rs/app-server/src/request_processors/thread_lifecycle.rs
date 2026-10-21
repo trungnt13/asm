@@ -349,16 +349,9 @@ pub(super) async fn ensure_listener_task_running(
                     };
                     if let EventMsg::RawResponseItem(raw) = &event.msg
                         && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(
-                            {
-                                if let Some(arguments) = &raw.spawn_arguments {
-                                    let mut display = codex_rollout::ResponseItemEnvelope::new(raw.item.clone());
-                                    display.metadata.get_or_insert_default().spawn_arguments = Some(arguments.clone());
-                                    std::borrow::Cow::Owned(display.to_display_item().into_owned())
-                                } else {
-                                    std::borrow::Cow::Borrowed(&raw.item)
-                                }
-                            }.as_ref(),
+                            &raw.item,
                             &event.id,
+                            raw.spawn_arguments.as_deref(),
                         )
                     {
                         let recipients = thread_state_manager

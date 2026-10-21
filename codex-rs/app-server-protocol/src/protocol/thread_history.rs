@@ -423,7 +423,7 @@ impl ThreadHistoryBuilder {
                     codex_protocol::models::ResponseItem::AgentMessage { .. }
                 ) =>
             {
-                self.handle_response_item(&payload.item);
+                self.handle_response_item(&payload.item, payload.spawn_arguments.as_deref());
             }
             EventMsg::TokenCount(_) => {}
             EventMsg::ThreadRolledBack(payload) => self.handle_thread_rollback(payload),
@@ -440,7 +440,12 @@ impl ThreadHistoryBuilder {
         match item {
             RolloutItem::EventMsg(event) => self.handle_event(event),
             RolloutItem::Compacted(payload) => self.handle_compacted(payload),
-            RolloutItem::ResponseItem(item) => self.handle_response_item(&item.to_display_item()),
+            RolloutItem::ResponseItem(item) => self.handle_response_item(
+                &item.item,
+                item.metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.spawn_arguments.as_deref()),
+            ),
             RolloutItem::TokenUsageRecord(record) => {
                 let turn = self
                     .current_turn
@@ -456,7 +461,7 @@ impl ThreadHistoryBuilder {
                 }
             }
             RolloutItem::InterAgentCommunication(communication) => {
-                self.handle_response_item(&communication.to_model_input_item());
+                self.handle_response_item(&communication.to_model_input_item(), None);
             }
             RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::TurnContext(_)
@@ -504,13 +509,19 @@ impl ThreadHistoryBuilder {
         self.active_change_set.take().unwrap_or_default()
     }
 
-    fn handle_response_item(&mut self, item: &codex_protocol::models::ResponseItem) {
+    fn handle_response_item(
+        &mut self,
+        item: &codex_protocol::models::ResponseItem,
+        spawn_arguments: Option<&str>,
+    ) {
         if matches!(
             item,
             codex_protocol::models::ResponseItem::AgentMessage { .. }
         ) {
             let fallback_id = format!("inter-agent-{}", self.next_item_index);
-            if let Some(item) = ThreadItem::from_inter_agent_message(item, &fallback_id) {
+            if let Some(item) =
+                ThreadItem::from_inter_agent_message(item, &fallback_id, spawn_arguments)
+            {
                 self.next_item_index += 1;
                 self.upsert_item_in_current_turn(item);
             }
