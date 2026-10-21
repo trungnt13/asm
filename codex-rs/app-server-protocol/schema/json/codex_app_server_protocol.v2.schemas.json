@@ -18840,6 +18840,26 @@
         },
         {
           "properties": {
+            "code": {
+              "$ref": "#/definitions/System1TransportCode"
+            },
+            "type": {
+              "enum": [
+                "transportDetails"
+              ],
+              "title": "TransportDetailsSystem1ErrorType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "type"
+          ],
+          "title": "TransportDetailsSystem1Error",
+          "type": "object"
+        },
+        {
+          "properties": {
             "type": {
               "enum": [
                 "timeout"
@@ -19017,6 +19037,24 @@
         "totalElapsedMs"
       ],
       "type": "object"
+    },
+    "System1TransportCode": {
+      "description": "Provides bounded transport diagnostics. Excludes URLs, credentials, and raw error text.",
+      "enum": [
+        "sendTimeout",
+        "sendTls",
+        "sendProxyAuthentication",
+        "sendProxyConfiguration",
+        "sendProxyResolution",
+        "sendConnect",
+        "sendPolicy",
+        "sendRedirect",
+        "sendBuild",
+        "sendOther",
+        "bodyTimeout",
+        "bodyRead"
+      ],
+      "type": "string"
     },
     "System1UpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
