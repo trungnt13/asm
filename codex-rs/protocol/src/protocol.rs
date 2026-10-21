@@ -2335,6 +2335,45 @@ pub struct TurnStartedEvent {
     pub collaboration_mode_kind: ModeKind,
 }
 
+/// Provides bounded transport diagnostics.
+/// Excludes URLs, credentials, and raw error text.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum System1TransportCode {
+    SendTimeout,
+    SendTls,
+    SendProxyAuthentication,
+    SendProxyConfiguration,
+    SendProxyResolution,
+    SendConnect,
+    SendPolicy,
+    SendRedirect,
+    SendBuild,
+    SendOther,
+    BodyTimeout,
+    BodyRead,
+}
+
+impl System1TransportCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SendTimeout => "SEND_TIMEOUT",
+            Self::SendTls => "SEND_TLS",
+            Self::SendProxyAuthentication => "SEND_PROXY_AUTHENTICATION",
+            Self::SendProxyConfiguration => "SEND_PROXY_CONFIGURATION",
+            Self::SendProxyResolution => "SEND_PROXY_RESOLUTION",
+            Self::SendConnect => "SEND_CONNECT",
+            Self::SendPolicy => "SEND_POLICY",
+            Self::SendRedirect => "SEND_REDIRECT",
+            Self::SendBuild => "SEND_BUILD",
+            Self::SendOther => "SEND_OTHER",
+            Self::BodyTimeout => "BODY_TIMEOUT",
+            Self::BodyRead => "BODY_READ",
+        }
+    }
+}
+
 /// Describes a Decisions failure without exposing request or response content.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -2343,6 +2382,7 @@ pub enum System1Error {
     Credentials,
     InvalidRequest,
     Transport,
+    TransportDetails { code: System1TransportCode },
     Timeout,
     Http { status: u16 },
     ResponseTooLarge,
@@ -2356,6 +2396,7 @@ impl std::fmt::Display for System1Error {
             Self::Credentials => f.write_str("configured API key is missing; load the key in the backend environment and restart"),
             Self::InvalidRequest => f.write_str("invalid decision request"),
             Self::Transport => f.write_str("decision backend connection failed"),
+            Self::TransportDetails { code } => write!(f, "decision transport failed ({})", code.as_str()),
             Self::Timeout => f.write_str("decision request timed out"),
             Self::Http { status } => write!(f, "decision backend HTTP {status}"),
             Self::ResponseTooLarge => f.write_str("decision response exceeded the size limit"),
