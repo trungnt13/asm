@@ -381,6 +381,10 @@ struct SessionPickerRunOptions {
 /// Filtering happens in two layers:
 /// 1. Provider, source, and eligible working-directory filtering at the backend.
 /// 2. Typed search filtering over loaded rows in the picker.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "startup disambiguation retains a fixed matching-session restriction"
+)]
 pub async fn run_resume_picker_with_app_server(
     uses_remote_filesystem: bool,
     tui: &mut Tui,
@@ -389,6 +393,7 @@ pub async fn run_resume_picker_with_app_server(
     show_all: bool,
     include_non_interactive: bool,
     app_server: AppServerSession,
+    matching_ids: Option<HashSet<ThreadId>>,
 ) -> Result<SessionSelection> {
     let archive_request_handle = app_server.request_handle();
     run_resume_picker_with_launch_context(
@@ -401,6 +406,7 @@ pub async fn run_resume_picker_with_app_server(
         app_server,
         archive_request_handle,
         SessionPickerLaunchContext::Startup,
+        matching_ids,
     )
     .await
 }
@@ -430,6 +436,7 @@ pub async fn run_resume_picker_from_existing_session_with_app_server(
         app_server,
         archive_request_handle,
         SessionPickerLaunchContext::ExistingSession { current_thread_id },
+        /*matching_ids*/ None,
     )
     .await
 }
@@ -448,6 +455,7 @@ async fn run_resume_picker_with_launch_context(
     app_server: AppServerSession,
     archive_request_handle: AppServerRequestHandle,
     launch_context: SessionPickerLaunchContext,
+    matching_ids: Option<HashSet<ThreadId>>,
 ) -> Result<SessionSelection> {
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
     let uses_remote_workspace = app_server.uses_remote_workspace();
@@ -496,6 +504,7 @@ async fn run_resume_picker_with_launch_context(
             raw_reasoning_visibility(config),
             (!uses_remote_workspace).then(|| config.clone()),
             bg_tx,
+            matching_ids,
         ),
         bg_rx,
     )
@@ -558,6 +567,7 @@ pub async fn run_fork_picker_with_app_server(
             raw_reasoning_visibility(config),
             (!uses_remote_workspace).then(|| config.clone()),
             bg_tx,
+            /*matching_ids*/ None,
         ),
         bg_rx,
     )
@@ -715,6 +725,10 @@ fn picker_cwd_filter(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the loader owns the fixed startup matching-session restriction"
+)]
 fn spawn_app_server_page_loader(
     uses_remote_filesystem: bool,
     app_server: AppServerSession,
@@ -723,6 +737,7 @@ fn spawn_app_server_page_loader(
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<Config>,
     bg_tx: mpsc::UnboundedSender<BackgroundEvent>,
+    matching_ids: Option<HashSet<ThreadId>>,
 ) -> PickerLoader {
     let (request_tx, mut request_rx) = mpsc::unbounded_channel::<PickerLoadRequest>();
 
@@ -738,7 +753,7 @@ fn spawn_app_server_page_loader(
                         uses_remote_filesystem,
                     );
                     let cursor = request.cursor.map(|PageCursor::AppServer(cursor)| cursor);
-                    let params = thread_list_params(
+                    let mut params = thread_list_params(
                         cursor,
                         cwd_filter,
                         request.status,
@@ -747,7 +762,27 @@ fn spawn_app_server_page_loader(
                         include_non_interactive,
                         matches!(request.mode, PageLoadMode::StateDbOnly),
                     );
-                    let page = load_app_server_page(&mut app_server, params).await;
+                    // Skip nonmatching pages before the picker considers a legacy-store fallback.
+                    let page = loop {
+                        let mut page =
+                            match load_app_server_page(&mut app_server, params.clone()).await {
+                                Ok(page) => page,
+                                Err(err) => break Err(err),
+                            };
+                        let Some(ids) = matching_ids.as_ref() else {
+                            break Ok(page);
+                        };
+                        page.rows
+                            .retain(|row| row.thread_id.is_some_and(|id| ids.contains(&id)));
+                        page.history_modes.retain(|id, _| ids.contains(id));
+                        if page.rows.is_empty()
+                            && let Some(PageCursor::AppServer(cursor)) = page.next_cursor.as_ref()
+                        {
+                            params.cursor = Some(cursor.clone());
+                            continue;
+                        }
+                        break Ok(page);
+                    };
                     let _ = bg_tx.send(BackgroundEvent::Page {
                         request_token: request.request_token,
                         search_token: request.search_token,
@@ -3867,6 +3902,7 @@ mod tests {
             RawReasoningVisibility::Hidden,
             Some(config.clone()),
             bg_tx,
+            /*matching_ids*/ None,
         );
         let mut live_picker = PickerState::new(
             crate::backend_id::BackendId::new(),

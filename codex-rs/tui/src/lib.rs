@@ -1632,21 +1632,50 @@ async fn run_ratatui_app(
             unreachable!("app server should be initialized for --resume <id>");
         };
         let lookup = startup_draft
-            .run_until(
-                &mut tui,
-                lookup_session_target_with_app_server(startup_app_server, &config, id_str),
-            )
+            .run_until(&mut tui, async {
+                if Uuid::parse_str(id_str).is_ok() {
+                    return Ok(lookup_session_target_with_app_server(
+                        startup_app_server,
+                        &config,
+                        id_str,
+                    )
+                    .await?
+                    .into_iter()
+                    .collect::<Vec<_>>());
+                }
+                let model_provider = startup_app_server.history_model_provider(&config).await?;
+                Ok::<_, color_eyre::Report>(
+                    named_session_lookup::find_matches(
+                        startup_app_server,
+                        config.codex_home.as_path(),
+                        id_str,
+                        &[named_session_lookup::SessionCollection::Active],
+                        &[resume_source_kinds(cli.resume_include_non_interactive)],
+                        model_provider.as_deref(),
+                        named_session_lookup::SessionMatch::Partial,
+                    )
+                    .await?
+                    .into_iter()
+                    .filter_map(|thread| {
+                        session_target_from_app_server_thread(
+                            startup_app_server.backend_id(),
+                            thread,
+                        )
+                    })
+                    .collect(),
+                )
+            })
             .await;
-        let target_session = match lookup {
+        let mut targets = match lookup {
             Ok(result) => result?,
             Err(err) => {
                 shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
                 return Err(err.into());
             }
         };
-        match target_session {
-            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
-            None => {
+        match targets.len() {
+            1 => resume_picker::SessionSelection::Resume(targets.pop().expect("one match")),
+            0 => {
                 shutdown_app_server_if_present(app_server.take()).await;
                 return missing_session_exit(
                     id_str,
@@ -1654,6 +1683,39 @@ async fn run_ratatui_app(
                     &mut tui,
                     &mut terminal_restore_guard,
                 );
+            }
+            _ => {
+                if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
+                    shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                    return Err(err.into());
+                }
+                let matching_ids = targets.into_iter().map(|target| target.thread_id).collect();
+                let picker_local_settings =
+                    crate::local_settings::LocalSettings::for_tui(&config, &tui);
+                let selection = resume_picker::run_resume_picker_with_app_server(
+                    uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
+                    &mut tui,
+                    &config,
+                    &picker_local_settings,
+                    /*show_all*/ true,
+                    cli.resume_include_non_interactive,
+                    app_server.take().expect("startup app server"),
+                    Some(matching_ids),
+                )
+                .await?;
+                if matches!(selection, resume_picker::SessionSelection::Exit) {
+                    terminal_restore_guard.restore_silently();
+                    session_log::log_session_end();
+                    return Ok(AppExitInfo {
+                        token_usage: crate::token_usage::TokenUsage::default(),
+                        thread_id: None,
+                        resume_hint: None,
+                        disconnect_info: None,
+                        update_action: None,
+                        exit_reason: ExitReason::UserRequested,
+                    });
+                }
+                selection
             }
         }
     } else if cli.resume_last {
@@ -1706,6 +1768,7 @@ async fn run_ratatui_app(
             cli.resume_show_all,
             cli.resume_include_non_interactive,
             app_server,
+            /*matching_ids*/ None,
         )
         .await?
         {
