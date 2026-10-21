@@ -53,6 +53,23 @@ impl TokenUsage {
     }
 }
 
+pub(crate) fn context_window_remaining_percent(
+    usage: &TokenUsage,
+    context_window: i64,
+    claude_runtime: bool,
+) -> i64 {
+    if !claude_runtime {
+        return usage.percent_of_context_window_remaining(context_window);
+    }
+    if context_window <= 0 {
+        return 0;
+    }
+    let remaining = context_window.saturating_sub(usage.input_tokens.max(0));
+    ((remaining as f64 / context_window as f64) * 100.0)
+        .clamp(0.0, 100.0)
+        .round() as i64
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TokenUsageInfo {
     pub(crate) total_token_usage: TokenUsage,

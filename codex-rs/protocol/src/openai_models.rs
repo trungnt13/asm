@@ -1023,13 +1023,19 @@ impl ModelInfo {
 }
 
 impl ModelPreset {
-    /// Filter models based on authentication mode.
-    ///
-    /// In ChatGPT mode, all models are visible. Otherwise, only API-supported models are shown.
+    /// Keep native runtime models independent of OpenAI authentication.
+    /// Other models retain their authentication-based visibility.
     pub fn filter_by_auth(models: Vec<ModelPreset>, chatgpt_mode: bool) -> Vec<ModelPreset> {
         models
             .into_iter()
-            .filter(|model| chatgpt_mode || model.supported_in_api)
+            .filter(|model| {
+                chatgpt_mode
+                    || model.supported_in_api
+                    || model
+                        .model
+                        .strip_prefix("claude-code/")
+                        .is_some_and(|native_model| !native_model.is_empty())
+            })
             .collect()
     }
 
