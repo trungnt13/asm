@@ -401,9 +401,12 @@ pub struct ConfigToml {
     /// Defaults to false; saved conversation history is independent.
     pub diagnostic_log_capture: Option<bool>,
 
-    /// Directory where Codex writes log files. Setting this value explicitly
-    /// also enables the TUI text log when diagnostic capture is enabled.
-    /// Defaults to `$CODEX_HOME/log`.
+    /// Directory for diagnostic log files.
+    /// Explicit settings also route SQLite logs here and enable the TUI text log.
+    /// Diagnostic capture must also be enabled.
+    /// Unset settings use `$CODEX_HOME/log` for files and `sqlite_home` for SQLite logs.
+    /// Existing SQLite logs are not migrated automatically.
+    /// Managed `sqlite_home` requirements keep SQLite logs in the required directory.
     pub log_dir: Option<AbsolutePathBuf>,
 
     /// Optional URI-based file opener. If set, citations to files in the model
