@@ -1,4 +1,5 @@
 mod application_requirements;
+mod application_storage_requirements;
 mod auth_policy;
 mod auto_rename;
 mod browser_computer_use_requirements;
@@ -57,6 +58,7 @@ pub const CONFIG_TOML_FILE: &str = "config.toml";
 
 pub use application_requirements::ApplicationNetworkRequirementsToml;
 pub use application_requirements::ApplicationRequirementsToml;
+pub use application_storage_requirements::ApplicationStorageRequirementsToml;
 pub use auth_policy::ManagedAuthPolicy;
 pub use auto_rename::AutoRenameConfig;
 pub use auto_rename::AutoRenameContext;
