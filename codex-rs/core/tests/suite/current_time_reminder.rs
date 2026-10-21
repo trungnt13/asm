@@ -899,7 +899,8 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
                     CALL_ID,
                     "clock",
                     "sleep",
-                    &json!({ "duration_ms": DURATION_MS }).to_string(),
+                    &json!({ "duration_ms": DURATION_MS, "reason": "Waiting for pending work" })
+                        .to_string(),
                 ),
                 ev_completed("resp-1"),
             ]),
@@ -940,7 +941,7 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
     assert!(
         requests[1]
             .function_call_output_text(CALL_ID)
-            .is_some_and(|output| output.ends_with("Sleep completed."))
+            .is_some_and(|output| output.ends_with("Sleep completed. Check the pending work after waking.\nReason for waiting (quoted context): \"Waiting for pending work\""))
     );
 
     Ok(())

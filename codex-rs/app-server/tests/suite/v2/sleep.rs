@@ -38,13 +38,21 @@ const CURRENT_TIME_AT: i64 = 1_781_717_655;
 async fn clock_tools_emit_control_tool_analytics() -> Result<()> {
     let calls = [
         ("curr_time", json!({}), "completed"),
-        ("sleep", json!({"duration_ms": 1}), "completed"),
         (
             "sleep",
-            json!({"duration_ms": "PRIVATE_INVALID_DURATION"}),
+            json!({"duration_ms": 1, "reason": "Waiting for pending work"}),
+            "completed",
+        ),
+        (
+            "sleep",
+            json!({"duration_ms": "PRIVATE_INVALID_DURATION", "reason": "Waiting for pending work"}),
             "failed",
         ),
-        ("sleep", json!({"duration_ms": 43_200_000}), "interrupted"),
+        (
+            "sleep",
+            json!({"duration_ms": 43_200_000, "reason": "Waiting for pending work"}),
+            "interrupted",
+        ),
     ];
     let server = responses::start_mock_server().await;
     let response_mock = responses::mount_sse_sequence(
@@ -184,7 +192,7 @@ async fn external_sleep_polls_current_time_and_emits_items(
                     CALL_ID,
                     "clock",
                     "sleep",
-                    &serde_json::json!({ "duration_ms": DURATION_MS }).to_string(),
+                    &serde_json::json!({ "duration_ms": DURATION_MS, "reason": "Waiting for pending work" }).to_string(),
                 ),
                 responses::ev_completed("resp-1"),
             ]),
