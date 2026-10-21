@@ -5180,36 +5180,6 @@ class RejectedSystem1Error(BaseModel):
     type: Annotated[Literal["rejected"], Field(title="RejectedSystem1ErrorType")]
 
 
-class System1Error(
-    RootModel[
-        CredentialsSystem1Error
-        | InvalidRequestSystem1Error
-        | TransportSystem1Error
-        | TimeoutSystem1Error
-        | HttpSystem1Error
-        | ResponseTooLargeSystem1Error
-        | InvalidResponseSystem1Error
-        | RejectedSystem1Error
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        CredentialsSystem1Error
-        | InvalidRequestSystem1Error
-        | TransportSystem1Error
-        | TimeoutSystem1Error
-        | HttpSystem1Error
-        | ResponseTooLargeSystem1Error
-        | InvalidResponseSystem1Error
-        | RejectedSystem1Error,
-        Field(
-            description="Describes a Decisions failure without exposing request or response content."
-        ),
-    ]
-
-
 class System1FailureWarning(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5247,16 +5217,19 @@ class System1Stats(BaseModel):
     total_elapsed_ms: Annotated[int, Field(alias="totalElapsedMs", ge=0)]
 
 
-class System1UpdatedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    enabled: bool
-    error: System1Error | None = None
-    failure_episode: Annotated[int | None, Field(alias="failureEpisode", ge=0)] = 0
-    system1_revision: Annotated[int | None, Field(alias="system1Revision", ge=0)] = 0
-    thread_id: Annotated[str, Field(alias="threadId")]
-    warning: System1FailureWarning | None = None
+class System1TransportCode(Enum):
+    send_timeout = "sendTimeout"
+    send_tls = "sendTls"
+    send_proxy_authentication = "sendProxyAuthentication"
+    send_proxy_configuration = "sendProxyConfiguration"
+    send_proxy_resolution = "sendProxyResolution"
+    send_connect = "sendConnect"
+    send_policy = "sendPolicy"
+    send_redirect = "sendRedirect"
+    send_build = "sendBuild"
+    send_other = "sendOther"
+    body_timeout = "bodyTimeout"
+    body_read = "bodyRead"
 
 
 class TerminalInteractionNotification(BaseModel):
@@ -6569,21 +6542,6 @@ class ThreadSystem1StatsReadParams(BaseModel):
         populate_by_name=True,
     )
     thread_id: Annotated[str, Field(alias="threadId")]
-
-
-class ThreadSystem1StatsReadResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    decision_connection: Annotated[
-        System1DecisionConnection | None, Field(alias="decisionConnection")
-    ] = None
-    enabled: bool
-    error: System1Error | None = None
-    failure_episode: Annotated[int, Field(alias="failureEpisode", ge=0)]
-    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
-    revision: Annotated[int, Field(ge=0)]
-    stats: System1Stats
 
 
 class TurnStartedThreadTimelineEntry(BaseModel):
@@ -9741,23 +9699,6 @@ class ThreadProjectUpdatedServerNotification(BaseModel):
     params: ThreadProjectUpdatedNotification
 
 
-class ThreadSystem1UpdatedServerNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    emitted_at_ms: Annotated[
-        int | None,
-        Field(
-            alias="emittedAtMs",
-            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
-        ),
-    ] = None
-    method: Annotated[
-        Literal["thread/system1Updated"], Field(title="Thread/system1UpdatedNotificationMethod")
-    ]
-    params: System1UpdatedNotification
-
-
 class HookStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10227,6 +10168,58 @@ class SubAgentSource(
         populate_by_name=True,
     )
     root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
+
+
+class TransportDetailsSystem1Error(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    code: System1TransportCode
+    type: Annotated[Literal["transportDetails"], Field(title="TransportDetailsSystem1ErrorType")]
+
+
+class System1Error(
+    RootModel[
+        CredentialsSystem1Error
+        | InvalidRequestSystem1Error
+        | TransportSystem1Error
+        | TransportDetailsSystem1Error
+        | TimeoutSystem1Error
+        | HttpSystem1Error
+        | ResponseTooLargeSystem1Error
+        | InvalidResponseSystem1Error
+        | RejectedSystem1Error
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        CredentialsSystem1Error
+        | InvalidRequestSystem1Error
+        | TransportSystem1Error
+        | TransportDetailsSystem1Error
+        | TimeoutSystem1Error
+        | HttpSystem1Error
+        | ResponseTooLargeSystem1Error
+        | InvalidResponseSystem1Error
+        | RejectedSystem1Error,
+        Field(
+            description="Describes a Decisions failure without exposing request or response content."
+        ),
+    ]
+
+
+class System1UpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    enabled: bool
+    error: System1Error | None = None
+    failure_episode: Annotated[int | None, Field(alias="failureEpisode", ge=0)] = 0
+    system1_revision: Annotated[int | None, Field(alias="system1Revision", ge=0)] = 0
+    thread_id: Annotated[str, Field(alias="threadId")]
+    warning: System1FailureWarning | None = None
 
 
 class ThreadForkParams(BaseModel):
@@ -10813,6 +10806,21 @@ class ThreadStartParams(BaseModel):
             description="Optional client-supplied analytics source classification for this thread.",
         ),
     ] = None
+
+
+class ThreadSystem1StatsReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    decision_connection: Annotated[
+        System1DecisionConnection | None, Field(alias="decisionConnection")
+    ] = None
+    enabled: bool
+    error: System1Error | None = None
+    failure_episode: Annotated[int, Field(alias="failureEpisode", ge=0)]
+    reasoning_effort: Annotated[ReasoningEffort | None, Field(alias="reasoningEffort")] = None
+    revision: Annotated[int, Field(ge=0)]
+    stats: System1Stats
 
 
 class RealtimeThreadTimelineEntry(BaseModel):
@@ -11751,6 +11759,23 @@ class ThreadTokenUsageUpdatedServerNotification(BaseModel):
         Field(title="Thread/tokenUsage/updatedNotificationMethod"),
     ]
     params: ThreadTokenUsageUpdatedNotification
+
+
+class ThreadSystem1UpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/system1Updated"], Field(title="Thread/system1UpdatedNotificationMethod")
+    ]
+    params: System1UpdatedNotification
 
 
 class HookCompletedServerNotification(BaseModel):

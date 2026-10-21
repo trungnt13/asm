@@ -409,7 +409,7 @@ Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.ste
 | `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` | Built-in descriptions below | Nonblank; each at most 4096 UTF-8 bytes |
 | `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
 
-Failure warnings use yellow chat text with the error category, current fallback effort, and runtime cooldown duration (or recovery blocked). Show a warning when the error category changes within a failure episode; keep identical errors quiet. Old/restored events without recovery details must not invent a cooldown.
+Failure warnings use yellow chat text with the error category, current fallback effort, and runtime cooldown duration (or recovery blocked). Show a warning when the error category changes within a failure episode; keep identical errors quiet. Old/restored events without recovery details must not invent a cooldown. Transport failures include bounded send/body-read codes, using typed HTTP classifications where available; never expose raw error messages, URLs, or credentials. Legacy transport events remain readable.
 
 Choice descriptions are separate from the selection/safety rubric. Main decisions send only allowed choices; warmup retains its synthetic low/medium pair. Replacing the rubric must not remove or duplicate their descriptions. `none`, `minimal`, and `max` retain fixed descriptions.
 
@@ -700,6 +700,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
 
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
 - `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only instructions, no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
+- Side has no extra question-only, non-mutating inspection, or explicit-mutation/escalation instruction gate; normal permissions and approvals still apply. Preserve reference-only inherited history, waiting for a new request, the subagent prohibition, and the ephemeral/worktree attachment restrictions in both boundary and developer instructions.
 - In temporary Side, `/sendlast [extra message]` forwards raw last completed assistant reply plus optional text as main user input. No prefix/navigation/settings change; atomically start or steer main. Reject complete items above 10,000 UTF-8 bytes, never truncate. Explicit item can exceed 1K tokens; require manual review when changed.
 - `/sync` replaces idle temporary Side with main's latest context, retaining model/effort/tier. Discard old history only after replacement setup/selection succeeds. Keep Side pairing/boundaries. Context refresh does not guarantee cache hits.
 - In idle temporary Side, `/fork [name]` saves an independent ordinary conversation:
@@ -707,7 +708,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
   - Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history.
   - Default `<main title> (fork)` or `Untitled (fork)`; keep explicit names.
   - Keep raw replay in memory only for temporary root forks. Normally append only new items; copy retained history only on explicit save. Temporary chats stay pathless/unlisted until saved.
-- `/parallel` creates a saved ordinary user fork. Normal permissions/flags/platform/busy checks control commands. Inherited history is reference, not instructions to continue parent work/control its agents. Parallel may own goals/subagents. Keep initial transcript clean without stored/model-history rewrites.
+- `/parallel` creates a saved ordinary user fork. Normal permissions/flags/platform/busy checks control commands. Inherited history is reference, not instructions to continue parent work/control its agents. Parallel may own goals/subagents. Do not add a separate explicit-mutation/escalation instruction gate in its boundary or developer policy; normal permissions and approvals apply. Keep initial transcript clean without stored/model-history rewrites.
 - Keep one non-nested main/companion pair:
   - `/parallel` from parallel returns to parent/replaces selected companion; older chats stay saved.
   - Block `/side`/`/btw` while viewing either open-pair member. Restore after closure; saved closed chats do not block.
