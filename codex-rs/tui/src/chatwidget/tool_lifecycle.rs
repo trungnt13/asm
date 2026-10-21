@@ -210,6 +210,23 @@ impl ChatWidget {
             tool,
             arguments: Some(arguments),
         };
+        if invocation.is_claude_activity() {
+            if !self.transcript.native_calls.contains_key(&id) {
+                self.flush_active_cell();
+                let cell = history_cell::RetainedMcpToolCallCell::new(
+                    history_cell::new_active_mcp_tool_call(
+                        id.clone(),
+                        invocation,
+                        self.local_settings.tui.animations
+                            && self.local_settings.tui.effects.progress,
+                    ),
+                );
+                self.transcript.native_calls.insert(id, cell.clone());
+                self.add_to_history(cell);
+            }
+            self.request_redraw();
+            return;
+        }
         if invocation.is_computer_activity() {
             let call = history_cell::new_active_mcp_tool_call(
                 id,
@@ -244,6 +261,19 @@ impl ChatWidget {
             return;
         };
 
+        if invocation.is_claude_activity() {
+            if let Some(cell) = self.transcript.native_calls.remove(&id) {
+                cell.complete(duration, result);
+            } else {
+                let mut cell = history_cell::new_active_mcp_tool_call(
+                    id, invocation, /*animations_enabled*/ false,
+                );
+                cell.complete(duration, result);
+                self.add_to_history(cell);
+            }
+            self.request_redraw();
+            return;
+        }
         if invocation.is_computer_activity() {
             let call = history_cell::new_active_mcp_tool_call(
                 id,

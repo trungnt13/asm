@@ -32,6 +32,13 @@ impl McpToolCallCell {
                 "Calling",
             ),
         };
+        let native_message =
+            self.invocation.is_claude_activity() && self.invocation.tool == "__agent_message";
+        let verb = if native_message && status != Some(false) {
+            "Message"
+        } else {
+            verb
+        };
         let title = self
             .invocation
             .arguments
@@ -41,7 +48,17 @@ impl McpToolCallCell {
             .and_then(serde_json::Value::as_str)
             .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
             .filter(|title| !title.is_empty())
-            .unwrap_or_else(|| format!("{}.{}", self.invocation.server, self.invocation.tool));
+            .unwrap_or_else(|| {
+                if native_message {
+                    format!("{} native agent", self.invocation.display_server())
+                } else {
+                    format!(
+                        "{}.{}",
+                        self.invocation.display_server(),
+                        self.invocation.tool
+                    )
+                }
+            });
         let mut lines = vec![clipped_line(
             Line::from(vec![
                 marker,

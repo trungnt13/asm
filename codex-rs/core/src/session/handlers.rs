@@ -247,7 +247,35 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
     Box::pin(sess.reload_user_config_layer()).await;
 }
 
+async fn reject_claude_operation(sess: &Session, sub_id: &str, operation: &str) -> bool {
+    let model = sess.thread_settings_snapshot().await.model;
+    if !crate::claude_runtime::is_claude_model(&model) {
+        return false;
+    }
+    sess.send_event_raw(Event {
+        id: sub_id.to_string(),
+        msg: EventMsg::Warning(WarningEvent {
+            message: format!(
+                "Claude runtime does not support {operation}; current work was not changed"
+            ),
+        }),
+    })
+    .await;
+    true
+}
+
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
+    if crate::claude_runtime::is_claude_model(&sess.thread_settings_snapshot().await.model) {
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Warning(WarningEvent {
+                message: "Claude runtime does not support manual compaction; current work was not changed"
+                    .to_string(),
+            }),
+        })
+        .await;
+        return;
+    }
     // Stop the old turn before the compact task picks up the next turn's environments.
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
     let turn_context = sess
@@ -303,6 +331,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     sess.stop_system1().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    crate::claude_runtime::shutdown(sess).await;
     super::async_compaction::shutdown(sess).await;
     // Cancel the turn before starting the bounded, best-effort diagnostic drain.
     if let Some(log) = sess
@@ -418,6 +447,9 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
+    if reject_claude_operation(sess, &sub_id, "native review mode").await {
+        return;
+    }
     let turn_context = sess
         .new_turn_with_default_settings(sub_id.clone(), Default::default())
         .await;
@@ -518,6 +550,9 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationStart(params) => {
+                    if reject_claude_operation(&sess, &sub.id, "realtime conversations").await {
+                        return false;
+                    }
                     if let Err(err) =
                         handle_realtime_conversation_start(&sess, sub.id.clone(), params).await
                     {
@@ -534,6 +569,12 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationAttach { params, reply } => {
+                    if crate::claude_runtime::is_claude_model(&sess.thread_settings_snapshot().await.model) {
+                        let _ = reply.send(Err(CodexErr::InvalidRequest(
+                            "Claude runtime does not support realtime conversations".to_string(),
+                        )));
+                        return false;
+                    }
                     let result =
                         crate::realtime_conversation::handle_attach(&sess, sub.id, params).await;
                     let _ = reply.send(result);

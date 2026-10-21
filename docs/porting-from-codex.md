@@ -274,6 +274,108 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### Claude Code thread runtime
+
+Explicit `claude-code/<model>` IDs select the official persistent `claude -p` CLI
+for main threads and ASM-managed children. Versioned `sonnet-` and `opus-` suffixes
+are expanded to native `claude-` model names at CLI launch; other native suffixes pass
+through unchanged. Saved session model IDs remain unchanged for safe resume.
+Other models retain upstream inference.
+Keep the upstream built-in catalog unchanged; select the runtime explicitly:
+
+```bash
+codex --no-daemon --model claude-code/sonnet-5-5
+```
+
+[Reference runtime catalog](example-model-catalog.json) is the authoritative, complete
+CC catalog example: Sonnet 5.5 and Opus 5.5 with `low`, `medium`, `high`, and `xhigh`
+effort, defaulting to `high`. Keep personal CC entries aligned with these objects.
+Do not copy personal instruction templates into this reference or modify the upstream
+built-in catalog. Claude Code remains responsible for native model access and effort
+acceptance; catalog metadata does not grant account access.
+
+Load it with `-c model_catalog_json="docs/example-model-catalog.json"` from the source
+checkout, or use an absolute path. A custom catalog replaces the ordinary catalog;
+this CC-only example does not merge in OpenAI entries. To retain both, copy its model
+objects into the existing personal catalog's `models` array.
+
+Keep CC entries visible independently of OpenAI login; never bypass filtering by
+marking them API-supported. Preserve ordinary model defaults.
+The model picker starts a fresh session after confirmation when entering/leaving this
+runtime or changing its fixed model/effort. Keep the original history; never replay it
+into the new native conversation or change saved defaults as part of this action.
+ASM child selections use catalog defaults and supported efforts when present; native
+model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
+Keep the V2 spawn tool description explicit: `claude-code/*` requires
+`fork_turns="none"` and a self-contained task message, including with custom tool
+descriptions or hidden catalogs. Do not rely on a failed spawn to teach this constraint.
+
+- ASM owns thread identity, queues, user input, output display and process lifecycle.
+  Claude Code owns conversation context, instructions, skills, tools, permissions,
+  hooks and its internal subagents. Do not synchronize ASM developer instructions,
+  approval receipts or tool results into Claude's private conversation.
+- Main sessions have no injected ASM MCP server. ASM-managed Claude children may
+  receive only inter-agent messaging tools over authenticated loopback MCP. Never
+  forward executable ASM tools or create a second agent registry.
+- Deliver messages during a busy Claude child's native run using UUID-correlated
+  Send now only when `system/init` advertises `interrupt_send_now_v1`. Persist input
+  before submission; reconcile every submitted command and control receipt before
+  saving clean idle. Native cutover may stop current tools but must not cancel
+  unrelated background children. Without the capability, retain turn-boundary delivery;
+  never send an unsupported control that could become an ordinary Stop. Idle
+  `send_message` remains queue-only, Codex delivery stays unchanged, and explicit
+  interruption retains its separate confirmed-idle or kill-and-dirty rules.
+- Project native tool, skill and task activity into existing MCP display cells for
+  streaming, disclosure, grouping and replay. These are display events, not tool
+  execution requests or model-context items. Attribute native child activity without
+  inventing ASM threads; preserve failures and avoid duplicate bridge-tool events.
+  Include distinct observed native child tasks in the completed turn's `ag` count,
+  deduplicated across lifecycle events and display replay. Historical child activity
+  must not inflate a currently active ancestor turn's count.
+- Use native Claude Code settings and subscription login; resolve `claude` through
+  PATH. Do not extract subscription credentials or enable API billing implicitly.
+  Do not disable native tools, skills or instructions to emulate ASM inference.
+- Claude permissions govern Claude tools. ASM sandbox and approval settings do not
+  govern them; display that distinction clearly. Never auto-approve headless prompts;
+  unavailable approvals must fail explicitly. Configured native hooks remain native.
+  If managed policy requires an ASM-managed sandbox, refuse external execution.
+- Keep one CLI process per loaded Claude session, with private external-session
+  linkage and unfinished-turn state. Resume only a known clean session; never replay
+  an uncertain submitted turn or completed tool calls automatically.
+- On interrupt, stop native work and retain the process only after a matching
+  successful interrupt acknowledgement with an explicit empty queued-input receipt,
+  explicit idle, and termination of observed
+  native child tasks. Persist clean linkage before allowing another turn. Missing
+  confirmation, timeout, disconnect or forced abort kills the owned group and keeps
+  linkage dirty. Give only external tasks a bounded cleanup grace period.
+  UUID-stamp submitted native user inputs so the receipt accounts for queued work.
+  A native aborted-streaming result is resumable only for that submitted UUID with
+  its cancelled-command receipt; other execution errors still require recovery.
+- Bound framing, stderr and cleanup waits. Interrupt and kill only owned process
+  groups; preserve primary failures and retain diagnostics only when requested.
+- Keep text-only local execution initially. Reject unsupported history forks,
+  rollback, runtime switches and native-only operations explicitly. Suppress native
+  model prewarm, title inference and System1 for external threads. Native memory
+  extraction may summarize their saved ASM transcripts.
+- External threads use Default collaboration mode only and never use guardian
+  approval review. Mandatory managed-execution restrictions still apply.
+- Native turns have no total-duration deadline; cancellation and bounded cleanup
+  remain available while tools and background agents are running.
+- Do not impose a separate approximate-token prompt cap or truncate instructions.
+  Claude Code manages its context; transport bounds still apply.
+- Report checked per-process usage deltas from native cumulative model counters.
+  First cold-resume usage and missing/reset counters are unknown, not zero; warn
+  that ASM totals and token-budget accounting are partial in those cases.
+- Thinking is a reported subset of output, never an additional output charge.
+  Display context fill from the latest main request input, not cumulative billing
+  or child requests. Use its native model window; hide unknown context metrics.
+  Cache rate is the cached share of that latest main request.
+- Require native stream-json result followed by session-idle completion; CLI 2.1.296
+  is the verified protocol target. Revalidate compatibility when upgrading it.
+- Keep opt-in until real Claude-main and Sol-parent/Claude-child sessions pass with
+  the intended installed CLI. Never replace installed binaries or global profiles
+  as part of testing. Cross-runtime context parity is not a requirement.
+
 ### Minimal diagnostics
 
 - Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. Disabled capture cannot be enabled by `RUST_LOG`, `log_dir`, or recorder environment variables.

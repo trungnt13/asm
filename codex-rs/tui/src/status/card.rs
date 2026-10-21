@@ -7,6 +7,7 @@ use crate::line_truncation::line_width;
 use crate::style::accent_color;
 use crate::token_usage::TokenUsage;
 use crate::token_usage::TokenUsageInfo;
+use crate::token_usage::context_window_remaining_percent;
 use crate::version::CODEX_CLI_VERSION;
 use chrono::DateTime;
 use chrono::Local;
@@ -297,6 +298,11 @@ impl StatusHistoryCell {
         agents_summary: String,
         refreshing_rate_limits: bool,
     ) -> Self {
+        let claude_runtime = model_name.starts_with("claude-code/")
+            || config
+                .model
+                .as_deref()
+                .is_some_and(|model| model.starts_with("claude-code/"));
         let approval_policy = AskForApproval::from(config.permissions.approval_policy.value());
         let permission_profile = config.permissions.effective_permission_profile();
         let workspace_roots = config.effective_workspace_roots();
@@ -347,14 +353,18 @@ impl StatusHistoryCell {
         let sandbox = status_permission_summary(&permission_profile, &cwd, &workspace_roots);
         let workspace_root_suffix = workspace_root_suffix(&workspace_roots, &cwd);
         let approval = status_approval_label(approval_policy, config.approvals_reviewer, &approval);
-        let permissions = status_permissions_label(
-            active_permission_profile.as_ref(),
-            &permission_profile,
-            approval_policy,
-            &sandbox,
-            &approval,
-            workspace_root_suffix.as_deref(),
-        );
+        let permissions = if claude_runtime {
+            "Claude Code-managed (ASM sandbox and approvals do not apply)".to_string()
+        } else {
+            status_permissions_label(
+                active_permission_profile.as_ref(),
+                &permission_profile,
+                approval_policy,
+                &sandbox,
+                &approval,
+                workspace_root_suffix.as_deref(),
+            )
+        };
         let show_chatgpt_usage_link = requires_openai_auth;
         let account = compose_account_display(account_display);
         let session_id = session_id.as_ref().map(std::string::ToString::to_string);
@@ -362,10 +372,15 @@ impl StatusHistoryCell {
         let default_usage = TokenUsage::default();
         let (context_usage, context_window) = match token_info {
             Some(info) => (&info.last_token_usage, info.model_context_window),
+            None if claude_runtime => (&default_usage, None),
             None => (&default_usage, config.model_context_window),
         };
         let context_window = context_window.map(|window| StatusContextWindowData {
-            percent_remaining: context_usage.percent_of_context_window_remaining(window),
+            percent_remaining: context_window_remaining_percent(
+                context_usage,
+                window,
+                claude_runtime,
+            ),
             tokens_in_context: context_usage.tokens_in_context_window(),
             window,
         });

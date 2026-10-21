@@ -23,6 +23,10 @@ pub(super) fn is_pending(cell: &dyn HistoryCell) -> bool {
     cell.as_any()
         .downcast_ref::<history_cell::DynamicToolCallCell>()
         .is_some_and(history_cell::DynamicToolCallCell::is_active)
+        || cell
+            .as_any()
+            .downcast_ref::<history_cell::RetainedMcpToolCallCell>()
+            .is_some_and(history_cell::RetainedMcpToolCallCell::is_active)
 }
 
 impl NativeHistory {

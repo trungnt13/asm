@@ -7,7 +7,9 @@ use super::app_server_event_targets::server_notification_thread_target;
 use crate::multi_agents::sub_agent_activity_display;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
+use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadStatus;
+use codex_app_server_protocol::Turn;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SubAgentSource;
 use std::collections::HashMap;
@@ -18,6 +20,7 @@ use uuid::Uuid;
 pub(super) struct TurnAgentCounts {
     active: HashMap<ThreadId, ActiveTurnAgents>,
     completed: HashMap<(ThreadId, String), usize>,
+    native: HashMap<(ThreadId, String), HashSet<(ThreadId, String, String)>>,
     // V2 spawn activity can arrive without a child thread metadata notification.
     parents: HashMap<ThreadId, ThreadId>,
     // The refresh ID protects live activity received while a metadata read is in flight.
@@ -31,9 +34,70 @@ struct ActiveTurnAgents {
 
 impl TurnAgentCounts {
     pub(super) fn count(&self, thread_id: ThreadId, turn_id: &str) -> Option<usize> {
-        self.completed
-            .get(&(thread_id, turn_id.to_owned()))
-            .copied()
+        let key = (thread_id, turn_id.to_owned());
+        let asm = self.completed.get(&key).copied();
+        let native = self.native.get(&key).map(HashSet::len);
+        (asm.is_some() || native.is_some()).then(|| asm.unwrap_or(0) + native.unwrap_or(0))
+    }
+
+    fn record_native_item(
+        &mut self,
+        thread_id: ThreadId,
+        turn_id: &str,
+        item: &ThreadItem,
+        live: bool,
+    ) {
+        if let ThreadItem::McpToolCall {
+            server,
+            tool,
+            arguments,
+            ..
+        } = item
+            && (server == "claude-code" || server.starts_with("claude-code/"))
+            && matches!(
+                tool.as_str(),
+                "__agent_started" | "__agent_progress" | "__agent_completed"
+            )
+            && let Some(task_id) = arguments.get("task_id").and_then(serde_json::Value::as_str)
+            && !task_id.is_empty()
+        {
+            self.native
+                .entry((thread_id, turn_id.to_owned()))
+                .or_default()
+                .insert((thread_id, server.clone(), task_id.to_owned()));
+            if !live
+                || !self
+                    .active
+                    .get(&thread_id)
+                    .is_some_and(|turn| turn.turn_id == turn_id)
+            {
+                return;
+            }
+            let mut ancestor = thread_id;
+            for _ in 0..self.parents.len() {
+                let Some(parent_id) = self.parents.get(&ancestor).copied() else {
+                    break;
+                };
+                if parent_id == thread_id {
+                    break;
+                }
+                if let Some(turn) = self.active.get(&parent_id) {
+                    self.native
+                        .entry((parent_id, turn.turn_id.clone()))
+                        .or_default()
+                        .insert((thread_id, server.clone(), task_id.to_owned()));
+                }
+                ancestor = parent_id;
+            }
+        }
+    }
+
+    pub(super) fn record_native_turns(&mut self, thread_id: ThreadId, turns: &[Turn]) {
+        for turn in turns {
+            for item in &turn.items {
+                self.record_native_item(thread_id, &turn.id, item, false);
+            }
+        }
     }
 
     fn record_active_agent(&mut self, agent_id: ThreadId) {
@@ -63,6 +127,12 @@ impl App {
         };
         let refresh_id = self.agents_overview.request_id;
         let state = &mut self.turn_agent_counts;
+        if let ServerNotification::ItemStarted(item) = notification {
+            state.record_native_item(thread_id, &item.turn_id, &item.item, true);
+        }
+        if let ServerNotification::ItemCompleted(item) = notification {
+            state.record_native_item(thread_id, &item.turn_id, &item.item, true);
+        }
         let activity = match notification {
             ServerNotification::ItemStarted(item) => Some((&item.turn_id, &item.item)),
             ServerNotification::ItemCompleted(item) => Some((&item.turn_id, &item.item)),

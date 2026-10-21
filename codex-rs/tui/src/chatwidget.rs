@@ -77,6 +77,7 @@ use crate::terminal_title::set_terminal_title;
 use crate::text_formatting::proper_join;
 use crate::token_usage::TokenUsage;
 use crate::token_usage::TokenUsageInfo;
+use crate::token_usage::context_window_remaining_percent;
 use crate::version::CODEX_CLI_VERSION;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
@@ -1160,13 +1161,16 @@ impl ChatWidget {
 
     fn context_remaining_percent(&self, info: &TokenUsageInfo) -> Option<i64> {
         info.model_context_window.map(|window| {
-            info.last_token_usage
-                .percent_of_context_window_remaining(window)
+            context_window_remaining_percent(
+                &info.last_token_usage,
+                window,
+                self.current_model().starts_with("claude-code/"),
+            )
         })
     }
 
     fn context_used_tokens(&self, info: &TokenUsageInfo, percent_known: bool) -> Option<i64> {
-        if percent_known {
+        if percent_known || self.current_model().starts_with("claude-code/") {
             return None;
         }
 
