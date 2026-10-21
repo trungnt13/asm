@@ -89,6 +89,7 @@ async fn forward_events_filters_private_events_before_blocked_send_is_cancelled(
             .unwrap();
     }
     let visible_msg = EventMsg::RawResponseItem(RawResponseItemEvent {
+        spawn_arguments: None,
         item: ResponseItem::CustomToolCall {
             encrypted_content: None,
             id: None,

@@ -914,6 +914,11 @@ impl FromStr for ThreadHistoryMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct InterAgentCommunication {
+    /// Local transcript details; never included in model input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(skip)]
+    #[schemars(skip)]
+    pub spawn_arguments: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub id: Option<ResponseItemId>,
@@ -946,6 +951,7 @@ impl InterAgentCommunication {
             other_recipients,
             content,
             encrypted_content: None,
+            spawn_arguments: None,
             internal_chat_message_metadata_passthrough: None,
             trigger_turn,
         }
@@ -964,6 +970,7 @@ impl InterAgentCommunication {
             recipient,
             other_recipients,
             content: String::new(),
+            spawn_arguments: None,
             encrypted_content: Some(encrypted_content),
             internal_chat_message_metadata_passthrough: None,
             trigger_turn,
@@ -980,6 +987,7 @@ impl InterAgentCommunication {
     pub fn to_response_input_item(&self) -> ResponseInputItem {
         let mut communication = self.clone();
         communication.id = None;
+        communication.spawn_arguments = None;
         communication.internal_chat_message_metadata_passthrough = None;
         ResponseInputItem::Message {
             role: "assistant".to_string(),
@@ -2049,6 +2057,10 @@ impl CodexErrorInfo {
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct RawResponseItemEvent {
+    /// Local transcript details, separate from the unchanged raw item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub spawn_arguments: Option<String>,
     pub item: ResponseItem,
 }
 
@@ -4994,6 +5006,7 @@ mod tests {
     #[test]
     fn inter_agent_communication_response_input_item_preserves_commentary_phase() {
         let mut communication = InterAgentCommunication {
+            spawn_arguments: None,
             id: Some(ResponseItemId::with_suffix("amsg", "1")),
             author: AgentPath::root(),
             recipient: AgentPath::root().join("reviewer").expect("recipient path"),
