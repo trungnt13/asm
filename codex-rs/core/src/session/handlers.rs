@@ -283,7 +283,15 @@ async fn reject_claude_operation(sess: &Session, sub_id: &str, operation: &str) 
 }
 
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
-    if reject_claude_operation(sess, &sub_id, "manual compaction").await {
+    if crate::claude_runtime::is_claude_model(&sess.thread_settings_snapshot().await.model) {
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Warning(WarningEvent {
+                message: "Claude runtime does not support manual compaction; current work was not changed"
+                    .to_string(),
+            }),
+        })
+        .await;
         return;
     }
     // Stop the old turn before the compact task picks up the next turn's environments.
