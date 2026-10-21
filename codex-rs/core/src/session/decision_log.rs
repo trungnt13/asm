@@ -253,6 +253,7 @@ impl DecisionAttempt {
                         "invalid_request"
                     }
                     DecisionsError::Transport => "transport",
+                    DecisionsError::TransportDetails(code) => code.as_str(),
                     DecisionsError::Http(status) => {
                         self.record.http_status = Some(status);
                         "http"

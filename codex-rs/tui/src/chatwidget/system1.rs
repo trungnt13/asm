@@ -154,6 +154,9 @@ impl ChatWidget {
             codex_protocol::protocol::System1Error::Credentials => "CREDENTIALS".to_string(),
             codex_protocol::protocol::System1Error::InvalidRequest => "INVALID_REQUEST".to_string(),
             codex_protocol::protocol::System1Error::Transport => "TRANSPORT".to_string(),
+            codex_protocol::protocol::System1Error::TransportDetails { code } => {
+                format!("TRANSPORT_{}", code.as_str())
+            }
             codex_protocol::protocol::System1Error::Timeout => "TIMEOUT".to_string(),
             codex_protocol::protocol::System1Error::Http { status } => format!("HTTP{status}"),
             codex_protocol::protocol::System1Error::ResponseTooLarge => {
