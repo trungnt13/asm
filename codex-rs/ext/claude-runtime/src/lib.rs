@@ -89,6 +89,16 @@ fn kill_group(pid: Option<u32>) {
     }
 }
 
+fn execution_abort_reason(result: &Value) -> Option<&str> {
+    if result.get("is_error").and_then(Value::as_bool) == Some(true)
+        && result.get("subtype").and_then(Value::as_str) == Some("error_during_execution")
+    {
+        result.get("terminal_reason").and_then(Value::as_str)
+    } else {
+        None
+    }
+}
+
 impl ClaudeRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn spawn(options: ClaudeOptions) -> Result<Self> {
@@ -515,12 +525,9 @@ impl ClaudeRuntime {
                 {
                     bail!("Claude result did not confirm the requested session ID");
                 }
+                let abort_reason = execution_abort_reason(&frame);
                 let interrupted_execution = interrupt_id.is_some()
-                    && frame.get("is_error").and_then(Value::as_bool) == Some(true)
-                    && frame.get("subtype").and_then(Value::as_str)
-                        == Some("error_during_execution")
-                    && frame.get("terminal_reason").and_then(Value::as_str)
-                        == Some("aborted_streaming")
+                    && abort_reason == Some("aborted_streaming")
                     && frame
                         .get("user_message_uuid")
                         .and_then(Value::as_str)
@@ -531,13 +538,7 @@ impl ClaudeRuntime {
                         id != latest_command
                             && (commands.contains(id) || cancelled_commands.contains(id))
                     })
-                    && frame.get("is_error").and_then(Value::as_bool) == Some(true)
-                    && frame.get("subtype").and_then(Value::as_str)
-                        == Some("error_during_execution")
-                    && matches!(
-                        frame.get("terminal_reason").and_then(Value::as_str),
-                        Some("aborted_streaming" | "aborted_tools")
-                    );
+                    && matches!(abort_reason, Some("aborted_streaming" | "aborted_tools"));
                 if steering_abort && let Some(id) = result_command {
                     aborted_commands.insert(id.to_owned());
                 }
