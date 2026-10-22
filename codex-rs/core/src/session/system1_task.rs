@@ -149,9 +149,12 @@ pub(super) async fn run_decision(
     {
         session
             .publish_system1_error(
-                if matches!(target, DecisionTarget::Warmup { .. }) && error == System1Error::Timeout
-                {
-                    super::system1::health::System1HealthUpdate::WarmupTimeout
+                if matches!(target, DecisionTarget::Warmup { .. }) {
+                    if error == System1Error::Timeout {
+                        super::system1::health::System1HealthUpdate::WarmupTimeout
+                    } else {
+                        super::system1::health::System1HealthUpdate::WarmupFailure(error)
+                    }
                 } else {
                     super::system1::health::System1HealthUpdate::Decision(Some(error))
                 },

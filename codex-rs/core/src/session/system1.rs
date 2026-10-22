@@ -131,6 +131,7 @@ impl Drop for System1Session {
 #[derive(Default)]
 struct System1Recovery {
     failures: u32,
+    restore_baseline: bool,
     next_probe: Option<Instant>,
     blocked: bool,
     in_flight: bool,
@@ -211,7 +212,7 @@ impl System1Session {
                 profile.model.clone(),
             )),
             Err(error) => {
-                tracing::warn!(%error, "System1 unavailable; retaining current effort");
+                tracing::warn!(%error, "System1 client unavailable");
                 Err(error)
             }
         }
