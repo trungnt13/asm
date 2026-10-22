@@ -1068,6 +1068,8 @@ pub struct Config {
     /// Value to use for `reasoning.effort` when making a request using the
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
+    // Retained separately because child inheritance and live settings replace the effort.
+    pub(crate) system1_default_effort: Option<ReasoningEffort>,
     pub system1: codex_config::System1Config,
     /// Retains role restrictions across live-toggle inheritance and child reloads.
     pub(crate) role_system1_disabled: bool,
@@ -4692,6 +4694,7 @@ impl Config {
                 .as_ref()
                 .and_then(|auto_review| auto_review.circuit_break_action)
                 .unwrap_or_default(),
+            system1_default_effort: cfg.model_reasoning_effort.clone(),
             model_reasoning_effort: cfg.model_reasoning_effort,
             system1,
             role_system1_disabled: false,

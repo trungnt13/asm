@@ -4065,14 +4065,24 @@ impl Session {
         // Match apply_turn_settings and activate_turn_environments: active_turn before state.
         // Wait for executor startup below, after releasing both locks.
         let (mut settings, environments, inherited_environments) = {
+            // Manual publication also pauses System1 before releasing this permit.
+            let _settings_guard = thread_settings::acquire_persistence_lock(self)
+                .or_cancel(cancellation_token)
+                .await?;
             let _active = self
                 .active_turn
                 .lock()
                 .or_cancel(cancellation_token)
                 .await?;
-            let _state = self.state.lock().or_cancel(cancellation_token).await?;
+            let state = self.state.lock().or_cancel(cancellation_token).await?;
+            let current = turn_context.next_step_settings.load_full();
+            let settings =
+                self.system1_fallback_settings(Arc::clone(&current), &state.session_configuration);
+            if !Arc::ptr_eq(&current, &settings) {
+                turn_context.next_step_settings.store(Arc::clone(&settings));
+            }
             (
-                turn_context.next_step_settings.load_full(),
+                settings,
                 self.services.turn_environments.snapshot(),
                 self.features
                     .enabled(Feature::SubagentThreadEnvironments)

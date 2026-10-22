@@ -234,6 +234,7 @@ mod role_overrides {
             next_config.developer_instructions = Some(instructions.clone());
         }
         if let Some(effort) = overrides.model_reasoning_effort.clone() {
+            next_config.system1_default_effort = Some(effort.clone());
             next_config.model_reasoning_effort = Some(effort);
         }
         if let Some(summary) = overrides.model_reasoning_summary {
