@@ -375,6 +375,21 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   remain available while tools and background agents are running.
 - Do not impose a separate approximate-token prompt cap or truncate instructions.
   Claude Code manages its context; transport bounds still apply.
+- Explicit child role context limits, otherwise exact V2
+  `subagent_model_context_windows` entries, set native `--autocompact` windows.
+  Accept only 100000–1000000 tokens; reject unsupported values, never ignore them.
+  Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the child environment and flag settings
+  so inherited environment and user/project settings cannot override the explicit
+  value. Native managed policy retains precedence. Unmatched children and main
+  sessions retain native defaults and environment settings.
+  Bind the configured window to native linkage; changing it requires a new chat.
+  This is a soft compaction window, not a hard maximum context capacity or an
+  exact trigger. Native model capacity still clamps it; Claude subtracts output
+  reserve and compaction headroom. Native 2.1.296 uses a 20000-token output reserve
+  and 13000-token headroom, so 272000 triggers at 239000 with that output reserve.
+  Preserve native automatic-compaction enable/disable controls, memory and hooks;
+  the setting cannot force disabled compaction to run. Keep reported context fill
+  based on native model capacity, not this configured compaction window.
 - Report checked per-process usage deltas from native cumulative model counters.
   First cold-resume usage and missing/reset counters are unknown, not zero; warn
   that ASM totals and token-budget accounting are partial in those cases.

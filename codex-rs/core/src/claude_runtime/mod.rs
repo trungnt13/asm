@@ -25,6 +25,8 @@ use codex_protocol::models::ContentItemProvenance;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
@@ -200,6 +202,24 @@ async fn run_conversation(
     let messaging = turn.parent_thread_id.is_some()
         && turn.session_source.is_non_root_agent()
         && turn.multi_agent_version == MultiAgentVersion::V2;
+    // Do not reinterpret inherited scalar limits or model metadata as native settings.
+    let auto_compact_window = if matches!(
+        turn.session_source,
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+    ) {
+        turn.config.role_model_context_window.or_else(|| {
+            (turn.multi_agent_version == MultiAgentVersion::V2)
+                .then(|| {
+                    turn.config
+                        .subagent_model_context_windows
+                        .get(&settings.model_info.slug)
+                        .copied()
+                })
+                .flatten()
+        })
+    } else {
+        None
+    };
     let mut last_message = None;
     loop {
         if cancellation.is_cancelled() {
@@ -287,6 +307,7 @@ async fn run_conversation(
                             format_version: 2,
                             model: settings.model_info.slug.clone(),
                             effort: effort.clone(),
+                            auto_compact_window,
                             cwd: cwd.clone(),
                             session_id: id.clone(),
                             messaging,
@@ -302,6 +323,7 @@ async fn run_conversation(
             checkpoint.validate(
                 &settings.model_info.slug,
                 &effort,
+                auto_compact_window,
                 &cwd,
                 messaging,
                 &messages,
@@ -350,6 +372,7 @@ async fn run_conversation(
         runtime.checkpoint.validate(
             &settings.model_info.slug,
             &effort,
+            auto_compact_window,
             &cwd,
             messaging,
             &messages,
