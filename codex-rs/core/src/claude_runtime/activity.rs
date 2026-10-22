@@ -14,6 +14,8 @@ pub(super) struct ActivityStream {
     calls: HashMap<String, Value>,
     seen: HashSet<String>,
     pub(super) messaging: bool,
+    /// Native runtime ID shown as the activity server, such as `claude-code`.
+    pub(super) server: &'static str,
     agent_tasks: HashSet<String>,
 }
 
@@ -116,7 +118,7 @@ impl ActivityStream {
         Ok(())
     }
 
-    async fn start(
+    pub(super) async fn start(
         &mut self,
         session: &Session,
         turn: &TurnContext,
@@ -149,12 +151,12 @@ impl ActivityStream {
             return Ok(());
         }
         let server = if scope.is_empty() {
-            "claude-code".to_owned()
+            self.server.to_owned()
         } else {
-            format!("claude-code/{scope}")
+            format!("{}/{scope}", self.server)
         };
         let call = json!({
-            "id": format!("{}:claude:{key}", turn.sub_id),
+            "id": format!("{}:{}:{key}", turn.sub_id, self.server),
             "server": server, "tool": name, "arguments": block["input"],
             "status": "inProgress"
         });
@@ -166,7 +168,19 @@ impl ActivityStream {
         Ok(())
     }
 
-    async fn finish(
+    /// Applies a native update's title or arguments to a running call before completion.
+    pub(super) fn update(&mut self, key: &str, name: &Value, input: &Value) {
+        if let Some(call) = self.calls.get_mut(key) {
+            if name.is_string() {
+                call["tool"] = name.clone();
+            }
+            if !input.is_null() {
+                call["arguments"] = input.clone();
+            }
+        }
+    }
+
+    pub(super) async fn finish(
         &mut self,
         session: &Session,
         turn: &TurnContext,

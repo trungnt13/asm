@@ -405,6 +405,52 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   the intended installed CLI. Never replace installed binaries or global profiles
   as part of testing. Cross-runtime context parity is not a requirement.
 
+### Cursor Agent thread runtime
+
+Explicit `cursor-agent/<model>` IDs select the official Cursor CLI over ACP (`agent acp`,
+JSON-RPC on stdio) for main threads and ASM-managed children. It extends the Claude Code
+runtime above: the same rules apply except where listed here. Do not add a separate runtime
+copy, backend hierarchy or event vocabulary; branch only where the protocols differ.
+
+```bash
+codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
+```
+
+- `<model>` must be one value from Cursor's ACP model list, or a base name matching exactly
+  one listed variant. Effort is part of that native variant; ASM effort does not apply.
+  Unlisted bracket overrides fail before the first prompt.
+- The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
+  switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
+  checkpoint path and format, storing the session ID that Cursor assigns.
+- Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. Never pass
+  `--force`, `--yolo`, `--approve-mcps` or `--trust`. Cursor configuration governs its tools,
+  including its own auto-approval settings. Answer approval requests with a reject option,
+  plans with `rejected`, questions with `skipped`, and other agent requests with an error, so
+  that a turn cannot hang or fall back to a local plan. Show each refusal.
+- Cursor saves session model selections in its config directory. Give each thread a private
+  `CURSOR_CONFIG_DIR` beside its checkpoint. Refresh it on every spawn with private copies of
+  the user's `cli-config.json` and `permissions.json`, using Cursor's directory precedence, so
+  that native permissions still apply and the user's default model never changes. Login,
+  rules, skills, hooks and MCP settings stay in their native locations; never copy or extract
+  credentials.
+- Child role context limits and `subagent_model_context_windows` set no Cursor compaction
+  window and skip the Claude window validation; Cursor manages its own context.
+- Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.
+- `session/load` replays native history before it responds; discard that replay so the ASM
+  transcript does not get duplicates. Set the model again after every new or loaded session.
+- Cursor starts shell tools in their own process groups below the ACP process. Cleanup lists
+  descendants with a bounded `ps` snapshot, kills their groups and then the owned group. Never
+  kill by socket, path or name, and never signal ASM's group. Cleanup succeeds only after those
+  groups are observed gone; it does not cover processes that left them, such as with `setsid`. On interrupt, send
+  `session/cancel`. After `stopReason: cancelled`, stop the process tree and keep the linkage
+  clean only when descendant cleanup succeeded; the next turn loads the session. A missing
+  acknowledgement, failed cleanup or any other failure leaves the linkage dirty.
+- Cursor reports no token usage or context fill. Show them as unavailable, never zero.
+- Session-scoped MCP servers can be blocked by Cursor team policy; this account rejects them
+  ("Blocked by team policy"). Cursor children therefore get no ASM messaging tools. Their
+  mail arrives between turns, and ASM still returns their final answer. There is no Send now.
+- Verified with Cursor CLI 2026.10.19-6bbf2c4. Revalidate the protocol when upgrading it.
+
 ### Minimal diagnostics
 
 - Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. Disabled capture cannot be enabled by `RUST_LOG`, `log_dir`, or recorder environment variables.

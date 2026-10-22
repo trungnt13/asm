@@ -338,17 +338,17 @@ impl StepSettings {
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
         let current_claude =
-            crate::claude_runtime::is_claude_model(self.collaboration_mode.model());
+            crate::claude_runtime::is_native_model(self.collaboration_mode.model());
         let claude_settings_changed = current_claude
             && (self.collaboration_mode.model() != next.collaboration_mode.model()
                 || self.collaboration_mode.reasoning_effort()
                     != next.collaboration_mode.reasoning_effort());
         if claude_settings_changed
             || (!current_claude
-                && crate::claude_runtime::is_claude_model(next.collaboration_mode.model()))
+                && crate::claude_runtime::is_native_model(next.collaboration_mode.model()))
         {
             return Err(ConstraintError::InvalidValue {
-                field_name: "Claude runtime settings (start a fresh thread to change)",
+                field_name: "Native runtime settings (start a fresh thread to change)",
                 candidate: next.collaboration_mode.model().to_string(),
                 allowed: self.collaboration_mode.model().to_string(),
                 requirement_source: codex_config::RequirementSource::Unknown,
@@ -363,21 +363,21 @@ impl StepSettings {
         &self,
         constraints: &StepSettingsConstraints<'_>,
     ) -> ConstraintResult<()> {
-        if crate::claude_runtime::is_claude_model(self.collaboration_mode.model())
+        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
             && self.collaboration_mode.mode != ModeKind::Default
         {
             return Err(ConstraintError::InvalidValue {
-                field_name: "Claude runtime collaboration mode",
+                field_name: "Native runtime collaboration mode",
                 candidate: self.collaboration_mode.mode.display_name().to_string(),
                 allowed: "default".to_string(),
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }
-        if crate::claude_runtime::is_claude_model(self.collaboration_mode.model())
+        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
             && self.approvals_reviewer != ApprovalsReviewer::User
         {
             return Err(ConstraintError::InvalidValue {
-                field_name: "Claude runtime approvals reviewer",
+                field_name: "Native runtime approvals reviewer",
                 candidate: self.approvals_reviewer.to_string(),
                 allowed: "user".to_string(),
                 requirement_source: codex_config::RequirementSource::Unknown,

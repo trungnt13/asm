@@ -247,16 +247,16 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
     Box::pin(sess.reload_user_config_layer()).await;
 }
 
-async fn reject_claude_operation(sess: &Session, sub_id: &str, operation: &str) -> bool {
+async fn reject_native_operation(sess: &Session, sub_id: &str, operation: &str) -> bool {
     let model = sess.thread_settings_snapshot().await.model;
-    if !crate::claude_runtime::is_claude_model(&model) {
+    if !crate::claude_runtime::is_native_model(&model) {
         return false;
     }
     sess.send_event_raw(Event {
         id: sub_id.to_string(),
         msg: EventMsg::Warning(WarningEvent {
             message: format!(
-                "Claude runtime does not support {operation}; current work was not changed"
+                "Native runtimes do not support {operation}; current work was not changed"
             ),
         }),
     })
@@ -265,12 +265,13 @@ async fn reject_claude_operation(sess: &Session, sub_id: &str, operation: &str) 
 }
 
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
-    if crate::claude_runtime::is_claude_model(&sess.thread_settings_snapshot().await.model) {
+    if crate::claude_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
         sess.send_event_raw(Event {
             id: sub_id,
             msg: EventMsg::Warning(WarningEvent {
-                message: "Claude runtime does not support manual compaction; current work was not changed"
-                    .to_string(),
+                message:
+                    "Native runtimes do not support manual compaction; current work was not changed"
+                        .to_string(),
             }),
         })
         .await;
@@ -447,7 +448,7 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
-    if reject_claude_operation(sess, &sub_id, "native review mode").await {
+    if reject_native_operation(sess, &sub_id, "native review mode").await {
         return;
     }
     let turn_context = sess
@@ -550,7 +551,7 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationStart(params) => {
-                    if reject_claude_operation(&sess, &sub.id, "realtime conversations").await {
+                    if reject_native_operation(&sess, &sub.id, "realtime conversations").await {
                         return false;
                     }
                     if let Err(err) =
@@ -569,9 +570,9 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationAttach { params, reply } => {
-                    if crate::claude_runtime::is_claude_model(&sess.thread_settings_snapshot().await.model) {
+                    if crate::claude_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
                         let _ = reply.send(Err(CodexErr::InvalidRequest(
-                            "Claude runtime does not support realtime conversations".to_string(),
+                            "Native runtimes do not support realtime conversations".to_string(),
                         )));
                         return false;
                     }

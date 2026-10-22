@@ -1,7 +1,12 @@
-//! Run persistent official Claude CLI sessions.
-//! Claude owns tools and configuration. Callers serialize turns.
+//! Run persistent official Claude and Cursor CLI sessions.
+//! The native CLI owns tools and configuration. Callers serialize turns.
 
+mod cursor;
 mod frames;
+
+pub use cursor::CursorOptions;
+pub use cursor::CursorRuntime;
+pub use cursor::CursorSession;
 
 use anyhow::Context;
 use anyhow::Result;

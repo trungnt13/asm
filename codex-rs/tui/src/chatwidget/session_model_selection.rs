@@ -55,7 +55,8 @@ impl ChatWidget {
         model: &str,
         effort: Option<ReasoningEffortConfig>,
     ) -> bool {
-        (self.current_model().starts_with("claude-code/") || model.starts_with("claude-code/"))
+        (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
+            || codex_protocol::openai_models::is_native_runtime_model(&model))
             && (self.current_model() != model || self.current_reasoning_effort() != effort)
     }
 
@@ -88,7 +89,7 @@ impl ChatWidget {
         model: String,
         effort: Option<ReasoningEffortConfig>,
     ) -> Option<SelectionSecondaryAction> {
-        if model.starts_with("claude-code/")
+        if codex_protocol::openai_models::is_native_runtime_model(&model)
             || self.model_selection_needs_new_session(&model, effort.clone())
         {
             return None;

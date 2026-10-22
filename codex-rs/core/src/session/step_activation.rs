@@ -338,11 +338,11 @@ impl Session {
         let Some((turn_context, task_done, current)) = target else {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
-        if crate::claude_runtime::is_claude_model(&current.model_info.slug)
+        if crate::claude_runtime::is_native_model(&current.model_info.slug)
             && update.environments.is_some()
         {
             return TurnSettingsUpdateOutcome::Rejected {
-                reason: "Claude runtime environments cannot change during a turn".to_string(),
+                reason: "Native runtime environments cannot change during a turn".to_string(),
             };
         }
         let TurnSettingsUpdate {

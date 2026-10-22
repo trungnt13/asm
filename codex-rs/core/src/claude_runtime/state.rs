@@ -1,5 +1,7 @@
 use super::bridge::ClaudeMessageBridge;
 use codex_claude_runtime::ClaudeRuntime;
+use codex_claude_runtime::CursorRuntime;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::TokenUsage;
 use serde::Deserialize;
 use serde::Serialize;
@@ -35,11 +37,11 @@ impl Checkpoint {
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.format_version == 2,
-            "incompatible Claude linkage; start a new chat"
+            "incompatible native session linkage; start a new chat"
         );
         anyhow::ensure!(
             !self.in_flight,
-            "previous Claude turn has an uncertain outcome; start a new chat to avoid replay"
+            "previous native turn has an uncertain outcome; start a new chat to avoid replay"
         );
         anyhow::ensure!(
             self.model == model
@@ -47,12 +49,12 @@ impl Checkpoint {
                 && self.auto_compact_window == auto_compact_window
                 && self.cwd == cwd
                 && self.messaging == messaging,
-            "saved Claude model, effort, compaction window, directory, or messaging configuration changed; start a new chat"
+            "saved native model, effort, compaction window, directory, or messaging configuration changed; start a new chat"
         );
         anyhow::ensure!(
             self.input_count <= messages.len()
                 && self.input_prefix == super::input_prefix(&messages[..self.input_count])?,
-            "saved user input does not match the Claude checkpoint; refusing replay"
+            "saved user input does not match the native session checkpoint; refusing replay"
         );
         Ok(())
     }
@@ -76,8 +78,30 @@ impl Checkpoint {
     }
 }
 
+/// The official CLI process serving one loaded native session.
+pub(super) enum RuntimeProcess {
+    Claude(ClaudeRuntime),
+    Cursor(CursorRuntime),
+}
+
+impl RuntimeProcess {
+    pub(super) async fn shutdown(&mut self) -> anyhow::Result<()> {
+        match self {
+            Self::Claude(runtime) => runtime.shutdown().await,
+            Self::Cursor(runtime) => runtime.shutdown().await,
+        }
+    }
+
+    pub(super) fn diagnostic_snapshot(&self) -> serde_json::Value {
+        match self {
+            Self::Claude(runtime) => runtime.diagnostic_snapshot(),
+            Self::Cursor(runtime) => runtime.diagnostic_snapshot(),
+        }
+    }
+}
+
 pub(crate) struct ClaudeSession {
-    pub(super) runtime: ClaudeRuntime,
+    pub(super) runtime: RuntimeProcess,
     pub(super) bridge: Option<ClaudeMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
@@ -135,14 +159,34 @@ impl ClaudeSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
         bridge: Option<&ClaudeMessageBridge>,
-        checkpoint: &Checkpoint,
+        checkpoint: &mut Checkpoint,
+        checkpoint_path: &std::path::Path,
         session: codex_claude_runtime::ClaudeSession,
-    ) -> anyhow::Result<ClaudeRuntime> {
+    ) -> anyhow::Result<RuntimeProcess> {
         use anyhow::Context;
-        let model = checkpoint
-            .model
-            .strip_prefix("claude-code/")
-            .context("not a Claude model")?;
+        let (runtime, model) =
+            NativeRuntime::for_model(&checkpoint.model).context("not a native runtime model")?;
+        if runtime == NativeRuntime::CursorAgent {
+            let session = match session {
+                codex_claude_runtime::ClaudeSession::New { .. } => {
+                    codex_claude_runtime::CursorSession::New
+                }
+                codex_claude_runtime::ClaudeSession::Resume { id } => {
+                    codex_claude_runtime::CursorSession::Load { id }
+                }
+            };
+            let runtime = CursorRuntime::spawn(codex_claude_runtime::CursorOptions {
+                executable: PathBuf::from("agent"),
+                cwd: checkpoint.cwd.clone(),
+                model: model.to_owned(),
+                session,
+                config_dir: checkpoint_path.with_extension("cursor-config"),
+            })
+            .await?;
+            // Cursor assigns new session IDs; link before the first prompt is submitted.
+            checkpoint.session_id = runtime.session_id().to_owned();
+            return Ok(RuntimeProcess::Cursor(runtime));
+        }
         let model = if model.starts_with("sonnet-") || model.starts_with("opus-") {
             format!("claude-{model}")
         } else {
@@ -161,6 +205,7 @@ impl ClaudeSession {
             }),
         })
         .await
+        .map(RuntimeProcess::Claude)
     }
 
     pub(super) fn measure_usage_delta(&mut self, result: &serde_json::Value) -> Option<TokenUsage> {
@@ -271,7 +316,7 @@ impl RuntimeSlot {
                 // A late return is killed by Drop rather than becoming an unowned idle process.
                 drop(state.runtime.take());
                 anyhow::bail!(
-                    "Claude runtime did not return from its aborted turn within five seconds"
+                    "native runtime did not return from its aborted turn within five seconds"
                 )
             }
         }
@@ -289,11 +334,11 @@ impl<'a> RuntimeLease<'a> {
         let mut state = slot
             .state
             .lock()
-            .map_err(|_| anyhow::anyhow!("Claude session lock was poisoned"))?;
-        anyhow::ensure!(!state.leased, "Claude runtime is already in use");
+            .map_err(|_| anyhow::anyhow!("native session lock was poisoned"))?;
+        anyhow::ensure!(!state.leased, "native runtime is already in use");
         anyhow::ensure!(
             !state.discard_on_return,
-            "Claude runtime shutdown timed out; start a new chat"
+            "native runtime shutdown timed out; start a new chat"
         );
         state.leased = true;
         let runtime = state.runtime.take();

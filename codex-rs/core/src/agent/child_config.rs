@@ -236,7 +236,7 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
-        let native_model = crate::claude_runtime::is_claude_model(requested_model);
+        let native_model = crate::claude_runtime::is_native_model(requested_model);
         let selected_model_name = if native_model {
             requested_model.to_string()
         } else {
@@ -283,7 +283,7 @@ async fn apply_requested_spawn_agent_model_overrides(
         if config
             .model
             .as_deref()
-            .is_some_and(crate::claude_runtime::is_claude_model)
+            .is_some_and(crate::claude_runtime::is_native_model)
         {
             config.model_reasoning_effort = Some(reasoning_effort);
             return Ok(());
@@ -311,7 +311,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .models_manager
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
-    if crate::claude_runtime::is_claude_model(&model) {
+    if crate::claude_runtime::is_native_model(&model) {
         if !model_info.used_fallback_model_metadata
             && let Some(effort) = config.model_reasoning_effort.as_ref()
         {
@@ -324,7 +324,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         if matching_subagent_service_tier(config, &model, config.model_reasoning_effort.as_ref())
             .is_some_and(|tier| tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE)
         {
-            return Err("Claude runtime does not support native service tiers".to_string());
+            return Err("Native runtimes do not support service tiers".to_string());
         }
         config.service_tier = None;
         return Ok(());

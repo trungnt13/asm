@@ -21,6 +21,7 @@ use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_path_uri::PathUri;
 use codex_utils_sandbox_summary::summarize_permission_profile;
@@ -62,6 +63,8 @@ struct StatusContextWindowData {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StatusTokenUsageData {
+    /// False when the runtime reports no token usage, as with Cursor.
+    reported: bool,
     total: i64,
     input: i64,
     output: i64,
@@ -298,11 +301,10 @@ impl StatusHistoryCell {
         agents_summary: String,
         refreshing_rate_limits: bool,
     ) -> Self {
-        let claude_runtime = model_name.starts_with("claude-code/")
-            || config
-                .model
-                .as_deref()
-                .is_some_and(|model| model.starts_with("claude-code/"));
+        let native_runtime = NativeRuntime::for_model(model_name)
+            .or_else(|| config.model.as_deref().and_then(NativeRuntime::for_model))
+            .map(|(runtime, _)| runtime);
+        let claude_runtime = native_runtime.is_some();
         let approval_policy = AskForApproval::from(config.permissions.approval_policy.value());
         let permission_profile = config.permissions.effective_permission_profile();
         let workspace_roots = config.effective_workspace_roots();
@@ -353,8 +355,12 @@ impl StatusHistoryCell {
         let sandbox = status_permission_summary(&permission_profile, &cwd, &workspace_roots);
         let workspace_root_suffix = workspace_root_suffix(&workspace_roots, &cwd);
         let approval = status_approval_label(approval_policy, config.approvals_reviewer, &approval);
-        let permissions = if claude_runtime {
-            "Claude Code-managed (ASM sandbox and approvals do not apply)".to_string()
+        let permissions = if let Some(runtime) = native_runtime {
+            let owner = match runtime {
+                NativeRuntime::ClaudeCode => "Claude Code",
+                NativeRuntime::CursorAgent => "Cursor Agent",
+            };
+            format!("{owner}-managed (ASM sandbox and approvals do not apply)")
         } else {
             status_permissions_label(
                 active_permission_profile.as_ref(),
@@ -386,6 +392,7 @@ impl StatusHistoryCell {
         });
 
         let token_usage = StatusTokenUsageData {
+            reported: native_runtime != Some(NativeRuntime::CursorAgent),
             total: total_usage.blended_total(),
             input: total_usage.non_cached_input(),
             output: total_usage.output_tokens,
@@ -424,6 +431,9 @@ impl StatusHistoryCell {
     }
 
     fn token_usage_spans(&self) -> Vec<Span<'static>> {
+        if !self.token_usage.reported {
+            return vec![Span::from("unavailable").dim()];
+        }
         let total_fmt = format_tokens_compact(self.token_usage.total);
         let input_fmt = format_tokens_compact(self.token_usage.input);
         let output_fmt = format_tokens_compact(self.token_usage.output);

@@ -77,11 +77,11 @@ impl Session {
             let (config, source, thread_source, model, effort) = {
                 let state = self.state.lock().await;
                 let configuration = &state.session_configuration;
-                if crate::claude_runtime::is_claude_model(
+                if crate::claude_runtime::is_native_model(
                     configuration.step_settings.collaboration_mode.model(),
                 ) {
                     return Err(CodexErr::InvalidRequest(
-                        "Claude runtime does not support adaptive reasoning".to_string(),
+                        "Native runtimes do not support adaptive reasoning".to_string(),
                     ));
                 }
                 if state.shutting_down {

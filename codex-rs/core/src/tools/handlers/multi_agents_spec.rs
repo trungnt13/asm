@@ -812,7 +812,7 @@ Note that passing `fork_turns="none"` will not pass any surrounding context to t
     };
 
     let tool_description = format!(
-        "{tool_description}\nClaude Code models (`claude-code/*`) require `fork_turns=\"none\"`; `all` and its default are rejected before launch. Include all needed context in `message`. Claude uses its native instructions, tools and permissions, not the parent's."
+        "{tool_description}\nNative runtime models (`claude-code/*`, `cursor-agent/*`) require `fork_turns=\"none\"`; `all` and its default are rejected before launch. Include all needed context in `message`. They use their native instructions, tools and permissions, not the parent's. Cursor agents cannot call agent messaging tools; their final answer is still returned."
     );
 
     if let Some(usage_hint_text) = usage_hint_text {
