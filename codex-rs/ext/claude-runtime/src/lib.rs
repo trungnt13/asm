@@ -64,7 +64,9 @@ pub struct ClaudeRuntime {
     usable: bool,
     failure_result: Option<Value>,
     exit_status: Option<String>,
-    send_now: watch::Sender<bool>,
+    mid_turn_delivery: watch::Sender<bool>,
+    // Native reports this level per process; live tasks can start another native turn.
+    background_work: bool,
 }
 
 // A dropped turn future must not leave a live agent executing outside ASM's task lifetime.
@@ -197,12 +199,13 @@ impl ClaudeRuntime {
             usable: true,
             failure_result: None,
             exit_status: None,
-            send_now: watch::channel(false).0,
+            mid_turn_delivery: watch::channel(false).0,
+            background_work: false,
         })
     }
 
-    pub fn subscribe_send_now(&self) -> watch::Receiver<bool> {
-        self.send_now.subscribe()
+    pub fn subscribe_mid_turn_delivery(&self) -> watch::Receiver<bool> {
+        self.mid_turn_delivery.subscribe()
     }
 
     /// These bounded diagnostics can contain private information.
@@ -303,10 +306,8 @@ impl ClaudeRuntime {
         let mut latest_command = user_message_uuid.to_owned();
         let mut commands = HashSet::from([latest_command.clone()]);
         let mut submitted_commands = commands.clone();
-        let mut steering_requests = std::collections::HashMap::new();
         let mut latest_command_succeeded = false;
         let mut cancelled_commands = HashSet::new();
-        let mut aborted_commands = HashSet::new();
         let mut submitted_steering_count = 0;
         let mut interrupt_id = None;
         let mut interrupt_deadline = None;
@@ -346,36 +347,26 @@ impl ClaudeRuntime {
                         steering = None;
                         continue;
                     };
-                    if !*self.send_now.borrow() {
-                        bail!("Claude steering was submitted without Send now capability");
+                    if !*self.mid_turn_delivery.borrow() {
+                        bail!("Claude steering was submitted without command lifecycle support");
                     }
                     let command_uuid = Uuid::new_v4().to_string();
-                    let request_id = Uuid::new_v4().to_string();
-                    // Persisted input is never replayed if either write fails partway through.
-                    timeout(STOP_TIMEOUT, async {
-                        self.write_frame(json!({"type":"user", "uuid":command_uuid,
-                            "message":{"role":"user","content":prompt}})).await?;
-                        self.write_frame(json!({"type":"control_request", "request_id":request_id,
-                            "request":{"subtype":"interrupt", "send_now":true,
-                                "message_uuid":command_uuid}})).await
-                    }).await.context("Claude steering submission timed out")??;
+                    // No Send now or interrupt: native queues the message and folds it in at
+                    // its next tool boundary, so running tools finish instead of being rejected.
+                    // Persisted input is never replayed if the write fails partway through.
+                    timeout(STOP_TIMEOUT, self.write_frame(json!({"type":"user",
+                        "uuid":command_uuid, "message":{"role":"user","content":prompt}})))
+                    .await
+                    .context("Claude steering submission timed out")??;
                     commands.insert(command_uuid.clone());
                     submitted_commands.insert(command_uuid.clone());
                     latest_command = command_uuid;
-                    steering_requests.insert(request_id, Instant::now() + STOP_TIMEOUT);
                     latest_command_succeeded = false;
                     submitted_steering_count += 1;
                     pending_result = None;
                     idle = false;
                     continue;
                 }
-                _ = async {
-                    if let Some(deadline) = steering_requests.values().min() {
-                        sleep_until(*deadline).await;
-                    } else {
-                        std::future::pending::<()>().await;
-                    }
-                } => bail!("Claude Send now acknowledgement timed out; explicit recovery is required"),
                 frame = self.frames.recv() => frame.context("Claude stream reader stopped")??,
             };
             if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
@@ -389,7 +380,9 @@ impl ClaudeRuntime {
             if frame.get("type").and_then(Value::as_str) == Some("system")
                 && frame.get("subtype").and_then(Value::as_str) == Some("init")
             {
-                self.send_now.send_replace(
+                // Send now is never requested. This capability only identifies the verified
+                // CLI generation whose UUID command lifecycle lets queued input be reconciled.
+                self.mid_turn_delivery.send_replace(
                     frame
                         .get("capabilities")
                         .and_then(Value::as_array)
@@ -399,23 +392,6 @@ impl ClaudeRuntime {
                                 .any(|item| item.as_str() == Some("interrupt_send_now_v1"))
                         }),
                 );
-            }
-            if frame.get("type").and_then(Value::as_str) == Some("control_response")
-                && let Some(response) = frame.get("response")
-                && let Some(id) = response.get("request_id").and_then(Value::as_str)
-                && steering_requests.remove(id).is_some()
-            {
-                if response.get("subtype").and_then(Value::as_str) != Some("success")
-                    || !matches!(
-                        response
-                            .pointer("/response/send_now")
-                            .and_then(Value::as_str),
-                        Some("stopped" | "delivering" | "nothing_waiting")
-                    )
-                {
-                    self.failure_result = Some(frame);
-                    bail!("Claude did not acknowledge Send now; explicit recovery is required");
-                }
             }
             if frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
                 && let Some(id) = frame.get("command_uuid").and_then(Value::as_str)
@@ -495,8 +471,19 @@ impl ClaudeRuntime {
                 {
                     active_agents.remove(task_id);
                 }
+                if subtype == Some("background_tasks_changed") {
+                    self.background_work = frame
+                        .get("tasks")
+                        .and_then(Value::as_array)
+                        .context("Claude reported background tasks without a task list")?
+                        .iter()
+                        .any(|task| task.get("ambient").and_then(Value::as_bool) != Some(true));
+                }
                 if subtype == Some("session_state_changed") {
-                    idle = frame.get("state").and_then(Value::as_str) == Some("idle");
+                    // Idle with live background work is not final: its notification starts
+                    // another native turn. Interrupts keep their separate idle confirmation.
+                    idle = frame.get("state").and_then(Value::as_str) == Some("idle")
+                        && (interrupt_id.is_some() || !self.background_work);
                 }
             }
             let is_result = frame.get("type").and_then(Value::as_str) == Some("result");
@@ -533,20 +520,10 @@ impl ClaudeRuntime {
                         .and_then(Value::as_str)
                         .is_some_and(|id| commands.contains(id) || cancelled_commands.contains(id));
                 let result_command = frame.get("user_message_uuid").and_then(Value::as_str);
-                let steering_abort = submitted_steering_count > 0
-                    && result_command.is_some_and(|id| {
-                        id != latest_command
-                            && (commands.contains(id) || cancelled_commands.contains(id))
-                    })
-                    && matches!(abort_reason, Some("aborted_streaming" | "aborted_tools"));
-                if steering_abort && let Some(id) = result_command {
-                    aborted_commands.insert(id.to_owned());
-                }
                 if interrupted_execution && let Some(id) = result_command {
                     interrupted_commands.insert(id.to_owned());
                 }
                 if !interrupted_execution
-                    && !steering_abort
                     && (frame.get("is_error").and_then(Value::as_bool) != Some(false)
                         || frame.get("subtype").and_then(Value::as_str) != Some("success"))
                 {
@@ -566,19 +543,22 @@ impl ClaudeRuntime {
                 if result_command == Some(latest_command.as_str()) && !interrupted_execution {
                     latest_command_succeeded = true;
                 }
-                if submitted_steering_count == 0
+                // A notification turn can run while ASM is between turns, for example after
+                // an interrupt leaves a background shell live. Accept one only after this turn's
+                // own input succeeded, so a stale notification never answers new input.
+                let notification = frame.pointer("/origin/kind").and_then(Value::as_str)
+                    == Some("task-notification");
+                if (submitted_steering_count == 0 && !notification)
                     || (result_command.is_some_and(|id| submitted_commands.contains(id))
-                        && !steering_abort
                         && !interrupted_execution)
                     || (result_command.is_none()
+                        && notification
                         && latest_command_succeeded
-                        && commands.is_empty()
-                        && frame.pointer("/origin/kind").and_then(Value::as_str)
-                            == Some("task-notification"))
+                        && commands.is_empty())
                 {
                     pending_result = Some(frame.clone());
                 }
-                if !steering_abort && let Some(id) = result_command {
+                if let Some(id) = result_command {
                     commands.remove(id);
                 }
             }
@@ -592,7 +572,6 @@ impl ClaudeRuntime {
                     && idle
                     && active_agents.is_empty()
                     && interrupted_commands.is_subset(&cancelled_commands)
-                    && aborted_commands.is_subset(&cancelled_commands)
                 {
                     return Ok(ClaudeTurnOutcome {
                         result: pending_result,
@@ -602,10 +581,7 @@ impl ClaudeRuntime {
                 }
             } else if idle
                 && (submitted_steering_count == 0
-                    || (latest_command_succeeded
-                        && commands.is_empty()
-                        && steering_requests.is_empty()
-                        && aborted_commands.is_subset(&cancelled_commands)))
+                    || (latest_command_succeeded && commands.is_empty()))
                 && let Some(result) = pending_result.take()
             {
                 return Ok(ClaudeTurnOutcome {

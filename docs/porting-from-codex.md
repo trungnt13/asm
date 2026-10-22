@@ -317,14 +317,24 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - Main sessions have no injected ASM MCP server. ASM-managed Claude children may
   receive only inter-agent messaging tools over authenticated loopback MCP. Never
   forward executable ASM tools or create a second agent registry.
-- Deliver messages during a busy Claude child's native run using UUID-correlated
-  Send now only when `system/init` advertises `interrupt_send_now_v1`. Persist input
-  before submission; reconcile every submitted command and control receipt before
-  saving clean idle. Native cutover may stop current tools but must not cancel
-  unrelated background children. Without the capability, retain turn-boundary delivery;
-  never send an unsupported control that could become an ordinary Stop. Idle
-  `send_message` remains queue-only, Codex delivery stays unchanged, and explicit
+- Deliver messages during a busy Claude child's native run as UUID-stamped queued
+  user input, never Send now or another interrupt. Native folds it in at its next tool
+  boundary, so running tools finish instead of returning a rejection that tells the
+  model to stop. Enable this only when `system/init` advertises `interrupt_send_now_v1`,
+  which identifies the verified CLI generation whose command lifecycle reconciles
+  queued input; otherwise retain turn-boundary delivery. Persist input before
+  submission; reconcile every submitted command before saving clean idle. Idle
+  `send_message` remains queue-only and Codex delivery stays unchanged. Redirect
+  urgently with explicit `interrupt_agent`, then `followup_task`; explicit
   interruption retains its separate confirmed-idle or kill-and-dirty rules.
+- Native idle is not final while `background_tasks_changed` lists live non-ambient
+  tasks: their completion notification starts another native turn. Keep that work in
+  the same ASM turn until a later idle without live background work, so a parent does
+  not see completion before the child can wake. Notifications confer no new authority.
+  Long-lived background tasks keep the turn running until they end or are interrupted.
+  A plain interrupt leaves background shells running; its confirmation rules are
+  unchanged. A notification result answers a turn only after that turn's own input
+  succeeded, so a notification turn that ran between ASM turns cannot answer new input.
 - Project native tool, skill and task activity into existing MCP display cells for
   streaming, disclosure, grouping and replay. These are display events, not tool
   execution requests or model-context items. Attribute native child activity without
@@ -371,7 +381,8 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   or child requests. Use its native model window; hide unknown context metrics.
   Cache rate is the cached share of that latest main request.
 - Require native stream-json result followed by session-idle completion; CLI 2.1.296
-  is the verified protocol target. Revalidate compatibility when upgrading it.
+  is the verified protocol target. Queued delivery and background continuation were
+  verified with 2.1.308. Revalidate compatibility when upgrading it.
 - Keep opt-in until real Claude-main and Sol-parent/Claude-child sessions pass with
   the intended installed CLI. Never replace installed binaries or global profiles
   as part of testing. Cross-runtime context parity is not a requirement.
