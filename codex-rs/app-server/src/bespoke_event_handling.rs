@@ -1237,6 +1237,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                         started_at: aborted.started_at,
                         completed_at: aborted.completed_at,
                         duration_ms: aborted.duration_ms,
+                        token_usage: None,
                     },
                     &outgoing,
                 )
