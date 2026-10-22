@@ -359,8 +359,10 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   confirmation, timeout, disconnect or forced abort kills the owned group and keeps
   linkage dirty. Give only external tasks a bounded cleanup grace period.
   UUID-stamp submitted native user inputs so the receipt accounts for queued work.
-  A native aborted-streaming result is resumable only for that submitted UUID with
-  its cancelled-command receipt; other execution errors still require recovery.
+  Native aborted-streaming and aborted-tools results are resumable only after an
+  ASM-requested interrupt, for the submitted UUID with its cancelled-command receipt
+  and the confirmed cleanup above. Continue with new input; never replay the interrupted
+  input or assume its tools had no side effects. Other execution errors require recovery.
 - Bound framing, stderr and cleanup waits. Interrupt and kill only owned process
   groups; preserve primary failures and retain diagnostics only when requested.
 - Keep text-only local execution initially. Reject unsupported history forks,
