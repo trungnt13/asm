@@ -527,7 +527,7 @@ impl ClaudeRuntime {
                 }
                 let abort_reason = execution_abort_reason(&frame);
                 let interrupted_execution = interrupt_id.is_some()
-                    && abort_reason == Some("aborted_streaming")
+                    && matches!(abort_reason, Some("aborted_streaming" | "aborted_tools"))
                     && frame
                         .get("user_message_uuid")
                         .and_then(Value::as_str)
