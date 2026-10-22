@@ -13,6 +13,8 @@ pub(super) struct Checkpoint {
     pub(super) format_version: u8,
     pub(super) model: String,
     pub(super) effort: Option<String>,
+    #[serde(default)]
+    pub(super) auto_compact_window: Option<i64>,
     pub(super) cwd: PathBuf,
     pub(super) session_id: String,
     pub(super) messaging: bool,
@@ -26,6 +28,7 @@ impl Checkpoint {
         &self,
         model: &str,
         effort: &Option<String>,
+        auto_compact_window: Option<i64>,
         cwd: &std::path::Path,
         messaging: bool,
         messages: &[String],
@@ -41,9 +44,10 @@ impl Checkpoint {
         anyhow::ensure!(
             self.model == model
                 && &self.effort == effort
+                && self.auto_compact_window == auto_compact_window
                 && self.cwd == cwd
                 && self.messaging == messaging,
-            "saved Claude model, effort, directory, or messaging configuration changed; start a new chat"
+            "saved Claude model, effort, compaction window, directory, or messaging configuration changed; start a new chat"
         );
         anyhow::ensure!(
             self.input_count <= messages.len()
@@ -149,6 +153,7 @@ impl ClaudeSession {
             cwd: checkpoint.cwd.clone(),
             model,
             effort: checkpoint.effort.clone(),
+            auto_compact_window: checkpoint.auto_compact_window,
             session,
             mcp_config: bridge.map(|bridge| {
                 serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),

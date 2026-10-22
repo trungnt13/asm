@@ -42,6 +42,8 @@ pub struct ClaudeOptions {
     pub cwd: PathBuf,
     pub model: String,
     pub effort: Option<String>,
+    /// Native compaction window, not the model's maximum context capacity.
+    pub auto_compact_window: Option<i64>,
     pub session: ClaudeSession,
     pub mcp_config: Option<Value>,
 }
@@ -105,6 +107,12 @@ impl ClaudeRuntime {
         if !cfg!(any(target_os = "linux", target_os = "macos")) {
             bail!("Claude runtime currently supports Linux and macOS only");
         }
+        if let Some(window) = options.auto_compact_window {
+            anyhow::ensure!(
+                (100_000..=1_000_000).contains(&window),
+                "Claude auto-compaction window must be between 100000 and 1000000 tokens"
+            );
+        }
         let (session_id, session_flag) = match options.session {
             ClaudeSession::New { id } => (id, "--session-id"),
             ClaudeSession::Resume { id } => (id, "--resume"),
@@ -159,6 +167,16 @@ impl ClaudeRuntime {
             .transpose()?;
         if let Some(config) = &mcp_config {
             command.arg("--mcp-config").arg(config.path());
+        }
+        if let Some(window) = options.auto_compact_window {
+            // Settings can reapply env after startup; flag settings beat user/project settings.
+            // Native managed policy still has precedence.
+            let window = window.to_string();
+            command.env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", &window);
+            command
+                .arg("--settings")
+                .arg(json!({"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":window}}).to_string());
+            command.arg("--autocompact").arg(window);
         }
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
