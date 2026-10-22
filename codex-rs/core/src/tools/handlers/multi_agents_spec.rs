@@ -224,7 +224,7 @@ pub fn create_send_message_tool() -> ToolSpec {
 
     ToolSpec::Function(ResponsesApiTool {
         name: "send_message".to_string(),
-        description: "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn. For busy Claude Code agents, immediate delivery may stop current native tools; idle agents remain queued."
+        description: "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn. Busy Claude Code agents receive it after their current native tool finishes, without stopping work; use interrupt_agent first to redirect urgently. Idle agents remain queued."
             .to_string(),
         strict: false,
         defer_loading: None,
