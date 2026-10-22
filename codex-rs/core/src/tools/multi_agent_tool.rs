@@ -25,7 +25,7 @@ pub(crate) fn multi_agent_v2_handler(
     parameters_override: Option<&str>,
 ) -> Arc<dyn CoreToolRuntime> {
     let parameters_override = parameters_override.map(|parameters| -> Result<JsonSchema, &str> {
-        let mut parameters = super::catalog_parameters::parse(parameters)?;
+        let mut parameters = codex_tools::parse_catalog_tool_parameters(parameters)?;
         // ASM delivers inter-agent messages as plaintext, so catalog markers must not
         // make the server encrypt arguments.
         for property in parameters

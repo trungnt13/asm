@@ -10,6 +10,7 @@ use codex_config::ConfigLayerEntry;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
 use codex_config::McpServerCommandMatcher;
+use codex_config::McpServerDisabledReason;
 use codex_config::McpServerIdentity;
 use codex_config::McpServerRequirement;
 use codex_config::McpServerValueMatcher;
@@ -507,6 +508,34 @@ consolidation_reasoning_effort = "high"
         )
         .disable_on_external_context
     );
+}
+
+#[tokio::test]
+async fn fresh_memory_profiles_preserve_explicit_version_and_transition_opt_out() {
+    for (settings, expected) in [
+        ("", codex_protocol::MemoryVersion::V2),
+        ("version = 'v1'", codex_protocol::MemoryVersion::V1),
+        ("dual_write = false", codex_protocol::MemoryVersion::V1),
+        (
+            "version = 'v2'\ndual_write = false",
+            codex_protocol::MemoryVersion::V2,
+        ),
+    ] {
+        let home = tempdir().expect("tempdir");
+        let cfg = toml::from_str::<ConfigToml>(&format!(
+            "[features]\nmemories = true\n[memories]\n{settings}"
+        ))
+        .expect("memory config");
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            home.abs(),
+        )
+        .await
+        .expect("load config");
+        assert_eq!(config.memories.version, expected, "{settings}");
+        assert!(!home.path().join("memories").exists());
+    }
 }
 
 #[tokio::test]
@@ -1360,6 +1389,108 @@ command = "print-token"
     assert_eq!(config.model_provider, expected_provider);
 }
 
+#[tokio::test]
+async fn load_config_uses_resolved_cwd_for_default_gcp_auth() {
+    let codex_home = tempdir().expect("tempdir");
+    let workspace = tempdir().expect("tempdir");
+    let cwd = workspace.abs();
+
+    for base_url in [None, Some("https://vertex.example.com/v1")] {
+        let mut cfg = ConfigToml {
+            model_provider: Some("gcp".to_string()),
+            ..Default::default()
+        };
+        if let Some(base_url) = base_url {
+            cfg.model_providers.insert(
+                "gcp".to_string(),
+                ModelProviderInfo {
+                    base_url: Some(base_url.to_string()),
+                    ..Default::default()
+                },
+            );
+        }
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides {
+                cwd: Some(cwd.to_path_buf()),
+                ..Default::default()
+            },
+            codex_home.abs(),
+        )
+        .await
+        .expect("load config");
+
+        let mut expected_provider = ModelProviderInfo::create_gcp_provider();
+        expected_provider.base_url = base_url.map(str::to_string);
+        expected_provider.auth = Some(ModelProviderAuthInfo {
+            command: if cfg!(windows) {
+                "gcloud.cmd"
+            } else {
+                "gcloud"
+            }
+            .to_string(),
+            args: vec![
+                "auth".into(),
+                "application-default".into(),
+                "print-access-token".into(),
+            ],
+            timeout_ms: std::num::NonZeroU64::new(30_000).expect("timeout should be non-zero"),
+            refresh_interval_ms: 3_000_000,
+            cwd: cwd.clone(),
+        });
+        assert_eq!(config.model_provider_id, "gcp");
+        assert_eq!(config.model_provider, expected_provider);
+        assert_eq!(config.model_providers.get("gcp"), Some(&expected_provider));
+    }
+}
+
+#[tokio::test]
+async fn load_config_applies_gcp_transport_overrides() {
+    let cfg = toml::from_str::<ConfigToml>(
+        r#"
+model_provider = "gcp"
+
+[model_providers.gcp]
+base_url = "https://vertex.example.com/v1"
+http_headers = { "X-Custom-Header" = "value" }
+
+[model_providers.gcp.auth]
+command = "print-token"
+"#,
+    )
+    .expect("GCP transport overrides should deserialize");
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides::default(),
+        tempdir().expect("tempdir").abs(),
+    )
+    .await
+    .expect("load config");
+
+    let mut expected_provider = built_in_model_providers(/*openai_base_url*/ None)
+        .remove("gcp")
+        .expect("GCP provider should be built in");
+    expected_provider.base_url = Some("https://vertex.example.com/v1".to_string());
+    expected_provider.auth = Some(ModelProviderAuthInfo {
+        command: "print-token".to_string(),
+        args: Vec::new(),
+        timeout_ms: std::num::NonZeroU64::new(5_000).expect("timeout should be non-zero"),
+        refresh_interval_ms: 300_000,
+        cwd: std::env::current_dir()
+            .expect("current directory should be available")
+            .try_into()
+            .expect("current directory should be absolute"),
+    });
+    expected_provider.http_headers = Some(std::collections::HashMap::from([(
+        "X-Custom-Header".to_string(),
+        "value".into(),
+    )]));
+
+    assert_eq!(config.model_provider_id, "gcp");
+    assert_eq!(config.model_provider, expected_provider);
+}
+
 #[test]
 fn config_toml_rejects_unsupported_amazon_bedrock_overrides() {
     let err = toml::from_str::<ConfigToml>(
@@ -1687,9 +1818,12 @@ strip_request_headers = ["authorization"]
                         unix_sockets: None,
                         allow_local_binding: None,
                         mitm: Some(NetworkMitmToml {
+                            version: None,
                             hooks: Some(IndexMap::from([(
                                 "github_write".to_string(),
                                 NetworkMitmHookToml {
+                                    schemes: Vec::new(),
+                                    ports: Vec::new(),
                                     host: "api.github.com".to_string(),
                                     methods: vec!["POST".to_string(), "PUT".to_string()],
                                     path_prefixes: vec!["/repos/openai/".to_string()],
@@ -1768,9 +1902,12 @@ fn permissions_profile_network_to_proxy_config_preserves_mitm_hooks() {
     let network = NetworkToml {
         mode: Some(NetworkMode::Full),
         mitm: Some(NetworkMitmToml {
+            version: None,
             hooks: Some(IndexMap::from([(
                 "github_write".to_string(),
                 NetworkMitmHookToml {
+                    schemes: Vec::new(),
+                    ports: Vec::new(),
                     host: "api.github.com".to_string(),
                     methods: vec!["POST".to_string()],
                     path_prefixes: vec!["/repos/openai/".to_string()],
@@ -5451,8 +5588,10 @@ fn filter_mcp_servers_by_allowlist_blocks_all_when_empty() {
         ("server-b".to_string(), http_mcp("https://example.com/b")),
     ]);
 
+    servers.get_mut("server-b").expect("server-b").enabled = false;
     let source = RequirementSource::LegacyManagedConfigTomlFromMdm;
     let requirements = Sourced::new(BTreeMap::new(), source.clone());
+    filter_mcp_servers_by_requirements(&mut servers, Some(&requirements));
     filter_mcp_servers_by_requirements(&mut servers, Some(&requirements));
 
     let reason = Some(McpServerDisabledReason::Requirements { source });
@@ -5465,8 +5604,16 @@ fn filter_mcp_servers_by_allowlist_blocks_all_when_empty() {
             ))
             .collect::<HashMap<String, (bool, Option<McpServerDisabledReason>)>>(),
         HashMap::from([
-            ("server-a".to_string(), (false, reason.clone())),
-            ("server-b".to_string(), (false, reason)),
+            ("server-a".to_string(), (false, reason)),
+            (
+                "server-b".to_string(),
+                (
+                    false,
+                    Some(McpServerDisabledReason::ExplicitAndRequirements {
+                        source: requirements.source.clone(),
+                    })
+                ),
+            ),
         ])
     );
 }
@@ -5692,6 +5839,10 @@ fn filter_plugin_mcp_servers_by_matchers_enforces_name_and_invocation() {
 
 #[tokio::test]
 async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result<()> {
+    let service_config = codex_config::ConfigServer {
+        base_url: "https://policy.example/settings".into(),
+        oauth: None,
+    };
     let codex_home = TempDir::new()?;
     let user_file = AbsolutePathBuf::resolve_path_against_base(CONFIG_TOML_FILE, codex_home.path());
     let project_dot_codex =
@@ -5731,6 +5882,7 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         ),
     ]);
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        config_server: Some(service_config.clone()),
         mcp_servers: Some(mcp_requirements.clone()),
         ..Default::default()
     };
@@ -5777,7 +5929,8 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         requirements,
         requirements_toml,
     )
-    .map_err(std::io::Error::other)?;
+    .map_err(std::io::Error::other)?
+    .with_applied_config_server(Some(service_config));
     let thread_layer_stack = ConfigLayerStack::new(
         vec![
             ConfigLayerEntry::new(
@@ -5852,6 +6005,26 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         codex_home.abs(),
     )
     .await?;
+    assert_eq!(
+        config.config_layer_stack.applied_config_server(),
+        refreshed_layer_stack.applied_config_server()
+    );
+
+    // User-only refreshes keep this policy; managed refreshes must supply it.
+    let mut missing_policy = config.clone();
+    missing_policy.config_layer_stack = missing_policy
+        .config_layer_stack
+        .with_applied_config_server(/*service_config*/ None);
+    assert!(
+        config
+            .resolve_runtime_refresh(&missing_policy, RuntimeConfigRefresh::User)
+            .is_ok()
+    );
+    assert!(
+        config
+            .resolve_runtime_refresh(&missing_policy, RuntimeConfigRefresh::Mcp)
+            .is_err()
+    );
 
     assert_eq!(
         config.mcp_servers.get(),
@@ -6426,7 +6599,7 @@ async fn memory_tool_makes_memories_root_readable_without_creating_or_widening_w
 -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
-    let memories_root = codex_home.path().join("memories");
+    let memories_root = codex_home.path().join("memories_v2");
     let memories_root_abs = memories_root.abs();
 
     let config = Config::load_from_base_config_with_overrides(
@@ -10575,6 +10748,7 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
     let fixture = create_test_fixture()?;
 
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        config_server: None,
         model_provider: None,
         model_providers: None,
         allowed_login_methods: None,

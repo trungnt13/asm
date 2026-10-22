@@ -1671,6 +1671,12 @@ pub enum EventMsg {
     RawResponseItem(RawResponseItemEvent),
     RawResponseCompleted(RawResponseCompletedEvent),
 
+    /// In-process delivery from a private reviewer through its parent's subscription.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    PrivateSessionEvent(PrivateSessionEvent),
+
     ItemStarted(ItemStartedEvent),
     ItemCompleted(ItemCompletedEvent),
     HookStarted(HookStartedEvent),
@@ -2062,6 +2068,20 @@ pub struct RawResponseItemEvent {
     #[ts(optional)]
     pub spawn_arguments: Option<String>,
     pub item: ResponseItem,
+}
+
+/// Observer events that a private session forwards without modifying its parent's history.
+#[derive(Debug, Clone)]
+pub struct PrivateSessionEvent {
+    pub thread_id: ThreadId,
+    pub event: PrivateSessionEventPayload,
+}
+
+/// Recorded state and cancellation needed by observers awaiting response acceptance.
+#[derive(Debug, Clone)]
+pub enum PrivateSessionEventPayload {
+    RecordedItem(RawResponseItemEvent),
+    TurnAborted(TurnAbortedEvent),
 }
 
 /// Exact usage and metadata reported by one upstream Responses API completion.

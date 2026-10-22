@@ -51,11 +51,11 @@ impl ChatComposer {
             self.draft.quote_comments.clear();
         }
         self.attachments.quotes = quotes;
-        if !self.attachments.quotes.is_empty() && self.draft.prompt_prefix == PromptPrefix::Shell {
+        if !self.attachments.quotes.is_empty() && self.draft.is_bash_mode {
             let cursor = self.draft.textarea.cursor();
             self.draft.textarea.insert_str_at(/*pos*/ 0, "!");
             self.draft.textarea.set_cursor(cursor + 1);
-            self.draft.prompt_prefix = PromptPrefix::None;
+            self.draft.is_bash_mode = false;
         }
         self.sync_popups();
     }

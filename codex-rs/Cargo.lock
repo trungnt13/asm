@@ -2576,6 +2576,7 @@ dependencies = [
  "codex-utils-redacted-string",
  "codex-websocket-auth",
  "codex-windows-sandbox",
+ "core_test_support",
  "crossterm",
  "flate2",
  "futures",
@@ -2663,6 +2664,7 @@ dependencies = [
  "codex-config",
  "codex-core",
  "codex-http-client",
+ "codex-keyring-store",
  "codex-login",
  "codex-otel",
  "codex-protocol",
@@ -2675,6 +2677,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]
@@ -2837,6 +2840,7 @@ dependencies = [
  "codex-features",
  "codex-file-system",
  "codex-git-utils",
+ "codex-http-client",
  "codex-model-provider-info",
  "codex-network-proxy",
  "codex-protocol",
@@ -3182,6 +3186,14 @@ name = "codex-diagnostics"
 version = "0.164.1-alpha.10"
 dependencies = [
  "libc",
+ "pretty_assertions",
+]
+
+[[package]]
+name = "codex-direct-tool-timing"
+version = "0.164.1-alpha.10"
+dependencies = [
+ "codex-utils-critical-path",
  "pretty_assertions",
 ]
 
@@ -3692,6 +3704,7 @@ dependencies = [
  "codex-utils-output-truncation",
  "core_test_support",
  "http 1.4.0",
+ "insta",
  "pretty_assertions",
  "serde_json",
  "tempfile",
@@ -3942,6 +3955,7 @@ dependencies = [
  "codex-exec-server-test-support",
  "codex-login",
  "codex-model-provider",
+ "codex-network-proxy",
  "codex-otel",
  "codex-plugin",
  "codex-protocol",
@@ -4155,6 +4169,7 @@ name = "codex-model-provider-info"
 version = "0.164.1-alpha.10"
 dependencies = [
  "codex-client",
+ "codex-http-client",
  "codex-protocol",
  "codex-utils-absolute-path",
  "codex-utils-redacted-string",
@@ -4165,7 +4180,6 @@ dependencies = [
  "serde",
  "tempfile",
  "toml 0.9.11+spec-1.1.0",
- "url",
 ]
 
 [[package]]
@@ -4239,6 +4253,8 @@ name = "codex-network-proxy"
 version = "0.164.1-alpha.10"
 dependencies = [
  "anyhow",
+ "aws-credential-types",
+ "aws-sigv4",
  "base64 0.22.1",
  "chrono",
  "clap",
@@ -4615,6 +4631,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tracing",
  "uuid",
@@ -4916,6 +4933,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "urlencoding",
 ]
 

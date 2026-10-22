@@ -1063,6 +1063,9 @@
             "guardian_node_repl_transcript_images": {
               "type": "boolean"
             },
+            "guardian_recorded_items": {
+              "type": "boolean"
+            },
             "guardian_reuse_parent_compaction": {
               "type": "boolean"
             },
@@ -1361,6 +1364,9 @@
               "type": "boolean"
             },
             "tui_app_server": {
+              "type": "boolean"
+            },
+            "tui_multi_backend": {
               "type": "boolean"
             },
             "ultrafast_mode": {
@@ -2861,7 +2867,7 @@
               "$ref": "#/definitions/MemoryVersion"
             }
           ],
-          "description": "Selects the memory pipeline; v1 remains the default."
+          "description": "Selects the memory pipeline. Fresh profiles default to v2 when memories are enabled, unless dual-write is explicitly disabled; existing v1 profiles default to v1."
         }
       },
       "type": "object"
@@ -3233,6 +3239,7 @@
       "type": "object"
     },
     "NetworkMitmActionToml": {
+      "additionalProperties": false,
       "properties": {
         "inject_request_headers": {
           "default": [],
@@ -3286,6 +3293,15 @@
           },
           "type": "array"
         },
+        "ports": {
+          "default": [],
+          "items": {
+            "format": "uint16",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
         "query": {
           "additionalProperties": {
             "items": {
@@ -3295,6 +3311,13 @@
           },
           "default": {},
           "type": "object"
+        },
+        "schemes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -3306,9 +3329,14 @@
       "type": "object"
     },
     "NetworkMitmInjectedHeaderToml": {
+      "additionalProperties": false,
       "properties": {
         "name": {
           "default": "",
+          "type": "string"
+        },
+        "placeholder": {
+          "default": null,
           "type": "string"
         },
         "prefix": {
@@ -3340,6 +3368,13 @@
             "$ref": "#/definitions/NetworkMitmHookToml"
           },
           "type": "object"
+        },
+        "version": {
+          "description": "Set to 2 when using origin-scoped hooks or credential substitution.",
+          "format": "uint8",
+          "maximum": 2.0,
+          "minimum": 2.0,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -7751,6 +7786,9 @@
         "guardian_node_repl_transcript_images": {
           "type": "boolean"
         },
+        "guardian_recorded_items": {
+          "type": "boolean"
+        },
         "guardian_reuse_parent_compaction": {
           "type": "boolean"
         },
@@ -8049,6 +8087,9 @@
           "type": "boolean"
         },
         "tui_app_server": {
+          "type": "boolean"
+        },
+        "tui_multi_backend": {
           "type": "boolean"
         },
         "ultrafast_mode": {
