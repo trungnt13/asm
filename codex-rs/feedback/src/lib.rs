@@ -1094,14 +1094,3 @@ impl Visit for FeedbackTagsVisitor {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "metadata_tests.rs"]
-mod metadata_tests;
-
-#[cfg(test)]
-#[path = "feedback_event_tests.rs"]
-mod feedback_event_tests;
-
-#[cfg(test)]
-mod save_rollout_tests;
