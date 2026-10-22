@@ -10,7 +10,7 @@ Buffer {
         "  /mention   mention a file                                                     ",
         "  /mcp       list MCP tools; use /mcp verbose or /mcp login <name>              ",
         "                                                                           Main ",
-        "/ m                                                                             ",
+        "› /m                                                                            ",
         "                                                                                ",
         "  model · high · fast                                                           ",
     ],

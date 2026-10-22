@@ -510,6 +510,34 @@ consolidation_reasoning_effort = "high"
 }
 
 #[tokio::test]
+async fn fresh_memory_profiles_preserve_explicit_version_and_transition_opt_out() {
+    for (settings, expected) in [
+        ("", codex_protocol::MemoryVersion::V2),
+        ("version = 'v1'", codex_protocol::MemoryVersion::V1),
+        ("dual_write = false", codex_protocol::MemoryVersion::V1),
+        (
+            "version = 'v2'\ndual_write = false",
+            codex_protocol::MemoryVersion::V2,
+        ),
+    ] {
+        let home = tempdir().expect("tempdir");
+        let cfg = toml::from_str::<ConfigToml>(&format!(
+            "[features]\nmemories = true\n[memories]\n{settings}"
+        ))
+        .expect("memory config");
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            home.abs(),
+        )
+        .await
+        .expect("load config");
+        assert_eq!(config.memories.version, expected, "{settings}");
+        assert!(!home.path().join("memories").exists());
+    }
+}
+
+#[tokio::test]
 async fn goal_max_token_budget_requires_positive_integer() {
     let config_toml = toml::from_str::<ConfigToml>("subagent_model_context_windows = { \"gpt-6-astra\" = 272000 }\n[goals]\nmax_goal_token_budget = 25000\n")
         .expect("positive goal token budget should deserialize");
@@ -1687,9 +1715,12 @@ strip_request_headers = ["authorization"]
                         unix_sockets: None,
                         allow_local_binding: None,
                         mitm: Some(NetworkMitmToml {
+                            version: None,
                             hooks: Some(IndexMap::from([(
                                 "github_write".to_string(),
                                 NetworkMitmHookToml {
+                                    schemes: Vec::new(),
+                                    ports: Vec::new(),
                                     host: "api.github.com".to_string(),
                                     methods: vec!["POST".to_string(), "PUT".to_string()],
                                     path_prefixes: vec!["/repos/openai/".to_string()],
@@ -1768,9 +1799,12 @@ fn permissions_profile_network_to_proxy_config_preserves_mitm_hooks() {
     let network = NetworkToml {
         mode: Some(NetworkMode::Full),
         mitm: Some(NetworkMitmToml {
+            version: None,
             hooks: Some(IndexMap::from([(
                 "github_write".to_string(),
                 NetworkMitmHookToml {
+                    schemes: Vec::new(),
+                    ports: Vec::new(),
                     host: "api.github.com".to_string(),
                     methods: vec!["POST".to_string()],
                     path_prefixes: vec!["/repos/openai/".to_string()],
@@ -5692,6 +5726,10 @@ fn filter_plugin_mcp_servers_by_matchers_enforces_name_and_invocation() {
 
 #[tokio::test]
 async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result<()> {
+    let service_config = codex_config::ConfigServer {
+        base_url: "https://policy.example/settings".into(),
+        oauth: None,
+    };
     let codex_home = TempDir::new()?;
     let user_file = AbsolutePathBuf::resolve_path_against_base(CONFIG_TOML_FILE, codex_home.path());
     let project_dot_codex =
@@ -5731,6 +5769,7 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         ),
     ]);
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        config_server: Some(service_config.clone()),
         mcp_servers: Some(mcp_requirements.clone()),
         ..Default::default()
     };
@@ -5777,7 +5816,8 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         requirements,
         requirements_toml,
     )
-    .map_err(std::io::Error::other)?;
+    .map_err(std::io::Error::other)?
+    .with_applied_config_server(Some(service_config));
     let thread_layer_stack = ConfigLayerStack::new(
         vec![
             ConfigLayerEntry::new(
@@ -5852,6 +5892,26 @@ async fn rebuild_with_session_layers_refreshes_requirements() -> std::io::Result
         codex_home.abs(),
     )
     .await?;
+    assert_eq!(
+        config.config_layer_stack.applied_config_server(),
+        refreshed_layer_stack.applied_config_server()
+    );
+
+    // User-only refreshes keep this policy; managed refreshes must supply it.
+    let mut missing_policy = config.clone();
+    missing_policy.config_layer_stack = missing_policy
+        .config_layer_stack
+        .with_applied_config_server(/*service_config*/ None);
+    assert!(
+        config
+            .resolve_runtime_refresh(&missing_policy, RuntimeConfigRefresh::User)
+            .is_ok()
+    );
+    assert!(
+        config
+            .resolve_runtime_refresh(&missing_policy, RuntimeConfigRefresh::Mcp)
+            .is_err()
+    );
 
     assert_eq!(
         config.mcp_servers.get(),
@@ -6426,7 +6486,7 @@ async fn memory_tool_makes_memories_root_readable_without_creating_or_widening_w
 -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
-    let memories_root = codex_home.path().join("memories");
+    let memories_root = codex_home.path().join("memories_v2");
     let memories_root_abs = memories_root.abs();
 
     let config = Config::load_from_base_config_with_overrides(
@@ -10575,6 +10635,7 @@ async fn test_requirements_web_search_mode_allowlist_does_not_warn_when_unset() 
     let fixture = create_test_fixture()?;
 
     let requirements_toml = codex_config::ConfigRequirementsToml {
+        config_server: None,
         model_provider: None,
         model_providers: None,
         allowed_login_methods: None,
