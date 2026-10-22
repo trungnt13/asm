@@ -373,7 +373,7 @@ async fn run_conversation(
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
         stream.activity.messaging = messaging;
-        let mut supports_send_now = runtime.runtime.subscribe_send_now();
+        let mut mid_turn_delivery = runtime.runtime.subscribe_mid_turn_delivery();
         let turn_state = session
             .input_queue
             .turn_state_for_sub_id(&session.active_turn, &turn.sub_id)
@@ -399,7 +399,7 @@ async fn run_conversation(
                     _ = async {
                         if pending_activity.is_some() { return; }
                         let _ = activity.changed().await;
-                    }, if messaging && *supports_send_now.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
+                    }, if messaging && *mid_turn_delivery.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
                         pending_activity = None;
                         session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
                         let (pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
@@ -427,7 +427,7 @@ async fn run_conversation(
                         steering_tx.try_send(prompt).context("Claude steering channel was not ready; explicit recovery is required")?;
                         submitted_steering_count += 1;
                     }
-                    changed = supports_send_now.changed(), if messaging => {
+                    changed = mid_turn_delivery.changed(), if messaging => {
                         if changed.is_err() { bail!("Claude steering capability channel closed"); }
                     }
                     Some(frame) = events_rx.recv() => {
