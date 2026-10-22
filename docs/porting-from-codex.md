@@ -445,7 +445,10 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   `session/cancel`. After `stopReason: cancelled`, stop the process tree and keep the linkage
   clean only when descendant cleanup succeeded; the next turn loads the session. A missing
   acknowledgement, failed cleanup or any other failure leaves the linkage dirty.
-- Cursor reports no token usage or context fill. Show them as unavailable, never zero.
+- Cursor reports no token usage or context fill. Show them as unavailable, never zero, in ASM
+  usage accounting and `/status`. Known gap: `codex exec --json` `turn.completed.usage` has
+  required numeric fields and reports zeros when usage is unknown; the session warning says
+  usage is unavailable. Keep that wire shape until the owner approves an API change.
 - Session-scoped MCP servers can be blocked by Cursor team policy; this account rejects them
   ("Blocked by team policy"). Cursor children therefore get no ASM messaging tools. Their
   mail arrives between turns, and ASM still returns their final answer. There is no Send now.
