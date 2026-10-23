@@ -159,6 +159,7 @@ impl ClaudeSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
         bridge: Option<&ClaudeMessageBridge>,
+        disallowed_tools: Vec<String>,
         checkpoint: &mut Checkpoint,
         checkpoint_path: &std::path::Path,
         session: codex_claude_runtime::ClaudeSession,
@@ -199,6 +200,7 @@ impl ClaudeSession {
             effort: checkpoint.effort.clone(),
             auto_compact_window: checkpoint.auto_compact_window,
             session,
+            disallowed_tools,
             mcp_config: bridge.map(|bridge| {
                 serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
                 "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}})

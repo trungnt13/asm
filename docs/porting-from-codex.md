@@ -345,10 +345,16 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   must not inflate a currently active ancestor turn's count.
 - Use native Claude Code settings and subscription login; resolve `claude` through
   PATH. Do not extract subscription credentials or enable API billing implicitly.
-  Do not disable native tools, skills or instructions to emulate ASM inference.
+  Do not disable native tools, skills or instructions to emulate ASM inference. The one
+  exception: ASM thread-spawned children (V1 and V2) launch with
+  `--disallowedTools AskUserQuestion`, because nobody can answer a headless child's
+  questions. Main sessions keep native question behavior.
 - Claude permissions govern Claude tools. ASM sandbox and approval settings do not
-  govern them; display that distinction clearly. Never auto-approve headless prompts;
-  unavailable approvals must fail explicitly. Configured native hooks remain native.
+  govern them; display that distinction clearly. By user decision, every Claude session,
+  main and children, runs in native bypass mode (`--dangerously-skip-permissions`).
+  Native deny rules, hooks and managed policy still apply. Keep
+  `--permission-prompts none`, so anything that still prompts fails explicitly; never
+  grant protocol approval requests. Configured native hooks remain native.
   If managed policy requires an ASM-managed sandbox, refuse external execution.
 - Keep one CLI process per loaded Claude session, with private external-session
   linkage and unfinished-turn state. Resume only a known clean session; never replay
@@ -424,9 +430,12 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
-- Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. Never pass
-  `--force`, `--yolo`, `--approve-mcps` or `--trust`. Cursor configuration governs its tools,
-  including its own auto-approval settings. Answer approval requests with a reject option,
+- Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. By user
+  decision, every Cursor session, main and children, launches as `agent --force acp`
+  (native run-everything mode). Explicit Cursor denies and team auto-run controls still
+  apply; never pass `--approve-mcps`, `--trust` or `--sandbox`. Cursor ACP has no supported
+  control to remove its question tool, so children keep it; questions are refused, not
+  disabled. Answer remaining approval requests with a reject option,
   plans with `rejected`, questions with `skipped`, and other agent requests with an error, so
   that a turn cannot hang or fall back to a local plan. Show each refusal.
 - Cursor saves session model selections in its config directory. Give each thread a private

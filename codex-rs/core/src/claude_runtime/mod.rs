@@ -219,11 +219,11 @@ async fn run_conversation(
         && turn.multi_agent_version == MultiAgentVersion::V2;
     // Do not reinterpret inherited scalar limits or model metadata as native settings.
     // Cursor exposes no compaction window, so the Claude window never applies to it.
-    let auto_compact_window = if native_runtime == NativeRuntime::ClaudeCode
-        && matches!(
-            turn.session_source,
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-        ) {
+    let thread_spawn_child = matches!(
+        turn.session_source,
+        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+    );
+    let auto_compact_window = if native_runtime == NativeRuntime::ClaudeCode && thread_spawn_child {
         turn.config.role_model_context_window.or_else(|| {
             (turn.multi_agent_version == MultiAgentVersion::V2)
                 .then(|| {
@@ -368,13 +368,13 @@ async fn run_conversation(
             };
             let message = match native_runtime {
                 NativeRuntime::ClaudeCode => {
-                    "Claude Code owns instructions, tools, hooks and permissions. ASM sandbox and approvals do not apply; unavailable Claude approval prompts are denied."
+                    "Claude Code owns instructions, tools, hooks and permissions, and bypasses its permission prompts; native deny rules and managed policy still apply. ASM sandbox and approvals do not apply."
                 }
                 NativeRuntime::CursorAgent if child_agent => {
-                    "Cursor Agent owns instructions, tools and permissions. ASM sandbox and approvals do not apply; Cursor approval requests are denied. Token usage and context fill are unavailable. ASM messaging tools are unavailable; messages arrive between turns."
+                    "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable. ASM messaging tools are unavailable; messages arrive between turns."
                 }
                 NativeRuntime::CursorAgent => {
-                    "Cursor Agent owns instructions, tools and permissions. ASM sandbox and approvals do not apply; Cursor approval requests are denied. Token usage and context fill are unavailable."
+                    "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable."
                 }
             };
             session
@@ -389,8 +389,15 @@ async fn run_conversation(
                 codex_claude_runtime::ClaudeSession::New { .. } => Some(Default::default()),
                 codex_claude_runtime::ClaudeSession::Resume { .. } => None,
             };
+            // Spawned children run headless: nobody can answer their native questions.
+            let disallowed_tools = if thread_spawn_child {
+                vec!["AskUserQuestion".to_owned()]
+            } else {
+                Vec::new()
+            };
             let runtime = ClaudeSession::spawn_runtime(
                 bridge.as_ref(),
+                disallowed_tools,
                 &mut checkpoint,
                 &checkpoint_path,
                 claude_session,

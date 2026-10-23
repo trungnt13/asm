@@ -52,6 +52,8 @@ pub struct ClaudeOptions {
     pub auto_compact_window: Option<i64>,
     pub session: ClaudeSession,
     pub mcp_config: Option<Value>,
+    /// Native tool names removed from this session, such as questions for headless children.
+    pub disallowed_tools: Vec<String>,
 }
 
 pub struct ClaudeTurnOutcome {
@@ -156,8 +158,9 @@ impl ClaudeRuntime {
                 "stream-json",
             ])
             .args(["--verbose", "--include-partial-messages"])
-            // No permission host is attached. Native allow/deny rules still apply,
-            // but a tool that requires a new approval must be denied, not granted.
+            // Run in native bypass mode. Native deny rules and managed policy still apply;
+            // no permission host is attached, so anything that still prompts is denied.
+            .arg("--dangerously-skip-permissions")
             .args(["--permission-prompts", "none"])
             .arg("--model")
             .arg(options.model)
@@ -190,6 +193,11 @@ impl ClaudeRuntime {
         }
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
+        }
+        if !options.disallowed_tools.is_empty() {
+            command
+                .arg("--disallowedTools")
+                .arg(options.disallowed_tools.join(","));
         }
         Ok(Self {
             process: NativeProcess::spawn(command).context("starting official Claude CLI")?,

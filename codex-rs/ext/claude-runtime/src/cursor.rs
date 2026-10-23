@@ -63,7 +63,8 @@ impl CursorRuntime {
             .env_remove("CURSOR_API_KEY")
             .env("CURSOR_CONFIG_DIR", &options.config_dir)
             .current_dir(&options.cwd)
-            .arg("acp");
+            // Native run-everything mode; explicit denies and team auto-run controls still apply.
+            .args(["--force", "acp"]);
         let mut runtime = Self {
             process: NativeProcess::spawn(command).context("starting official Cursor agent")?,
             session_id: String::new(),
