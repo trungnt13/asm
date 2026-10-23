@@ -69,6 +69,7 @@ use codex_extension_items::image_generation::GeneratedImageRef;
 use codex_extension_items::image_generation::ImageGenerationFailure;
 use codex_extension_items::image_generation::ImageGenerationInputImage;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1820,7 +1821,7 @@ pub struct HookRunSummary {
     pub handler_type: HookHandlerType,
     pub execution_mode: HookExecutionMode,
     pub scope: HookScope,
-    pub source_path: AbsolutePathBuf,
+    pub source_path: LegacyAppPathString,
     #[serde(default)]
     pub source: HookSource,
     pub display_order: i64,
@@ -1998,6 +1999,7 @@ pub enum CodexErrorInfo {
     RateLimitExceeded,
     FlexUnavailable,
     ServerOverloaded,
+    ModelNotFound,
     CyberPolicy,
     BioPolicy,
     MisalignmentPolicyViolation,
@@ -2043,6 +2045,7 @@ impl CodexErrorInfo {
             | Self::RateLimitExceeded
             | Self::FlexUnavailable
             | Self::ServerOverloaded
+            | Self::ModelNotFound
             | Self::CyberPolicy
             | Self::BioPolicy
             | Self::MisalignmentPolicyViolation

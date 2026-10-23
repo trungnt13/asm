@@ -3019,6 +3019,7 @@ dependencies = [
  "codex-utils-cache",
  "codex-utils-cargo-bin",
  "codex-utils-git-discovery",
+ "codex-utils-head-tail-buffer",
  "codex-utils-home-dir",
  "codex-utils-image",
  "codex-utils-output-truncation",
@@ -3605,6 +3606,7 @@ dependencies = [
  "codex-history",
  "codex-protocol",
  "codex-protocol-test-support",
+ "codex-utils-output-truncation",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -3672,6 +3674,15 @@ dependencies = [
  "uuid",
  "wiremock",
  "zstd",
+]
+
+[[package]]
+name = "codex-guardian-v3"
+version = "0.164.1-alpha.12"
+dependencies = [
+ "codex-message-board",
+ "codex-protocol",
+ "codex-state",
 ]
 
 [[package]]
@@ -5194,6 +5205,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-utils-head-tail-buffer"
+version = "0.164.1-alpha.12"
+dependencies = [
+ "pretty_assertions",
+]
+
+[[package]]
 name = "codex-utils-home-dir"
 version = "0.164.1-alpha.12"
 dependencies = [
@@ -6158,9 +6176,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0"
 dependencies = [
  "cmov",
 ]

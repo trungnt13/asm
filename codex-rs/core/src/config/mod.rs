@@ -26,6 +26,7 @@ use codex_config::ResidencyRequirement;
 use codex_config::SandboxModeRequirement;
 use codex_config::Sourced;
 use codex_config::ThreadConfigLoader;
+use codex_config::apply_default_gcp_auth;
 use codex_config::config_toml::CircuitBreakAction;
 use codex_config::config_toml::ConfigToml;
 use codex_config::config_toml::DEFAULT_PROJECT_DOC_MAX_BYTES;
@@ -102,7 +103,6 @@ use codex_protocol::MemoryVersion;
 use codex_protocol::config_types::AltScreenMode;
 use codex_protocol::config_types::AutoCompactTokenLimitScope;
 use codex_protocol::config_types::ForcedLoginMethod;
-use codex_protocol::config_types::ModelProviderAuthInfo;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
@@ -750,6 +750,9 @@ pub struct Config {
 
     /// Include a structured error when Guardian's circuit breaker interrupts a turn.
     pub guardian_circuit_break_action: CircuitBreakAction,
+
+    /// Overall Guardian review budget. None means unlimited; cancellation still applies.
+    pub guardian_review_timeout: Option<Duration>,
 
     /// Whether to inject the `<permissions instructions>` developer block.
     pub include_permissions_instructions: bool,
@@ -3589,6 +3592,16 @@ impl Config {
                 "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
             ));
         }
+        if let Some(FeatureToml::Config(guardian)) = cfg
+            .features
+            .as_ref()
+            .and_then(|features| features.guardianv2.as_ref())
+            && guardian.async_classifier_mode.is_some()
+        {
+            startup_warnings.push(
+                "`[features.guardianv2].async_classifier_mode` is deprecated and ignored. Async classification always uses conversations; remove this setting from config.toml or profile configuration files.".to_owned(),
+            );
+        }
         let mcp_enterprise_managed_auth = McpEnterpriseManagedAuthConfig::resolve(
             &config_layer_stack,
             cfg.mcp_enterprise_managed_auth.as_ref(),
@@ -4055,21 +4068,8 @@ impl Config {
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
 
-        if let Some(provider) = model_providers.get_mut(GCP_PROVIDER_ID)
-            && provider.auth.is_none()
-        {
-            // Registry construction must not depend on the process cwd, which may be deleted.
-            provider.auth = Some(ModelProviderAuthInfo {
-                command: if cfg!(windows) { "gcloud.cmd" } else { "gcloud" }.to_string(),
-                args: vec![
-                    "auth".into(),
-                    "application-default".into(),
-                    "print-access-token".into(),
-                ],
-                timeout_ms: std::num::NonZeroU64::new(30_000).unwrap_or(std::num::NonZeroU64::MIN),
-                refresh_interval_ms: 3_000_000,
-                cwd: resolved_cwd.clone(),
-            });
+        if let Some(provider) = model_providers.get_mut(GCP_PROVIDER_ID) {
+            apply_default_gcp_auth(provider, &resolved_cwd);
         }
 
         let model_provider_id = config_layer_stack.required_model_provider().map(str::to_string)
@@ -4715,6 +4715,13 @@ impl Config {
             guardian_transcript_mode,
             guardian_conversation_history_prompt,
             guardian_conversation_history_max_output_tokens,
+            guardian_review_timeout: cfg
+                .auto_review
+                .as_ref()
+                .and_then(|auto_review| auto_review.timeout_ms)
+                .map_or(Some(codex_guardian_reviewer::REVIEW_TIMEOUT), |timeout_ms| {
+                    (timeout_ms != 0).then(|| Duration::from_millis(u64::from(timeout_ms)))
+                }),
             guardian_circuit_break_action: cfg
                 .auto_review
                 .as_ref()
