@@ -12,6 +12,7 @@ use anyhow::bail;
 use codex_utils_pty::process_group;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -81,12 +82,18 @@ impl CursorRuntime {
         let initialized = self
             .request(
                 "initialize",
+                // Subagent support publishes native child sessions and makes prompts wait for
+                // background children and cancel them; Cursor runs its Task tool either way.
                 json!({"protocolVersion": 1, "clientCapabilities": {
-                    "fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false}}),
+                    "fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false,
+                    "_meta": {"subagents": {}}}}),
             )
             .await?;
         if initialized["protocolVersion"] != 1 {
             bail!("Cursor agent does not support ACP protocol version 1");
+        }
+        if !initialized["agentCapabilities"]["sessionCapabilities"]["subagents"].is_object() {
+            bail!("Cursor agent does not support ACP subagents; upgrade the Cursor CLI");
         }
         self.request("authenticate", json!({"methodId": "cursor_login"}))
             .await
@@ -284,6 +291,8 @@ impl CursorRuntime {
                 "prompt": [{"type": "text", "text": prompt}]})) => id?,
         };
         let mut cancel_deadline = None;
+        // Native child sessions announced this turn, with their last reported state.
+        let mut children: HashMap<String, Option<String>> = HashMap::new();
         loop {
             let frame = tokio::select! {
                 biased;
@@ -305,10 +314,26 @@ impl CursorRuntime {
                 frame = self.process.frames.recv() => frame.context("Cursor stream reader stopped")??,
             };
             if frame.get("method").is_some() {
-                if frame["method"] == "session/update"
-                    && frame["params"]["sessionId"] != self.session_id.as_str()
-                {
-                    bail!("Cursor returned an update for a different session");
+                if frame["method"] == "session/update" {
+                    let session = frame["params"]["sessionId"].as_str().unwrap_or_default();
+                    if session != self.session_id && !children.contains_key(session) {
+                        bail!("Cursor returned an update for a different session");
+                    }
+                    let update = &frame["params"]["update"];
+                    let child = update["subagentSessionId"].as_str();
+                    match update["sessionUpdate"].as_str() {
+                        Some("subagent_spawned") => {
+                            let child = child.context("Cursor subagent has no session ID")?;
+                            children.insert(child.to_owned(), None);
+                        }
+                        Some("subagent_state_update") => {
+                            let state = children
+                                .get_mut(child.unwrap_or_default())
+                                .context("Cursor updated an unknown subagent")?;
+                            *state = update["state"].as_str().map(str::to_owned);
+                        }
+                        _ => {}
+                    }
                 }
                 self.refuse_request(&frame).await?;
             } else if frame["id"] != prompt_id {
@@ -345,6 +370,14 @@ impl CursorRuntime {
             if interrupted && !matches!(stop_reason, Some("cancelled" | "end_turn")) {
                 self.failure_result = Some(frame);
                 bail!("Cursor did not confirm cancellation");
+            }
+            // Cursor waits for this turn's children before answering. It also answers after
+            // its cancel wait times out, marking children `disconnected`: that is not a stop.
+            if children.values().any(|state| {
+                !matches!(state.as_deref(), Some("completed" | "failed" | "cancelled"))
+            }) {
+                self.failure_result = Some(frame);
+                bail!("Cursor did not confirm that its native subagents stopped");
             }
             return Ok(ClaudeTurnOutcome {
                 result: Some(frame["result"].clone()),

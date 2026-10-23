@@ -8,6 +8,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TokenUsage;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct MessageStream {
@@ -16,6 +17,8 @@ pub(super) struct MessageStream {
     pub(super) text: String,
     pub(super) started: bool,
     pub(super) context: Option<RequestContext>,
+    /// Cursor child sessions by session ID.
+    pub(super) cursor_children: HashMap<String, super::cursor::CursorChild>,
 }
 
 pub(super) struct RequestContext {

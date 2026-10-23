@@ -356,7 +356,9 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - On interrupt, stop native work and retain the process only after a matching
   successful interrupt acknowledgement with an explicit empty queued-input receipt,
   explicit idle, and termination of observed
-  native child tasks. Persist clean linkage before allowing another turn. Missing
+  native child tasks. Track a local agent task by ID and its latest run ID: a resumed
+  task keeps its ID with a new, later-sorting run ID. An older-run or run-less start or
+  terminal never replaces or clears a known newer run. Persist clean linkage before allowing another turn. Missing
   confirmation, timeout, disconnect or forced abort kills the owned group and keeps
   linkage dirty. Give only external tasks a bounded cleanup grace period.
   UUID-stamp submitted native user inputs so the receipt accounts for queued work.
@@ -400,7 +402,7 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Cache rate is the cached share of that latest main request.
 - Require native stream-json result followed by session-idle completion; CLI 2.1.296
   is the verified protocol target. Queued delivery and background continuation were
-  verified with 2.1.308. Revalidate compatibility when upgrading it.
+  verified with 2.1.309. Revalidate compatibility when upgrading it.
 - Keep opt-in until real Claude-main and Sol-parent/Claude-child sessions pass with
   the intended installed CLI. Never replace installed binaries or global profiles
   as part of testing. Cross-runtime context parity is not a requirement.
@@ -433,6 +435,19 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   that native permissions still apply and the user's default model never changes. Login,
   rules, skills, hooks and MCP settings stay in their native locations; never copy or extract
   credentials.
+- Negotiate ACP subagents (`clientCapabilities._meta.subagents`); require the agent to
+  advertise `sessionCapabilities.subagents`. Cursor then publishes native child sessions and
+  makes the prompt wait for background children, so their completion drives the parent
+  follow-up within the same ASM turn. Accept updates only for the session and announced
+  children. Show child tools and text in a child-scoped activity cell, not the main
+  transcript; children stay native, with no ASM threads. A prompt response stays clean only
+  after every announced child reported `completed`, `failed` or `cancelled`. Cursor also
+  answers after its cancel wait times out and marks children `disconnected`; that does not
+  prove a stop, so the turn fails and the linkage stays dirty.
+- Cursor reports finished tools as `completed`. Mark a tool failed from typed top-level
+  `rawOutput` fields only: nonzero `exitCode`, a string `error`, `rejected: true` or
+  `permissionDenied: true`. A missing field means unknown; a failed tool does not fail the
+  turn.
 - Child role context limits and `subagent_model_context_windows` set no Cursor compaction
   window and skip the Claude window validation; Cursor manages its own context.
 - Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.
@@ -452,7 +467,7 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 - Session-scoped MCP servers can be blocked by Cursor team policy; this account rejects them
   ("Blocked by team policy"). Cursor children therefore get no ASM messaging tools. Their
   mail arrives between turns, and ASM still returns their final answer. There is no Send now.
-- Verified with Cursor CLI 2026.10.19-6bbf2c4. Revalidate the protocol when upgrading it.
+- Verified with Cursor CLI 2026.10.22-27dcf5f. Revalidate the protocol when upgrading it.
 
 ### Minimal diagnostics
 

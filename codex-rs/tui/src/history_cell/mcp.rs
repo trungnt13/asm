@@ -81,6 +81,7 @@ impl McpInvocation {
     pub(crate) fn is_native_activity(&self) -> bool {
         self.is_claude_activity()
             || self.server == codex_protocol::openai_models::NativeRuntime::CursorAgent.id()
+            || self.server.starts_with("cursor-agent/")
     }
 
     pub(crate) fn is_computer_activity(&self) -> bool {

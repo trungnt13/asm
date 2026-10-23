@@ -14,6 +14,7 @@ use anyhow::bail;
 use codex_utils_pty::process_group;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -276,7 +277,8 @@ impl ClaudeRuntime {
         let mut interrupt_acknowledged = false;
         let mut interrupted_commands = HashSet::new();
         let mut idle = false;
-        let mut active_agents = HashSet::new();
+        // Local agents by task ID, with the latest run ID when Claude reports one.
+        let mut active_agents: HashMap<String, Option<String>> = HashMap::new();
         loop {
             let frame = tokio::select! {
                 biased;
@@ -422,7 +424,13 @@ impl ClaudeRuntime {
                         .get("task_id")
                         .and_then(Value::as_str)
                         .context("Claude local agent started without a task ID")?;
-                    active_agents.insert(task_id.to_owned());
+                    let run = frame.get("run_id").and_then(Value::as_str);
+                    // A resumed task keeps its ID with a new, later-sorting run ID. Late or
+                    // run-less starts must not replace a known newer run.
+                    let known = active_agents.get(task_id).cloned().flatten();
+                    if known.is_none() || run.is_some_and(|run| Some(run) >= known.as_deref()) {
+                        active_agents.insert(task_id.to_owned(), run.map(str::to_owned));
+                    }
                 }
                 if subtype == Some("task_notification")
                     && matches!(
@@ -430,8 +438,13 @@ impl ClaudeRuntime {
                         Some("stopped" | "completed" | "failed" | "killed")
                     )
                     && let Some(task_id) = frame.get("task_id").and_then(Value::as_str)
+                    && let Some(known) = active_agents.get(task_id)
                 {
-                    active_agents.remove(task_id);
+                    // A run-less or older-run terminal cannot prove that a known newer run stopped.
+                    let run = frame.get("run_id").and_then(Value::as_str);
+                    if known.is_none() || run.is_some_and(|run| Some(run) >= known.as_deref()) {
+                        active_agents.remove(task_id);
+                    }
                 }
                 if subtype == Some("background_tasks_changed") {
                     self.background_work = frame
