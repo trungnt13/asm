@@ -26,7 +26,7 @@ This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.m
 
 For runtime/UI edits, inspect affected paths, including streaming and completed output. Make the smallest coherent change.
 
-- Before Cargo, ensure sufficient disk space. Local `just` recipes default to main's `codex-rs/target`. Explicit `CARGO_TARGET_DIR` and Cargo target-directory options retain their meaning.
+- Before Cargo, ensure sufficient disk space. Rebase/release maintenance has standing approval to remove verified inactive local build caches under the existing path, lock, and process checks. Record measurements and removals. Preserve active or uncertain artifacts, source, user state, and verified binaries; ask if safe cleanup cannot provide sufficient space. Local `just` recipes default to main's `codex-rs/target`. Explicit `CARGO_TARGET_DIR` and Cargo target-directory options retain their meaning.
 - Keep native host mode, toolchain, profile, features, flags, checkout, and cache stable. Do not add `--target` just to name the host. Fresh timestamps, source/version changes, and other changed inputs can force rebuilds.
 - Reuse matching verified [fork V8](#v8-dependency-release). Export the same verified absolute `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH` paths. An old Cargo fingerprint does not prove validity.
 - Export `AWS_LC_SYS_NO_JITTER_ENTROPY=1` consistently. Changing or unsetting it rebuilds AWS-LC and dependents.
@@ -100,7 +100,7 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Stage only finished task changes, tests, generated files, and intent. Inspect the staged diff.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`; fix local config if needed. Ask before attribution-only published-history rewrites.
-- Before branch updates, recheck the PR base. Resolve against base, fork, upstream, and this guide; verify affected behavior. For owner decisions, inspect all exposed conflicts and ask one question with recommendations. Later commits can expose more.
+- Before branch updates, recheck the PR base. Resolve mechanical conflicts without new approval when they preserve this guide; verify affected behavior against base, fork, and upstream. For unsafe changes, ambiguous intent, or other owner decisions, inspect all exposed conflicts and ask one question with recommendations. Later commits can expose more.
 - Reconcile task-owned duplicate edits without losing other work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
 - Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference it in later handoffs and integration reports instead of repeating unchanged checks. Refresh changed results/status. PR readiness alone does not authorize merging.
 
@@ -117,9 +117,9 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `40db507eeca2ff778c040c325449eb72e90c0590`.
-- Date: 2026-10-22.
-- Subject: Avoid redundant settings checkpoints when resuming threads (#56250).
+- Last incorporated commit: `4610b573e59b211bf9430cf6ffb97cfb84623090`.
+- Date: 2026-10-23.
+- Subject: Run environment hooks on their owning executors (#56343).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
@@ -240,7 +240,8 @@ Package limits:
 Build V8 separately only if version/target/baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml), tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35`. The suffix identifies GNU-baseline generation and matching macOS pair. Do not replace/move the old MUSL release.
 
 - Manual branch dispatch defaults to build-only. Explicit `publish=true` builds/smokes, then tags/publishes at that commit. Tag pushes publish too. Tag moves or published asset replacement need approval.
-- Reuse unchanged verified inputs. For changed source/patches/flags/bindings under the same version, ask how to version V8. Approved reuse of the existing V8 152.2.0 pair covers upstream’s ICU rule relocation and patch-path edits when independent review proves identical effective build inputs; the glibc baseline stays 2.35. Do not replace published assets.
+- Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebase/releases also has standing approval when independent review proves Cargo ABI, bindings, and the full dependency closure remain compatible, and native consumer build/JavaScript/sandbox checks pass. Record omitted source-recipe fixes; do not claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
+  - Existing V8 152.2.0 archives remain approved at glibc 2.35. The ICU relocation preserves effective inputs. Upstream `85de07048c` changes Abseil namespace/C++ runtime isolation: these archives omit that fix. Reuse is accepted for compatible Cargo consumers, not equivalent new-source builds.
 - Build only optimized sandbox + pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
 - Require both targets' native `codex-v8-poc` sandbox/JavaScript smoke, including Ubuntu 22.04 GNU. Reuse GNU Bazel platform and older glibc sysroot.
 - Publish only each target's archive, Rust binding, and two-file manifest. Normal release, **not Latest**, no installer; separate from CLI discovery.
