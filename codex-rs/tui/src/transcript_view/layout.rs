@@ -153,7 +153,10 @@ impl TranscriptView {
         mode: HistoryRenderMode,
     ) -> CellPresentation {
         let ids = cell.activity_ids();
-        let disclosure = !self.detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
+        let disclosure = !self.detailed
+            && mode == HistoryRenderMode::Rich
+            && !ids.is_empty()
+            && cell.supports_individual_disclosure();
         let manually_expanded = self.disclosure.is_expanded(&ids);
         let reveal_image = ids.is_empty() || manually_expanded || self.detailed;
         if manually_expanded {
