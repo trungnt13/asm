@@ -324,7 +324,7 @@ impl CursorRuntime {
                     match update["sessionUpdate"].as_str() {
                         Some("subagent_spawned") => {
                             let child = child.context("Cursor subagent has no session ID")?;
-                            children.insert(child.to_owned(), None);
+                            children.insert(child.to_owned(), /*v*/ None);
                         }
                         Some("subagent_state_update") => {
                             let state = children
