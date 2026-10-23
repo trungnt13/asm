@@ -10044,9 +10044,6 @@ class System1Error(
         | RejectedSystem1Error
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         CredentialsSystem1Error
         | InvalidRequestSystem1Error
