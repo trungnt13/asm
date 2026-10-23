@@ -104,6 +104,7 @@ pub enum RolloutRecorderParams {
         /// thread ID stable while creating a new immutable rollout file.
         rollout_id_override: Option<RolloutId>,
         forked_from_id: Option<ThreadId>,
+        attached_thread: bool,
         forked_from_ordinal_exclusive: Option<u64>,
         parent_thread_id: Option<ThreadId>,
         source: Box<SessionSource>,
@@ -197,6 +198,17 @@ fn clone_io_error(err: &IoError) -> IoError {
 }
 
 impl RolloutRecorderParams {
+    pub fn with_attached_thread(mut self, attached_thread: bool) -> Self {
+        if let Self::Create {
+            attached_thread: value,
+            ..
+        } = &mut self
+        {
+            *value = attached_thread;
+        }
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         conversation_id: ThreadId,
@@ -214,6 +226,7 @@ impl RolloutRecorderParams {
             conversation_id,
             rollout_id_override: None,
             forked_from_id,
+            attached_thread: false,
             forked_from_ordinal_exclusive: None,
             parent_thread_id,
             source: Box::new(source),
@@ -932,6 +945,7 @@ impl RolloutRecorder {
                 conversation_id,
                 rollout_id_override,
                 forked_from_id,
+                attached_thread,
                 forked_from_ordinal_exclusive,
                 parent_thread_id,
                 source,
@@ -967,6 +981,7 @@ impl RolloutRecorder {
                     prompt_cache_key,
                     id: conversation_id,
                     forked_from_id,
+                    attached_thread,
                     forked_from_ordinal_exclusive: forked_from_ordinal_exclusive
                         .filter(|_| forked_from_id.is_some()),
                     parent_thread_id,
