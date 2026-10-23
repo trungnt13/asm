@@ -452,7 +452,10 @@ Typical tasks:
 - Implement part of a feature
 - Fix tests or bugs
 - Split large refactors into independent chunks
-Rules: - Assign each worker explicit task and file/module ownership. - Tell workers they share the codebase: preserve others’ edits and adapt to concurrent changes. - Identify shared prerequisites before parallel implementation; assign each one owner. If overlap emerges, coordinate ownership before continuing overlapping work; continue independent work meanwhile."#
+Rules:
+- Assign each worker explicit task and file/module ownership.
+- Tell workers they share the codebase: preserve others’ edits and adapt to concurrent changes.
+- Identify shared prerequisites before parallel implementation; assign each one owner. If overlap emerges, coordinate ownership before continuing overlapping work; continue independent work meanwhile."#
                                 .to_string(),
                         ),
                         config_file: None,
