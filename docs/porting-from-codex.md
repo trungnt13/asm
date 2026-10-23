@@ -908,7 +908,7 @@ Keep the active prompt destination visible in the composer’s top-right padding
 
 ### Built-in agent role descriptions
 
-Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list, but omit its verbose delegation Rules block; shared orchestration instructions govern worker delegation instead.
+Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list and concise Rules requiring explicit task/file ownership, preservation of concurrent edits, and one owner for shared prerequisites. Coordinate ownership before continuing overlapping work; continue independent work meanwhile.
 
 ### Subagent global instructions
 
