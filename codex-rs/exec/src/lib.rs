@@ -1897,6 +1897,7 @@ async fn resolve_resume_thread_id(
                     request_id: RequestId::Integer(0),
                     params: ThreadListParams {
                         excluded_thread_ids: None,
+                        attached_to_thread_id: None,
                         originators: None,
                         cursor,
                         limit: Some(100),
@@ -1984,6 +1985,7 @@ async fn resolve_resume_thread_id(
                 request_id: RequestId::Integer(0),
                 params: ThreadListParams {
                     excluded_thread_ids: None,
+                    attached_to_thread_id: None,
                     originators: None,
                     cursor,
                     limit: Some(100),

@@ -287,6 +287,7 @@ async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) 
     let prompt_cache_key = ThreadId::new().into();
     store
         .create_thread(CreateThreadParams {
+            attached_thread: false,
             creator_user_id: Some("creator-user".to_string()),
             creator_account_id: Some("creator-account".to_string()),
             session_id: thread_id.into(),

@@ -109,6 +109,7 @@ pub(super) async fn find_matches(
                 let response = app_server
                     .thread_list(ThreadListParams {
                         excluded_thread_ids: None,
+                        attached_to_thread_id: None,
                         originators: None,
                         cursor,
                         limit: Some(100),
