@@ -906,9 +906,9 @@ Vim Insert/Replace use the editor newline binding; Vim Normal retains its editin
 
 Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
 
-### Concise built-in agent roles
+### Built-in agent role descriptions
 
-Keep the built-in explorer purpose and worker task list, but omit their verbose delegation Rules blocks from the spawn-agent schema. Shared orchestration instructions govern delegation instead.
+Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list and concise Rules requiring explicit task/file ownership, preservation of concurrent edits, and one owner for shared prerequisites. Coordinate ownership before continuing overlapping work; continue independent work meanwhile.
 
 ### Subagent global instructions
 
