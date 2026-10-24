@@ -304,6 +304,7 @@ impl Session {
         expected_task_done: Option<&Arc<tokio::sync::Notify>>,
         system1_guard: Option<&super::system1_task::System1DecisionGuard>,
     ) -> TurnSettingsUpdateOutcome {
+        let updates_system1_baseline = system1_guard.is_none() && update.effort.is_some();
         let updates_model_settings = update.model.is_some()
             || update.effort.is_some()
             || update.summary.is_some()
@@ -464,6 +465,13 @@ impl Session {
         // Save changed settings first. The manager then installs any new environment list before
         // waking waiting work. The next step cannot read either until we release this lock.
         if let Some(settings) = updated_settings {
+            if updates_system1_baseline {
+                task.turn_context
+                    .extension_data
+                    .insert(super::system1::System1Baseline(
+                        settings.reasoning_effort().cloned(),
+                    ));
+            }
             task.turn_context
                 .next_step_settings
                 .store(Arc::new(settings));
