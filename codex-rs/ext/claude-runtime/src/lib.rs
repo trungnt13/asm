@@ -22,7 +22,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Child;
 use tokio::process::ChildStdin;
@@ -62,7 +61,7 @@ pub struct ClaudeOptions {
     /// Native compaction window, not the model's maximum context capacity.
     pub auto_compact_window: Option<i64>,
     pub session: ClaudeSession,
-    pub mcp_config: Option<Value>,
+    pub bridge_directory: Option<PathBuf>,
     /// Native tool names removed from this session, such as questions for headless children.
     pub disallowed_tools: Vec<String>,
 }
@@ -76,7 +75,6 @@ pub struct ClaudeTurnOutcome {
 pub struct ClaudeRuntime {
     process: NativeProcess,
     session_id: String,
-    mcp_config: Option<NamedTempFile>,
     usable: bool,
     failure_result: Option<Value>,
     mid_turn_delivery: watch::Sender<bool>,
@@ -191,20 +189,11 @@ impl ClaudeRuntime {
             .arg(options.model)
             .arg(session_flag)
             .arg(&session_id);
-        // Keep credentials out of argv. The owner-only file is removed on spawn
-        // failure or runtime teardown, after the child no longer needs it.
-        let mcp_config = options
-            .mcp_config
-            .map(|config| -> Result<NamedTempFile> {
-                let mut file =
-                    NamedTempFile::new().context("creating private Claude MCP config")?;
-                serde_json::to_writer(file.as_file_mut(), &config)
-                    .context("writing private Claude MCP config")?;
-                Ok(file)
-            })
-            .transpose()?;
-        if let Some(config) = &mcp_config {
-            command.arg("--mcp-config").arg(config.path());
+        if let Some(directory) = &options.bridge_directory {
+            command
+                .arg("--plugin-dir")
+                .arg(directory)
+                .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"));
         }
         if let Some(window) = options.auto_compact_window {
             // Settings can reapply env after startup; flag settings beat user/project settings.
@@ -227,7 +216,6 @@ impl ClaudeRuntime {
         Ok(Self {
             process: NativeProcess::spawn(command).context("starting official Claude CLI")?,
             session_id,
-            mcp_config,
             usable: true,
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
@@ -621,7 +609,6 @@ impl ClaudeRuntime {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.usable = false;
         let result = self.process.shutdown().await;
-        self.mcp_config.take();
         result
     }
 }
