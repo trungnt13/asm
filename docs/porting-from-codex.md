@@ -73,8 +73,9 @@ Local profile rules:
 Verify the intended outcome with suitable evidence. Select checks from changed inputs, fork interactions, and conflicts, not sync size. Do not default to retesting upstream behavior untouched by the fork. Use focused checks when fork interactions, failures, or unresolved concerns require them. Record the selected checks, reused evidence, and uncertainty. Never label unchecked behavior as verified. Narrow scope does not reduce required evidence.
 
 - **Documentation:** review wording/links; run `git diff --check`. No builds or tests.
-- **Rust:** use `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting below and targeted Clippy when needed. Update affected assertions/snapshots together. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
-- **Workflows/scripts:** run `actionlint` on changed workflows and small logic fixtures. Build natively only for affected packaging or approved experiments.
+- **Behavior:** use the built binary in a small real user scenario to accept changed fork behavior. Mocked or simulated responses are not acceptance evidence. Do not add mock tests or run them by default. Preserve inherited tests and assertions; do not delete, ignore, or weaken them to follow this rule.
+- **Rust:** run existing non-mock checks only when needed: `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting below and targeted Clippy when needed. Update affected assertions/snapshots together. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
+- **Workflows/scripts:** run `actionlint` on changed workflows and small checks of the actual script. Build natively only for affected packaging or approved experiments.
 - Do not add tests or extend coverage without an explicit user request. Update existing tests/snapshots only for compile fixes or changed expected output required by production changes; preserve original checks. This overrides upstream integration/snapshot requirements. Report gaps before requesting added coverage.
 - Keep fork-added test files at most 200 lines. In inherited test files, keep fork-added behavioral coverage at most 200 lines per file; preserve upstream coverage and required compile adaptations. Retain the most meaningful user-visible and safety checks. Remove lower-value cases rather than splitting them into more files or compressing formatting to meet the limit.
 - **Formatting:** pass affected checkout-relative or absolute files: `just fmt --files scripts/format.py justfile`. Use `--files -- <paths>` for leading hyphens. Select changed Rust child modules explicitly; selected parents do not format unselected children. Select repository files; this local tool trusts the supplied paths. Unsupported file types fail. Formatters apply their project exclusions and report normal file errors. `just fmt --rust` formats the whole Rust workspace only; use it only when that scope is needed. Unscoped `just fmt` and CI `just fmt-check` remain full-repository commands.
@@ -85,7 +86,12 @@ After approved integration, reuse PR checks and the verified binary pair only wh
 
 ### Real-session checks
 
-- Decide whether changed behavior needs a real session. State behavior and expected result. Use sufficient existing focused checks; do not replay every feature/session. The release smoke turn remains required.
+- Select the smallest real scenario for the changed behavior and affected fork interactions. State the expected result. Prefer offline binary use when no model response is needed. Use a live session only when the behavior needs one; do not replay unchanged upstream features or whole sessions. The release smoke turn remains required.
+- Before model calls, set a request/turn count and time limit. Keep input and requested output small; set supported token limits. Stop at the expected proof or first failure, then inspect evidence before another call. Do not run broad replays, model matrices, benchmarks, or repeated cold builds by default.
+- Control cost:
+  - Use existing sign-in only as authorized. New paid API/provider/model tests require approval for the endpoint, model, request/token limits, and spend cap. Do not invent a dollar budget.
+  - Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Include required runtime helper calls in the budget; keep release defaults unchanged.
+  - Record calls, elapsed time, and reported token use. Report money cost only when known; otherwise mark it unknown. If credentials, budget, or a compatible test setup are missing, report the check blocked, not verified.
 - Use private temporary `CODEX_HOME` with `diagnostic_log_capture = true`, not ephemeral mode. Retain history for debugging outside personal history.
 - Securely provision only needed config, authentication, and resources. Keep the intended profile/model. Put session, database, and log paths inside the test home. Do not copy personal history or symlink shared mutable state.
 - Use a temporary working directory unless behavior needs a specific checkout. Use `--no-daemon`; for daemon/remote checks, use an isolated server, never the personal shared daemon.
@@ -158,8 +164,8 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
    - If the owner requires recovery first, verify successful retry before dispatch.
    - Read prior candidate job logs in memory with the GitHub CLI raw-output opt-in when supported; never render untrusted log escapes to a terminal.
 3. **Check live use.**
-   - Before dispatch, run one time-limited local live turn with default config/existing sign-in. Do not override profile/model.
-   - Use the release-source CLI/helper pair and [real-session isolation](#real-session-checks).
+   - Before dispatch, run one time-limited local live turn with default config/existing sign-in. Do not override profile/model for cheaper testing unless the owner explicitly approves it.
+   - Use the release-source CLI/helper pair and [real-session isolation and cost limits](#real-session-checks).
    - Require a real model response and verified successful read-only Code Mode output.
    - Failure, timeout, or missing authentication blocks dispatch; never skip this check. Report source/result separately from package checks. Keep credentials out of CI.
 4. **Dispatch.**
@@ -412,7 +418,7 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - When disabled, do not allocate feedback capture, install its tracing layers, open/migrate diagnostic databases, or run insertion/pruning/reclamation workers. Ordinary startup leaves historical files unchanged.
 - Explicit history inspection/feedback export may read old logs without capture. Thread deletion removes historical diagnostic records through existing-only on-demand access; never create missing files. Preserve feedback submission/upload errors; never invent evidence.
 - Preserve direct errors/warnings, exit status, protocol events, saved conversation/tool history, subagent relationships, memory, and operational state. Detached-daemon startup/fatal stderr and Windows sandbox security-audit logs remain separate. Do not suppress them or weaken security. Keep product analytics/account usage unchanged.
-- Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Opt-in `runtime_metrics` uses a manual reader without timer/network exporter when none is configured. No unsolicited session-storage size telemetry scan. Check fork-disabled paths with existing focused tests, not broad upstream retesting.
+- Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Opt-in `runtime_metrics` uses a manual reader without timer/network exporter when none is configured. No unsolicited session-storage size telemetry scan. Check fork-disabled paths with focused real-binary scenarios under the validation rules, not broad upstream retesting.
 
 ### System1
 
@@ -521,7 +527,7 @@ keep credentials separate from main-model authentication and diagnostics sanitiz
 - Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
 - Report errors through backend runtime state, independent of diagnostics. Include health at attachment and after live child reload. New children inherit mode, not parent errors. Deduplicate visible warnings by failure episode. Clear errors only after a current main-step decision passes acceptance guards, including unchanged effort. Warm-up errors count for health. Warm-up timeouts do not change recovery failures, cooldown, or blocked state. Other warm-up errors retain normal recovery behavior. Warm-up success, cancellation, and supersession do not clear errors. Identify warm-up timeouts explicitly with their deadline in the visible warning; record backend, model, elapsed time, and remaining deadline at request start in diagnostic tracing, without message content or endpoints.
 - With `diagnostic_log_capture = true`, append sanitized attempt metadata to a separate per-session `decision.jsonl`. Include credential failures, API outcome, and acceptance outcome. Do not log evidence, rubric text, bodies, or authentication headers. With capture off, create no log file or writer. Bound buffering and storage; never wait for disk on the decision path. Report dropped records or writer failures separately. Crash-interrupted attempts can lack an end record.
-- Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance separately from mock checks before making claims.
+- Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance with real-binary scenarios under the isolation and cost limits before making claims.
 
 #### Space decision calls by turn and step
 
