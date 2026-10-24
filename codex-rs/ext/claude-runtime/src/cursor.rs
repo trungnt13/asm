@@ -36,6 +36,7 @@ pub struct CursorOptions {
     pub cwd: PathBuf,
     /// A listed ACP model value, or a base name matching exactly one listed value.
     pub model: String,
+    pub effort: Option<String>,
     pub session: CursorSession,
     /// Private `CURSOR_CONFIG_DIR`. Cursor persists session model selections there, so a
     /// shared directory would silently change the user's default model.
@@ -147,19 +148,50 @@ impl CursorRuntime {
                 .filter(|value| value.split('[').next() == Some(options.model.as_str()))
                 .collect()
         };
+        let matches = matches
+            .into_iter()
+            .filter(|value| {
+                options.effort.as_deref().is_none_or(|effort| {
+                    if effort == "none" && value.starts_with("auto-smart[") {
+                        return true;
+                    }
+                    value.split_once('[').is_some_and(|(_, parameters)| {
+                        parameters
+                            .trim_end_matches(']')
+                            .split(',')
+                            .any(|parameter| {
+                                parameter.split_once('=').is_some_and(|(key, value)| {
+                                    matches!(key, "effort" | "reasoning_effort" | "reasoning")
+                                        && value == effort
+                                })
+                            })
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
         let [model] = matches[..] else {
             bail!(
-                "Cursor model `{}` is not one available model; use one of: {}",
+                "Cursor model `{}` with effort {:?} is not one available variant; use one of: {}",
                 options.model,
+                options.effort,
                 values.join(", ")
             );
         };
         let model = model.to_owned();
-        self.request(
-            "session/set_config_option",
-            json!({"sessionId": self.session_id, "configId": "model", "value": model}),
-        )
-        .await?;
+        let selected = self
+            .request(
+                "session/set_config_option",
+                json!({"sessionId": self.session_id, "configId": "model", "value": model}),
+            )
+            .await?;
+        anyhow::ensure!(
+            selected["configOptions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|option| option["id"] == "model" && option["currentValue"] == model),
+            "Cursor did not confirm requested model variant `{model}`"
+        );
         self.usable = true;
         Ok(())
     }
