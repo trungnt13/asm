@@ -34,7 +34,8 @@ impl MessageBoardTool {
         Self::Post,
     ];
 
-    pub(super) fn name(self) -> &'static str {
+    /// The tool's name within its consumer's namespace.
+    pub fn name(self) -> &'static str {
         match self {
             Self::CreateChannel => "create_channel",
             Self::UpsertChannel => "upsert_channel",

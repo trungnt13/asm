@@ -305,7 +305,7 @@ impl ChatWidget {
                 })
             })];
         }
-        if model_for_action.starts_with("claude-code/") {
+        if codex_protocol::openai_models::is_native_runtime_model(&model_for_action) {
             return Vec::new();
         }
         let warning = effort_for_action

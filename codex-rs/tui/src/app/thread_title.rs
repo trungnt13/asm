@@ -72,7 +72,8 @@ impl App {
         prompt: String,
         auto_rename: AutoRenameRequest,
     ) {
-        if self.chat_widget.current_model().starts_with("claude-code/") {
+        if codex_protocol::openai_models::is_native_runtime_model(self.chat_widget.current_model())
+        {
             if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
                 self.chat_widget
                     .apply_thread_name_suggestion(thread_id, request_id, /*suggestion*/ None);

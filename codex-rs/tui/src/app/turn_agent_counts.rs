@@ -53,12 +53,23 @@ impl TurnAgentCounts {
             arguments,
             ..
         } = item
-            && (server == "claude-code" || server.starts_with("claude-code/"))
-            && matches!(
-                tool.as_str(),
-                "__agent_started" | "__agent_progress" | "__agent_completed"
-            )
-            && let Some(task_id) = arguments.get("task_id").and_then(serde_json::Value::as_str)
+            && let Some(task_id) = match server.split('/').next() {
+                Some("claude-code")
+                    if matches!(
+                        tool.as_str(),
+                        "__agent_started" | "__agent_progress" | "__agent_completed"
+                    ) =>
+                {
+                    arguments.get("task_id")
+                }
+                // Cursor child lifecycle cells carry the native agent ID, which stays stable
+                // across the child's resumed runs; the child session ID does not.
+                Some("cursor-agent") if tool.starts_with("Subagent ") => {
+                    arguments.pointer("/cursor/agentId")
+                }
+                _ => None,
+            }
+            .and_then(serde_json::Value::as_str)
             && !task_id.is_empty()
         {
             self.native

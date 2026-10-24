@@ -48,7 +48,7 @@ impl SessionTask for RegularTask {
         input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
-        if crate::claude_runtime::is_claude_model(&ctx.model_info().slug) {
+        if crate::claude_runtime::is_native_model(&ctx.model_info().slug) {
             return Box::pin(crate::claude_runtime::run_turn(
                 sess,
                 ctx,

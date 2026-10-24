@@ -1164,13 +1164,15 @@ impl ChatWidget {
             context_window_remaining_percent(
                 &info.last_token_usage,
                 window,
-                self.current_model().starts_with("claude-code/"),
+                codex_protocol::openai_models::is_native_runtime_model(self.current_model()),
             )
         })
     }
 
     fn context_used_tokens(&self, info: &TokenUsageInfo, percent_known: bool) -> Option<i64> {
-        if percent_known || self.current_model().starts_with("claude-code/") {
+        if percent_known
+            || codex_protocol::openai_models::is_native_runtime_model(self.current_model())
+        {
             return None;
         }
 

@@ -1,5 +1,7 @@
 use super::bridge::ClaudeMessageBridge;
 use codex_claude_runtime::ClaudeRuntime;
+use codex_claude_runtime::CursorRuntime;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::TokenUsage;
 use serde::Deserialize;
 use serde::Serialize;
@@ -21,6 +23,9 @@ pub(super) struct Checkpoint {
     pub(super) in_flight: bool,
     pub(super) input_count: usize,
     pub(super) input_prefix: String,
+    /// Final native message of the last successful turn; older checkpoints lack it.
+    #[serde(default)]
+    pub(super) fork_point: Option<String>,
 }
 
 impl Checkpoint {
@@ -35,11 +40,11 @@ impl Checkpoint {
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.format_version == 2,
-            "incompatible Claude linkage; start a new chat"
+            "incompatible native session linkage; start a new chat"
         );
         anyhow::ensure!(
             !self.in_flight,
-            "previous Claude turn has an uncertain outcome; start a new chat to avoid replay"
+            "previous native turn has an uncertain outcome; start a new chat to avoid replay"
         );
         anyhow::ensure!(
             self.model == model
@@ -47,12 +52,12 @@ impl Checkpoint {
                 && self.auto_compact_window == auto_compact_window
                 && self.cwd == cwd
                 && self.messaging == messaging,
-            "saved Claude model, effort, compaction window, directory, or messaging configuration changed; start a new chat"
+            "saved native model, effort, compaction window, directory, or messaging configuration changed; start a new chat"
         );
         anyhow::ensure!(
             self.input_count <= messages.len()
                 && self.input_prefix == super::input_prefix(&messages[..self.input_count])?,
-            "saved user input does not match the Claude checkpoint; refusing replay"
+            "saved user input does not match the native session checkpoint; refusing replay"
         );
         Ok(())
     }
@@ -76,11 +81,52 @@ impl Checkpoint {
     }
 }
 
+/// The official CLI process serving one loaded native session.
+pub(super) enum RuntimeProcess {
+    Claude(ClaudeRuntime),
+    Cursor(CursorRuntime),
+}
+
+impl RuntimeProcess {
+    pub(super) async fn shutdown(&mut self) -> anyhow::Result<()> {
+        match self {
+            Self::Claude(runtime) => runtime.shutdown().await,
+            Self::Cursor(runtime) => runtime.shutdown().await,
+        }
+    }
+
+    pub(super) fn diagnostic_snapshot(&self) -> serde_json::Value {
+        match self {
+            Self::Claude(runtime) => runtime.diagnostic_snapshot(),
+            Self::Cursor(runtime) => runtime.diagnostic_snapshot(),
+        }
+    }
+}
+
+/// Where a loaded session keeps its native linkage.
+pub(super) enum Linkage {
+    Saved,
+    /// Temporary forks are unsaved natively, so a saved checkpoint could only mislead cold resume.
+    Temporary,
+}
+
+/// A clean Claude parent captured when a temporary side fork was created.
+pub(crate) struct ForkSeed {
+    pub(super) parent: Checkpoint,
+    pub(super) fork_point: String,
+}
+
+enum TemporaryFork {
+    Pending(ForkSeed),
+    Started,
+}
+
 pub(crate) struct ClaudeSession {
-    pub(super) runtime: ClaudeRuntime,
+    pub(super) runtime: RuntimeProcess,
     pub(super) bridge: Option<ClaudeMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
+    pub(super) linkage: Linkage,
     pub(super) _lock: File,
     pub(super) diagnostic_capture: bool,
     pub(super) usage_baseline: Option<BTreeMap<String, ModelUsage>>,
@@ -131,18 +177,62 @@ fn decode_model_usage(result: &serde_json::Value) -> Option<BTreeMap<String, Mod
         })
 }
 
+impl Linkage {
+    pub(super) fn save(
+        &self,
+        checkpoint: &Checkpoint,
+        path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Saved => checkpoint.save(path),
+            Self::Temporary => Ok(()),
+        }
+    }
+}
+
 impl ClaudeSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
         bridge: Option<&ClaudeMessageBridge>,
-        checkpoint: &Checkpoint,
+        disallowed_tools: Vec<String>,
+        checkpoint: &mut Checkpoint,
+        checkpoint_path: &std::path::Path,
         session: codex_claude_runtime::ClaudeSession,
-    ) -> anyhow::Result<ClaudeRuntime> {
+    ) -> anyhow::Result<RuntimeProcess> {
         use anyhow::Context;
-        let model = checkpoint
-            .model
-            .strip_prefix("claude-code/")
-            .context("not a Claude model")?;
+        let (runtime, model) =
+            NativeRuntime::for_model(&checkpoint.model).context("not a native runtime model")?;
+        if runtime == NativeRuntime::CursorAgent {
+            let session = match session {
+                codex_claude_runtime::ClaudeSession::New { .. } => {
+                    codex_claude_runtime::CursorSession::New
+                }
+                codex_claude_runtime::ClaudeSession::Resume { id } => {
+                    codex_claude_runtime::CursorSession::Load { id }
+                }
+                codex_claude_runtime::ClaudeSession::Fork { .. } => {
+                    anyhow::bail!("Cursor Agent has no native session fork")
+                }
+            };
+            let runtime = CursorRuntime::spawn(codex_claude_runtime::CursorOptions {
+                executable: PathBuf::from("agent"),
+                cwd: checkpoint.cwd.clone(),
+                model: model.to_owned(),
+                session,
+                config_dir: checkpoint_path.with_extension("cursor-config"),
+                mcp_servers: bridge
+                    .map(|bridge| {
+                        serde_json::json!({"type":"http","name":"asm","url":bridge.url(),
+                        "headers":[{"name":"Authorization","value":format!("Bearer {}", bridge.bearer_token())}]})
+                    })
+                    .into_iter()
+                    .collect(),
+            })
+            .await?;
+            // Cursor assigns new session IDs; link before the first prompt is submitted.
+            checkpoint.session_id = runtime.session_id().to_owned();
+            return Ok(RuntimeProcess::Cursor(runtime));
+        }
         let model = if model.starts_with("sonnet-") || model.starts_with("opus-") {
             format!("claude-{model}")
         } else {
@@ -155,12 +245,15 @@ impl ClaudeSession {
             effort: checkpoint.effort.clone(),
             auto_compact_window: checkpoint.auto_compact_window,
             session,
+            disallowed_tools,
             mcp_config: bridge.map(|bridge| {
                 serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
-                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}})
+                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())},
+                "timeout":u64::try_from(bridge.tool_timeout().as_millis()).unwrap_or(u64::MAX)}}})
             }),
         })
         .await
+        .map(RuntimeProcess::Claude)
     }
 
     pub(super) fn measure_usage_delta(&mut self, result: &serde_json::Value) -> Option<TokenUsage> {
@@ -233,9 +326,33 @@ struct SlotState {
     runtime: Option<ClaudeSession>,
     leased: bool,
     discard_on_return: bool,
+    fork: Option<TemporaryFork>,
 }
 
 impl RuntimeSlot {
+    pub(crate) fn seed_fork(&self, seed: ForkSeed) {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .fork = Some(TemporaryFork::Pending(seed));
+    }
+
+    /// Reports a parent busy with an ASM-owned turn or live native background work.
+    pub(super) fn is_busy(&self) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.leased
+            || state.runtime.as_ref().is_some_and(|session| {
+                session.checkpoint.in_flight
+                    || match &session.runtime {
+                        RuntimeProcess::Claude(runtime) => runtime.has_background_work(),
+                        RuntimeProcess::Cursor(_) => false,
+                    }
+            })
+    }
+
     pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ClaudeSession>> {
         let returned = async {
             loop {
@@ -271,7 +388,7 @@ impl RuntimeSlot {
                 // A late return is killed by Drop rather than becoming an unowned idle process.
                 drop(state.runtime.take());
                 anyhow::bail!(
-                    "Claude runtime did not return from its aborted turn within five seconds"
+                    "native runtime did not return from its aborted turn within five seconds"
                 )
             }
         }
@@ -285,15 +402,34 @@ pub(super) struct RuntimeLease<'a> {
 }
 
 impl<'a> RuntimeLease<'a> {
+    /// Claims the seed of a temporary fork once; its native session cannot be started again.
+    pub(super) fn start_fork(&self) -> anyhow::Result<Option<ForkSeed>> {
+        let mut state = self
+            .slot
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match state.fork.replace(TemporaryFork::Started) {
+            Some(TemporaryFork::Pending(seed)) => Ok(Some(seed)),
+            Some(TemporaryFork::Started) => anyhow::bail!(
+                "the temporary native side process ended and cannot be resumed; close it and start a new side conversation"
+            ),
+            None => {
+                state.fork = None;
+                Ok(None)
+            }
+        }
+    }
+
     pub(super) fn take(slot: &'a RuntimeSlot) -> anyhow::Result<Self> {
         let mut state = slot
             .state
             .lock()
-            .map_err(|_| anyhow::anyhow!("Claude session lock was poisoned"))?;
-        anyhow::ensure!(!state.leased, "Claude runtime is already in use");
+            .map_err(|_| anyhow::anyhow!("native session lock was poisoned"))?;
+        anyhow::ensure!(!state.leased, "native runtime is already in use");
         anyhow::ensure!(
             !state.discard_on_return,
-            "Claude runtime shutdown timed out; start a new chat"
+            "native runtime shutdown timed out; start a new chat"
         );
         state.leased = true;
         let runtime = state.runtime.take();

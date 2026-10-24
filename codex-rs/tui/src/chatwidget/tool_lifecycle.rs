@@ -210,7 +210,7 @@ impl ChatWidget {
             tool,
             arguments: Some(arguments),
         };
-        if invocation.is_claude_activity() {
+        if invocation.is_native_activity() {
             if !self.transcript.native_calls.contains_key(&id) {
                 self.flush_active_cell();
                 let cell = history_cell::RetainedMcpToolCallCell::new(
@@ -261,9 +261,9 @@ impl ChatWidget {
             return;
         };
 
-        if invocation.is_claude_activity() {
+        if invocation.is_native_activity() {
             if let Some(cell) = self.transcript.native_calls.remove(&id) {
-                cell.complete(duration, result);
+                cell.complete(invocation, duration, result);
             } else {
                 let mut cell = history_cell::new_active_mcp_tool_call(
                     id, invocation, /*animations_enabled*/ false,

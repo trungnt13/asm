@@ -14,6 +14,8 @@ pub(super) struct ActivityStream {
     calls: HashMap<String, Value>,
     seen: HashSet<String>,
     pub(super) messaging: bool,
+    /// Native runtime ID shown as the activity server, such as `claude-code`.
+    pub(super) server: &'static str,
     agent_tasks: HashSet<String>,
 }
 
@@ -116,7 +118,7 @@ impl ActivityStream {
         Ok(())
     }
 
-    async fn start(
+    pub(super) async fn start(
         &mut self,
         session: &Session,
         turn: &TurnContext,
@@ -129,32 +131,21 @@ impl ActivityStream {
         let Some(name) = block["name"].as_str() else {
             return Ok(());
         };
-        if self.messaging {
-            let namespace = turn.config.multi_agent_v2.tool_namespace.as_deref();
-            let bridged = ["send_message", "list_agents", "wait_agent"]
-                .iter()
-                .any(|tool| {
-                    let wire = match namespace {
-                        Some(namespace) => format!("mcp__asm__{namespace}__{tool}"),
-                        None => format!("mcp__asm__{tool}"),
-                    };
-                    name == wire
-                });
-            if bridged {
-                return Ok(());
-            }
+        // The bridge records its own calls; every tool on the `asm` server is bridged.
+        if self.messaging && name.starts_with("mcp__asm__") {
+            return Ok(());
         }
         let key = format!("{scope}:{id}");
         if !self.seen.insert(key.clone()) {
             return Ok(());
         }
         let server = if scope.is_empty() {
-            "claude-code".to_owned()
+            self.server.to_owned()
         } else {
-            format!("claude-code/{scope}")
+            format!("{}/{scope}", self.server)
         };
         let call = json!({
-            "id": format!("{}:claude:{key}", turn.sub_id),
+            "id": format!("{}:{}:{key}", turn.sub_id, self.server),
             "server": server, "tool": name, "arguments": block["input"],
             "status": "inProgress"
         });
@@ -166,7 +157,19 @@ impl ActivityStream {
         Ok(())
     }
 
-    async fn finish(
+    /// Applies a native update's title or arguments to a running call before completion.
+    pub(super) fn update(&mut self, key: &str, name: &Value, input: &Value) {
+        if let Some(call) = self.calls.get_mut(key) {
+            if name.is_string() {
+                call["tool"] = name.clone();
+            }
+            if !input.is_null() {
+                call["arguments"] = input.clone();
+            }
+        }
+    }
+
+    pub(super) async fn finish(
         &mut self,
         session: &Session,
         turn: &TurnContext,

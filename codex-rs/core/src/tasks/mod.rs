@@ -993,7 +993,7 @@ impl Session {
         let session_task = task.task;
 
         let interruption_timeout =
-            if crate::claude_runtime::is_claude_model(&task.turn_context.model_info().slug) {
+            if crate::claude_runtime::is_native_model(&task.turn_context.model_info().slug) {
                 Duration::from_secs(15)
             } else {
                 Duration::from_millis(GRACEFULL_INTERRUPTION_TIMEOUT_MS)

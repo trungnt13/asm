@@ -568,13 +568,19 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
-pub(crate) fn history_uses_claude(history: &InitialHistory) -> bool {
-    history.get_rollout_items().iter().any(|item| match item {
-        RolloutItem::TurnContext(context) => crate::claude_runtime::is_claude_model(&context.model),
-        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
-            crate::claude_runtime::is_claude_model(&event.thread_settings.model)
-        }
-        _ => false,
+/// Returns the native runtime recorded in saved history, if any.
+pub(crate) fn history_native_runtime(
+    history: &InitialHistory,
+) -> Option<codex_protocol::openai_models::NativeRuntime> {
+    history.get_rollout_items().iter().find_map(|item| {
+        let model = match item {
+            RolloutItem::TurnContext(context) => &context.model,
+            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+                &event.thread_settings.model
+            }
+            _ => return None,
+        };
+        codex_protocol::openai_models::NativeRuntime::for_model(model).map(|(runtime, _)| runtime)
     })
 }
 
@@ -750,36 +756,43 @@ impl Session {
         };
 
         let mut config = Arc::new(config);
-        let uses_claude = config
+        let native_runtime = config
             .model
             .as_deref()
-            .is_some_and(crate::claude_runtime::is_claude_model);
-        if uses_claude
+            .and_then(codex_protocol::openai_models::NativeRuntime::for_model)
+            .map(|(runtime, _)| runtime);
+        let uses_native_runtime = native_runtime.is_some();
+        if uses_native_runtime
             && config
                 .service_tier
                 .as_deref()
                 .is_some_and(|tier| tier != "default")
         {
             return Err(CodexErr::InvalidRequest(
-                "Claude runtime does not support native service tiers; select the default tier"
-                    .to_string(),
+                "Native runtimes do not support service tiers; select the default tier".to_string(),
             ));
         }
+        // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
+        // Claude history forks only into a temporary side, which Claude forks natively.
+        let temporary_claude_fork = config.ephemeral
+            && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::ClaudeCode)
+            && history_native_runtime(&conversation_history) == native_runtime;
         if (matches!(&conversation_history, InitialHistory::Forked(_))
-            && (uses_claude || history_uses_claude(&conversation_history)))
+            && !temporary_claude_fork
+            && (uses_native_runtime || history_native_runtime(&conversation_history).is_some()))
             || (matches!(&conversation_history, InitialHistory::Resumed(_))
-                && history_uses_claude(&conversation_history) != uses_claude)
+                && history_native_runtime(&conversation_history) != native_runtime)
         {
             return Err(CodexErr::InvalidRequest(
-                "Claude runtime does not support history forks or cross-runtime resume; start a fresh thread".to_string(),
+                "Native runtimes do not support history forks or cross-runtime resume; start a fresh thread".to_string(),
             ));
         }
-        let refresh_strategy = if uses_claude || session_source.is_non_root_agent() {
+        let refresh_strategy = if uses_native_runtime || session_source.is_non_root_agent() {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        if !uses_claude
+        if !uses_native_runtime
             && (config.model.is_none()
                 || !matches!(
                     refresh_strategy,
@@ -790,9 +803,9 @@ impl Session {
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = if uses_claude {
+        let model = if uses_native_runtime {
             config.model.clone().ok_or_else(|| {
-                CodexErr::InvalidRequest("Claude runtime requires an explicit model".to_owned())
+                CodexErr::InvalidRequest("Native runtimes require an explicit model".to_owned())
             })?
         } else {
             models_manager
@@ -811,7 +824,7 @@ impl Session {
         }
         let trusted_guardian_reviewer = crate::guardian::is_basic_session_source(&session_source)
             && !matches!(conversation_history, InitialHistory::Resumed(_));
-        if uses_claude {
+        if uses_native_runtime {
             if crate::guardian::is_basic_session_source(&session_source)
                 || config
                     .config_layer_stack
@@ -819,7 +832,7 @@ impl Session {
                     .auto_review_required_for_model(&model)
             {
                 return Err(CodexErr::InvalidRequest(
-                    "Claude runtime cannot perform required Guardian review; use an ASM-managed model"
+                    "Native runtimes cannot perform required Guardian review; use an ASM-managed model"
                         .to_string(),
                 ));
             }
@@ -2598,7 +2611,7 @@ impl Session {
 
     pub(crate) async fn emit_turn_started(&self, turn_context: &TurnContext, task_kind: TaskKind) {
         let model_context_window =
-            if crate::claude_runtime::is_claude_model(&turn_context.model_info().slug) {
+            if crate::claude_runtime::is_native_model(&turn_context.model_info().slug) {
                 self.token_usage_info()
                     .await
                     .and_then(|info| info.model_context_window)
@@ -5780,7 +5793,7 @@ async fn build_hooks_config(
     if config
         .model
         .as_deref()
-        .is_some_and(crate::claude_runtime::is_claude_model)
+        .is_some_and(crate::claude_runtime::is_native_model)
     {
         return HooksConfig::default();
     }

@@ -577,12 +577,12 @@ impl SessionConfiguration {
             &updates.step_settings,
             &next_configuration.step_settings_constraints(next_environments),
         )?);
-        if crate::claude_runtime::is_claude_model(self.step_settings.collaboration_mode.model())
+        if crate::claude_runtime::is_native_model(self.step_settings.collaboration_mode.model())
             && (next_configuration.cwd() != self.cwd()
                 || next_configuration.environments != self.environments)
         {
             return Err(crate::config::ConstraintError::InvalidValue {
-                field_name: "Claude runtime environment (start a fresh thread to change)",
+                field_name: "Native runtime environment (start a fresh thread to change)",
                 candidate: "changed environment".to_string(),
                 allowed: "original environment".to_string(),
                 requirement_source: codex_config::RequirementSource::Unknown,
@@ -1942,7 +1942,7 @@ impl Session {
                 next_internal_sub_id: AtomicU64::new(0),
             });
             let initial_system1 = config.system1.enabled
-                && !crate::claude_runtime::is_claude_model(
+                && !crate::claude_runtime::is_native_model(
                     session_configuration
                         .step_settings
                         .collaboration_mode

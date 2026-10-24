@@ -3169,7 +3169,8 @@ impl App {
                 return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Side, user_message)).await;
             }
             AppEvent::SideConversationAction { action } => {
-                self.apply_side_conversation_action(tui, app_server, action).await?;
+                // Sync and Fork re-run companion fork setup; keep it boxed like Side startup.
+                Box::pin(self.apply_side_conversation_action(tui, app_server, action)).await?;
             }
             AppEvent::StartParallel { parent_thread_id, user_message } => {
                 return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Parallel, user_message)).await;

@@ -77,6 +77,13 @@ impl McpInvocation {
         self.server == "claude-code" || self.server.starts_with("claude-code/")
     }
 
+    /// Native runtime tool display events, which complete by retained call ID.
+    pub(crate) fn is_native_activity(&self) -> bool {
+        self.is_claude_activity()
+            || self.server == codex_protocol::openai_models::NativeRuntime::CursorAgent.id()
+            || self.server.starts_with("cursor-agent/")
+    }
+
     pub(crate) fn is_computer_activity(&self) -> bool {
         self.server == "cua_repl"
     }
@@ -504,12 +511,17 @@ impl RetainedMcpToolCallCell {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Completes the call with its final invocation; native runtimes can refine the
+    /// title or arguments after the call starts.
     pub(crate) fn complete(
         &self,
+        invocation: McpInvocation,
         duration: Duration,
         result: Result<codex_protocol::mcp::CallToolResult, String>,
     ) {
-        self.cell().complete(duration, result);
+        let mut cell = self.cell();
+        cell.invocation = invocation;
+        cell.complete(duration, result);
     }
 
     pub(crate) fn is_active(&self) -> bool {

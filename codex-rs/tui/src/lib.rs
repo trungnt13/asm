@@ -1353,7 +1353,7 @@ async fn run_ratatui_app(
     let uses_claude_runtime = initial_config
         .model
         .as_deref()
-        .is_some_and(|model| model.starts_with("claude-code/"));
+        .is_some_and(codex_protocol::openai_models::is_native_runtime_model);
     let requires_openai_auth = !uses_claude_runtime
         && startup_account
             .as_ref()

@@ -70,7 +70,8 @@ impl App {
         &mut self,
         event: &ThreadBufferedEvent,
     ) -> Option<AutomaticTitlePrompt> {
-        if self.chat_widget.current_model().starts_with("claude-code/") {
+        if codex_protocol::openai_models::is_native_runtime_model(self.chat_widget.current_model())
+        {
             return None;
         }
         let settings = &self.local_settings.auto_rename;

@@ -162,7 +162,7 @@ impl ChatWidget {
             self.confirm_model_session(model, Some(effort));
             return;
         }
-        if model.starts_with("claude-code/") {
+        if codex_protocol::openai_models::is_native_runtime_model(&model) {
             return;
         }
         let warning = self.ultra_reasoning_concurrency_warning(&effort);

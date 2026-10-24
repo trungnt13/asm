@@ -1,7 +1,12 @@
-//! Run persistent official Claude CLI sessions.
-//! Claude owns tools and configuration. Callers serialize turns.
+//! Run persistent official Claude and Cursor CLI sessions.
+//! The native CLI owns tools and configuration. Callers serialize turns.
 
+mod cursor;
 mod frames;
+
+pub use cursor::CursorOptions;
+pub use cursor::CursorRuntime;
+pub use cursor::CursorSession;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -9,6 +14,7 @@ use anyhow::bail;
 use codex_utils_pty::process_group;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -32,9 +38,20 @@ use uuid::Uuid;
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 5);
 
+/// `Fork` is an unsaved native copy of `parent` up to and including message `at`, under `id`;
+/// it cannot resume after its process ends.
 pub enum ClaudeSession {
-    New { id: String },
-    Resume { id: String },
+    New {
+        id: String,
+    },
+    Resume {
+        id: String,
+    },
+    Fork {
+        parent: String,
+        at: String,
+        id: String,
+    },
 }
 
 pub struct ClaudeOptions {
@@ -46,6 +63,8 @@ pub struct ClaudeOptions {
     pub auto_compact_window: Option<i64>,
     pub session: ClaudeSession,
     pub mcp_config: Option<Value>,
+    /// Native tool names removed from this session, such as questions for headless children.
+    pub disallowed_tools: Vec<String>,
 }
 
 pub struct ClaudeTurnOutcome {
@@ -55,32 +74,40 @@ pub struct ClaudeTurnOutcome {
 }
 
 pub struct ClaudeRuntime {
+    process: NativeProcess,
+    session_id: String,
+    mcp_config: Option<NamedTempFile>,
+    usable: bool,
+    failure_result: Option<Value>,
+    mid_turn_delivery: watch::Sender<bool>,
+    // Native reports this level per process; live tasks can start another native turn.
+    background_work: bool,
+    // Last top-level assistant message of the latest turn, for pinned native forks.
+    last_assistant_uuid: Option<String>,
+}
+
+/// Native CLI process leading its own process group, with framed stdout and a bounded stderr tail.
+struct NativeProcess {
     child: Child,
     stdin: Option<ChildStdin>,
     frames: mpsc::Receiver<Result<Value>>,
     stdout_reader: JoinHandle<()>,
     stderr_reader: Option<JoinHandle<()>>,
     stderr: Arc<Mutex<VecDeque<u8>>>,
-    session_id: String,
-    mcp_config: Option<NamedTempFile>,
-    usable: bool,
-    failure_result: Option<Value>,
     exit_status: Option<String>,
-    mid_turn_delivery: watch::Sender<bool>,
-    // Native reports this level per process; live tasks can start another native turn.
-    background_work: bool,
 }
 
 // A dropped turn future must not leave a live agent executing outside ASM's task lifetime.
 struct TurnGuard {
     pid: Option<u32>,
     armed: bool,
+    kill: fn(Option<u32>),
 }
 
 impl Drop for TurnGuard {
     fn drop(&mut self) {
         if self.armed {
-            kill_group(self.pid);
+            (self.kill)(self.pid);
         }
     }
 }
@@ -89,7 +116,7 @@ fn kill_group(pid: Option<u32>) {
     if let Some(pid) = pid
         && let Err(error) = process_group::kill_process_group(pid)
     {
-        tracing::warn!(pid, %error, "failed to kill Claude process group");
+        tracing::warn!(pid, %error, "failed to kill native CLI process group");
     }
 }
 
@@ -115,12 +142,24 @@ impl ClaudeRuntime {
                 "Claude auto-compaction window must be between 100000 and 1000000 tokens"
             );
         }
-        let (session_id, session_flag) = match options.session {
-            ClaudeSession::New { id } => (id, "--session-id"),
-            ClaudeSession::Resume { id } => (id, "--resume"),
+        let (session_id, session_flag, fork_parent) = match options.session {
+            ClaudeSession::New { id } => (id, "--session-id", None),
+            ClaudeSession::Resume { id } => (id, "--resume", None),
+            ClaudeSession::Fork { parent, at, id } => (id, "--session-id", Some((parent, at))),
         };
         Uuid::parse_str(&session_id).context("Claude session ID must be a UUID")?;
         let mut command = Command::new(options.executable);
+        if let Some((parent, at)) = fork_parent {
+            Uuid::parse_str(&parent).context("Claude parent session ID must be a UUID")?;
+            Uuid::parse_str(&at).context("Claude fork message ID must be a UUID")?;
+            // The native cutoff pins the fork; Claude refuses to start if `at` is not in the chain.
+            command
+                .arg("--resume")
+                .arg(parent)
+                .arg("--resume-session-at")
+                .arg(at)
+                .args(["--fork-session", "--no-session-persistence"]);
+        }
         // Keep login in the official CLI, without accidental API-key or cloud-provider billing.
         for name in [
             "ANTHROPIC_API_KEY",
@@ -144,17 +183,14 @@ impl ClaudeRuntime {
                 "stream-json",
             ])
             .args(["--verbose", "--include-partial-messages"])
-            // No permission host is attached. Native allow/deny rules still apply,
-            // but a tool that requires a new approval must be denied, not granted.
+            // Run in native bypass mode. Native deny rules and managed policy still apply;
+            // no permission host is attached, so anything that still prompts is denied.
+            .arg("--dangerously-skip-permissions")
             .args(["--permission-prompts", "none"])
             .arg("--model")
             .arg(options.model)
             .arg(session_flag)
-            .arg(&session_id)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(/*kill_on_drop*/ true);
+            .arg(&session_id);
         // Keep credentials out of argv. The owner-only file is removed on spawn
         // failure or runtime teardown, after the child no longer needs it.
         let mcp_config = options
@@ -183,43 +219,31 @@ impl ClaudeRuntime {
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
         }
-        #[cfg(unix)]
-        {
-            let parent_pid = std::process::id() as i32;
-            // SAFETY: only async-signal-safe system calls run in the child.
-            unsafe {
-                command.pre_exec(move || {
-                    process_group::set_process_group()?;
-                    process_group::set_parent_death_signal(parent_pid)
-                });
-            }
+        if !options.disallowed_tools.is_empty() {
+            command
+                .arg("--disallowedTools")
+                .arg(options.disallowed_tools.join(","));
         }
-        let mut child = command.spawn().context("starting official Claude CLI")?;
-        let stdin = child.stdin.take().context("Claude stdin unavailable")?;
-        let stdout = child.stdout.take().context("Claude stdout unavailable")?;
-        let stderr_pipe = child.stderr.take().context("Claude stderr unavailable")?;
-        let (sender, frames) = mpsc::channel(/*buffer*/ 32);
-        let stderr = Arc::new(Mutex::new(VecDeque::new()));
-        let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender));
-        let stderr_reader = Some(tokio::spawn(frames::drain_stderr(
-            stderr_pipe,
-            Arc::clone(&stderr),
-        )));
         Ok(Self {
-            child,
-            stdin: Some(stdin),
-            frames,
-            stdout_reader,
-            stderr_reader,
-            stderr,
+            process: NativeProcess::spawn(command).context("starting official Claude CLI")?,
             session_id,
             mcp_config,
             usable: true,
             failure_result: None,
-            exit_status: None,
             mid_turn_delivery: watch::channel(false).0,
             background_work: false,
+            last_assistant_uuid: None,
         })
+    }
+
+    /// Whether native background tasks were live at the last observed frame.
+    pub fn has_background_work(&self) -> bool {
+        self.background_work
+    }
+
+    /// Final top-level assistant message of the latest turn; a fork at it excludes later turns.
+    pub fn fork_point(&self) -> Option<&str> {
+        self.last_assistant_uuid.as_deref()
     }
 
     pub fn subscribe_mid_turn_delivery(&self) -> watch::Receiver<bool> {
@@ -229,18 +253,7 @@ impl ClaudeRuntime {
     /// These bounded diagnostics can contain private information.
     /// Save them only when private diagnostic capture is enabled.
     pub fn diagnostic_snapshot(&self) -> Value {
-        let stderr = self
-            .stderr
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
-        json!({
-            "stderr_tail": String::from_utf8_lossy(&stderr),
-            "failure_result": self.failure_result,
-            "exit_status": self.exit_status,
-        })
+        self.process.diagnostic_snapshot(&self.failure_result)
     }
 
     #[tracing::instrument(skip_all)]
@@ -259,9 +272,11 @@ impl ClaudeRuntime {
         }
         self.usable = false;
         self.failure_result = None;
+        self.last_assistant_uuid = None;
         let mut guard = TurnGuard {
-            pid: self.child.id(),
+            pid: self.process.child.id(),
             armed: true,
+            kill: kill_group,
         };
         let user_message_uuid = Uuid::new_v4().to_string();
         let result = async {
@@ -270,7 +285,7 @@ impl ClaudeRuntime {
                 _ = cancel.cancelled() => {
                     bail!("Claude turn cancelled during submission; explicit recovery is required");
                 }
-                result = self.write_frame(json!({"type":"user", "uuid":user_message_uuid,
+                result = self.process.write_frame(json!({"type":"user", "uuid":user_message_uuid,
                     "message":{"role":"user","content":prompt}})) => result?,
             }
             self.read_result(&events, cancel, &user_message_uuid, steering)
@@ -280,37 +295,12 @@ impl ClaudeRuntime {
         if result.is_ok() {
             self.usable = true;
         }
-        if self.usable {
-            guard.armed = false;
-        } else {
+        if !self.usable {
             // Preserve the original turn error even if cleanup fails.
-            let pid = self.child.id();
-            let exited = self.child.try_wait();
-            // try_wait can reap the leader and clear child.id(), while helpers
-            // still hold its process group. Keep the original group ID for cleanup.
-            kill_group(pid);
-            if let Ok(Some(status)) = exited {
-                self.exit_status = Some(status.to_string());
-            } else if let Ok(Ok(status)) = timeout(STOP_TIMEOUT, self.child.wait()).await {
-                self.exit_status = Some(status.to_string());
-            }
-            guard.armed = false;
+            self.process.kill(kill_group).await;
         }
+        guard.armed = false;
         result
-    }
-
-    async fn write_frame(&mut self, frame: Value) -> Result<()> {
-        let mut bytes = serde_json::to_vec(&frame)?;
-        if bytes.len() > frames::FRAME_LIMIT {
-            bail!("Claude input frame exceeded size limit");
-        }
-        bytes.push(b'\n');
-        let stdin = self.stdin.as_mut().context("Claude stdin is closed")?;
-        stdin
-            .write_all(&bytes)
-            .await
-            .context("writing Claude input")?;
-        stdin.flush().await.context("flushing Claude input")
     }
 
     async fn read_result(
@@ -332,14 +322,15 @@ impl ClaudeRuntime {
         let mut interrupt_acknowledged = false;
         let mut interrupted_commands = HashSet::new();
         let mut idle = false;
-        let mut active_agents = HashSet::new();
+        // Local agents by task ID, with the latest run ID when Claude reports one.
+        let mut active_agents: HashMap<String, Option<String>> = HashMap::new();
         loop {
             let frame = tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if interrupt_id.is_none() => {
                     let request_id = Uuid::new_v4().to_string();
                     let deadline = Instant::now() + STOP_TIMEOUT;
-                    timeout(STOP_TIMEOUT, self.write_frame(json!({
+                    timeout(STOP_TIMEOUT, self.process.write_frame(json!({
                         "type":"control_request", "request_id":request_id,
                         "request":{"subtype":"interrupt"}
                     }))).await.context("Claude interrupt submission timed out")??;
@@ -372,7 +363,7 @@ impl ClaudeRuntime {
                     // No Send now or interrupt: native queues the message and folds it in at
                     // its next tool boundary, so running tools finish instead of being rejected.
                     // Persisted input is never replayed if the write fails partway through.
-                    timeout(STOP_TIMEOUT, self.write_frame(json!({"type":"user",
+                    timeout(STOP_TIMEOUT, self.process.write_frame(json!({"type":"user",
                         "uuid":command_uuid, "message":{"role":"user","content":prompt}})))
                     .await
                     .context("Claude steering submission timed out")??;
@@ -385,7 +376,7 @@ impl ClaudeRuntime {
                     idle = false;
                     continue;
                 }
-                frame = self.frames.recv() => frame.context("Claude stream reader stopped")??,
+                frame = self.process.frames.recv() => frame.context("Claude stream reader stopped")??,
             };
             if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
                 bail!("Claude emitted a JSON frame without an event type");
@@ -432,7 +423,7 @@ impl ClaudeRuntime {
             if frame.get("type").and_then(Value::as_str) == Some("control_request") {
                 self.failure_result = Some(frame.clone());
                 if let Some(request_id) = frame.get("request_id").and_then(Value::as_str) {
-                    self.write_frame(json!({
+                    self.process.write_frame(json!({
                         "type": "control_response",
                         "response": {
                             "subtype": "error",
@@ -478,7 +469,13 @@ impl ClaudeRuntime {
                         .get("task_id")
                         .and_then(Value::as_str)
                         .context("Claude local agent started without a task ID")?;
-                    active_agents.insert(task_id.to_owned());
+                    let run = frame.get("run_id").and_then(Value::as_str);
+                    // A resumed task keeps its ID with a new, later-sorting run ID. Late or
+                    // run-less starts must not replace a known newer run.
+                    let known = active_agents.get(task_id).cloned().flatten();
+                    if known.is_none() || run.is_some_and(|run| Some(run) >= known.as_deref()) {
+                        active_agents.insert(task_id.to_owned(), run.map(str::to_owned));
+                    }
                 }
                 if subtype == Some("task_notification")
                     && matches!(
@@ -486,8 +483,13 @@ impl ClaudeRuntime {
                         Some("stopped" | "completed" | "failed" | "killed")
                     )
                     && let Some(task_id) = frame.get("task_id").and_then(Value::as_str)
+                    && let Some(known) = active_agents.get(task_id)
                 {
-                    active_agents.remove(task_id);
+                    // A run-less or older-run terminal cannot prove that a known newer run stopped.
+                    let run = frame.get("run_id").and_then(Value::as_str);
+                    if known.is_none() || run.is_some_and(|run| Some(run) >= known.as_deref()) {
+                        active_agents.remove(task_id);
+                    }
                 }
                 if subtype == Some("background_tasks_changed") {
                     self.background_work = frame
@@ -515,6 +517,10 @@ impl ClaudeRuntime {
             {
                 pending_result = None;
                 idle = false;
+                if frame.get("type").and_then(Value::as_str) == Some("assistant") {
+                    self.last_assistant_uuid =
+                        frame.get("uuid").and_then(Value::as_str).map(str::to_owned);
+                }
             }
             let send = events.send(frame.clone());
             if let Some(deadline) = interrupt_deadline {
@@ -614,6 +620,103 @@ impl ClaudeRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn shutdown(&mut self) -> Result<()> {
         self.usable = false;
+        let result = self.process.shutdown().await;
+        self.mcp_config.take();
+        result
+    }
+}
+
+impl NativeProcess {
+    /// Starts `command` as the leader of a new process group that dies with ASM.
+    fn spawn(mut command: Command) -> Result<Self> {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(/*kill_on_drop*/ true);
+        #[cfg(unix)]
+        {
+            let parent_pid = std::process::id() as i32;
+            // SAFETY: only async-signal-safe system calls run in the child.
+            unsafe {
+                command.pre_exec(move || {
+                    process_group::set_process_group()?;
+                    process_group::set_parent_death_signal(parent_pid)
+                });
+            }
+        }
+        let mut child = command.spawn()?;
+        let stdin = child.stdin.take().context("native CLI stdin unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("native CLI stdout unavailable")?;
+        let stderr_pipe = child
+            .stderr
+            .take()
+            .context("native CLI stderr unavailable")?;
+        let (sender, frames) = mpsc::channel(/*buffer*/ 32);
+        let stderr = Arc::new(Mutex::new(VecDeque::new()));
+        let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender));
+        let stderr_reader = Some(tokio::spawn(frames::drain_stderr(
+            stderr_pipe,
+            Arc::clone(&stderr),
+        )));
+        Ok(Self {
+            child,
+            stdin: Some(stdin),
+            frames,
+            stdout_reader,
+            stderr_reader,
+            stderr,
+            exit_status: None,
+        })
+    }
+
+    fn diagnostic_snapshot(&self, failure_result: &Option<Value>) -> Value {
+        let stderr = self
+            .stderr
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        json!({
+            "stderr_tail": String::from_utf8_lossy(&stderr),
+            "failure_result": failure_result,
+            "exit_status": self.exit_status,
+        })
+    }
+
+    async fn write_frame(&mut self, frame: Value) -> Result<()> {
+        let mut bytes = serde_json::to_vec(&frame)?;
+        if bytes.len() > frames::FRAME_LIMIT {
+            bail!("native CLI input frame exceeded size limit");
+        }
+        bytes.push(b'\n');
+        let stdin = self.stdin.as_mut().context("native CLI stdin is closed")?;
+        stdin
+            .write_all(&bytes)
+            .await
+            .context("writing native CLI input")?;
+        stdin.flush().await.context("flushing native CLI input")
+    }
+
+    /// Kills the owned process tree with `kill` and records the leader's exit status.
+    async fn kill(&mut self, kill: fn(Option<u32>)) {
+        let pid = self.child.id();
+        let exited = self.child.try_wait();
+        // try_wait can reap the leader and clear child.id(), while helpers
+        // still hold its process group. Keep the original group ID for cleanup.
+        kill(pid);
+        if let Ok(Some(status)) = exited {
+            self.exit_status = Some(status.to_string());
+        } else if let Ok(Ok(status)) = timeout(STOP_TIMEOUT, self.child.wait()).await {
+            self.exit_status = Some(status.to_string());
+        }
+    }
+
+    async fn shutdown(&mut self) -> Result<()> {
         self.stdin.take();
         let pid = self.child.id();
         let result = timeout(STOP_TIMEOUT, self.child.wait()).await;
@@ -621,29 +724,32 @@ impl ClaudeRuntime {
         kill_group(pid);
         match result {
             Ok(status) => {
-                self.exit_status = Some(status.context("waiting for Claude exit")?.to_string());
+                self.exit_status = Some(status.context("waiting for native CLI exit")?.to_string());
             }
             Err(_) => {
                 let status = timeout(STOP_TIMEOUT, self.child.wait())
                     .await
-                    .context("Claude did not exit after termination")??;
+                    .context("native CLI did not exit after termination")??;
                 self.exit_status = Some(status.to_string());
             }
         }
-        self.mcp_config.take();
-        // Let stderr finish before callers capture diagnostics. Keep the task owned
-        // while awaiting, so cancellation still lets Drop stop it.
+        self.wait_for_stderr().await;
+        Ok(())
+    }
+
+    /// Lets stderr finish before callers capture diagnostics. Keeps the task owned
+    /// while awaiting, so cancellation still lets Drop stop it.
+    async fn wait_for_stderr(&mut self) {
         if let Some(reader) = self.stderr_reader.as_mut() {
             if timeout(STOP_TIMEOUT, &mut *reader).await.is_err() {
                 reader.abort();
             }
             self.stderr_reader.take();
         }
-        Ok(())
     }
 }
 
-impl Drop for ClaudeRuntime {
+impl Drop for NativeProcess {
     fn drop(&mut self) {
         kill_group(self.child.id());
         self.stdout_reader.abort();

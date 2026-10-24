@@ -2221,9 +2221,9 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
-        if config_snapshot.model.starts_with("claude-code/") {
+        if codex_protocol::openai_models::is_native_runtime_model(&config_snapshot.model) {
             return Err(invalid_request(
-                "Claude runtime history cannot be reverted; start a fresh thread",
+                "Native runtime history cannot be reverted; start a fresh thread",
             ));
         }
         let mut config = thread.config().await.as_ref().clone();
@@ -2541,14 +2541,11 @@ impl ThreadRequestProcessor {
 
         let (_, thread) = self.load_thread(&thread_id).await?;
         ensure_direct_input_allowed(thread.as_ref()).await?;
-        if thread
-            .config_snapshot()
-            .await
-            .model
-            .starts_with("claude-code/")
-        {
+        if codex_protocol::openai_models::is_native_runtime_model(
+            &thread.config_snapshot().await.model,
+        ) {
             return Err(invalid_request(
-                "Claude runtime does not support manual compaction; start a fresh thread instead",
+                "Native runtimes do not support manual compaction; start a fresh thread instead",
             ));
         }
         self.config_manager

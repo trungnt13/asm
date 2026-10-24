@@ -312,9 +312,21 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
   approval receipts or tool results into Claude's private conversation.
-- Main sessions have no injected ASM MCP server. ASM-managed Claude children may
-  receive only inter-agent messaging tools over authenticated loopback MCP. Never
-  forward executable ASM tools or create a second agent registry.
+- Main sessions and sides have no injected ASM MCP server. ASM-managed MultiAgentV2
+  children of both native runtimes get one authenticated loopback MCP server, `asm`,
+  carrying the canonical collaboration tools other than `spawn_agent`, under the same
+  gates as Codex children. `disable_direct_message` removes `send_message` and
+  `followup_task`; `wait_agent` follows `wait_agent_enabled`; `interrupt_agent` and
+  `list_agents` stay; `disable_native_tools` removes them all. `agent_message_board`
+  adds the board extension's nine discussion tools, bound to the child at thread start
+  with the extension's own storage gates, independent of `disable_native_tools`. Reuse
+  the canonical registration and handlers; a duplicate tool name fails the turn. Never
+  forward other executable ASM tools or create a second agent registry. Claude's
+  per-server tool timeout covers eight admitted calls queued behind canonical maximum
+  waits, plus 30 seconds; its default ends a bridged wait after 60 seconds. Calls run
+  one at a time per turn; canonical waits, sends and posts also serialize. Board
+  notifications reach only a running turn, as with Codex children: Claude folds them in
+  at its next tool boundary, Cursor after its turn; they never wake an idle child.
 - Deliver messages during a busy Claude child's native run as UUID-stamped queued
   user input, never Send now or another interrupt. Native folds it in at its next tool
   boundary, so running tools finish instead of returning a rejection that tells the
@@ -342,10 +354,16 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   must not inflate a currently active ancestor turn's count.
 - Use native Claude Code settings and subscription login; resolve `claude` through
   PATH. Do not extract subscription credentials or enable API billing implicitly.
-  Do not disable native tools, skills or instructions to emulate ASM inference.
+  Do not disable native tools, skills or instructions to emulate ASM inference. The one
+  exception: ASM thread-spawned children (V1 and V2) launch with
+  `--disallowedTools AskUserQuestion`, because nobody can answer a headless child's
+  questions. Main sessions keep native question behavior.
 - Claude permissions govern Claude tools. ASM sandbox and approval settings do not
-  govern them; display that distinction clearly. Never auto-approve headless prompts;
-  unavailable approvals must fail explicitly. Configured native hooks remain native.
+  govern them; display that distinction clearly. By user decision, every Claude session,
+  main and children, runs in native bypass mode (`--dangerously-skip-permissions`).
+  Native deny rules, hooks and managed policy still apply. Keep
+  `--permission-prompts none`, so anything that still prompts fails explicitly; never
+  grant protocol approval requests. Configured native hooks remain native.
   If managed policy requires an ASM-managed sandbox, refuse external execution.
 - Keep one CLI process per loaded Claude session, with private external-session
   linkage and unfinished-turn state. Resume only a known clean session; never replay
@@ -353,7 +371,9 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - On interrupt, stop native work and retain the process only after a matching
   successful interrupt acknowledgement with an explicit empty queued-input receipt,
   explicit idle, and termination of observed
-  native child tasks. Persist clean linkage before allowing another turn. Missing
+  native child tasks. Track a local agent task by ID and its latest run ID: a resumed
+  task keeps its ID with a new, later-sorting run ID. An older-run or run-less start or
+  terminal never replaces or clears a known newer run. Persist clean linkage before allowing another turn. Missing
   confirmation, timeout, disconnect or forced abort kills the owned group and keeps
   linkage dirty. Give only external tasks a bounded cleanup grace period.
   UUID-stamp submitted native user inputs so the receipt accounts for queued work.
@@ -367,6 +387,23 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
   extraction may summarize their saved ASM transcripts.
+- Claude history forks only into temporary `/side`/`/btw` (and its `/sync`), whole and at
+  main's model. Admission requires a loaded, idle main with no native background work and a
+  clean checkpoint whose delivered input equals the forked history. The checkpoint's
+  optional `fork_point` is the final top-level assistant message UUID of the last
+  successful, uninterrupted turn; older checkpoints lack it, so `/side` refuses until main
+  completes a new turn. The side's first turn starts a separate process with `--resume
+  <main> --resume-session-at <fork_point> --fork-session --no-session-persistence
+  --session-id <new>`, so later main turns are excluded. This relies on Claude's hidden
+  cutoff flag, verified on 2.1.309: an unknown UUID fails closed, without fallback to
+  latest. Native agent, task and worktree controls (Agent, Task, TaskStop, SendMessage,
+  ListAgents, CronCreate, CronDelete, ScheduleWakeup, EnterWorktree, ExitWorktree) are
+  disallowed. A short boundary is sent once, because ASM side instructions are not native
+  context; it keeps Side's reference-only, no-agent and no-worktree rules. Never replay
+  history or copy session files. The side checkpoint stays in memory and the side thread
+  unloads as soon as it is closed, ending its process; a lost process or closed side
+  cannot cold-resume. Cursor sides, `/parallel`, saved `/fork` and historical cuts of
+  native history stay rejected.
 - External threads use Default collaboration mode only and never use guardian
   approval review. Mandatory managed-execution restrictions still apply.
 - Native turns have no total-duration deadline; cancellation and bounded cleanup
@@ -397,10 +434,80 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Cache rate is the cached share of that latest main request.
 - Require native stream-json result followed by session-idle completion; CLI 2.1.296
   is the verified protocol target. Queued delivery and background continuation were
-  verified with 2.1.308. Revalidate compatibility when upgrading it.
+  verified with 2.1.309. Revalidate compatibility when upgrading it.
 - Keep opt-in until real Claude-main and Sol-parent/Claude-child sessions pass with
   the intended installed CLI. Never replace installed binaries or global profiles
   as part of testing. Cross-runtime context parity is not a requirement.
+
+### Cursor Agent thread runtime
+
+Explicit `cursor-agent/<model>` IDs select the official Cursor CLI over ACP (`agent acp`,
+JSON-RPC on stdio) for main threads and ASM-managed children. It extends the Claude Code
+runtime above: the same rules apply except where listed here. Do not add a separate runtime
+copy, backend hierarchy or event vocabulary; branch only where the protocols differ.
+
+```bash
+codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
+```
+
+- `<model>` must be one value from Cursor's ACP model list, or a base name matching exactly
+  one listed variant. Effort is part of that native variant; ASM effort does not apply.
+  Unlisted bracket overrides fail before the first prompt.
+- The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
+  switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
+  checkpoint path and format, storing the session ID that Cursor assigns.
+- Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. By user
+  decision, every Cursor session, main and children, launches as `agent --force acp`
+  (native run-everything mode). Explicit Cursor denies and team auto-run controls still
+  apply; never pass `--approve-mcps`, `--trust` or `--sandbox`. Cursor ACP has no supported
+  control to remove its question tool, so children keep it; questions are refused, not
+  disabled. Answer remaining approval requests with a reject option,
+  plans with `rejected`, questions with `skipped`, and other agent requests with an error, so
+  that a turn cannot hang or fall back to a local plan. Show each refusal.
+- Cursor saves session model selections in its config directory. Give each thread a private
+  `CURSOR_CONFIG_DIR` beside its checkpoint. Refresh it on every spawn with private copies of
+  the user's `cli-config.json` and `permissions.json`, using Cursor's directory precedence, so
+  that native permissions still apply and the user's default model never changes. Login,
+  rules, skills, hooks and MCP settings stay in their native locations; never copy or extract
+  credentials.
+- Negotiate ACP subagents (`clientCapabilities._meta.subagents`); require the agent to
+  advertise `sessionCapabilities.subagents`. Cursor then publishes native child sessions and
+  makes the prompt wait for background children, so their completion drives the parent
+  follow-up within the same ASM turn. Accept updates only for the session and announced
+  children. Show child tools and text in a child-scoped activity cell, not the main
+  transcript; children stay native, with no ASM threads. A prompt response stays clean only
+  after every announced child reported `completed`, `failed` or `cancelled`. Cursor also
+  answers after its cancel wait times out and marks children `disconnected`; that does not
+  prove a stop, so the turn fails and the linkage stays dirty.
+- Cursor reports finished tools as `completed`. Mark a tool failed from typed top-level
+  `rawOutput` fields only: nonzero `exitCode`, a string `error`, `rejected: true` or
+  `permissionDenied: true`. A missing field means unknown; a failed tool does not fail the
+  turn.
+- Child role context limits and `subagent_model_context_windows` set no Cursor compaction
+  window and skip the Claude window validation; Cursor manages its own context.
+- Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.
+- `session/load` replays native history before it responds; discard that replay so the ASM
+  transcript does not get duplicates. Set the model again after every new or loaded session.
+- Cursor starts shell tools in their own process groups below the ACP process. Cleanup lists
+  descendants with a bounded `ps` snapshot, kills their groups and then the owned group. Never
+  kill by socket, path or name, and never signal ASM's group. Cleanup succeeds only after those
+  groups are observed gone; it does not cover processes that left them, such as with `setsid`. On interrupt, send
+  `session/cancel`. After `stopReason: cancelled`, stop the process tree and keep the linkage
+  clean only when descendant cleanup succeeded; the next turn loads the session. A missing
+  acknowledgement, failed cleanup or any other failure leaves the linkage dirty.
+- Cursor reports no token usage or context fill. Show them as unavailable, never zero, in ASM
+  usage accounting and `/status`. Known gap: `codex exec --json` `turn.completed.usage` has
+  required numeric fields and reports zeros when usage is unknown; the session warning says
+  usage is unavailable. Keep that wire shape until the owner approves an API change.
+- Cursor children receive the `asm` server as an ACP session `http` MCP server on
+  `session/new` and `session/load`. Cursor applies team MCP policy to session servers and
+  drops blocked ones silently: on this account `agent mcp list-tools` reports "blocked by
+  team policy" for stdio and HTTP alike, and ACP sessions with or without `--force` never
+  contact the server. Do not treat an accepted session as available tools. Cursor mail
+  and board notices arrive between turns, and ASM still returns its final answer. There
+  is no Send now. Cursor children saved before this bridge recorded no messaging; their
+  cold resume fails closed and needs a new thread. Mains are unaffected.
+- Verified with Cursor CLI 2026.10.22-27dcf5f. Revalidate the protocol when upgrading it.
 
 ### Minimal diagnostics
 

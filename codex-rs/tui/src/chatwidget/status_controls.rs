@@ -450,7 +450,7 @@ impl ChatWidget {
             .as_ref()
             .and_then(|info| info.model_context_window)
             .or_else(|| {
-                if self.current_model().starts_with("claude-code/") {
+                if codex_protocol::openai_models::is_native_runtime_model(self.current_model()) {
                     None
                 } else {
                     self.config.model_context_window
@@ -463,7 +463,8 @@ impl ChatWidget {
             return None;
         }
         let Some(context_window) = self.status_line_context_window_size() else {
-            return (!self.current_model().starts_with("claude-code/")).then_some(100);
+            return (!codex_protocol::openai_models::is_native_runtime_model(self.current_model()))
+                .then_some(100);
         };
         let default_usage = TokenUsage::default();
         let usage = self
@@ -474,7 +475,7 @@ impl ChatWidget {
         Some(context_window_remaining_percent(
             usage,
             context_window,
-            self.current_model().starts_with("claude-code/"),
+            codex_protocol::openai_models::is_native_runtime_model(self.current_model()),
         ))
     }
 

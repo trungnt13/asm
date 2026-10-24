@@ -1,4 +1,4 @@
-//! Child-only MCP messaging; native agent control retains caller-scoped authority.
+//! Child-only MCP bridge to the canonical ASM messaging and message-board tools.
 
 use std::sync::Arc;
 use std::sync::Weak;
@@ -15,6 +15,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use axum::routing::post;
+use codex_message_board::MessageBoardTool;
+use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
@@ -35,23 +37,27 @@ use uuid::Uuid;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::tools::context::ToolPayload;
-use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
-use crate::tools::handlers::multi_agents_v2::ListAgentsHandler;
-use crate::tools::handlers::multi_agents_v2::SendMessageHandler;
-use crate::tools::handlers::multi_agents_v2::WaitAgentHandler;
-use crate::tools::multi_agent_tool::multi_agent_v2_handler;
+use crate::tools::handlers::extension_tools::ExtensionToolAdapter;
 use crate::tools::parallel::ToolCallRuntime;
+use crate::tools::registry::ToolExposure;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolRouter;
+use crate::tools::spec_plan::extension_tool_executors;
+use crate::tools::spec_plan::register_multi_agent_v2_communication_tools;
 use crate::turn_diff_tracker::TurnDiffTracker;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+/// Concurrent HTTP requests admitted; their tool calls run one at a time per turn.
+const ADMITTED_REQUESTS: u32 = 8;
+/// Allowance beyond queued canonical waits for dispatch and result conversion.
+const TOOL_TIMEOUT_MARGIN: Duration = Duration::from_secs(/*secs*/ 30);
 
 pub(super) struct ClaudeMessageBridge {
     state: Arc<BridgeState>,
     stop: CancellationToken,
     server: Option<JoinHandle<std::io::Result<()>>>,
+    tool_timeout: Duration,
 }
 
 struct BridgeState {
@@ -82,7 +88,7 @@ struct MessageTool {
 
 impl ClaudeMessageBridge {
     #[tracing::instrument(level = "trace", skip_all, err)]
-    pub(super) async fn start() -> anyhow::Result<Self> {
+    pub(super) async fn start(max_wait: Duration) -> anyhow::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let authority = listener.local_addr()?.to_string();
         let stop = CancellationToken::new();
@@ -91,7 +97,7 @@ impl ClaudeMessageBridge {
             token: Uuid::new_v4().to_string(),
             session_id: Uuid::new_v4().to_string(),
             turn: Mutex::new(/*t*/ None),
-            requests: Semaphore::new(/*permits*/ 8),
+            requests: Semaphore::new(ADMITTED_REQUESTS as usize),
             stop: stop.clone(),
             message_tools: Mutex::new(/*t*/ None),
         });
@@ -108,7 +114,16 @@ impl ClaudeMessageBridge {
             state,
             stop,
             server: Some(server),
+            // An admitted call may queue behind every other admitted wait.
+            tool_timeout: max_wait
+                .saturating_mul(ADMITTED_REQUESTS)
+                .saturating_add(TOOL_TIMEOUT_MARGIN),
         })
+    }
+
+    /// Native MCP clients must not end a call that a canonical wait can still complete.
+    pub(super) fn tool_timeout(&self) -> Duration {
+        self.tool_timeout
     }
 
     pub(super) fn url(&self) -> String {
@@ -342,48 +357,44 @@ fn build_message_tools(
     step: &StepContext,
 ) -> anyhow::Result<(ToolRouter, Vec<MessageTool>)> {
     let config = &step.turn.config.multi_agent_v2;
-    let options = WaitAgentTimeoutOptions {
-        default_timeout_ms: config.default_wait_timeout_ms,
-        min_timeout_ms: config.min_wait_timeout_ms,
-        max_timeout_ms: config.max_wait_timeout_ms,
-    };
-    let namespace = config.tool_namespace.as_deref();
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
+    // Reuse the canonical collaboration gates, minus spawning. A native child's model
+    // metadata must not hide them, so the model-catalog check does not apply here.
+    if !config.disable_native_tools {
+        register_multi_agent_v2_communication_tools(
+            &step.turn,
+            ResolvedModelMessages::from_model(&step.settings.model_info),
+            ToolExposure::Direct,
+            &mut registry,
+        );
+    }
+    // The board extension binds its tools to this caller at thread start, when the board is
+    // enabled for it. Expose only its discussion tools, never other extension tools.
+    let namespace = config.tool_namespace.as_deref();
+    let board_tools = MessageBoardTool::DISCUSSION
+        .map(|tool| ToolName::new(namespace.map(str::to_owned), tool.name()));
+    for executor in extension_tool_executors(session, &step.extension_data) {
+        if board_tools.contains(&executor.tool_name()) {
+            registry.register_external(Arc::new(ExtensionToolAdapter::new(executor)));
+        }
+    }
+    if let Some(name) = registry.first_collision() {
+        bail!("Messaging tool {name} is defined twice; ASM cannot tell which to expose");
+    }
     let mut tools = Vec::new();
     let mut specs = Vec::new();
-    // Build only native messaging handlers; never import the inference tool catalog.
-    for (enabled, runtime) in [
-        (
-            !config.disable_direct_message,
-            multi_agent_v2_handler(SendMessageHandler, namespace, None, None),
-        ),
-        (
-            true,
-            multi_agent_v2_handler(ListAgentsHandler, namespace, None, None),
-        ),
-        (
-            config.wait_agent_enabled,
-            multi_agent_v2_handler(WaitAgentHandler::new(options), namespace, None, None),
-        ),
-    ] {
-        if config.disable_native_tools || !enabled {
-            continue;
-        }
-        let name = runtime.tool_name();
-        let spec = runtime.spec();
-        registry.register_trusted(runtime);
-        if registry.registered_tool(&name).is_none() {
-            continue;
-        }
+    for registered in registry.entries() {
+        let name = registered.runtime.tool_name();
+        let spec = registered.spec().as_ref().clone();
         let tool = match spec.clone() {
             ToolSpec::Function(tool) => tool,
             ToolSpec::Namespace(mut namespace) if namespace.tools.len() == 1 => {
                 let Some(ResponsesApiNamespaceTool::Function(tool)) = namespace.tools.pop() else {
-                    bail!("Native messaging tool must use function arguments");
+                    bail!("Messaging tool must use function arguments");
                 };
                 tool
             }
-            _ => bail!("Native messaging tool must use function arguments"),
+            _ => bail!("Messaging tool must use function arguments"),
         };
         let wire_name = match &name.namespace {
             Some(namespace) => format!("{namespace}__{}", name.name),
@@ -435,7 +446,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
             Some(namespace) => name == format!("{namespace}__{}", tool.name),
             None => name == tool.name,
         })
-        .context("Only exposed native messaging tools are allowed")?;
+        .context("Only exposed messaging tools are allowed")?;
     let arguments = params
         .get("arguments")
         .cloned()

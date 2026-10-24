@@ -8,14 +8,17 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::TokenUsage;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub(super) struct MessageStream {
     pub(super) activity: super::activity::ActivityStream,
-    id: Option<String>,
-    text: String,
-    started: bool,
+    pub(super) id: Option<String>,
+    pub(super) text: String,
+    pub(super) started: bool,
     pub(super) context: Option<RequestContext>,
+    /// Cursor child sessions by session ID.
+    pub(super) cursor_children: HashMap<String, super::cursor::CursorChild>,
 }
 
 pub(super) struct RequestContext {
@@ -116,6 +119,15 @@ pub(super) async fn record_assistant_frame(
         // The CLI emits assistant frames per block, before message_stop; deltas own that text.
         return Ok(None);
     }
+    complete_message(session, turn, stream).await
+}
+
+/// Records the streamed assistant message, if any, as one completed transcript item.
+pub(super) async fn complete_message(
+    session: &Session,
+    turn: &TurnContext,
+    stream: &mut MessageStream,
+) -> anyhow::Result<Option<String>> {
     let id = stream
         .id
         .take()
@@ -150,7 +162,7 @@ pub(super) async fn record_assistant_frame(
     Ok(Some(text))
 }
 
-async fn emit_message_started(session: &Session, turn: &TurnContext, id: &str) {
+pub(super) async fn emit_message_started(session: &Session, turn: &TurnContext, id: &str) {
     session
         .emit_turn_item_started(
             turn,

@@ -79,6 +79,7 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
 use codex_protocol::openai_models::ModelPreset;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InternalSessionSource;
@@ -1651,17 +1652,45 @@ impl ThreadManager {
             initial_history: history,
             persistence: fork_persistence,
         } = fork_history;
-        if crate::session::history_uses_claude(&history) {
-            return Err(CodexErr::InvalidRequest(
-                "Claude runtime history cannot be forked; start a fresh thread".to_string(),
-            ));
-        }
         // `forked_from_id()` describes this history's existing lineage. When
         // forking a resumed thread, the child copies the resumed thread itself.
         let source_thread_id = match &history {
             InitialHistory::Resumed(resumed) => Some(resumed.conversation_id),
             InitialHistory::Forked(_) => history.forked_from_id(),
             InitialHistory::New | InitialHistory::Cleared => None,
+        };
+        // Native history is forked only by Claude itself, into a temporary unsaved side session.
+        let native_fork = match crate::session::history_native_runtime(&history) {
+            None => None,
+            Some(NativeRuntime::ClaudeCode)
+                if options.config.ephemeral && matches!(snapshot, ForkSnapshot::Interrupted) =>
+            {
+                let source = match source_thread_id {
+                    Some(source_thread_id) => self.get_thread(source_thread_id).await.ok(),
+                    None => None,
+                };
+                let Some(source) = source else {
+                    return Err(CodexErr::InvalidRequest(
+                        "Claude Code side conversations need the loaded main thread".to_string(),
+                    ));
+                };
+                // Closing a side unsubscribes it; unload at once so its native process ends too.
+                options.config.thread_unload_delay = std::time::Duration::ZERO;
+                Some(
+                    crate::claude_runtime::prepare_temporary_fork(
+                        &source.session,
+                        &options.config.codex_home,
+                        options.config.model.as_deref(),
+                        history.get_rollout_items(),
+                    )
+                    .await?,
+                )
+            }
+            Some(NativeRuntime::ClaudeCode | NativeRuntime::CursorAgent) => {
+                return Err(CodexErr::InvalidRequest(
+                    "Native runtime history can only be forked whole into a temporary Claude Code side conversation; start a fresh thread".to_string(),
+                ));
+            }
         };
         // Capture the live source before later startup work can unload it. Keep
         // the fork's own providers, not the source's task-bound callback.
@@ -1698,7 +1727,11 @@ impl ThreadManager {
         request.forked_from_thread_id = source_thread_id;
         request.fork_persistence = fork_persistence;
         request.inherited_instructions = Some(instructions);
-        Box::pin(self.state.spawn_thread(request)).await
+        let new_thread = Box::pin(self.state.spawn_thread(request)).await?;
+        if let Some(seed) = native_fork {
+            new_thread.thread.session.claude_runtime.seed_fork(seed);
+        }
+        Ok(new_thread)
     }
 
     pub(crate) fn agent_control(&self) -> LocalAgentControl {
