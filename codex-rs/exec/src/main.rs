@@ -30,6 +30,11 @@ struct TopCli {
 }
 
 fn main() -> anyhow::Result<()> {
+    if std::env::args_os().nth(/*n*/ 1).as_deref()
+        == Some(std::ffi::OsStr::new("--asm-native-tools"))
+    {
+        return codex_core::run_native_tool_cli();
+    }
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let top_cli = TopCli::parse();
         // Merge root-level overrides into inner CLI struct so downstream logic remains unchanged.

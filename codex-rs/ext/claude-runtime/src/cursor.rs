@@ -40,8 +40,7 @@ pub struct CursorOptions {
     /// Private `CURSOR_CONFIG_DIR`. Cursor persists session model selections there, so a
     /// shared directory would silently change the user's default model.
     pub config_dir: PathBuf,
-    /// ACP session MCP servers. Cursor team policy can block them silently.
-    pub mcp_servers: Vec<Value>,
+    pub bridge_directory: Option<PathBuf>,
 }
 
 pub struct CursorRuntime {
@@ -50,6 +49,7 @@ pub struct CursorRuntime {
     next_request_id: u64,
     usable: bool,
     failure_result: Option<Value>,
+    bridge_instructions: Option<String>,
 }
 
 impl CursorRuntime {
@@ -67,12 +67,18 @@ impl CursorRuntime {
             .current_dir(&options.cwd)
             // Native run-everything mode; explicit denies and team auto-run controls still apply.
             .args(["--force", "acp"]);
+        if let Some(directory) = &options.bridge_directory {
+            command
+                .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
+                .env("ASM_NATIVE_EXE", std::env::current_exe()?);
+        }
         let mut runtime = Self {
             process: NativeProcess::spawn(command).context("starting official Cursor agent")?,
             session_id: String::new(),
             next_request_id: 0,
             usable: false,
             failure_result: None,
+            bridge_instructions: options.bridge_directory.as_ref().map(|_| "ASM communication: use native shell to run \"$ASM_NATIVE_EXE\" --asm-native-tools list for available tools and JSON schemas. Call a listed tool with JSON arguments on stdin: printf '%s' '<JSON>' | \"$ASM_NATIVE_EXE\" --asm-native-tools call <name>. Do not print the private descriptor or retry side-effecting calls automatically. Long calls may background; await their completion.".to_owned()),
         };
         let setup = runtime.start_session(options).await;
         if setup.is_err() {
@@ -102,14 +108,11 @@ impl CursorRuntime {
             .await
             .context("Cursor login is required; run `agent login`")?;
         let cwd = &options.cwd;
-        let mcp_servers = &options.mcp_servers;
+
         let session = match options.session {
             CursorSession::New => {
                 let session = self
-                    .request(
-                        "session/new",
-                        json!({"cwd": cwd, "mcpServers": mcp_servers}),
-                    )
+                    .request("session/new", json!({"cwd": cwd, "mcpServers": []}))
                     .await?;
                 self.session_id = session["sessionId"]
                     .as_str()
@@ -122,7 +125,7 @@ impl CursorRuntime {
                 // Native history replay arrives before this response and is discarded.
                 self.request(
                     "session/load",
-                    json!({"sessionId": self.session_id, "cwd": cwd, "mcpServers": mcp_servers}),
+                    json!({"sessionId": self.session_id, "cwd": cwd, "mcpServers": []}),
                 )
                 .await?
             }
@@ -262,7 +265,11 @@ impl CursorRuntime {
             armed: true,
             kill: kill_tree,
         };
-        let mut result = self.read_result(prompt, &events, cancel).await;
+        let prompt = match self.bridge_instructions.take() {
+            Some(instructions) => format!("{instructions}\n\n{prompt}"),
+            None => prompt.to_owned(),
+        };
+        let mut result = self.read_result(&prompt, &events, cancel).await;
         match &result {
             Ok(outcome) if !outcome.interrupted => self.usable = true,
             // Cancelled tools can outlive Cursor's acknowledgement in their own process
