@@ -664,9 +664,6 @@ pub(super) async fn submission_loop(
                 } => {
                     let system1_enabled = thread_settings.system1_enabled.take();
                     let persistent = thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default();
-                    let manual_reasoning = thread_settings.model.is_some()
-                        || thread_settings.effort.is_some()
-                        || thread_settings.collaboration_mode.is_some();
                     let thread_settings = WithTurnExtensionData {
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
@@ -686,9 +683,6 @@ pub(super) async fn submission_loop(
                         } else {
                             None
                         };
-                        if manual_reasoning {
-                            sess.pause_system1().await;
-                        }
                         if let Some(enabled) = system1_enabled {
                             sess.set_system1_enabled(enabled).await?;
                         }
