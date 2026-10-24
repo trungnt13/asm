@@ -195,6 +195,7 @@ impl ClaudeSession {
     pub(super) async fn spawn_runtime(
         bridge: Option<&ClaudeMessageBridge>,
         disallowed_tools: Vec<String>,
+        role_instructions: Option<String>,
         checkpoint: &mut Checkpoint,
         checkpoint_path: &std::path::Path,
         session: codex_claude_runtime::ClaudeSession,
@@ -219,6 +220,7 @@ impl ClaudeSession {
                 cwd: checkpoint.cwd.clone(),
                 model: model.to_owned(),
                 effort: checkpoint.effort.clone(),
+                role_instructions,
                 session,
                 config_dir: checkpoint_path.with_extension("cursor-config"),
                 bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
@@ -239,6 +241,7 @@ impl ClaudeSession {
             model,
             effort: checkpoint.effort.clone(),
             auto_compact_window: checkpoint.auto_compact_window,
+            role_instructions,
             session,
             disallowed_tools,
             bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
