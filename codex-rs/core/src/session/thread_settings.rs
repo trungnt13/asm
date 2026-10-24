@@ -40,8 +40,42 @@ pub(super) async fn update(
     overrides: impl Into<WithTurnExtensionData<ThreadSettingsOverrides>>,
 ) -> ConstraintResult<ThreadSettingsSnapshot> {
     let updates = prepare_update(overrides, &session.services.selected_capability_roots);
+    let updates_effort = updates.step_settings.effort.is_some()
+        || updates.step_settings.collaboration_mode.is_some();
+    let previous_model = session
+        .state
+        .lock()
+        .await
+        .session_configuration
+        .step_settings
+        .collaboration_mode
+        .model()
+        .to_owned();
     let commit = session.update_settings(updates).await?;
+    if previous_model
+        != commit
+            .configuration
+            .step_settings
+            .collaboration_mode
+            .model()
+    {
+        session.pause_system1().await;
+    }
     let active_turn = session.active_turn.lock().await;
+    if updates_effort {
+        session.invalidate_system1();
+        if let Some(task) = active_turn.as_ref().and_then(|active| active.task.as_ref()) {
+            task.turn_context
+                .extension_data
+                .insert(super::system1::System1Baseline(
+                    commit
+                        .configuration
+                        .step_settings
+                        .collaboration_mode
+                        .reasoning_effort(),
+                ));
+        }
+    }
     // A registered running task retains its lineage so it can be recovered after a daemon
     // restart. Reservations and finishing turns have no interrupted work to continue.
     if active_turn
