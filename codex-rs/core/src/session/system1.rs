@@ -51,7 +51,7 @@ pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
 const RUBRIC: &str = "Choose the lowest effort sufficient for the next step. \
 Treat the configured baseline as informed task-difficulty guidance, not a ceiling. \
-Assess required effort relative to the current model’s capabilities. \
+For the same reasoning demands, favor lower effort for more capable models and higher effort for less capable models. \
 Judge the next step—not role, message length, or task duration. \
 Consider interacting constraints, uncertainty, and consequences of mistakes. \
 Exceed baseline only when concrete evidence warrants deeper reasoning. \
