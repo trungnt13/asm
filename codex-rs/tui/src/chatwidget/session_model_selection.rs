@@ -55,9 +55,11 @@ impl ChatWidget {
         model: &str,
         effort: Option<ReasoningEffortConfig>,
     ) -> bool {
-        (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
-            || codex_protocol::openai_models::is_native_runtime_model(&model))
-            && (self.current_model() != model || self.current_reasoning_effort() != effort)
+        (codex_models_manager::provider_for_model(self.current_model())
+            != codex_models_manager::provider_for_model(model))
+            || (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
+                || codex_protocol::openai_models::is_native_runtime_model(&model))
+                && (self.current_model() != model || self.current_reasoning_effort() != effort)
     }
 
     pub(crate) fn confirm_model_session(
@@ -68,7 +70,7 @@ impl ChatWidget {
         let thread_id = self.thread_id();
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Start a new session?".to_string()),
-            subtitle: Some(format!("Use {model}. The current session stays saved; conversation history is not copied. Native runtimes use their own tools and permissions.")),
+            subtitle: Some(format!("Use {model}. The current session stays saved; conversation history is not copied. The selected model uses its configured provider or native runtime.")),
             items: vec![SelectionItem {
                 name: "Start new session".to_string(),
                 dismiss_on_select: true,

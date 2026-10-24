@@ -63,6 +63,7 @@ impl App {
     pub(super) async fn load_new_session_config(
         &mut self,
         app_server: &AppServerSession,
+        selected_model: Option<&str>,
     ) -> Result<(Config, crate::local_settings::LocalSettings)> {
         let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
         let defaults_cwd = match app_server.thread_params_mode() {
@@ -77,7 +78,14 @@ impl App {
         )
         .await?;
         // Stage local preferences and permission carryover without changing the active task.
-        let (mut config, local_settings) = match self.rebuild_config_for_cwd(cwd).await {
+        let mut overrides = self.harness_overrides.clone();
+        if let Some(model) = selected_model {
+            overrides.model = Some(model.to_owned());
+        }
+        let (mut config, local_settings) = match self
+            .rebuild_config_for_cwd_with_overrides(cwd, overrides)
+            .await
+        {
             Ok(config) => {
                 let settings = self.local_settings.reloaded(&config);
                 (config, settings)

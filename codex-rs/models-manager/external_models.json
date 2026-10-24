@@ -231,6 +231,40 @@
       "experimental_supported_tools": [],
       "supports_reasoning_summary_parameter": false,
       "node_repl_disabled": true
+    },
+    {
+      "slug": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "display_name": "DeepSeek V4.1 Flash 1017 · Fireworks",
+      "description": "Uses the configured Fireworks provider with ASM tools.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "High reasoning effort"
+        }
+      ],
+      "shell_type": "default",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 110,
+      "availability_nux": null,
+      "upgrade": null,
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": false,
+      "model_provider": "fireworks",
+      "context_window": 1000000,
+      "max_context_window": 1000000
     }
   ]
 }

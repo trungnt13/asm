@@ -94,6 +94,12 @@ pub(crate) async fn prepare_agent_spawn_config(
         config.model = Some(model);
     }
     validate_spawn_agent_config_effort(session, &config).await?;
+    config
+        .apply_external_model_provider()
+        .map_err(|err| err.to_string())?;
+    if options.full_history_fork && config.model_provider_id != turn.config.model_provider_id {
+        return Err("Cross-provider subagents require fork_turns=none".to_string());
+    }
     apply_spawn_agent_service_tier(session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
@@ -243,7 +249,10 @@ async fn apply_requested_spawn_agent_model_overrides(
 
     if let Some(requested_model) = requested_model {
         let native_model = crate::claude_runtime::is_native_model(requested_model);
-        let selected_model_name = if native_model {
+        let catalog_bound_model = config.model_catalog.is_none()
+            && config.model_provider.model_catalog_url.is_none()
+            && codex_models_manager::provider_for_model(requested_model).is_some();
+        let selected_model_name = if native_model || catalog_bound_model {
             requested_model.to_string()
         } else {
             let available_models = session

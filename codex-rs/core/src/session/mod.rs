@@ -621,7 +621,47 @@ impl Session {
         })
     }
 
-    async fn spawn_internal(args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
+    async fn spawn_internal(mut args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
+        let bound_model = args
+            .config
+            .model
+            .as_deref()
+            .and_then(codex_models_manager::provider_for_model)
+            .is_some();
+        if bound_model {
+            args.config.apply_external_model_provider()?;
+            args.models_manager = crate::thread_manager::build_models_manager(
+                &args.config,
+                args.auth_manager.clone(),
+            );
+        }
+        let history = args.conversation_history.get_rollout_items();
+        let saved_bound_model = history.iter().any(|item| {
+            let model = if let RolloutItem::TurnContext(context) = item {
+                Some(context.model.as_str())
+            } else if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = item {
+                Some(event.thread_settings.model.as_str())
+            } else {
+                None
+            };
+            model
+                .and_then(codex_models_manager::provider_for_model)
+                .is_some()
+        });
+        if bound_model || saved_bound_model {
+            let saved_provider = history.iter().find_map(|item| {
+                if let RolloutItem::SessionMeta(meta) = item {
+                    meta.meta.model_provider.as_deref()
+                } else {
+                    None
+                }
+            });
+            if saved_provider.is_some_and(|provider| provider != args.config.model_provider_id) {
+                return Err(CodexErr::InvalidRequest(
+                    "Cross-provider history is not supported; start a fresh thread".to_string(),
+                ));
+            }
+        }
         args.config
             .config_layer_stack
             .ensure_config_server_applied()?;

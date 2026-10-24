@@ -509,7 +509,13 @@ impl ModelsManager for OpenAiModelsManager {
                 let entry = self.remote_models.read().await;
                 let models = self.models_for_entry(&entry);
                 match &self.catalog_source {
-                    CatalogSource::Default => find_model_from_candidates(model, &models),
+                    CatalogSource::Default => crate::external_models::models()
+                        .find(|candidate| {
+                            candidate.slug == model
+                                && crate::external_models::provider_for_model(model).is_some()
+                        })
+                        .cloned()
+                        .or_else(|| find_model_from_candidates(model, &models)),
                     CatalogSource::ExplicitProvider(_) => models
                         .iter()
                         .find(|candidate| candidate.slug == model)
@@ -551,19 +557,11 @@ impl OpenAiModelsManager {
         if matches!(self.catalog_source, CatalogSource::Default)
             && self.load_external_models_json.load(Ordering::SeqCst)
         {
-            static EXTERNAL_MODELS: std::sync::LazyLock<ModelsResponse> =
-                std::sync::LazyLock::new(|| {
-                    serde_json::from_str(include_str!("../external_models.json"))
-                        .expect("bundled external model catalog must be valid")
-                });
             let models = models.to_mut();
             models.retain(|model| {
-                !EXTERNAL_MODELS
-                    .models
-                    .iter()
-                    .any(|external| external.slug == model.slug)
+                !crate::external_models::models().any(|external| external.slug == model.slug)
             });
-            models.extend(EXTERNAL_MODELS.models.iter().cloned());
+            models.extend(crate::external_models::models().cloned());
         }
         models
     }

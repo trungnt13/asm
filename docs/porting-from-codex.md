@@ -281,6 +281,19 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### Catalog-bound model providers
+
+Bundled `external_models.json` entries may select an existing named `model_provider`.
+Resolve exact IDs only; remote catalogs cannot supply routing. Keep endpoints and
+credentials in user provider configuration and enforce managed provider requirements.
+DeepSeek V4.1 Flash 1017 selects `fireworks`; no custom agent role is required.
+Provider changes in the picker start fresh sessions and preserve the old chat.
+Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
+reuse and preserve saved provider identity on resume. Build a provider-specific
+model manager for bound models rather than reuse the parent's discovery identity.
+Keep upstream catalog/API model types unchanged. Disabling bundled catalog display
+does not disable explicit selection, matching native external model behavior.
+
 ### Claude Code thread runtime
 
 Explicit `claude-code/<model>` IDs select the official persistent `claude -p` CLI

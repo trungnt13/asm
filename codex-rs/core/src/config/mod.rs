@@ -166,6 +166,7 @@ use toml_edit::DocumentMut;
 
 mod auth_keyring;
 pub mod edit;
+mod external_model_provider;
 mod managed_features;
 mod metrics;
 mod network_config;
@@ -4916,6 +4917,7 @@ impl Config {
             tracing::warn!("{message}");
             config.startup_warnings.push(message.to_string());
         }
+        config.apply_external_model_provider()?;
         Ok(config)
         })
         .await
