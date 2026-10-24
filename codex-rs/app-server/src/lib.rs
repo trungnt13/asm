@@ -1581,3 +1581,5 @@ fn analytics_rpc_transport(transport: &AppServerTransport) -> AppServerRpcTransp
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+pub use codex_core::run_native_tool_cli;

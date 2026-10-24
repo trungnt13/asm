@@ -23,6 +23,11 @@ struct TopCli {
 }
 
 fn main() -> anyhow::Result<()> {
+    if std::env::args_os().nth(/*n*/ 1).as_deref()
+        == Some(std::ffi::OsStr::new("--asm-native-tools"))
+    {
+        return codex_app_server_client::run_native_tool_cli();
+    }
     codex_build_info::initialize!();
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let top_cli = TopCli::parse();

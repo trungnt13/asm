@@ -2257,3 +2257,5 @@ mod tests {
         assert!(completed.load(Ordering::Acquire));
     }
 }
+
+pub use codex_app_server::run_native_tool_cli;
