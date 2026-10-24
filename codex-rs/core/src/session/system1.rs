@@ -51,6 +51,7 @@ pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
 const RUBRIC: &str = "Choose the lowest effort sufficient for the next step. \
 Treat the configured baseline as informed task-difficulty guidance, not a ceiling. \
+For the same reasoning demands, favor lower effort for more capable models and higher effort for less capable models. \
 Judge the next step—not role, message length, or task duration. \
 Consider interacting constraints, uncertainty, and consequences of mistakes. \
 Exceed baseline only when concrete evidence warrants deeper reasoning. \
@@ -657,7 +658,24 @@ impl Session {
                                 .map(|effort| effort.to_string())
                                 .unwrap_or_else(|| "unspecified".to_string());
                             let rubric = config.rubric_instructions.as_deref().unwrap_or(RUBRIC);
-                            format!("Configured reasoning baseline: {baseline}.\n\n{rubric}")
+                            let current_model = serde_json::json!(expected.model_info.slug);
+                            let description = expected
+                                .model_info
+                                .description
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|description| {
+                                    !description.is_empty()
+                                        && !expected.model_info.used_fallback_model_metadata
+                                })
+                                .unwrap_or("unavailable");
+                            let description = serde_json::json!(
+                                &description
+                                    [..description.floor_char_boundary(/*index*/ 1024)]
+                            );
+                            format!(
+                                "Current model: {current_model}\nModel description: {description}\nConfigured reasoning baseline: {baseline}.\n\n{rubric}"
+                            )
                         },
                         choices: allowed
                             .iter()
