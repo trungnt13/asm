@@ -60,12 +60,6 @@ impl Session {
     }
 
     #[tracing::instrument(skip_all)]
-    pub(in crate::session) async fn pause_system1(&self) {
-        self.publish_system1_enabled(/*enabled*/ false, "manual_override")
-            .await;
-    }
-
-    #[tracing::instrument(skip_all)]
     pub(crate) async fn set_system1_enabled(&self, enabled: bool) -> CodexResult<()> {
         let _settings_guard = super::super::thread_settings::acquire_persistence_lock(self).await;
         self.set_system1_enabled_locked(enabled).await

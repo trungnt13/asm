@@ -42,28 +42,14 @@ pub(super) async fn update(
     let updates = prepare_update(overrides, &session.services.selected_capability_roots);
     let updates_effort = updates.step_settings.effort.is_some()
         || updates.step_settings.collaboration_mode.is_some();
-    let previous_model = session
-        .state
-        .lock()
-        .await
-        .session_configuration
-        .step_settings
-        .collaboration_mode
-        .model()
-        .to_owned();
+    let updates_model =
+        updates.step_settings.model.is_some() || updates.step_settings.collaboration_mode.is_some();
     let commit = session.update_settings(updates).await?;
-    if previous_model
-        != commit
-            .configuration
-            .step_settings
-            .collaboration_mode
-            .model()
-    {
-        session.pause_system1().await;
+    if updates_effort || updates_model {
+        session.invalidate_system1();
     }
     let active_turn = session.active_turn.lock().await;
     if updates_effort {
-        session.invalidate_system1();
         if let Some(task) = active_turn.as_ref().and_then(|active| active.task.as_ref()) {
             task.turn_context
                 .extension_data

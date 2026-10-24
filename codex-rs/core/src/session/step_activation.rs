@@ -457,14 +457,13 @@ impl Session {
             return TurnSettingsUpdateOutcome::Rejected { reason };
         }
 
-        let model_changed =
-            manual_model && candidate_settings.model_info.slug != current.model_info.slug;
-
         // Save changed settings first. The manager then installs any new environment list before
         // waking waiting work. The next step cannot read either until we release this lock.
         if let Some(settings) = updated_settings {
-            if updates_system1_baseline {
+            if manual_model || updates_system1_baseline {
                 self.invalidate_system1();
+            }
+            if updates_system1_baseline {
                 task.turn_context
                     .extension_data
                     .insert(super::system1::System1Baseline(
@@ -477,11 +476,6 @@ impl Session {
         }
         if environments.is_some() {
             self.services.turn_environments.update_selections(proposed);
-        }
-        drop(state);
-        drop(active);
-        if model_changed {
-            self.pause_system1().await;
         }
         TurnSettingsUpdateOutcome::Applied
     }
