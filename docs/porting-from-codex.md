@@ -378,6 +378,23 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
   extraction may summarize their saved ASM transcripts.
+- Claude history forks only into temporary `/side`/`/btw` (and its `/sync`), whole and at
+  main's model. Admission requires a loaded, idle main with no native background work and a
+  clean checkpoint whose delivered input equals the forked history. The checkpoint's
+  optional `fork_point` is the final top-level assistant message UUID of the last
+  successful, uninterrupted turn; older checkpoints lack it, so `/side` refuses until main
+  completes a new turn. The side's first turn starts a separate process with `--resume
+  <main> --resume-session-at <fork_point> --fork-session --no-session-persistence
+  --session-id <new>`, so later main turns are excluded. This relies on Claude's hidden
+  cutoff flag, verified on 2.1.309: an unknown UUID fails closed, without fallback to
+  latest. Native agent, task and worktree controls (Agent, Task, TaskStop, SendMessage,
+  ListAgents, CronCreate, CronDelete, ScheduleWakeup, EnterWorktree, ExitWorktree) are
+  disallowed. A short boundary is sent once, because ASM side instructions are not native
+  context; it keeps Side's reference-only, no-agent and no-worktree rules. Never replay
+  history or copy session files. The side checkpoint stays in memory and the side thread
+  unloads as soon as it is closed, ending its process; a lost process or closed side
+  cannot cold-resume. Cursor sides, `/parallel`, saved `/fork` and historical cuts of
+  native history stay rejected.
 - External threads use Default collaboration mode only and never use guardian
   approval review. Mandatory managed-execution restrictions still apply.
 - Native turns have no total-duration deadline; cancellation and bounded cleanup

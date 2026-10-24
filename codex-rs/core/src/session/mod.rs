@@ -773,7 +773,12 @@ impl Session {
             ));
         }
         // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
+        // Claude history forks only into a temporary side, which Claude forks natively.
+        let temporary_claude_fork = config.ephemeral
+            && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::ClaudeCode)
+            && history_native_runtime(&conversation_history) == native_runtime;
         if (matches!(&conversation_history, InitialHistory::Forked(_))
+            && !temporary_claude_fork
             && (uses_native_runtime || history_native_runtime(&conversation_history).is_some()))
             || (matches!(&conversation_history, InitialHistory::Resumed(_))
                 && history_native_runtime(&conversation_history) != native_runtime)

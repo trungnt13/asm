@@ -23,6 +23,9 @@ pub(super) struct Checkpoint {
     pub(super) in_flight: bool,
     pub(super) input_count: usize,
     pub(super) input_prefix: String,
+    /// Final native message of the last successful turn; older checkpoints lack it.
+    #[serde(default)]
+    pub(super) fork_point: Option<String>,
 }
 
 impl Checkpoint {
@@ -100,11 +103,30 @@ impl RuntimeProcess {
     }
 }
 
+/// Where a loaded session keeps its native linkage.
+pub(super) enum Linkage {
+    Saved,
+    /// Temporary forks are unsaved natively, so a saved checkpoint could only mislead cold resume.
+    Temporary,
+}
+
+/// A clean Claude parent captured when a temporary side fork was created.
+pub(crate) struct ForkSeed {
+    pub(super) parent: Checkpoint,
+    pub(super) fork_point: String,
+}
+
+enum TemporaryFork {
+    Pending(ForkSeed),
+    Started,
+}
+
 pub(crate) struct ClaudeSession {
     pub(super) runtime: RuntimeProcess,
     pub(super) bridge: Option<ClaudeMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
+    pub(super) linkage: Linkage,
     pub(super) _lock: File,
     pub(super) diagnostic_capture: bool,
     pub(super) usage_baseline: Option<BTreeMap<String, ModelUsage>>,
@@ -155,6 +177,19 @@ fn decode_model_usage(result: &serde_json::Value) -> Option<BTreeMap<String, Mod
         })
 }
 
+impl Linkage {
+    pub(super) fn save(
+        &self,
+        checkpoint: &Checkpoint,
+        path: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Saved => checkpoint.save(path),
+            Self::Temporary => Ok(()),
+        }
+    }
+}
+
 impl ClaudeSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
@@ -174,6 +209,9 @@ impl ClaudeSession {
                 }
                 codex_claude_runtime::ClaudeSession::Resume { id } => {
                     codex_claude_runtime::CursorSession::Load { id }
+                }
+                codex_claude_runtime::ClaudeSession::Fork { .. } => {
+                    anyhow::bail!("Cursor Agent has no native session fork")
                 }
             };
             let runtime = CursorRuntime::spawn(codex_claude_runtime::CursorOptions {
@@ -280,9 +318,33 @@ struct SlotState {
     runtime: Option<ClaudeSession>,
     leased: bool,
     discard_on_return: bool,
+    fork: Option<TemporaryFork>,
 }
 
 impl RuntimeSlot {
+    pub(crate) fn seed_fork(&self, seed: ForkSeed) {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .fork = Some(TemporaryFork::Pending(seed));
+    }
+
+    /// Reports a parent busy with an ASM-owned turn or live native background work.
+    pub(super) fn is_busy(&self) -> bool {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.leased
+            || state.runtime.as_ref().is_some_and(|session| {
+                session.checkpoint.in_flight
+                    || match &session.runtime {
+                        RuntimeProcess::Claude(runtime) => runtime.has_background_work(),
+                        RuntimeProcess::Cursor(_) => false,
+                    }
+            })
+    }
+
     pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ClaudeSession>> {
         let returned = async {
             loop {
@@ -332,6 +394,25 @@ pub(super) struct RuntimeLease<'a> {
 }
 
 impl<'a> RuntimeLease<'a> {
+    /// Claims the seed of a temporary fork once; its native session cannot be started again.
+    pub(super) fn start_fork(&self) -> anyhow::Result<Option<ForkSeed>> {
+        let mut state = self
+            .slot
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match state.fork.replace(TemporaryFork::Started) {
+            Some(TemporaryFork::Pending(seed)) => Ok(Some(seed)),
+            Some(TemporaryFork::Started) => anyhow::bail!(
+                "the temporary native side process ended and cannot be resumed; close it and start a new side conversation"
+            ),
+            None => {
+                state.fork = None;
+                Ok(None)
+            }
+        }
+    }
+
     pub(super) fn take(slot: &'a RuntimeSlot) -> anyhow::Result<Self> {
         let mut state = slot
             .state

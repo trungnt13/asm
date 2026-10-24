@@ -38,9 +38,20 @@ use uuid::Uuid;
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 5);
 
+/// `Fork` is an unsaved native copy of `parent` up to and including message `at`, under `id`;
+/// it cannot resume after its process ends.
 pub enum ClaudeSession {
-    New { id: String },
-    Resume { id: String },
+    New {
+        id: String,
+    },
+    Resume {
+        id: String,
+    },
+    Fork {
+        parent: String,
+        at: String,
+        id: String,
+    },
 }
 
 pub struct ClaudeOptions {
@@ -71,6 +82,8 @@ pub struct ClaudeRuntime {
     mid_turn_delivery: watch::Sender<bool>,
     // Native reports this level per process; live tasks can start another native turn.
     background_work: bool,
+    // Last top-level assistant message of the latest turn, for pinned native forks.
+    last_assistant_uuid: Option<String>,
 }
 
 /// Native CLI process leading its own process group, with framed stdout and a bounded stderr tail.
@@ -129,12 +142,24 @@ impl ClaudeRuntime {
                 "Claude auto-compaction window must be between 100000 and 1000000 tokens"
             );
         }
-        let (session_id, session_flag) = match options.session {
-            ClaudeSession::New { id } => (id, "--session-id"),
-            ClaudeSession::Resume { id } => (id, "--resume"),
+        let (session_id, session_flag, fork_parent) = match options.session {
+            ClaudeSession::New { id } => (id, "--session-id", None),
+            ClaudeSession::Resume { id } => (id, "--resume", None),
+            ClaudeSession::Fork { parent, at, id } => (id, "--session-id", Some((parent, at))),
         };
         Uuid::parse_str(&session_id).context("Claude session ID must be a UUID")?;
         let mut command = Command::new(options.executable);
+        if let Some((parent, at)) = fork_parent {
+            Uuid::parse_str(&parent).context("Claude parent session ID must be a UUID")?;
+            Uuid::parse_str(&at).context("Claude fork message ID must be a UUID")?;
+            // The native cutoff pins the fork; Claude refuses to start if `at` is not in the chain.
+            command
+                .arg("--resume")
+                .arg(parent)
+                .arg("--resume-session-at")
+                .arg(at)
+                .args(["--fork-session", "--no-session-persistence"]);
+        }
         // Keep login in the official CLI, without accidental API-key or cloud-provider billing.
         for name in [
             "ANTHROPIC_API_KEY",
@@ -207,7 +232,18 @@ impl ClaudeRuntime {
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
             background_work: false,
+            last_assistant_uuid: None,
         })
+    }
+
+    /// Whether native background tasks were live at the last observed frame.
+    pub fn has_background_work(&self) -> bool {
+        self.background_work
+    }
+
+    /// Final top-level assistant message of the latest turn; a fork at it excludes later turns.
+    pub fn fork_point(&self) -> Option<&str> {
+        self.last_assistant_uuid.as_deref()
     }
 
     pub fn subscribe_mid_turn_delivery(&self) -> watch::Receiver<bool> {
@@ -236,6 +272,7 @@ impl ClaudeRuntime {
         }
         self.usable = false;
         self.failure_result = None;
+        self.last_assistant_uuid = None;
         let mut guard = TurnGuard {
             pid: self.process.child.id(),
             armed: true,
@@ -480,6 +517,10 @@ impl ClaudeRuntime {
             {
                 pending_result = None;
                 idle = false;
+                if frame.get("type").and_then(Value::as_str) == Some("assistant") {
+                    self.last_assistant_uuid =
+                        frame.get("uuid").and_then(Value::as_str).map(str::to_owned);
+                }
             }
             let send = events.send(frame.clone());
             if let Some(deadline) = interrupt_deadline {

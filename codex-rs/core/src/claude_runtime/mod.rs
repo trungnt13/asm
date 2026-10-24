@@ -3,12 +3,17 @@ mod activity;
 mod bridge;
 mod cursor;
 mod events;
+mod fork;
 mod state;
 use bridge::ClaudeMessageBridge;
 use cursor::record_cursor_frame;
 use events::record_assistant_frame;
+use fork::TEMPORARY_FORK_BOUNDARY;
+use fork::TEMPORARY_FORK_DISALLOWED_TOOLS;
+pub(crate) use fork::prepare_temporary_fork;
 use state::Checkpoint;
 use state::ClaudeSession;
+use state::Linkage;
 use state::RuntimeLease;
 use state::RuntimeProcess;
 pub(crate) use state::RuntimeSlot;
@@ -290,9 +295,10 @@ async fn run_conversation(
             .await;
         }
         let history = session.clone_history().await;
-        let messages = input_messages(&history)?;
+        let messages = input_messages(history.raw_items())?;
         let mut lease = RuntimeLease::take(&session.claude_runtime)?;
         let needs_binding = lease.runtime.is_some();
+        let mut fork_boundary = None;
         if lease.runtime.is_none() {
             let directory = turn.config.codex_home.join("claude-runtime");
             std::fs::create_dir_all(&directory)?;
@@ -306,17 +312,30 @@ async fn run_conversation(
                 .open(directory.join(format!("{}.lock", session.thread_id())))?;
             lock.try_lock()
                 .context("native session is already owned by another ASM process")?;
-            let (mut checkpoint, claude_session) = match std::fs::read(&checkpoint_path) {
-                Ok(bytes) => {
+            let (mut checkpoint, claude_session, linkage) = match (
+                lease.start_fork()?,
+                std::fs::read(&checkpoint_path),
+            ) {
+                // A temporary fork never saves linkage; the native cutoff pins main as admitted.
+                (Some(seed), _) => {
+                    let mut checkpoint = seed.parent;
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let parent = std::mem::replace(&mut checkpoint.session_id, id.clone());
+                    checkpoint.fork_point = None;
+                    let at = seed.fork_point;
+                    let fork = codex_claude_runtime::ClaudeSession::Fork { parent, at, id };
+                    (checkpoint, fork, Linkage::Temporary)
+                }
+                (None, Ok(bytes)) => {
                     let checkpoint: Checkpoint = serde_json::from_slice(&bytes)
                         .context("incompatible native session linkage; start a new chat")?;
                     let resume = codex_claude_runtime::ClaudeSession::Resume {
                         id: checkpoint.session_id.clone(),
                     };
-                    (checkpoint, resume)
+                    (checkpoint, resume, Linkage::Saved)
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    if !input_messages(&original_history)?.is_empty()
+                (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if !input_messages(original_history.raw_items())?.is_empty()
                         || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
                     {
                         bail!("missing native session linkage for existing history; start a new chat");
@@ -334,11 +353,13 @@ async fn run_conversation(
                             in_flight: false,
                             input_count: 0,
                             input_prefix: input_prefix(&[])?,
+                            fork_point: None,
                         },
                         codex_claude_runtime::ClaudeSession::New { id },
+                        Linkage::Saved,
                     )
                 }
-                Err(error) => return Err(error.into()),
+                (None, Err(error)) => return Err(error.into()),
             };
             checkpoint.validate(
                 &settings.model_info.slug,
@@ -387,14 +408,19 @@ async fn run_conversation(
                 .await;
             let usage_baseline = match &claude_session {
                 codex_claude_runtime::ClaudeSession::New { .. } => Some(Default::default()),
-                codex_claude_runtime::ClaudeSession::Resume { .. } => None,
+                codex_claude_runtime::ClaudeSession::Resume { .. }
+                | codex_claude_runtime::ClaudeSession::Fork { .. } => None,
             };
+            let mut disallowed_tools = Vec::new();
             // Spawned children run headless: nobody can answer their native questions.
-            let disallowed_tools = if thread_spawn_child {
-                vec!["AskUserQuestion".to_owned()]
-            } else {
-                Vec::new()
-            };
+            if thread_spawn_child {
+                disallowed_tools.push("AskUserQuestion".to_owned());
+            }
+            // A side conversation answers questions; it must not start or steer native agents.
+            if matches!(linkage, Linkage::Temporary) {
+                disallowed_tools.extend(TEMPORARY_FORK_DISALLOWED_TOOLS.map(str::to_owned));
+                fork_boundary = Some(TEMPORARY_FORK_BOUNDARY);
+            }
             let runtime = ClaudeSession::spawn_runtime(
                 bridge.as_ref(),
                 disallowed_tools,
@@ -408,6 +434,7 @@ async fn run_conversation(
                 bridge,
                 checkpoint,
                 checkpoint_path,
+                linkage,
                 _lock: lock,
                 diagnostic_capture: turn.config.diagnostic_log_capture,
                 usage_baseline,
@@ -425,9 +452,12 @@ async fn run_conversation(
             messaging,
             &messages,
         )?;
-        let prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
+        let mut prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
         if prompt.trim().is_empty() {
             return Ok(last_message);
+        }
+        if let Some(boundary) = fork_boundary {
+            prompt = format!("{boundary}\n\n{prompt}");
         }
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = session
@@ -440,7 +470,10 @@ async fn run_conversation(
         runtime.checkpoint.input_count = messages.len();
         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
         runtime.checkpoint.in_flight = true;
-        runtime.checkpoint.save(&runtime.checkpoint_path)?;
+        runtime.checkpoint.fork_point = None;
+        runtime
+            .linkage
+            .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
         let (events_tx, mut events_rx) = tokio::sync::mpsc::channel(/*buffer*/ 32);
         let mut stream = events::MessageStream::default();
         stream.activity.messaging = messaging;
@@ -498,12 +531,12 @@ async fn run_conversation(
                             record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
                                 codex_thread_store::PersistContext::TurnStart).await;
                         }
-                        let messages = input_messages(&session.clone_history().await)?;
+                        let messages = input_messages(session.clone_history().await.raw_items())?;
                         let prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
                         session.flush_rollout().await?;
-                        runtime.checkpoint.save(&runtime.checkpoint_path)?;
+                        runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                         steering_tx.try_send(prompt).context("Claude steering channel was not ready; explicit recovery is required")?;
                         submitted_steering_count += 1;
                     }
@@ -610,7 +643,16 @@ async fn run_conversation(
             .await;
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;
-        runtime.checkpoint.save(&runtime.checkpoint_path)?;
+        // Only a successful turn ends at a native message that later sides can fork at.
+        runtime.checkpoint.fork_point = match &runtime.runtime {
+            RuntimeProcess::Claude(process) if !interrupted => {
+                process.fork_point().map(str::to_owned)
+            }
+            RuntimeProcess::Claude(_) | RuntimeProcess::Cursor(_) => None,
+        };
+        runtime
+            .linkage
+            .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
         if interrupted {
             if cursor {
                 // The runtime stopped Cursor's process tree; the next turn loads the clean session.
@@ -651,9 +693,11 @@ async fn record_frame(
     }
 }
 
-fn input_messages(history: &crate::context_manager::ContextManager) -> anyhow::Result<Vec<String>> {
+fn input_messages<'a>(
+    items: impl IntoIterator<Item = &'a ResponseItem>,
+) -> anyhow::Result<Vec<String>> {
     let mut messages = Vec::new();
-    for item in history.raw_items() {
+    for item in items {
         match item {
             ResponseItem::Message {
                 role,
