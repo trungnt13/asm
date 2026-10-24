@@ -17,8 +17,6 @@ pub(super) struct Checkpoint {
     pub(super) effort: Option<String>,
     #[serde(default)]
     pub(super) auto_compact_window: Option<i64>,
-    #[serde(default)]
-    pub(super) role_instructions: Option<String>,
     pub(super) cwd: PathBuf,
     pub(super) session_id: String,
     pub(super) messaging: bool,
@@ -63,17 +61,6 @@ impl Checkpoint {
         );
         Ok(())
     }
-    pub(super) fn validate_role_instructions(
-        &self,
-        role_instructions: Option<&str>,
-    ) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.role_instructions.as_deref() == role_instructions,
-            "saved native role instructions changed; start a new chat"
-        );
-        Ok(())
-    }
-
     pub(super) fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
         let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
         let mut options = std::fs::OpenOptions::new();
@@ -208,6 +195,7 @@ impl ClaudeSession {
     pub(super) async fn spawn_runtime(
         bridge: Option<&ClaudeMessageBridge>,
         disallowed_tools: Vec<String>,
+        role_instructions: Option<String>,
         checkpoint: &mut Checkpoint,
         checkpoint_path: &std::path::Path,
         session: codex_claude_runtime::ClaudeSession,
@@ -232,7 +220,7 @@ impl ClaudeSession {
                 cwd: checkpoint.cwd.clone(),
                 model: model.to_owned(),
                 effort: checkpoint.effort.clone(),
-                role_instructions: checkpoint.role_instructions.clone(),
+                role_instructions,
                 session,
                 config_dir: checkpoint_path.with_extension("cursor-config"),
                 bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
@@ -253,7 +241,7 @@ impl ClaudeSession {
             model,
             effort: checkpoint.effort.clone(),
             auto_compact_window: checkpoint.auto_compact_window,
-            role_instructions: checkpoint.role_instructions.clone(),
+            role_instructions,
             session,
             disallowed_tools,
             bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),

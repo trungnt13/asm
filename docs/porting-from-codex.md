@@ -318,8 +318,12 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   temporary prompt file. Process arguments expose the text and OS argument-size
   limits apply; never truncate or silently fall back to a file. Never forward merged
   or inherited ASM instructions.
-  Reapply identical role text on cold resume; bind it to native linkage and require a
-  new child if it changes. Old linkage without role text cannot adopt it on resume.
+  Keep loaded role instructions during warm turns. On cold reload, recover the role
+  through normal child configuration and supply its current text on native startup.
+  Do not pin role text to saved linkage or reject changes to the same role. Native
+  prompt snapshots may defer changed instructions until a later context rebuild;
+  accepting reload does not promise immediate application. Keep runtime-setting and
+  uncertain-turn recovery checks unchanged.
   Native main sessions receive no role instruction injection. Cursor children use the
   capability-gated ACP path below, not a CLI prompt flag.
 - Main sessions and sides have no injected ASM communication tools. ASM-managed
@@ -508,8 +512,9 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   `mode = "append"` on both `session/new` and `session/load`. Require an advertised
   `sessionCapabilities.systemPrompt` object before authentication or session creation/loading.
   Unsupported Cursor versions fail explicitly; never fall back to user-message prefixes,
-  replacement prompts, or shared rule files. Reuse native linkage to bind role text;
-  changed text requires a new child. Omit the field entirely when no role text applies.
+  replacement prompts, or shared rule files. Supply current loaded role text on
+  cold reload, without comparing it to saved role text. Omit the field entirely when
+  no role text applies.
 - Child role context limits and `subagent_model_context_windows` set no Cursor compaction
   window and skip the Claude window validation; Cursor manages its own context.
 - Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.

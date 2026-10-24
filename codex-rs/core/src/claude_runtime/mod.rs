@@ -241,25 +241,6 @@ async fn run_conversation(
     } else {
         None
     };
-    let mut role_instructions = if thread_spawn_child {
-        turn.config.role_developer_instructions.clone()
-    } else {
-        None
-    };
-    if thread_spawn_child
-        && turn.multi_agent_version == MultiAgentVersion::V1
-        && role_instructions.is_none()
-    {
-        // V1 reload restores role identity but not its config; preserve saved runtime settings.
-        let mut role_config = (*turn.config).clone();
-        crate::agent::role::apply_role_to_config(
-            &mut role_config,
-            turn.session_source.get_agent_role().as_deref(),
-        )
-        .await
-        .map_err(anyhow::Error::msg)?;
-        role_instructions = role_config.role_developer_instructions;
-    }
     // Native children get ASM messaging tools through a session MCP server. Cursor team policy
     // can block it without telling ASM; mail still arrives between Cursor turns.
     let messaging = child_agent;
@@ -318,6 +299,25 @@ async fn run_conversation(
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
         if lease.runtime.is_none() {
+            let mut role_instructions = if thread_spawn_child {
+                turn.config.role_developer_instructions.clone()
+            } else {
+                None
+            };
+            if thread_spawn_child
+                && turn.multi_agent_version == MultiAgentVersion::V1
+                && role_instructions.is_none()
+            {
+                // V1 reload restores role identity but not its config; preserve saved runtime settings.
+                let mut role_config = (*turn.config).clone();
+                crate::agent::role::apply_role_to_config(
+                    &mut role_config,
+                    turn.session_source.get_agent_role().as_deref(),
+                )
+                .await
+                .map_err(anyhow::Error::msg)?;
+                role_instructions = role_config.role_developer_instructions;
+            }
             let directory = turn.config.codex_home.join("claude-runtime");
             std::fs::create_dir_all(&directory)?;
             let checkpoint_path = directory
@@ -365,7 +365,6 @@ async fn run_conversation(
                             model: settings.model_info.slug.clone(),
                             effort: effort.clone(),
                             auto_compact_window,
-                            role_instructions: role_instructions.clone(),
                             cwd: cwd.clone(),
                             session_id: id.clone(),
                             messaging,
@@ -380,7 +379,6 @@ async fn run_conversation(
                 }
                 (None, Err(error)) => return Err(error.into()),
             };
-            checkpoint.validate_role_instructions(role_instructions.as_deref())?;
             checkpoint.validate(
                 &settings.model_info.slug,
                 &effort,
@@ -448,6 +446,7 @@ async fn run_conversation(
             let runtime = ClaudeSession::spawn_runtime(
                 bridge.as_ref(),
                 disallowed_tools,
+                role_instructions,
                 &mut checkpoint,
                 &checkpoint_path,
                 claude_session,
@@ -468,9 +467,6 @@ async fn run_conversation(
             .runtime
             .as_mut()
             .context("native session was not initialized")?;
-        runtime
-            .checkpoint
-            .validate_role_instructions(role_instructions.as_deref())?;
         runtime.checkpoint.validate(
             &settings.model_info.slug,
             &effort,
