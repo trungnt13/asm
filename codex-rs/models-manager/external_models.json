@@ -93,6 +93,144 @@
       "experimental_supported_tools": [],
       "supports_reasoning_summary_parameter": false,
       "node_repl_disabled": true
+    },
+    {
+      "slug": "cursor-agent/claude-opus-5-5",
+      "display_name": "Opus 5.5 · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {
+          "effort": "medium",
+          "description": "Native Cursor effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 102,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 300000
+    },
+    {
+      "slug": "cursor-agent/claude-sonnet-5-5",
+      "display_name": "Sonnet 5.5 · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "Native Cursor effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 103,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 300000
+    },
+    {
+      "slug": "cursor-agent/claude-haiku-5-5",
+      "display_name": "Haiku 5.5 · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "high",
+          "description": "Native Cursor effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 104,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 300000
+    },
+    {
+      "slug": "cursor-agent/auto-smart",
+      "display_name": "Auto · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": null,
+      "supported_reasoning_levels": [],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 105,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true
     }
   ]
 }

@@ -199,15 +199,14 @@ async fn run_conversation(
     }
     session.flush_rollout().await?;
     let effort = match native_runtime {
-        NativeRuntime::ClaudeCode => settings
-            .effective_reasoning_effort()
-            .map(|effort| effort.to_string()),
-        // Cursor encodes effort in its native model variant; ASM effort does not apply.
-        NativeRuntime::CursorAgent => None,
-    };
-    if effort
-        .as_deref()
-        .is_some_and(|value| !matches!(value, "low" | "medium" | "high" | "xhigh" | "max"))
+        NativeRuntime::ClaudeCode => settings.effective_reasoning_effort(),
+        NativeRuntime::CursorAgent => settings.reasoning_effort().cloned(),
+    }
+    .map(|effort| effort.to_string());
+    if native_runtime == NativeRuntime::ClaudeCode
+        && effort
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "low" | "medium" | "high" | "xhigh" | "max"))
     {
         bail!("unsupported Claude effort; use low, medium, high, xhigh, or max");
     }

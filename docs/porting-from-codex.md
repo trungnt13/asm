@@ -459,8 +459,11 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 ```
 
 - `<model>` must be one value from Cursor's ACP model list, or a base name matching exactly
-  one listed variant. Effort is part of that native variant; ASM effort does not apply.
-  Unlisted bracket overrides fail before the first prompt.
+  one listed variant after filtering by the user's selected effort. Match the native
+  `effort`, `reasoning_effort` or `reasoning` parameter exactly and require ACP to confirm
+  the selected variant; unsupported efforts and unlisted bracket overrides fail before
+  the first prompt. Omitted effort retains native defaults. Auto has no adjustable effort.
+  The shared external model catalog exposes only supported native effort choices.
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
