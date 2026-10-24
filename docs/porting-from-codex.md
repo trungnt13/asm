@@ -312,21 +312,26 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
   approval receipts or tool results into Claude's private conversation.
-- Main sessions and sides have no injected ASM MCP server. ASM-managed MultiAgentV2
-  children of both native runtimes get one authenticated loopback MCP server, `asm`,
-  carrying the canonical collaboration tools other than `spawn_agent`, under the same
-  gates as Codex children. `disable_direct_message` removes `send_message` and
-  `followup_task`; `wait_agent` follows `wait_agent_enabled`; `interrupt_agent` and
-  `list_agents` stay; `disable_native_tools` removes them all. `agent_message_board`
-  adds the board extension's nine discussion tools, bound to the child at thread start
-  with the extension's own storage gates, independent of `disable_native_tools`. Reuse
-  the canonical registration and handlers; a duplicate tool name fails the turn. Never
-  forward other executable ASM tools or create a second agent registry. Claude's
-  per-server tool timeout covers eight admitted calls queued behind canonical maximum
-  waits, plus 30 seconds; its default ends a bridged wait after 60 seconds. Calls run
-  one at a time per turn; canonical waits, sends and posts also serialize. Board
-  notifications reach only a running turn, as with Codex children: Claude folds them in
-  at its next tool boundary, Cursor after its turn; they never wake an idle child.
+- Main sessions and sides have no injected ASM communication tools. ASM-managed
+  MultiAgentV2 children use one authenticated loopback JSON dispatcher, without MCP:
+  Claude registers tools through a session-local native mod; Cursor calls the existing
+  ASM binary's private helper through its native shell. No external JavaScript or Python
+  runtime is required. Claude's native tool names still start with `mcp__asm__`;
+  that naming does not imply an MCP transport. Preserve other native user integrations.
+  Discovery exposes only canonical collaboration tools other than `spawn_agent`.
+  `disable_direct_message` removes `send_message` and `followup_task`;
+  `wait_agent` follows `wait_agent_enabled`; `interrupt_agent` and `list_agents` stay;
+  `disable_native_tools` removes them all. `agent_message_board` adds the extension's
+  nine discussion tools, bound to the child at thread start with its own storage gates,
+  independent of `disable_native_tools`. Reuse canonical registration and handlers;
+  duplicate names fail the turn. Never forward arbitrary ASM tools or create another
+  agent registry. The private child directory contains an owner-only credential
+  descriptor; prompts and argv carry no token. Calls are active-turn scoped, serialize
+  through the existing execution gate, and are not retried automatically. Cursor's
+  helper timeout covers eight queued maximum waits plus 30 seconds. Native Claude
+  mod long-wait behavior still requires live validation against the installed CLI.
+  Board notifications reach only a running turn: Claude folds them in at its next
+  tool boundary, Cursor after its turn; they never wake an idle child.
 - Deliver messages during a busy Claude child's native run as UUID-stamped queued
   user input, never Send now or another interrupt. Native folds it in at its next tool
   boundary, so running tools finish instead of returning a rejection that tells the

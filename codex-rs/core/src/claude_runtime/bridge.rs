@@ -1,4 +1,4 @@
-//! Child-only MCP bridge to the canonical ASM messaging and message-board tools.
+//! Child-only local JSON bridge to the canonical ASM messaging and message-board tools.
 
 use std::sync::Arc;
 use std::sync::Weak;
@@ -57,13 +57,12 @@ pub(super) struct ClaudeMessageBridge {
     state: Arc<BridgeState>,
     stop: CancellationToken,
     server: Option<JoinHandle<std::io::Result<()>>>,
-    tool_timeout: Duration,
+    directory: tempfile::TempDir,
 }
 
 struct BridgeState {
     authority: String,
     token: String,
-    session_id: String,
     turn: Mutex<Option<Arc<BridgeTurn>>>,
     requests: Semaphore,
     stop: CancellationToken,
@@ -95,15 +94,44 @@ impl ClaudeMessageBridge {
         let state = Arc::new(BridgeState {
             authority,
             token: Uuid::new_v4().to_string(),
-            session_id: Uuid::new_v4().to_string(),
             turn: Mutex::new(/*t*/ None),
             requests: Semaphore::new(ADMITTED_REQUESTS as usize),
             stop: stop.clone(),
             message_tools: Mutex::new(/*t*/ None),
         });
         let app = Router::new()
-            .route("/mcp", post(serve_rpc))
+            .route("/tools", post(serve_json))
+            .route("/call", post(serve_json))
             .with_state(Arc::clone(&state));
+        let directory = tempfile::Builder::new()
+            .prefix("asm-native-tools-")
+            .tempdir()?;
+        let descriptor = json!({"url":format!("http://{}",state.authority), "token":state.token,
+            "timeoutMs":u64::try_from(max_wait.saturating_mul(ADMITTED_REQUESTS).saturating_add(TOOL_TIMEOUT_MARGIN).as_millis()).unwrap_or(u64::MAX)});
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new();
+        file.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            file.mode(0o600);
+        }
+        file.open(directory.path().join("descriptor.json"))?
+            .write_all(&serde_json::to_vec(&descriptor)?)?;
+        std::fs::create_dir(directory.path().join(".claude-plugin"))?;
+        std::fs::create_dir(directory.path().join("hooks"))?;
+        std::fs::write(
+            directory.path().join(".claude-plugin/plugin.json"),
+            r#"{"name":"asm","version":"1.0.0"}"#,
+        )?;
+        std::fs::write(
+            directory.path().join("hooks/hooks.json"),
+            r#"{"modules":["./register.js"]}"#,
+        )?;
+        std::fs::write(
+            directory.path().join("hooks/register.js"),
+            include_str!("../../assets/native-tools/register.js"),
+        )?;
         let shutdown = stop.clone();
         let server = tokio::spawn(async move {
             axum::serve(listener, app)
@@ -114,24 +142,12 @@ impl ClaudeMessageBridge {
             state,
             stop,
             server: Some(server),
-            // An admitted call may queue behind every other admitted wait.
-            tool_timeout: max_wait
-                .saturating_mul(ADMITTED_REQUESTS)
-                .saturating_add(TOOL_TIMEOUT_MARGIN),
+            directory,
         })
     }
 
-    /// Native MCP clients must not end a call that a canonical wait can still complete.
-    pub(super) fn tool_timeout(&self) -> Duration {
-        self.tool_timeout
-    }
-
-    pub(super) fn url(&self) -> String {
-        format!("http://{}/mcp", self.state.authority)
-    }
-
-    pub(super) fn bearer_token(&self) -> &str {
-        &self.state.token
+    pub(super) fn directory(&self) -> &std::path::Path {
+        self.directory.path()
     }
 
     #[tracing::instrument(level = "trace", skip_all, err)]
@@ -231,13 +247,14 @@ impl Drop for ClaudeMessageBridge {
 }
 
 #[tracing::instrument(level = "trace", skip_all)]
-async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> Response {
+async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> Response {
     let Ok(_request_slot) = state.requests.try_acquire() else {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
     if state.stop.is_cancelled() {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
+    let request_path = request.uri().path().to_owned();
     let headers = request.headers();
     if headers.get("host").and_then(|v| v.to_str().ok()) != Some(state.authority.as_str())
         || headers.get("authorization").and_then(|v| v.to_str().ok())
@@ -246,11 +263,6 @@ async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> R
     {
         return StatusCode::FORBIDDEN.into_response();
     }
-    let supplied_session = headers.get("mcp-session-id").and_then(|v| v.to_str().ok());
-    if supplied_session.is_some_and(|id| id != state.session_id) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let session_supplied = supplied_session.is_some();
     if headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
@@ -268,46 +280,8 @@ async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> R
         Ok(Err(_)) => return StatusCode::PAYLOAD_TOO_LARGE.into_response(),
         Err(_) => return StatusCode::REQUEST_TIMEOUT.into_response(),
     };
-    let Ok(rpc) = serde_json::from_slice::<Value>(&bytes) else {
-        return rpc_error(Value::Null, /*code*/ -32700, "Invalid JSON");
-    };
-    let id = rpc.get("id").cloned().unwrap_or(Value::Null);
-    if rpc.get("jsonrpc").and_then(Value::as_str) != Some("2.0") || !rpc.is_object() {
-        return rpc_error(id, /*code*/ -32600, "Invalid request");
-    }
-    let method = rpc.get("method").and_then(Value::as_str).unwrap_or("");
-    if method == "initialize" {
-        let version = rpc
-            .pointer("/params/protocolVersion")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let version = match version {
-            "2024-11-05" | "2025-03-26" | "2025-06-18" => version,
-            _ => "2025-03-26",
-        };
-        return (
-            [("mcp-session-id", state.session_id.clone())],
-            Json(json!({
-                "jsonrpc":"2.0", "id":id, "result": {
-                    "protocolVersion":version, "capabilities":{"tools":{}},
-                    "serverInfo":{"name":"asm", "version":env!("CARGO_PKG_VERSION")}
-                }
-            })),
-        )
-            .into_response();
-    }
-    if !session_supplied {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    if method == "notifications/initialized" || method == "notifications/cancelled" {
-        // Turn cancellation is controlled by ASM, not by an uncorrelated request id.
-        return StatusCode::ACCEPTED.into_response();
-    }
-    if method == "ping" {
-        return rpc_result(id, json!({}));
-    }
-    if method == "tools/list" && !state.stop.is_cancelled() {
-        // Discovery has no execution authority and must also work between turns.
+    let path = request_path;
+    if path == "/tools" {
         let tools = state
             .message_tools
             .lock()
@@ -317,39 +291,28 @@ async fn serve_rpc(State(state): State<Arc<BridgeState>>, request: Request) -> R
             .iter()
             .map(|tool| tool.spec.clone())
             .collect::<Vec<_>>();
-        return rpc_result(id, json!({"tools": tools}));
+        return Json(json!({"tools":tools})).into_response();
     }
+    let Ok(params) = serde_json::from_slice::<Value>(&bytes) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
     let Some(turn) = state.turn.lock().await.clone() else {
-        return rpc_error(id, /*code*/ -32000, "No active ASM turn");
+        return (StatusCode::CONFLICT, "No active ASM turn").into_response();
     };
     if turn.cancel.is_cancelled() {
-        return rpc_error(id, /*code*/ -32000, "ASM turn cancelled");
+        return (StatusCode::CONFLICT, "ASM turn cancelled").into_response();
     }
-    match method {
-        "tools/call" if !id.is_null() => {
-            let params = rpc.get("params").cloned().unwrap_or(Value::Null);
-            // Keep admitted work alive on HTTP disconnect until ASM cancels/drains it.
-            match tokio::spawn(invoke_message_tool(turn, params))
-                .await
-                .unwrap_or_else(|error| Err(error.into()))
-            {
-                Ok(result) => rpc_result(id, result),
-                Err(error) => rpc_result(
-                    id,
-                    json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}),
-                ),
-            }
+    // Calls survive client disconnect until ASM cancels or drains the active turn.
+    let result = tokio::spawn(invoke_message_tool(turn, params))
+        .await
+        .unwrap_or_else(|error| Err(error.into()));
+    match result {
+        Ok(result) => Json(result).into_response(),
+        Err(error) => {
+            Json(json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}))
+                .into_response()
         }
-        _ => rpc_error(id, /*code*/ -32601, "Unsupported MCP method"),
     }
-}
-
-fn rpc_result(id: Value, result: Value) -> Response {
-    Json(json!({"jsonrpc":"2.0","id":id,"result":result})).into_response()
-}
-
-fn rpc_error(id: Value, code: i64, message: &str) -> Response {
-    Json(json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})).into_response()
 }
 
 fn build_message_tools(
@@ -405,7 +368,7 @@ fn build_message_tools(
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
         {
-            bail!("Messaging namespace is not MCP-compatible");
+            bail!("Messaging namespace is not tool-name compatible");
         }
         tools.push(MessageTool {
             name,
