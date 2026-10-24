@@ -40,6 +40,8 @@ pub struct CursorOptions {
     /// Private `CURSOR_CONFIG_DIR`. Cursor persists session model selections there, so a
     /// shared directory would silently change the user's default model.
     pub config_dir: PathBuf,
+    /// ACP session MCP servers. Cursor team policy can block them silently.
+    pub mcp_servers: Vec<Value>,
 }
 
 pub struct CursorRuntime {
@@ -99,12 +101,15 @@ impl CursorRuntime {
         self.request("authenticate", json!({"methodId": "cursor_login"}))
             .await
             .context("Cursor login is required; run `agent login`")?;
-        // No ASM MCP servers: session-scoped servers can be blocked by account policy.
         let cwd = &options.cwd;
+        let mcp_servers = &options.mcp_servers;
         let session = match options.session {
             CursorSession::New => {
                 let session = self
-                    .request("session/new", json!({"cwd": cwd, "mcpServers": []}))
+                    .request(
+                        "session/new",
+                        json!({"cwd": cwd, "mcpServers": mcp_servers}),
+                    )
                     .await?;
                 self.session_id = session["sessionId"]
                     .as_str()
@@ -117,7 +122,7 @@ impl CursorRuntime {
                 // Native history replay arrives before this response and is discarded.
                 self.request(
                     "session/load",
-                    json!({"sessionId": self.session_id, "cwd": cwd, "mcpServers": []}),
+                    json!({"sessionId": self.session_id, "cwd": cwd, "mcpServers": mcp_servers}),
                 )
                 .await?
             }

@@ -220,6 +220,13 @@ impl ClaudeSession {
                 model: model.to_owned(),
                 session,
                 config_dir: checkpoint_path.with_extension("cursor-config"),
+                mcp_servers: bridge
+                    .map(|bridge| {
+                        serde_json::json!({"type":"http","name":"asm","url":bridge.url(),
+                        "headers":[{"name":"Authorization","value":format!("Bearer {}", bridge.bearer_token())}]})
+                    })
+                    .into_iter()
+                    .collect(),
             })
             .await?;
             // Cursor assigns new session IDs; link before the first prompt is submitted.
@@ -241,7 +248,8 @@ impl ClaudeSession {
             disallowed_tools,
             mcp_config: bridge.map(|bridge| {
                 serde_json::json!({"mcpServers":{"asm":{"type":"http","url":bridge.url(),
-                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())}}}})
+                "headers":{"Authorization":format!("Bearer {}", bridge.bearer_token())},
+                "timeout":u64::try_from(bridge.tool_timeout().as_millis()).unwrap_or(u64::MAX)}}})
             }),
         })
         .await

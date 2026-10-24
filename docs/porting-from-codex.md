@@ -315,9 +315,21 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
   approval receipts or tool results into Claude's private conversation.
-- Main sessions have no injected ASM MCP server. ASM-managed Claude children may
-  receive only inter-agent messaging tools over authenticated loopback MCP. Never
-  forward executable ASM tools or create a second agent registry.
+- Main sessions and sides have no injected ASM MCP server. ASM-managed MultiAgentV2
+  children of both native runtimes get one authenticated loopback MCP server, `asm`,
+  carrying the canonical collaboration tools other than `spawn_agent`, under the same
+  gates as Codex children. `disable_direct_message` removes `send_message` and
+  `followup_task`; `wait_agent` follows `wait_agent_enabled`; `interrupt_agent` and
+  `list_agents` stay; `disable_native_tools` removes them all. `agent_message_board`
+  adds the board extension's nine discussion tools, bound to the child at thread start
+  with the extension's own storage gates, independent of `disable_native_tools`. Reuse
+  the canonical registration and handlers; a duplicate tool name fails the turn. Never
+  forward other executable ASM tools or create a second agent registry. Claude's
+  per-server tool timeout covers eight admitted calls queued behind canonical maximum
+  waits, plus 30 seconds; its default ends a bridged wait after 60 seconds. Calls run
+  one at a time per turn; canonical waits, sends and posts also serialize. Board
+  notifications reach only a running turn, as with Codex children: Claude folds them in
+  at its next tool boundary, Cursor after its turn; they never wake an idle child.
 - Deliver messages during a busy Claude child's native run as UUID-stamped queued
   user input, never Send now or another interrupt. Native folds it in at its next tool
   boundary, so running tools finish instead of returning a rejection that tells the
@@ -490,9 +502,14 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   usage accounting and `/status`. Known gap: `codex exec --json` `turn.completed.usage` has
   required numeric fields and reports zeros when usage is unknown; the session warning says
   usage is unavailable. Keep that wire shape until the owner approves an API change.
-- Session-scoped MCP servers can be blocked by Cursor team policy; this account rejects them
-  ("Blocked by team policy"). Cursor children therefore get no ASM messaging tools. Their
-  mail arrives between turns, and ASM still returns their final answer. There is no Send now.
+- Cursor children receive the `asm` server as an ACP session `http` MCP server on
+  `session/new` and `session/load`. Cursor applies team MCP policy to session servers and
+  drops blocked ones silently: on this account `agent mcp list-tools` reports "blocked by
+  team policy" for stdio and HTTP alike, and ACP sessions with or without `--force` never
+  contact the server. Do not treat an accepted session as available tools. Cursor mail
+  and board notices arrive between turns, and ASM still returns its final answer. There
+  is no Send now. Cursor children saved before this bridge recorded no messaging; their
+  cold resume fails closed and needs a new thread. Mains are unaffected.
 - Verified with Cursor CLI 2026.10.22-27dcf5f. Revalidate the protocol when upgrading it.
 
 ### Minimal diagnostics

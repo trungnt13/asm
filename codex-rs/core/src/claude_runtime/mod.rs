@@ -242,9 +242,9 @@ async fn run_conversation(
     } else {
         None
     };
-    // Cursor account policy can block session-scoped MCP servers, so Cursor children get no
-    // ASM messaging tools; their mail still arrives between turns.
-    let messaging = child_agent && native_runtime == NativeRuntime::ClaudeCode;
+    // Native children get ASM messaging tools through a session MCP server. Cursor team policy
+    // can block it without telling ASM; mail still arrives between Cursor turns.
+    let messaging = child_agent;
     let mut last_message = None;
     loop {
         if cancellation.is_cancelled() {
@@ -379,7 +379,11 @@ async fn run_conversation(
                 let step = session
                     .capture_speculative_step_context(Arc::clone(turn), cancellation)
                     .await?;
-                let bridge = ClaudeMessageBridge::start().await?;
+                let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
+                let bridge = ClaudeMessageBridge::start(std::time::Duration::from_millis(
+                    u64::try_from(max_wait).unwrap_or_default(),
+                ))
+                .await?;
                 bridge
                     .set_turn(Arc::clone(session), step, cancellation.clone())
                     .await?;
@@ -392,7 +396,7 @@ async fn run_conversation(
                     "Claude Code owns instructions, tools, hooks and permissions, and bypasses its permission prompts; native deny rules and managed policy still apply. ASM sandbox and approvals do not apply."
                 }
                 NativeRuntime::CursorAgent if child_agent => {
-                    "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable. ASM messaging tools are unavailable; messages arrive between turns."
+                    "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable. ASM messaging tools are offered through a session MCP server, which Cursor team policy can block; messages arrive between turns."
                 }
                 NativeRuntime::CursorAgent => {
                     "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable."
@@ -478,9 +482,10 @@ async fn run_conversation(
         let mut stream = events::MessageStream::default();
         stream.activity.messaging = messaging;
         stream.activity.server = native_runtime.id();
-        let mut mid_turn_delivery = match &runtime.runtime {
-            RuntimeProcess::Claude(process) => process.subscribe_mid_turn_delivery(),
-            RuntimeProcess::Cursor(_) => tokio::sync::watch::channel(false).1,
+        // Only Claude accepts input mid-turn; Cursor takes queued input after its turn.
+        let (steering, mut mid_turn_delivery) = match &runtime.runtime {
+            RuntimeProcess::Claude(process) => (messaging, process.subscribe_mid_turn_delivery()),
+            RuntimeProcess::Cursor(_) => (false, tokio::sync::watch::channel(false).1),
         };
         let turn_state = session
             .input_queue
@@ -498,7 +503,7 @@ async fn run_conversation(
                     &prompt,
                     events_tx,
                     cancellation.clone(),
-                    messaging.then_some(steering_rx),
+                    steering.then_some(steering_rx),
                 ))
                     as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>>,
                 RuntimeProcess::Cursor(process) => {
@@ -512,7 +517,7 @@ async fn run_conversation(
                     _ = async {
                         if pending_activity.is_some() { return; }
                         let _ = activity.changed().await;
-                    }, if messaging && *mid_turn_delivery.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
+                    }, if steering && *mid_turn_delivery.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
                         pending_activity = None;
                         session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
                         let (pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
@@ -540,7 +545,7 @@ async fn run_conversation(
                         steering_tx.try_send(prompt).context("Claude steering channel was not ready; explicit recovery is required")?;
                         submitted_steering_count += 1;
                     }
-                    changed = mid_turn_delivery.changed(), if messaging => {
+                    changed = mid_turn_delivery.changed(), if steering => {
                         if changed.is_err() { bail!("Claude steering capability channel closed"); }
                     }
                     Some(frame) = events_rx.recv() => {

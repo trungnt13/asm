@@ -131,20 +131,9 @@ impl ActivityStream {
         let Some(name) = block["name"].as_str() else {
             return Ok(());
         };
-        if self.messaging {
-            let namespace = turn.config.multi_agent_v2.tool_namespace.as_deref();
-            let bridged = ["send_message", "list_agents", "wait_agent"]
-                .iter()
-                .any(|tool| {
-                    let wire = match namespace {
-                        Some(namespace) => format!("mcp__asm__{namespace}__{tool}"),
-                        None => format!("mcp__asm__{tool}"),
-                    };
-                    name == wire
-                });
-            if bridged {
-                return Ok(());
-            }
+        // The bridge records its own calls; every tool on the `asm` server is bridged.
+        if self.messaging && name.starts_with("mcp__asm__") {
+            return Ok(());
         }
         let key = format!("{scope}:{id}");
         if !self.seen.insert(key.clone()) {
