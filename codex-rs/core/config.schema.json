@@ -8391,6 +8391,10 @@
       "description": "System instructions.",
       "type": "string"
     },
+    "load_external_models_json": {
+      "description": "Load bundled external models into the default catalog. Defaults to true.",
+      "type": "boolean"
+    },
     "log_dir": {
       "allOf": [
         {

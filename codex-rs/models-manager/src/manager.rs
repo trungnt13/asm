@@ -136,6 +136,9 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     /// Static catalogs ignore this setting.
     fn set_api_key_model_discovery_enabled(&self, _enabled: bool) {}
 
+    /// Set startup external-model visibility. Explicit catalogs ignore this setting.
+    fn set_load_external_models_json(&self, _enabled: bool) {}
+
     /// List all available models, refreshing according to the specified strategy.
     ///
     /// Returns model presets sorted by priority and filtered by auth mode and visibility.
@@ -309,6 +312,7 @@ pub struct OpenAiModelsManager {
     endpoint_client: SharedModelsEndpointClient,
     catalog_source: CatalogSource,
     api_key_model_discovery_enabled: Arc<AtomicBool>,
+    load_external_models_json: Arc<AtomicBool>,
     auth_manager: Option<Arc<AuthManager>>,
 }
 
@@ -373,6 +377,7 @@ impl OpenAiModelsManager {
             }),
             cache,
             api_key_model_discovery_enabled: Arc::new(AtomicBool::new(false)),
+            load_external_models_json: Arc::new(AtomicBool::new(true)),
             endpoint_client,
             catalog_source: CatalogSource::Default,
             auth_manager,
@@ -419,9 +424,15 @@ impl ModelsManager for OpenAiModelsManager {
             manager = manager.with_provider_catalog();
         }
         manager.api_key_model_discovery_enabled = Arc::clone(&self.api_key_model_discovery_enabled);
+        manager.load_external_models_json = Arc::clone(&self.load_external_models_json);
         let manager: SharedModelsManager = Arc::new(manager);
         managers.insert(originator, Arc::clone(&manager));
         Some(manager)
+    }
+
+    fn set_load_external_models_json(&self, enabled: bool) {
+        self.load_external_models_json
+            .store(enabled, Ordering::SeqCst);
     }
 
     fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
@@ -529,14 +540,32 @@ impl ModelsManager for OpenAiModelsManager {
 impl OpenAiModelsManager {
     /// Selects the catalog available under the current provider and auth identity.
     fn models_for_entry<'a>(&self, entry: &'a ModelsCacheEntry) -> Cow<'a, [ModelInfo]> {
-        if !self.api_key_discovery_disabled()
+        let mut models: Cow<'a, [ModelInfo]> = if !self.api_key_discovery_disabled()
             && entry.identity.is_some()
             && entry.identity == self.endpoint_client.identity()
         {
             Cow::Borrowed(&entry.models)
         } else {
             Cow::Owned(self.catalog_source.fallback_models().unwrap_or_default())
+        };
+        if matches!(self.catalog_source, CatalogSource::Default)
+            && self.load_external_models_json.load(Ordering::SeqCst)
+        {
+            static EXTERNAL_MODELS: std::sync::LazyLock<ModelsResponse> =
+                std::sync::LazyLock::new(|| {
+                    serde_json::from_str(include_str!("../external_models.json"))
+                        .expect("bundled external model catalog must be valid")
+                });
+            let models = models.to_mut();
+            models.retain(|model| {
+                !EXTERNAL_MODELS
+                    .models
+                    .iter()
+                    .any(|external| external.slug == model.slug)
+            });
+            models.extend(EXTERNAL_MODELS.models.iter().cloned());
         }
+        models
     }
 
     async fn raw_model_catalog(
