@@ -333,7 +333,8 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   and `$.process.run` is capped at ten minutes in Claude Code 2.1.310. Preserve native
   tool-search defaults rather than forcing every schema into each model prompt.
   Board notifications reach only a running turn: Claude folds them in at its next
-  tool boundary, Cursor after its turn; they never wake an idle child.
+  tool boundary; Cursor can read them through its CLI wait result during an active
+  prompt. Neither wakes an idle child.
 - Deliver messages during a busy Claude child's native run as UUID-stamped queued
   user input, never Send now or another interrupt. Native folds it in at its next tool
   boundary, so running tools finish instead of returning a rejection that tells the
@@ -509,8 +510,11 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 - Cursor children deliberately use the local CLI bridge, not ACP MCP servers:
   `session/new` and `session/load` carry empty `mcpServers`. Team MCP policy blocked the
   previous transport; do not reintroduce it or bypass native policy. Cursor mail
-  and board notices arrive between turns, and ASM still returns its final answer. There
-  is no Send now. Cursor children saved before this bridge recorded no messaging; their
+  and board notices can be delivered inside an active prompt through the canonical
+  wait tool's CLI result. The owning runtime records mail and advances its checkpoint
+  before returning it, so the next prompt does not replay it. Queued user input and
+  followups with next-turn options stay ordered for the next prompt. ASM still returns
+  Cursor's final answer; there is no Send now. Cursor children saved before this bridge recorded no messaging; their
   cold resume fails closed and needs a new thread. Mains are unaffected.
 - Verified with Cursor CLI 2026.10.22-27dcf5f. Revalidate the protocol when upgrading it.
 

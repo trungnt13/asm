@@ -58,6 +58,8 @@ pub(super) struct ClaudeMessageBridge {
     stop: CancellationToken,
     server: Option<JoinHandle<std::io::Result<()>>>,
     directory: tempfile::TempDir,
+    pub(super) mail_delivery:
+        tokio::sync::mpsc::Receiver<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
 struct BridgeState {
@@ -67,6 +69,7 @@ struct BridgeState {
     requests: Semaphore,
     stop: CancellationToken,
     message_tools: Mutex<Option<Vec<MessageTool>>>,
+    mail_delivery: tokio::sync::mpsc::Sender<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
 struct BridgeTurn {
@@ -77,6 +80,7 @@ struct BridgeTurn {
     tools: Vec<ToolName>,
     execution: Arc<Semaphore>,
     tracker: crate::tools::context::SharedTurnDiffTracker,
+    mail_delivery: tokio::sync::mpsc::Sender<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
 #[derive(PartialEq)]
@@ -91,7 +95,9 @@ impl ClaudeMessageBridge {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let authority = listener.local_addr()?.to_string();
         let stop = CancellationToken::new();
+        let (mail_tx, mail_delivery) = tokio::sync::mpsc::channel(/*buffer*/ 1);
         let state = Arc::new(BridgeState {
+            mail_delivery: mail_tx,
             authority,
             token: Uuid::new_v4().to_string(),
             turn: Mutex::new(/*t*/ None),
@@ -143,6 +149,7 @@ impl ClaudeMessageBridge {
             stop,
             server: Some(server),
             directory,
+            mail_delivery,
         })
     }
 
@@ -189,6 +196,7 @@ impl ClaudeMessageBridge {
         }
         *turn = Some(Arc::new(BridgeTurn {
             session: Arc::downgrade(&session),
+            mail_delivery: self.state.mail_delivery.clone(),
             stop: self.stop.clone(),
             step,
             cancel: cancel.child_token(),
@@ -457,7 +465,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
         }
         result = &mut dispatch => result?,
     };
-    let result = convert_output(&output.item);
+    let mut result = convert_output(&output.item)?;
     session
         .record_conversation_items(
             &turn.step.turn,
@@ -465,7 +473,36 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
             &[output.item],
         )
         .await;
-    result
+    if tool.name == "wait_agent"
+        && turn
+            .step
+            .settings
+            .model_info
+            .slug
+            .starts_with("cursor-agent/")
+        && result["isError"] == false
+    {
+        let (reply, delivered) = tokio::sync::oneshot::channel();
+        let delivery = async {
+            turn.mail_delivery
+                .send(reply)
+                .await
+                .context("Cursor mailbox delivery stopped")?;
+            delivered.await.context("Cursor mailbox delivery stopped")
+        };
+        let messages = tokio::select! {
+            biased;
+            _ = turn.cancel.cancelled() => bail!("ASM turn cancelled"),
+            messages = delivery => messages?,
+        };
+        for text in messages {
+            result["content"]
+                .as_array_mut()
+                .context("Missing tool result content")?
+                .push(json!({"type":"text","text":text}));
+        }
+    }
+    Ok(result)
 }
 
 fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
