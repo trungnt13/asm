@@ -232,6 +232,7 @@ impl ClaudeSession {
                 cwd: checkpoint.cwd.clone(),
                 model: model.to_owned(),
                 effort: checkpoint.effort.clone(),
+                role_instructions: checkpoint.role_instructions.clone(),
                 session,
                 config_dir: checkpoint_path.with_extension("cursor-config"),
                 bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),

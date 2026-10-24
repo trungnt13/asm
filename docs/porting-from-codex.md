@@ -317,7 +317,8 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   preserving Claude's default prompt. Never forward merged or inherited ASM instructions.
   Reapply identical role text on cold resume; bind it to native linkage and require a
   new child if it changes. Old linkage without role text cannot adopt it on resume.
-  Native main sessions and Cursor receive no role instruction injection.
+  Native main sessions receive no role instruction injection. Cursor children use the
+  capability-gated ACP path below, not a CLI prompt flag.
 - Main sessions and sides have no injected ASM communication tools. ASM-managed
   MultiAgentV2 children use one authenticated loopback JSON dispatcher, without MCP:
   Claude registers tools through a session-local native mod; Cursor calls the existing
@@ -500,6 +501,12 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   `rawOutput` fields only: nonzero `exitCode`, a string `error`, `rejected: true` or
   `permissionDenied: true`. A missing field means unknown; a failed tool does not fail the
   turn.
+- Forward only selected child-role instructions through ACP `systemPrompt` with
+  `mode = "append"` on both `session/new` and `session/load`. Require an advertised
+  `sessionCapabilities.systemPrompt` object before authentication or session creation/loading.
+  Unsupported Cursor versions fail explicitly; never fall back to user-message prefixes,
+  replacement prompts, or shared rule files. Reuse native linkage to bind role text;
+  changed text requires a new child. Omit the field entirely when no role text applies.
 - Child role context limits and `subagent_model_context_windows` set no Cursor compaction
   window and skip the Claude window validation; Cursor manages its own context.
 - Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.

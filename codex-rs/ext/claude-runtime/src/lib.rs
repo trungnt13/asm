@@ -23,6 +23,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Child;
 use tokio::process::ChildStdin;
