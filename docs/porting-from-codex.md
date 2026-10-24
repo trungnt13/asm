@@ -311,7 +311,13 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
-  approval receipts or tool results into Claude's private conversation.
+  approval receipts or tool results into Claude's private conversation. The one instruction
+  exception is a spawned child's selected role: append only that role's own
+  `developer_instructions` through the native additional-system-prompt mechanism,
+  preserving Claude's default prompt. Never forward merged or inherited ASM instructions.
+  Reapply identical role text on cold resume; bind it to native linkage and require a
+  new child if it changes. Old linkage without role text cannot adopt it on resume.
+  Native main sessions and Cursor receive no role instruction injection.
 - Main sessions and sides have no injected ASM communication tools. ASM-managed
   MultiAgentV2 children use one authenticated loopback JSON dispatcher, without MCP:
   Claude registers tools through a session-local native mod; Cursor calls the existing
@@ -1023,6 +1029,11 @@ Vim Insert/Replace use the editor newline binding; Vim Normal retains its editin
 Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
 
 ### Built-in agent role descriptions
+
+Explicit spawn `model` overrides the role model; the role model overrides inheritance.
+Resolve the final model before validating effort and selecting the runtime. Preserve
+role effort and other constraints; incompatible effective settings fail instead of
+switching runtimes. Keep the public `agent_type` spelling.
 
 Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list and concise Rules requiring explicit task/file ownership, preservation of concurrent edits, and one owner for shared prerequisites. Coordinate ownership before continuing overlapping work; continue independent work meanwhile.
 

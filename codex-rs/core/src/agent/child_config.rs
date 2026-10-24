@@ -1,7 +1,6 @@
 //! Prepares child configuration from captured step settings and requested overrides.
 //!
-//! Spawn and reload share live runtime policy; role and model precedence, full-history
-//! inheritance, and validation messages remain the same for each multi-agent version.
+//! Explicit spawn models override role defaults without removing role constraints.
 
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
@@ -51,7 +50,7 @@ pub(crate) struct PreparedSpawnConfig {
     pub(crate) role_name: Option<String>,
 }
 
-/// Resolves child settings before starting the thread, retaining the invoking tool's precedence.
+/// Resolves the final child model before validating role constraints.
 pub(crate) async fn prepare_agent_spawn_config(
     session: &Session,
     step_context: &StepContext,
@@ -63,6 +62,7 @@ pub(crate) async fn prepare_agent_spawn_config(
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
         config.role_model_context_window = turn.config.role_model_context_window;
+        config.role_developer_instructions = turn.config.role_developer_instructions.clone();
         config.system1.min_effort = turn.config.system1.min_effort.clone();
         config.system1.max_effort = turn.config.system1.max_effort.clone();
         config.role_system1_base_bounds = turn.config.role_system1_base_bounds.clone();
@@ -76,10 +76,11 @@ pub(crate) async fn prepare_agent_spawn_config(
         options.reasoning_effort,
     )
     .await?;
+    let explicit_model = options.model.and(config.model.clone());
     if !options.full_history_fork
         || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
     {
-        apply_spawn_agent_role(session, &mut config, options.role_name).await?;
+        apply_role_to_config(&mut config, options.role_name).await?;
         if options.version == SpawnConfigVersion::V2
             && options.full_history_fork
             && config.developer_instructions.is_none()
@@ -89,6 +90,10 @@ pub(crate) async fn prepare_agent_spawn_config(
                 .clone_from(&turn.developer_instructions);
         }
     }
+    if let Some(model) = explicit_model {
+        config.model = Some(model);
+    }
+    validate_spawn_agent_config_effort(session, &config).await?;
     apply_spawn_agent_service_tier(session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
@@ -141,6 +146,7 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, String> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
     config.role_model_context_window = None;
+    config.role_developer_instructions = None;
     if let Some((min, max)) = config.role_system1_base_bounds.take() {
         let reset = toml::Value::try_from(serde_json::json!({
             "system1": { "min_effort": min, "max_effort": max }
@@ -259,13 +265,6 @@ async fn apply_requested_spawn_agent_model_overrides(
 
         config.model = Some(selected_model_name.clone());
         if let Some(reasoning_effort) = requested_reasoning_effort {
-            if !native_model {
-                validate_spawn_agent_reasoning_effort(
-                    &selected_model_name,
-                    &selected_model_info.supported_reasoning_levels,
-                    &reasoning_effort,
-                )?;
-            }
             config.model_reasoning_effort = Some(reasoning_effort);
         } else {
             config.model_reasoning_effort =
@@ -280,19 +279,6 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(reasoning_effort) = requested_reasoning_effort {
-        if config
-            .model
-            .as_deref()
-            .is_some_and(crate::claude_runtime::is_native_model)
-        {
-            config.model_reasoning_effort = Some(reasoning_effort);
-            return Ok(());
-        }
-        validate_spawn_agent_reasoning_effort(
-            &step_context.settings.model_info.slug,
-            &step_context.settings.model_info.supported_reasoning_levels,
-            &reasoning_effort,
-        )?;
         config.model_reasoning_effort = Some(reasoning_effort);
     }
 
@@ -389,19 +375,11 @@ pub(crate) fn matching_subagent_service_tier<'a>(
     reasoning_effort.and_then(|effort| config.subagent_service_tiers.get(model)?.get(effort))
 }
 
-async fn apply_spawn_agent_role(
+#[tracing::instrument(skip_all)]
+async fn validate_spawn_agent_config_effort(
     session: &Session,
-    config: &mut Config,
-    role_name: Option<&str>,
+    config: &Config,
 ) -> Result<(), String> {
-    let previous_model = config.model.clone();
-    let previous_reasoning_effort = config.model_reasoning_effort.clone();
-    apply_role_to_config(config, role_name).await?;
-    if config.model == previous_model && config.model_reasoning_effort == previous_reasoning_effort
-    {
-        return Ok(());
-    }
-
     let Some(reasoning_effort) = config.model_reasoning_effort.clone() else {
         return Ok(());
     };

@@ -740,7 +740,7 @@ fn spawn_tool_spec_lists_user_defined_roles_before_built_ins() {
 }
 
 #[test]
-fn spawn_tool_spec_marks_role_locked_model_and_reasoning_effort() {
+fn spawn_tool_spec_marks_role_default_model_and_locked_reasoning_effort() {
     let tempdir = TempDir::new().expect("create temp dir");
     let role_path = tempdir.path().join("researcher.toml");
     fs::write(
@@ -760,7 +760,7 @@ fn spawn_tool_spec_marks_role_locked_model_and_reasoning_effort() {
     let spec = spawn_tool_spec::build(&user_defined_roles);
 
     assert!(spec.contains(
-            "Research carefully.\n- This role's model is set to `gpt-5` and its reasoning effort is set to `high`. These settings cannot be changed."
+            "Research carefully.\n- This role defaults to model `gpt-5`; an explicit spawn model overrides it. Its reasoning effort is fixed at `high`."
         ));
 }
 

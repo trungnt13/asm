@@ -17,6 +17,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -60,6 +61,8 @@ pub struct ClaudeOptions {
     pub effort: Option<String>,
     /// Native compaction window, not the model's maximum context capacity.
     pub auto_compact_window: Option<i64>,
+    /// Selected role instructions appended to the native system prompt, including on resume.
+    pub role_instructions: Option<String>,
     pub session: ClaudeSession,
     pub bridge_directory: Option<PathBuf>,
     /// Native tool names removed from this session, such as questions for headless children.
@@ -75,6 +78,7 @@ pub struct ClaudeTurnOutcome {
 pub struct ClaudeRuntime {
     process: NativeProcess,
     session_id: String,
+    role_instructions: Option<NamedTempFile>,
     usable: bool,
     failure_result: Option<Value>,
     mid_turn_delivery: watch::Sender<bool>,
@@ -196,6 +200,22 @@ impl ClaudeRuntime {
                 .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
+        // Reapply on resume: Claude can rebuild its saved system prompt after compaction.
+        let role_instructions = options
+            .role_instructions
+            .map(|instructions| -> Result<NamedTempFile> {
+                let mut file =
+                    NamedTempFile::new().context("creating private Claude role instructions")?;
+                file.write_all(instructions.as_bytes())
+                    .context("writing private Claude role instructions")?;
+                Ok(file)
+            })
+            .transpose()?;
+        if let Some(instructions) = &role_instructions {
+            command
+                .arg("--append-system-prompt-file")
+                .arg(instructions.path());
+        }
         if let Some(window) = options.auto_compact_window {
             // Settings can reapply env after startup; flag settings beat user/project settings.
             // Native managed policy still has precedence.
@@ -217,6 +237,7 @@ impl ClaudeRuntime {
         Ok(Self {
             process: NativeProcess::spawn(command).context("starting official Claude CLI")?,
             session_id,
+            role_instructions,
             usable: true,
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
@@ -610,6 +631,7 @@ impl ClaudeRuntime {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.usable = false;
         let result = self.process.shutdown().await;
+        self.role_instructions.take();
         result
     }
 }
