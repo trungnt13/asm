@@ -36,6 +36,8 @@ pub struct CursorOptions {
     pub cwd: PathBuf,
     /// A listed ACP model value, or a base name matching exactly one listed value.
     pub model: String,
+    /// Selected role text appended through ACP, including when loading a saved session.
+    pub role_instructions: Option<String>,
     pub session: CursorSession,
     /// Private `CURSOR_CONFIG_DIR`. Cursor persists session model selections there, so a
     /// shared directory would silently change the user's default model.
@@ -98,19 +100,26 @@ impl CursorRuntime {
         if !initialized["agentCapabilities"]["sessionCapabilities"]["subagents"].is_object() {
             bail!("Cursor agent does not support ACP subagents; upgrade the Cursor CLI");
         }
+        if options.role_instructions.is_some()
+            && !initialized["agentCapabilities"]["sessionCapabilities"]["systemPrompt"].is_object()
+        {
+            bail!(
+                "Cursor agent does not support ACP systemPrompt; cannot forward selected role instructions"
+            );
+        }
         self.request("authenticate", json!({"methodId": "cursor_login"}))
             .await
             .context("Cursor login is required; run `agent login`")?;
-        let cwd = &options.cwd;
-        let mcp_servers = &options.mcp_servers;
+        let mut params = json!({"cwd": options.cwd, "mcpServers": options.mcp_servers});
+        if let Some(instructions) = options.role_instructions {
+            params["systemPrompt"] = json!({
+                "mode": "append",
+                "content": [{"type": "text", "text": instructions}],
+            });
+        }
         let session = match options.session {
             CursorSession::New => {
-                let session = self
-                    .request(
-                        "session/new",
-                        json!({"cwd": cwd, "mcpServers": mcp_servers}),
-                    )
-                    .await?;
+                let session = self.request("session/new", params).await?;
                 self.session_id = session["sessionId"]
                     .as_str()
                     .context("Cursor did not return a session ID")?
@@ -120,11 +129,8 @@ impl CursorRuntime {
             CursorSession::Load { id } => {
                 self.session_id = id;
                 // Native history replay arrives before this response and is discarded.
-                self.request(
-                    "session/load",
-                    json!({"sessionId": self.session_id, "cwd": cwd, "mcpServers": mcp_servers}),
-                )
-                .await?
+                params["sessionId"] = json!(self.session_id);
+                self.request("session/load", params).await?
             }
         };
         let values = session["configOptions"]

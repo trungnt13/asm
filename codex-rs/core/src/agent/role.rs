@@ -65,6 +65,7 @@ pub(crate) async fn apply_role_to_config(
     config: &mut Config,
     role_name: Option<&str>,
 ) -> Result<(), String> {
+    config.role_developer_instructions = None;
     let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
 
     let role = resolve_role_config(config, role_name)
@@ -230,6 +231,7 @@ mod role_overrides {
         if let Some(window) = overrides.model_context_window {
             next_config.role_model_context_window = Some(window);
         }
+        next_config.role_developer_instructions = overrides.developer_instructions.clone();
         if let Some(instructions) = &overrides.developer_instructions {
             next_config.developer_instructions = Some(instructions.clone());
         }
@@ -370,7 +372,7 @@ pub(crate) mod spawn_tool_spec {
 
     fn format_role(name: &str, declaration: &AgentRoleConfig) -> String {
         if let Some(description) = &declaration.description {
-            let locked_settings_note = declaration
+            let role_settings_note = declaration
                 .config_file
                 .as_ref()
                 .and_then(|config_file| {
@@ -388,11 +390,11 @@ pub(crate) mod spawn_tool_spec {
                         .and_then(TomlValue::as_str);
                     match (model, reasoning_effort) {
                         (Some(model), Some(reasoning_effort)) => format!(
-                            "\n- This role's model is set to `{model}` and its reasoning effort is set to `{reasoning_effort}`. These settings cannot be changed."
+                            "\n- This role defaults to model `{model}`; an explicit spawn model overrides it. Its reasoning effort is fixed at `{reasoning_effort}`."
                         ),
                         (Some(model), None) => {
                             format!(
-                                "\n- This role's model is set to `{model}` and cannot be changed."
+                                "\n- This role defaults to model `{model}`; an explicit spawn model overrides it."
                             )
                         }
                         (None, Some(reasoning_effort)) => {
@@ -404,7 +406,7 @@ pub(crate) mod spawn_tool_spec {
                     }
                 })
                 .unwrap_or_default();
-            format!("{name}: {{\n{description}{locked_settings_note}\n}}")
+            format!("{name}: {{\n{description}{role_settings_note}\n}}")
         } else {
             format!("{name}: no description")
         }

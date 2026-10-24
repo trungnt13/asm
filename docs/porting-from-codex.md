@@ -311,7 +311,14 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
-  approval receipts or tool results into Claude's private conversation.
+  approval receipts or tool results into Claude's private conversation. The one instruction
+  exception is a spawned child's selected role: append only that role's own
+  `developer_instructions` through the native additional-system-prompt mechanism,
+  preserving Claude's default prompt. Never forward merged or inherited ASM instructions.
+  Reapply identical role text on cold resume; bind it to native linkage and require a
+  new child if it changes. Old linkage without role text cannot adopt it on resume.
+  Native main sessions receive no role instruction injection. Cursor children use the
+  capability-gated ACP path below, not a CLI prompt flag.
 - Main sessions and sides have no injected ASM MCP server. ASM-managed MultiAgentV2
   children of both native runtimes get one authenticated loopback MCP server, `asm`,
   carrying the canonical collaboration tools other than `spawn_agent`, under the same
@@ -483,6 +490,12 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   `rawOutput` fields only: nonzero `exitCode`, a string `error`, `rejected: true` or
   `permissionDenied: true`. A missing field means unknown; a failed tool does not fail the
   turn.
+- Forward only selected child-role instructions through ACP `systemPrompt` with
+  `mode = "append"` on both `session/new` and `session/load`. Require an advertised
+  `sessionCapabilities.systemPrompt` object before authentication or session creation/loading.
+  Unsupported Cursor versions fail explicitly; never fall back to user-message prefixes,
+  replacement prompts, or shared rule files. Reuse native linkage to bind role text;
+  changed text requires a new child. Omit the field entirely when no role text applies.
 - Child role context limits and `subagent_model_context_windows` set no Cursor compaction
   window and skip the Claude window validation; Cursor manages its own context.
 - Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.
@@ -1011,6 +1024,11 @@ Vim Insert/Replace use the editor newline binding; Vim Normal retains its editin
 Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
 
 ### Built-in agent role descriptions
+
+Explicit spawn `model` overrides the role model; the role model overrides inheritance.
+Resolve the final model before validating effort and selecting the runtime. Preserve
+role effort and other constraints; incompatible effective settings fail instead of
+switching runtimes. Keep the public `agent_type` spelling.
 
 Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list and concise Rules requiring explicit task/file ownership, preservation of concurrent edits, and one owner for shared prerequisites. Coordinate ownership before continuing overlapping work; continue independent work meanwhile.
 
