@@ -231,6 +231,7 @@ impl ClaudeSession {
                 executable: PathBuf::from("agent"),
                 cwd: checkpoint.cwd.clone(),
                 model: model.to_owned(),
+                role_instructions: checkpoint.role_instructions.clone(),
                 session,
                 config_dir: checkpoint_path.with_extension("cursor-config"),
                 mcp_servers: bridge

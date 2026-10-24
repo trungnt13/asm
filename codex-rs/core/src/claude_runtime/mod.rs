@@ -242,14 +242,12 @@ async fn run_conversation(
     } else {
         None
     };
-    let mut role_instructions = if native_runtime == NativeRuntime::ClaudeCode && thread_spawn_child
-    {
+    let mut role_instructions = if thread_spawn_child {
         turn.config.role_developer_instructions.clone()
     } else {
         None
     };
-    if native_runtime == NativeRuntime::ClaudeCode
-        && thread_spawn_child
+    if thread_spawn_child
         && turn.multi_agent_version == MultiAgentVersion::V1
         && role_instructions.is_none()
     {
