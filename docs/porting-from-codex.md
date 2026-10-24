@@ -282,23 +282,14 @@ for main threads and ASM-managed children. Versioned `sonnet-` and `opus-` suffi
 are expanded to native `claude-` model names at CLI launch; other native suffixes pass
 through unchanged. Saved session model IDs remain unchanged for safe resume.
 Other models retain upstream inference.
-Keep the upstream built-in catalog unchanged; select the runtime explicitly:
-
-```bash
-codex --no-daemon --model claude-code/sonnet-5-5
-```
-
-[Reference runtime catalog](example-model-catalog.json) is the authoritative, complete
-CC catalog example: Sonnet 5.5 and Opus 5.5 with `low`, `medium`, `high`, and `xhigh`
-effort, defaulting to `high`. Keep personal CC entries aligned with these objects.
-Do not copy personal instruction templates into this reference or modify the upstream
-built-in catalog. Claude Code remains responsible for native model access and effort
-acceptance; catalog metadata does not grant account access.
-
-Load it with `-c model_catalog_json="docs/example-model-catalog.json"` from the source
-checkout, or use an absolute path. A custom catalog replaces the ordinary catalog;
-this CC-only example does not merge in OpenAI entries. To retain both, copy its model
-objects into the existing personal catalog's `models` array.
+Keep upstream `models.json` unchanged. Bundle Claude Code entries separately in
+[`external_models.json`](../codex-rs/models-manager/external_models.json).
+Top-level `load_external_models_json` defaults to `true`; set it to `false` to
+hide bundled external entries. Explicit `claude-code/<model>` selection remains available.
+Append external entries when reading the default catalog, including remote and cached catalogs.
+External entries override duplicate IDs without changing cached payloads.
+Explicit custom/provider catalogs remain authoritative and ignore this flag.
+Claude Code owns native model access and effort acceptance; metadata grants no access.
 
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
 marking them API-supported. Preserve ordinary model defaults.

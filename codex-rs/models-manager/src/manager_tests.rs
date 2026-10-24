@@ -82,6 +82,13 @@ fn remote_model_with_visibility(
         .expect("valid model")
 }
 
+fn with_external_models(mut models: Vec<ModelInfo>) -> Vec<ModelInfo> {
+    let external: ModelsResponse = serde_json::from_str(include_str!("../external_models.json"))
+        .expect("bundled external models should parse");
+    models.extend(external.models);
+    models
+}
+
 fn assert_models_contain(actual: &[ModelInfo], expected: &[ModelInfo]) {
     for model in expected {
         assert!(
@@ -460,9 +467,12 @@ async fn manager_without_cache_fetches_on_every_refresh() {
         )
         .await;
 
-    assert_eq!(catalog.models, remote_models);
+    assert_eq!(catalog.models, with_external_models(remote_models.clone()));
     assert_eq!(second_catalog, catalog);
-    assert_eq!(manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_external_models(remote_models)
+    );
     assert_eq!(endpoint.fetch_count(), 2);
 }
 
@@ -494,7 +504,7 @@ async fn injected_cache_hit_avoids_remote_fetch() {
         )
         .await;
 
-    assert_eq!(catalog.models, cached_models);
+    assert_eq!(catalog.models, with_external_models(cached_models));
     assert_eq!(endpoint.fetch_count(), 0);
 }
 
@@ -518,7 +528,7 @@ async fn injected_cache_read_error_falls_back_and_persists_remote_models() {
         )
         .await;
 
-    assert_eq!(catalog.models, remote_models);
+    assert_eq!(catalog.models, with_external_models(remote_models.clone()));
     assert_eq!(endpoint.fetch_count(), 1);
     let stored_entries = cache.stored_entries();
     assert_eq!(
@@ -553,7 +563,7 @@ async fn injected_cache_write_error_does_not_fail_remote_refresh() {
         )
         .await;
 
-    assert_eq!(catalog.models, remote_models);
+    assert_eq!(catalog.models, with_external_models(remote_models.clone()));
     assert_eq!(endpoint.fetch_count(), 1);
 }
 
@@ -940,7 +950,10 @@ async fn refresh_available_models_uses_remote_only_catalog_for_chatgpt_auth() {
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_external_models(remote_models)
+    );
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
@@ -976,7 +989,10 @@ async fn refresh_available_models_uses_cached_remote_only_catalog_for_chatgpt_au
         .await
         .expect("cached refresh succeeds");
 
-    assert_eq!(cache_manager.get_remote_models().await, remote_models);
+    assert_eq!(
+        cache_manager.get_remote_models().await,
+        with_external_models(remote_models)
+    );
     assert_eq!(
         cache_endpoint.fetch_count(),
         0,
@@ -1032,7 +1048,10 @@ async fn refresh_available_models_preserves_bundled_catalog_for_empty_chatgpt_re
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_external_models(expected)
+    );
 }
 
 #[tokio::test]
@@ -1057,7 +1076,10 @@ async fn refresh_available_models_merges_hidden_only_chatgpt_remote_with_bundled
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_external_models(expected)
+    );
 }
 
 #[tokio::test]
@@ -1091,7 +1113,10 @@ async fn refresh_available_models_keeps_merging_for_custom_api_auth() {
         .await
         .expect("refresh succeeds");
 
-    assert_eq!(manager.get_remote_models().await, expected);
+    assert_eq!(
+        manager.get_remote_models().await,
+        with_external_models(expected)
+    );
     assert_eq!(endpoint.fetch_count(), 1, "expected a single model fetch");
 }
 
@@ -1374,13 +1399,22 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
     for model in [granted_model, revoked_model] {
         let mut expected = ModelPreset::from(model.clone());
         expected.is_default = true;
+        let mut expected = vec![expected];
+        expected.extend(
+            with_external_models(Vec::new())
+                .into_iter()
+                .map(ModelPreset::from),
+        );
         assert_eq!(
             manager
                 .list_models(RefreshStrategy::Online, DEFAULT_HTTP_CLIENT_FACTORY)
                 .await,
-            vec![expected.clone()]
+            expected.clone()
         );
-        assert_eq!(manager.get_remote_models().await, vec![model]);
+        assert_eq!(
+            manager.get_remote_models().await,
+            with_external_models(vec![model])
+        );
         assert_eq!(
             manager.remote_models.read().await.etag.as_deref(),
             Some("stable-catalog-etag")
@@ -1397,7 +1431,7 @@ async fn online_refresh_updates_access_programs_with_unchanged_etag() {
                     DEFAULT_HTTP_CLIENT_FACTORY
                 )
                 .await,
-            vec![expected]
+            expected
         );
         assert_eq!(cache_endpoint.fetch_count(), 0);
         assert_eq!(
@@ -1683,11 +1717,11 @@ async fn refresh_available_models_fetches_when_external_api_key_overrides_chatgp
 
     assert_eq!(
         cached_remote,
-        vec![remote_model(
+        with_external_models(vec![remote_model(
             dynamic_slug,
             "External API Key",
             /*priority*/ 1
-        )]
+        )])
     );
     assert_eq!(endpoint.fetch_count(), 1);
 }
