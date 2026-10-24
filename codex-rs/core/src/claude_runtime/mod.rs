@@ -482,11 +482,15 @@ async fn run_conversation(
         let mut stream = events::MessageStream::default();
         stream.activity.messaging = messaging;
         stream.activity.server = native_runtime.id();
-        // Only Claude accepts input mid-turn; Cursor takes queued input after its turn.
+        // Only Claude accepts native queued input; Cursor receives mail through tool results.
         let (steering, mut mid_turn_delivery) = match &runtime.runtime {
             RuntimeProcess::Claude(process) => (messaging, process.subscribe_mid_turn_delivery()),
             RuntimeProcess::Cursor(_) => (false, tokio::sync::watch::channel(false).1),
         };
+        let mut mail_delivery = runtime
+            .bridge
+            .as_mut()
+            .map(|bridge| &mut bridge.mail_delivery);
         let turn_state = session
             .input_queue
             .turn_state_for_sub_id(&session.active_turn, &turn.sub_id)
@@ -544,6 +548,32 @@ async fn run_conversation(
                         runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                         steering_tx.try_send(prompt).context("Claude steering channel was not ready; explicit recovery is required")?;
                         submitted_steering_count += 1;
+                    }
+                    Some(reply) = async {
+                        match mail_delivery.as_mut() {
+                            Some(requests) => requests.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    }, if native_runtime == NativeRuntime::CursorAgent && !cancellation.is_cancelled() => {
+                        if reply.is_closed() { continue; }
+                        if let Some(turn_state) = &turn_state {
+                            let pending = session.input_queue.take_current_turn_mail(turn_state).await;
+                            for item in pending {
+                                record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
+                                    codex_thread_store::PersistContext::TurnStart).await;
+                            }
+                        }
+                        let messages = input_messages(session.clone_history().await.raw_items())?;
+                        let delivered = messages[runtime.checkpoint.input_count..].to_vec();
+                        runtime.checkpoint.input_count = messages.len();
+                        runtime.checkpoint.input_prefix = input_prefix(&messages)?;
+                        session.flush_rollout().await?;
+                        runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                        // The helper returns these messages inside Cursor's active shell result.
+                        // Advancing the checkpoint prevents next-prompt reinjection.
+                        if reply.send(delivered).is_err() {
+                            bail!("Cursor mailbox result was not accepted; explicit recovery is required");
+                        }
                     }
                     changed = mid_turn_delivery.changed(), if steering => {
                         if changed.is_err() { bail!("Claude steering capability channel closed"); }
