@@ -313,8 +313,11 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
   approval receipts or tool results into Claude's private conversation. The one instruction
   exception is a spawned child's selected role: append only that role's own
-  `developer_instructions` through the native additional-system-prompt mechanism,
-  preserving Claude's default prompt. Never forward merged or inherited ASM instructions.
+  `developer_instructions` through `--append-system-prompt`, preserving Claude's
+  default prompt. Pass the text as one argument, without shell interpolation or a
+  temporary prompt file. Process arguments expose the text and OS argument-size
+  limits apply; never truncate or silently fall back to a file. Never forward merged
+  or inherited ASM instructions.
   Reapply identical role text on cold resume; bind it to native linkage and require a
   new child if it changes. Old linkage without role text cannot adopt it on resume.
   Native main sessions receive no role instruction injection. Cursor children use the

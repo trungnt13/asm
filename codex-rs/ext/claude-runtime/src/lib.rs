@@ -17,13 +17,11 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
-use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Child;
 use tokio::process::ChildStdin;
@@ -79,7 +77,6 @@ pub struct ClaudeTurnOutcome {
 pub struct ClaudeRuntime {
     process: NativeProcess,
     session_id: String,
-    role_instructions: Option<NamedTempFile>,
     usable: bool,
     failure_result: Option<Value>,
     mid_turn_delivery: watch::Sender<bool>,
@@ -202,20 +199,8 @@ impl ClaudeRuntime {
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
         // Reapply on resume: Claude can rebuild its saved system prompt after compaction.
-        let role_instructions = options
-            .role_instructions
-            .map(|instructions| -> Result<NamedTempFile> {
-                let mut file =
-                    NamedTempFile::new().context("creating private Claude role instructions")?;
-                file.write_all(instructions.as_bytes())
-                    .context("writing private Claude role instructions")?;
-                Ok(file)
-            })
-            .transpose()?;
-        if let Some(instructions) = &role_instructions {
-            command
-                .arg("--append-system-prompt-file")
-                .arg(instructions.path());
+        if let Some(instructions) = options.role_instructions {
+            command.arg("--append-system-prompt").arg(instructions);
         }
         if let Some(window) = options.auto_compact_window {
             // Settings can reapply env after startup; flag settings beat user/project settings.
@@ -238,7 +223,6 @@ impl ClaudeRuntime {
         Ok(Self {
             process: NativeProcess::spawn(command).context("starting official Claude CLI")?,
             session_id,
-            role_instructions,
             usable: true,
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
@@ -631,9 +615,7 @@ impl ClaudeRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn shutdown(&mut self) -> Result<()> {
         self.usable = false;
-        let result = self.process.shutdown().await;
-        self.role_instructions.take();
-        result
+        self.process.shutdown().await
     }
 }
 
