@@ -197,6 +197,7 @@ async fn system1_fixture(
                 config.features.enable(feature).unwrap();
             }
             configure(config);
+            config.system1_default_effort = config.model_reasoning_effort.clone();
         },
     )
     .await;
@@ -233,8 +234,8 @@ fn user_task(text: &str) -> Vec<TurnInput> {
 }
 
 #[test_case("success"; "selected_effort_precedes_each_request")]
-#[test_case("failure"; "http_failure_continues_with_current_effort")]
-#[test_case("timeout"; "timeout_continues_with_current_effort")]
+#[test_case("failure"; "http_failure_continues_with_profile_default")]
+#[test_case("timeout"; "timeout_continues_with_profile_default")]
 #[tokio::test]
 async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &str) {
     use crate::tasks::RegularTask;
@@ -372,7 +373,11 @@ async fn basic_regular_turn_waits_for_each_decision_before_sampling(scenario: &s
     let low = json!({"type":"configuration_update", "reasoning":{"effort":"low"}});
     let expected = match scenario {
         "success" => vec![vec![high.clone()], vec![high.clone()], vec![high, low]],
-        "failure" | "timeout" => vec![vec![high.clone()], vec![high.clone()], vec![high]],
+        "failure" | "timeout" => vec![
+            vec![high.clone()],
+            vec![high.clone(), low.clone()],
+            vec![high, low],
+        ],
         _ => unreachable!("defined test scenarios"),
     };
     assert_eq!(updates, expected);

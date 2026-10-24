@@ -2,12 +2,15 @@ use super::System1Session;
 use super::System1State;
 use crate::config::Config;
 use crate::session::session::Session;
+use crate::session::session::SessionConfiguration;
+use crate::session::step_settings::ResolvedStepSettings;
 use codex_api::DecisionsError;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::System1Error;
 use codex_protocol::protocol::System1FailureWarning;
 use codex_protocol::protocol::System1UpdatedEvent;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -145,6 +148,55 @@ impl Session {
         Some((*mode, cooldown_seconds))
     }
 
+    pub(in crate::session) fn system1_fallback_settings(
+        &self,
+        settings: Arc<ResolvedStepSettings>,
+        configuration: &SessionConfiguration,
+    ) -> Arc<ResolvedStepSettings> {
+        let mode = self.system1_state(
+            configuration.original_config_do_not_use.system1.enabled,
+            /*initial_revision*/ 0,
+        );
+        if !mode.enabled
+            || mode.error.is_none()
+            || !super::ordinary_agent_session(
+                &configuration.session_source,
+                configuration.thread_source.as_ref(),
+            )
+            || !self
+                .services
+                .model_client
+                .reasoning_effort_override_enabled(&settings.model_info)
+            || super::allowed_efforts(
+                &configuration.original_config_do_not_use.system1,
+                &settings.model_info,
+            )
+            .len()
+                < 2
+            || settings
+                .effective_reasoning_effort()
+                .is_some_and(|effort| !super::ORDINARY_EFFORTS.contains(&effort))
+        {
+            return settings;
+        }
+        let effort = configuration
+            .original_config_do_not_use
+            .system1_default_effort
+            .clone();
+        if settings.reasoning_effort() == effort.as_ref() {
+            return settings;
+        }
+        let mut selected = settings.selected().clone();
+        selected.collaboration_mode.settings.reasoning_effort = effort;
+        let mut fallback = ResolvedStepSettings::new(
+            Arc::new(selected),
+            Arc::clone(&settings.model_info),
+            &self.features,
+        );
+        fallback.mcp_approvals_reviewer_override = settings.mcp_approvals_reviewer_override;
+        Arc::new(fallback)
+    }
+
     #[tracing::instrument(skip_all)]
     pub(in crate::session) async fn publish_system1_error(
         &self,
@@ -159,6 +211,11 @@ impl Session {
                 Some(super::super::system1_task::WARMUP_TIMEOUT.as_secs()),
             ),
         };
+        let Some((updated, cooldown_seconds)) =
+            self.update_system1_error(update, generation, guard)
+        else {
+            return;
+        };
         let reasoning_effort = if error.is_some() {
             let active = self
                 .active_turn
@@ -167,24 +224,19 @@ impl Session {
                 .as_ref()
                 .and_then(|turn| turn.task.as_ref())
                 .map(|task| task.turn_context.next_step_settings.load_full());
+            let state = self.state.lock().await;
             if let Some(active) = active {
-                active.effective_reasoning_effort()
+                self.system1_fallback_settings(active, &state.session_configuration)
+                    .effective_reasoning_effort()
             } else {
-                self.state
-                    .lock()
-                    .await
+                state
                     .session_configuration
-                    .step_settings
-                    .collaboration_mode
-                    .reasoning_effort()
+                    .original_config_do_not_use
+                    .system1_default_effort
+                    .clone()
             }
         } else {
             None
-        };
-        let Some((updated, cooldown_seconds)) =
-            self.update_system1_error(update, generation, guard)
-        else {
-            return;
         };
         tracing::info!(thread_id = %self.thread_id(), ?error, revision = updated.revision,
             failure_episode = updated.failure_episode, "System1 health changed");

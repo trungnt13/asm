@@ -276,6 +276,7 @@ async fn apply_requested_spawn_agent_model_overrides(
                 };
         }
 
+        config.system1_default_effort = config.model_reasoning_effort.clone();
         return Ok(());
     }
 
@@ -285,6 +286,7 @@ async fn apply_requested_spawn_agent_model_overrides(
             .as_deref()
             .is_some_and(crate::claude_runtime::is_native_model)
         {
+            config.system1_default_effort = Some(reasoning_effort.clone());
             config.model_reasoning_effort = Some(reasoning_effort);
             return Ok(());
         }
@@ -293,6 +295,7 @@ async fn apply_requested_spawn_agent_model_overrides(
             &step_context.settings.model_info.supported_reasoning_levels,
             &reasoning_effort,
         )?;
+        config.system1_default_effort = Some(reasoning_effort.clone());
         config.model_reasoning_effort = Some(reasoning_effort);
     }
 
