@@ -193,7 +193,8 @@ impl ClaudeRuntime {
             command
                 .arg("--plugin-dir")
                 .arg(directory)
-                .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"));
+                .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
+                .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
         if let Some(window) = options.auto_compact_window {
             // Settings can reapply env after startup; flag settings beat user/project settings.

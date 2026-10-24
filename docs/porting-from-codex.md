@@ -327,9 +327,11 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   duplicate names fail the turn. Never forward arbitrary ASM tools or create another
   agent registry. The private child directory contains an owner-only credential
   descriptor; prompts and argv carry no token. Calls are active-turn scoped, serialize
-  through the existing execution gate, and are not retried automatically. Cursor's
-  helper timeout covers eight queued maximum waits plus 30 seconds. Native Claude
-  mod long-wait behavior still requires live validation against the installed CLI.
+  through the existing execution gate, and are not retried automatically. Both use
+  the helper's timeout covering eight queued maximum waits plus 30 seconds. Claude
+  invokes it with native `$.process.spawn`: `$.http.fetch` has a 30-second deadline,
+  and `$.process.run` is capped at ten minutes in Claude Code 2.1.310. Preserve native
+  tool-search defaults rather than forcing every schema into each model prompt.
   Board notifications reach only a running turn: Claude folds them in at its next
   tool boundary, Cursor after its turn; they never wake an idle child.
 - Deliver messages during a busy Claude child's native run as UUID-stamped queued
@@ -504,11 +506,9 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   usage accounting and `/status`. Known gap: `codex exec --json` `turn.completed.usage` has
   required numeric fields and reports zeros when usage is unknown; the session warning says
   usage is unavailable. Keep that wire shape until the owner approves an API change.
-- Cursor children receive the `asm` server as an ACP session `http` MCP server on
-  `session/new` and `session/load`. Cursor applies team MCP policy to session servers and
-  drops blocked ones silently: on this account `agent mcp list-tools` reports "blocked by
-  team policy" for stdio and HTTP alike, and ACP sessions with or without `--force` never
-  contact the server. Do not treat an accepted session as available tools. Cursor mail
+- Cursor children deliberately use the local CLI bridge, not ACP MCP servers:
+  `session/new` and `session/load` carry empty `mcpServers`. Team MCP policy blocked the
+  previous transport; do not reintroduce it or bypass native policy. Cursor mail
   and board notices arrive between turns, and ASM still returns its final answer. There
   is no Send now. Cursor children saved before this bridge recorded no messaging; their
   cold resume fails closed and needs a new thread. Mains are unaffected.
