@@ -2,12 +2,16 @@ use super::System1Session;
 use super::System1State;
 use crate::config::Config;
 use crate::session::session::Session;
+use crate::session::session::SessionConfiguration;
+use crate::session::step_settings::ResolvedStepSettings;
+use crate::session::turn_context::TurnContext;
 use codex_api::DecisionsError;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::System1Error;
 use codex_protocol::protocol::System1FailureWarning;
 use codex_protocol::protocol::System1UpdatedEvent;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -17,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 pub(in crate::session) enum System1HealthUpdate {
     Decision(Option<System1Error>),
     WarmupTimeout,
+    WarmupFailure(System1Error),
 }
 
 pub(in crate::session) struct System1DecisionHealthGuard<'a> {
@@ -96,6 +101,7 @@ impl Session {
         let error = match update {
             System1HealthUpdate::Decision(error) => error,
             System1HealthUpdate::WarmupTimeout => Some(System1Error::Timeout),
+            System1HealthUpdate::WarmupFailure(error) => Some(error),
         };
         let state = self
             .services
@@ -123,7 +129,10 @@ impl Session {
             return None;
         }
         let mut cooldown_seconds = None;
-        if let System1HealthUpdate::Decision(Some(error)) = update {
+        if let System1HealthUpdate::Decision(Some(error))
+        | System1HealthUpdate::WarmupFailure(error) = update
+        {
+            recovery.restore_baseline |= matches!(update, System1HealthUpdate::Decision(_));
             recovery.failures = recovery.failures.saturating_add(/*rhs*/ 1);
             recovery.blocked = permanent_error(error);
             if !recovery.blocked {
@@ -145,6 +154,83 @@ impl Session {
         Some((*mode, cooldown_seconds))
     }
 
+    pub(in crate::session) fn system1_fallback_settings(
+        &self,
+        settings: Arc<ResolvedStepSettings>,
+        configuration: &SessionConfiguration,
+        turn: &TurnContext,
+    ) -> Arc<ResolvedStepSettings> {
+        let mode = self.system1_state(
+            configuration.original_config_do_not_use.system1.enabled,
+            /*initial_revision*/ 0,
+        );
+        if !mode.enabled
+            || mode.error.is_none()
+            || !self
+                .services
+                .thread_extension_data
+                .get::<System1Session>()
+                .is_some_and(|session| {
+                    session
+                        .recovery
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .restore_baseline
+                })
+            || !super::ordinary_agent_session(
+                &configuration.session_source,
+                configuration.thread_source.as_ref(),
+            )
+            || !self
+                .services
+                .model_client
+                .reasoning_effort_override_enabled(&settings.model_info)
+            || super::allowed_efforts(
+                &configuration.original_config_do_not_use.system1,
+                &settings.model_info,
+            )
+            .len()
+                < 2
+            || settings
+                .effective_reasoning_effort()
+                .is_some_and(|effort| !super::ORDINARY_EFFORTS.contains(&effort))
+        {
+            return settings;
+        }
+        let effort = turn
+            .extension_data
+            .get::<super::System1Baseline>()
+            .map_or_else(
+                || turn.reasoning_effort().cloned(),
+                |baseline| baseline.0.clone(),
+            );
+        let effective = effort
+            .as_ref()
+            .or(settings.model_info.default_reasoning_level.as_ref());
+        if effective.is_none_or(|effort| {
+            !super::ORDINARY_EFFORTS.contains(effort)
+                || !settings
+                    .model_info
+                    .supported_reasoning_levels
+                    .iter()
+                    .any(|preset| &preset.effort == effort)
+        }) {
+            return settings;
+        }
+        if settings.reasoning_effort() == effort.as_ref() {
+            return settings;
+        }
+        let mut selected = settings.selected().clone();
+        selected.collaboration_mode.settings.reasoning_effort = effort;
+        let mut fallback = ResolvedStepSettings::new(
+            Arc::new(selected),
+            Arc::clone(&settings.model_info),
+            &self.features,
+        );
+        fallback.mcp_approvals_reviewer_override = settings.mcp_approvals_reviewer_override;
+        Arc::new(fallback)
+    }
+
     #[tracing::instrument(skip_all)]
     pub(in crate::session) async fn publish_system1_error(
         &self,
@@ -154,10 +240,16 @@ impl Session {
     ) {
         let (error, warmup_timeout_seconds) = match update {
             System1HealthUpdate::Decision(error) => (error, None),
+            System1HealthUpdate::WarmupFailure(error) => (Some(error), None),
             System1HealthUpdate::WarmupTimeout => (
                 Some(System1Error::Timeout),
                 Some(super::super::system1_task::WARMUP_TIMEOUT.as_secs()),
             ),
+        };
+        let Some((updated, cooldown_seconds)) =
+            self.update_system1_error(update, generation, guard)
+        else {
+            return;
         };
         let reasoning_effort = if error.is_some() {
             let active = self
@@ -166,13 +258,17 @@ impl Session {
                 .await
                 .as_ref()
                 .and_then(|turn| turn.task.as_ref())
-                .map(|task| task.turn_context.next_step_settings.load_full());
+                .map(|task| Arc::clone(&task.turn_context));
+            let state = self.state.lock().await;
             if let Some(active) = active {
-                active.effective_reasoning_effort()
+                self.system1_fallback_settings(
+                    active.next_step_settings.load_full(),
+                    &state.session_configuration,
+                    &active,
+                )
+                .effective_reasoning_effort()
             } else {
-                self.state
-                    .lock()
-                    .await
+                state
                     .session_configuration
                     .step_settings
                     .collaboration_mode
@@ -180,11 +276,6 @@ impl Session {
             }
         } else {
             None
-        };
-        let Some((updated, cooldown_seconds)) =
-            self.update_system1_error(update, generation, guard)
-        else {
-            return;
         };
         tracing::info!(thread_id = %self.thread_id(), ?error, revision = updated.revision,
             failure_episode = updated.failure_episode, "System1 health changed");
