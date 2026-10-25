@@ -2,6 +2,22 @@ use super::Config;
 use std::io;
 
 impl Config {
+    pub(crate) fn validate_external_subagent_model(&self) -> io::Result<()> {
+        let provider = self.model_provider_id.as_str();
+        if codex_models_manager::provider_has_model_bindings(provider)
+            && !self.model.as_deref().is_some_and(|model| {
+                crate::claude_runtime::is_native_model(model)
+                    || codex_models_manager::provider_for_model(model) == Some(provider)
+            })
+        {
+            let model = self.model.as_deref().unwrap_or("<default>");
+            return Err(io::Error::other(format!(
+                "Model `{model}` has no binding to provider `{provider}`; subagents using this catalog-bound provider require a bound model or native runtime. Use a separately configured provider ID for unbound models."
+            )));
+        }
+        Ok(())
+    }
+
     pub fn apply_external_model_provider(&mut self) -> io::Result<()> {
         let Some(provider_id) = self
             .model

@@ -97,6 +97,9 @@ pub(crate) async fn prepare_agent_spawn_config(
     config
         .apply_external_model_provider()
         .map_err(|err| err.to_string())?;
+    config
+        .validate_external_subagent_model()
+        .map_err(|err| err.to_string())?;
     if options.full_history_fork && config.model_provider_id != turn.config.model_provider_id {
         return Err("Cross-provider subagents require fork_turns=none".to_string());
     }

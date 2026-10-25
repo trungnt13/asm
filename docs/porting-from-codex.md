@@ -292,6 +292,11 @@ Provider changes in the picker start fresh sessions and preserve the old chat.
 Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
 reuse and preserve saved provider identity on resume. Build a provider-specific
 model manager for bound models rather than reuse the parent's discovery identity.
+User-spawned subagents using a catalog-bound provider ID must select an explicitly
+bound model or a native runtime, including descendants and cold resumes. Reject
+unbound selections before startup rather than guessing reverse provider routing.
+For unbound custom subagent models, configure a separate provider ID. Ordinary
+main sessions and internal workers retain their existing provider behavior.
 Keep upstream catalog/API model types unchanged. Disabling bundled catalog display
 does not disable explicit selection, matching native external model behavior.
 

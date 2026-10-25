@@ -635,6 +635,12 @@ impl Session {
                 args.auth_manager.clone(),
             );
         }
+        if matches!(
+            args.session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            args.config.validate_external_subagent_model()?;
+        }
         let history = args.conversation_history.get_rollout_items();
         let saved_bound_model = history.iter().any(|item| {
             let model = if let RolloutItem::TurnContext(context) = item {

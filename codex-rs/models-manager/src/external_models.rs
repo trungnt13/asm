@@ -36,6 +36,13 @@ pub fn provider_for_model(model: &str) -> Option<&'static str> {
         .and_then(|entry| entry.model_provider.as_deref())
 }
 
+pub fn provider_has_model_bindings(provider: &str) -> bool {
+    CATALOG
+        .models
+        .iter()
+        .any(|entry| entry.model_provider.as_deref() == Some(provider))
+}
+
 pub(crate) fn models() -> impl Iterator<Item = &'static ModelInfo> {
     CATALOG.models.iter().map(|entry| &entry.model)
 }
