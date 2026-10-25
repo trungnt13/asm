@@ -96,7 +96,15 @@ impl App {
     }
 
     pub(super) async fn rebuild_config_for_cwd(&self, cwd: PathBuf) -> Result<Config> {
-        let mut overrides = self.harness_overrides.clone();
+        self.rebuild_config_for_cwd_with_overrides(cwd, self.harness_overrides.clone())
+            .await
+    }
+
+    pub(super) async fn rebuild_config_for_cwd_with_overrides(
+        &self,
+        cwd: PathBuf,
+        mut overrides: ConfigOverrides,
+    ) -> Result<Config> {
         overrides.cwd = Some(cwd.clone());
         let cwd_display = cwd.display().to_string();
         let builder = ConfigBuilder::default()
@@ -1833,7 +1841,9 @@ enabled = false
             .await;
 
         app.refresh_in_memory_config_from_disk().await?;
-        let (new_config, _) = app.load_new_session_config(&app_server).await?;
+        let (new_config, _) = app
+            .load_new_session_config(&app_server, /*selected_model*/ None)
+            .await?;
         let permission_config = app
             .rebuild_config_for_permission_profile(":workspace")
             .await?;
@@ -2026,7 +2036,9 @@ theme = "dracula"
         app.local_settings.tui.rendering.math = false;
         std::fs::write(config_path, "[broken")?;
 
-        let (_, settings) = app.load_new_session_config(&server).await?;
+        let (_, settings) = app
+            .load_new_session_config(&server, /*selected_model*/ None)
+            .await?;
         assert_eq!(settings, app.local_settings);
         server.shutdown().await?;
         Ok(())

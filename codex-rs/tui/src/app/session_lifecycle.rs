@@ -1098,7 +1098,13 @@ impl App {
         // Start a fresh in-memory session while preserving resumability via persisted rollout
         // history. If an initial message is provided, `enqueue_primary_thread_session` suppresses it
         // until the new session is configured and any replayed turns have been rendered.
-        let (mut config, local_settings) = match self.load_new_session_config(app_server).await {
+        let (mut config, local_settings) = match self
+            .load_new_session_config(
+                app_server,
+                model_selection.as_ref().map(|(model, _)| model.as_str()),
+            )
+            .await
+        {
             Ok(config) => config,
             Err(err) => {
                 if let Some(message) = initial_user_message {
@@ -1120,6 +1126,10 @@ impl App {
             config.model = Some(model);
             config.model_reasoning_effort = effort;
             config.service_tier = None;
+            if let Err(err) = config.apply_external_model_provider() {
+                self.chat_widget.add_error_message(err.to_string());
+                return;
+            }
         }
         match app_server
             .start_thread_with_session_start_source(

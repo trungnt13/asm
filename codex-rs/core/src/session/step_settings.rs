@@ -337,6 +337,16 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
+        if codex_models_manager::provider_for_model(self.collaboration_mode.model())
+            != codex_models_manager::provider_for_model(next.collaboration_mode.model())
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Model provider (start a fresh thread to change)",
+                candidate: next.collaboration_mode.model().to_string(),
+                allowed: self.collaboration_mode.model().to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         let current_claude =
             crate::claude_runtime::is_native_model(self.collaboration_mode.model());
         let claude_settings_changed = current_claude
