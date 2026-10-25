@@ -263,6 +263,7 @@
       "supports_reasoning_summary_parameter": false,
       "node_repl_disabled": false,
       "model_provider": "fireworks",
+      "input_modalities": ["text", "image"],
       "tool_mode": "direct",
       "context_window": 300000,
       "max_context_window": 1000000
