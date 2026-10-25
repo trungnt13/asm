@@ -283,6 +283,10 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ### Catalog-bound model providers
 
+When `load_external_models_json` is true, merge bundled external models into custom
+`model_catalog_json` catalogs in memory; exact custom IDs retain all their metadata overrides.
+When false, keep the custom catalog alone. Provider routing remains bundled and exact-ID-only.
+
 Bundled `external_models.json` entries may select an existing named `model_provider`.
 Resolve exact IDs only; remote catalogs cannot supply routing. Keep endpoints and
 credentials in user provider configuration and enforce managed provider requirements.
@@ -314,7 +318,8 @@ Top-level `load_external_models_json` defaults to `true`; set it to `false` to
 hide bundled external entries. Explicit `claude-code/<model>` selection remains available.
 Append external entries when reading the default catalog, including remote and cached catalogs.
 External entries override duplicate IDs without changing cached payloads.
-Explicit custom/provider catalogs remain authoritative and ignore this flag.
+Provider-owned catalogs remain authoritative and ignore this flag.
+Explicit custom catalogs honor this flag and retain metadata for duplicate IDs.
 Claude Code owns native model access and effort acceptance; metadata grants no access.
 
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
