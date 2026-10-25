@@ -239,8 +239,20 @@
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
+          "effort": "none",
+          "description": "Disable thinking"
+        },
+        {
+          "effort": "low",
+          "description": "Low reasoning effort"
+        },
+        {
           "effort": "high",
           "description": "High reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning effort"
         }
       ],
       "shell_type": "default",
