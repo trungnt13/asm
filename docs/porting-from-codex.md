@@ -287,6 +287,7 @@ Bundled `external_models.json` entries may select an existing named `model_provi
 Resolve exact IDs only; remote catalogs cannot supply routing. Keep endpoints and
 credentials in user provider configuration and enforce managed provider requirements.
 DeepSeek V4.1 Flash 1017 selects `fireworks`; no custom agent role is required.
+Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
 Provider changes in the picker start fresh sessions and preserve the old chat.
 Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
 reuse and preserve saved provider identity on resume. Build a provider-specific
