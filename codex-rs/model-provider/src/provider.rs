@@ -403,10 +403,10 @@ impl ConfiguredModelProvider {
         cache: ModelsCacheConfig,
     ) -> SharedModelsManager {
         if let Some(model_catalog) = config_model_catalog {
-            return Arc::new(StaticModelsManager::new(
-                self.auth_manager.clone(),
-                model_catalog,
-            ));
+            return Arc::new(
+                StaticModelsManager::new(self.auth_manager.clone(), model_catalog)
+                    .with_external_models(),
+            );
         }
         let endpoint = Arc::new(OpenAiModelsEndpoint::new(
             self.info.clone(),

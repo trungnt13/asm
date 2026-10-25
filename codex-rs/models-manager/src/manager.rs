@@ -320,6 +320,7 @@ pub struct OpenAiModelsManager {
 #[derive(Debug)]
 pub struct StaticModelsManager {
     remote_models: Vec<ModelInfo>,
+    load_external_models_json: Option<AtomicBool>,
     auth_manager: Option<Arc<AuthManager>>,
 }
 
@@ -398,8 +399,36 @@ impl StaticModelsManager {
     pub fn new(auth_manager: Option<Arc<AuthManager>>, model_catalog: ModelsResponse) -> Self {
         Self {
             remote_models: model_catalog.models,
+            load_external_models_json: None,
             auth_manager,
         }
+    }
+
+    /// Allow the external-catalog setting to supplement a user-configured catalog.
+    pub fn with_external_models(mut self) -> Self {
+        self.load_external_models_json = Some(AtomicBool::new(true));
+        self
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        let mut models = self.remote_models.clone();
+        if self
+            .load_external_models_json
+            .as_ref()
+            .is_some_and(|enabled| enabled.load(Ordering::SeqCst))
+        {
+            models.extend(
+                crate::external_models::models()
+                    .filter(|external| {
+                        !self
+                            .remote_models
+                            .iter()
+                            .any(|model| model.slug == external.slug)
+                    })
+                    .cloned(),
+            );
+        }
+        models
     }
 }
 
@@ -846,15 +875,19 @@ impl OpenAiModelsManager {
 }
 
 impl ModelsManager for StaticModelsManager {
+    fn set_load_external_models_json(&self, enabled: bool) {
+        if let Some(setting) = &self.load_external_models_json {
+            setting.store(enabled, Ordering::SeqCst);
+        }
+    }
+
     #[tracing::instrument(skip_all, fields(model = model))]
     fn get_model_info<'a>(
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
     ) -> ModelsManagerFuture<'a, ModelInfo> {
-        Box::pin(
-            async move { construct_model_info_from_candidates(model, &self.remote_models, config) },
-        )
+        Box::pin(async move { construct_model_info_from_candidates(model, &self.models(), config) })
     }
 
     fn get_default_model<'a>(
@@ -906,11 +939,11 @@ impl ModelsManager for StaticModelsManager {
     }
 
     fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>> {
-        Box::pin(async { self.remote_models.clone() })
+        Box::pin(async { self.models() })
     }
 
     fn try_get_remote_models(&self) -> Result<Vec<ModelInfo>, TryLockError> {
-        Ok(self.remote_models.clone())
+        Ok(self.models())
     }
 
     fn auth_manager(&self) -> Option<&AuthManager> {
