@@ -50,6 +50,7 @@ pub struct CursorRuntime {
     process: NativeProcess,
     session_id: String,
     next_request_id: u64,
+    config_options: Value,
     usable: bool,
     failure_result: Option<Value>,
     bridge_instructions: Option<String>,
@@ -79,6 +80,7 @@ impl CursorRuntime {
             process: NativeProcess::spawn(command).context("starting official Cursor agent")?,
             session_id: String::new(),
             next_request_id: 0,
+            config_options: Value::Null,
             usable: false,
             failure_result: None,
             bridge_instructions: options.bridge_directory.as_ref().map(|_| "ASM communication: use native shell to run \"$ASM_NATIVE_EXE\" --asm-native-tools list for available tools and JSON schemas. Call a listed tool with JSON arguments on stdin: printf '%s' '<JSON>' | \"$ASM_NATIVE_EXE\" --asm-native-tools call <name>. Do not print the private descriptor or retry side-effecting calls automatically. Long calls may background; await their completion.".to_owned()),
@@ -98,7 +100,7 @@ impl CursorRuntime {
                 // background children and cancel them; Cursor runs its Task tool either way.
                 json!({"protocolVersion": 1, "clientCapabilities": {
                     "fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false,
-                    "_meta": {"subagents": {}}}}),
+                    "_meta": {"subagents": {}, "parameterizedModelPicker": true}}}),
             )
             .await?;
         if initialized["protocolVersion"] != 1 {
@@ -140,54 +142,23 @@ impl CursorRuntime {
                 self.request("session/load", params).await?
             }
         };
-        let values = session["configOptions"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|option| option["id"] == "model")
-            .flat_map(|option| option["options"].as_array().into_iter().flatten())
-            .filter_map(|option| option["value"].as_str())
-            .collect::<Vec<_>>();
-        let matches = if values.contains(&options.model.as_str()) {
-            vec![options.model.as_str()]
-        } else {
-            values
-                .iter()
-                .copied()
-                .filter(|value| value.split('[').next() == Some(options.model.as_str()))
-                .collect()
-        };
-        let matches = matches
-            .into_iter()
-            .filter(|value| {
-                options.effort.as_deref().is_none_or(|effort| {
-                    if effort == "none" && value.starts_with("auto-smart[") {
-                        return true;
-                    }
-                    value.split_once('[').is_some_and(|(_, parameters)| {
-                        parameters
-                            .trim_end_matches(']')
-                            .split(',')
-                            .any(|parameter| {
-                                parameter.split_once('=').is_some_and(|(key, value)| {
-                                    matches!(key, "effort" | "reasoning_effort" | "reasoning")
-                                        && value == effort
-                                })
-                            })
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
-        let [model] = matches[..] else {
-            bail!(
-                "Cursor model `{}` with effort {:?} is not one available variant; use one of: {}",
-                options.model,
-                options.effort,
-                values.join(", ")
-            );
-        };
-        let model = model.to_owned();
-        let selected = self
+        let (model, encoded) = options
+            .model
+            .split_once('[')
+            .map_or((options.model.as_str(), ""), |(model, parameters)| {
+                (model, parameters.trim_end_matches(']'))
+            });
+        anyhow::ensure!(
+            session["configOptions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|option| option["id"] == "model")
+                .flat_map(|option| option["options"].as_array().into_iter().flatten())
+                .any(|option| option["value"] == model),
+            "Cursor does not advertise model `{model}`"
+        );
+        let mut selected = self
             .request(
                 "session/set_config_option",
                 json!({"sessionId": self.session_id, "configId": "model", "value": model}),
@@ -199,10 +170,106 @@ impl CursorRuntime {
                 .into_iter()
                 .flatten()
                 .any(|option| option["id"] == "model" && option["currentValue"] == model),
-            "Cursor did not confirm requested model variant `{model}`"
+            "Cursor did not confirm model `{model}`"
         );
+        let mut parameters = encoded
+            .split(',')
+            .filter(|parameter| !parameter.is_empty())
+            .map(|parameter| {
+                parameter
+                    .split_once('=')
+                    .context("Invalid saved Cursor model parameter")
+                    .map(|(id, value)| (id.to_owned(), value.to_owned()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if let Some(effort) = options.effort {
+            let thought = selected["configOptions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|option| {
+                    option["category"] == "thought_level"
+                        && option["options"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|value| value["value"] == effort)
+                });
+            if let Some(thought) = thought {
+                let id = thought["id"]
+                    .as_str()
+                    .context("Cursor effort parameter has no ID")?;
+                parameters.retain(|(key, _)| key != id);
+                parameters.push((id.to_owned(), effort));
+            } else if effort != "none" || model != "auto-smart" {
+                bail!("Cursor model `{model}` does not advertise adjustable effort");
+            }
+        }
+        for (id, value) in parameters {
+            anyhow::ensure!(
+                selected["configOptions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|option| option["id"] == id)
+                    .flat_map(|option| option["options"].as_array().into_iter().flatten())
+                    .any(|option| option["value"] == value),
+                "Cursor does not advertise `{id}={value}` for `{model}`"
+            );
+            selected = self
+                .request(
+                    "session/set_config_option",
+                    json!({
+                "sessionId": self.session_id, "configId": id, "value": value}),
+                )
+                .await?;
+            anyhow::ensure!(
+                selected["configOptions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|option| option["id"] == id && option["currentValue"] == value),
+                "Cursor did not confirm `{id}={value}`"
+            );
+        }
+        self.config_options = selected["configOptions"].clone();
         self.usable = true;
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn set_effort(&mut self, effort: Option<&str>) -> Result<()> {
+        anyhow::ensure!(self.usable, "Cursor session requires recovery before changing effort");
+        let effort = effort.context("Cursor requires an explicit effort when changing it")?;
+        let id = self.config_options.as_array().into_iter().flatten()
+            .find(|option| option["category"] == "thought_level"
+                && option["options"].as_array().into_iter().flatten()
+                    .any(|value| value["value"] == effort))
+            .and_then(|option| option["id"].as_str())
+            .context("Cursor does not advertise the requested effort")?.to_owned();
+        self.usable = false;
+        let mut guard = TurnGuard {
+            pid: self.process.child.id(),
+            armed: true,
+            kill: kill_tree,
+        };
+        let result = async {
+            let selected = self.request("session/set_config_option", json!({
+                "sessionId": self.session_id, "configId": id, "value": effort
+            })).await?;
+            anyhow::ensure!(selected["configOptions"].as_array().into_iter().flatten()
+                .any(|option| option["id"] == id && option["currentValue"] == effort),
+                "Cursor did not confirm requested effort");
+            self.config_options = selected["configOptions"].clone();
+            Ok(())
+        }.await;
+        if result.is_ok() {
+            self.usable = true;
+        } else {
+            self.process.kill(kill_tree).await;
+        }
+        guard.armed = false;
+        result
     }
 
     pub fn session_id(&self) -> &str {

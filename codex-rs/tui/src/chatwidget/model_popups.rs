@@ -297,7 +297,7 @@ impl ChatWidget {
         effort_for_action: Option<ReasoningEffortConfig>,
         should_prompt_plan_mode_scope: bool,
     ) -> Vec<SelectionAction> {
-        if self.model_selection_needs_new_session(&model_for_action, effort_for_action.clone()) {
+        if self.model_selection_needs_new_session(&model_for_action) {
             let thread_id = self.thread_id();
             return vec![Box::new(move |tx| {
                 tx.send(AppEvent::StartModelSession {
@@ -309,7 +309,13 @@ impl ChatWidget {
             })];
         }
         if codex_protocol::openai_models::is_native_runtime_model(&model_for_action) {
-            return Vec::new();
+            return vec![Box::new(move |tx| {
+                tx.send(AppEvent::SelectSessionModel {
+                    model: model_for_action.clone(),
+                    effort: effort_for_action.clone(),
+                    service_tier: None,
+                });
+            })];
         }
         let warning = effort_for_action
             .as_ref()
