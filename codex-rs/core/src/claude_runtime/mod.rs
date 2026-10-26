@@ -281,20 +281,7 @@ async fn run_conversation(
             }
         }
         let original_history = session.clone_history().await;
-        for item in input.drain(..) {
-            // Only transcript recording is shared; Claude owns its prompt and hook lifecycle.
-            record_pending_input(
-                session,
-                turn,
-                &settings.model_info,
-                item,
-                Vec::new(),
-                codex_thread_store::PersistContext::TurnStart,
-            )
-            .await;
-        }
-        let history = session.clone_history().await;
-        let messages = input_messages(history.raw_items())?;
+        let messages = input_messages(original_history.raw_items())?;
         let mut lease = RuntimeLease::take(&session.claude_runtime)?;
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
@@ -386,9 +373,10 @@ async fn run_conversation(
                 messaging,
                 &messages,
             )?;
-            if messages[checkpoint.input_count..]
-                .iter()
-                .all(|message| message.trim().is_empty())
+            if input.is_empty()
+                && messages[checkpoint.input_count..]
+                    .iter()
+                    .all(|message| message.trim().is_empty())
             {
                 return Ok(last_message);
             }
@@ -483,6 +471,20 @@ async fn run_conversation(
                 .linkage
                 .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
         }
+        for item in input.drain(..) {
+            // Reject native setup or effort changes before recording input for later delivery.
+            record_pending_input(
+                session,
+                turn,
+                &settings.model_info,
+                item,
+                Vec::new(),
+                codex_thread_store::PersistContext::TurnStart,
+            )
+            .await;
+        }
+        let history = session.clone_history().await;
+        let messages = input_messages(history.raw_items())?;
         let mut prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
         if prompt.trim().is_empty() {
             return Ok(last_message);
