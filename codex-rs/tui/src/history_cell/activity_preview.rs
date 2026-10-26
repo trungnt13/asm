@@ -10,6 +10,8 @@ pub(crate) const DETAIL_PREVIEW_LINES: usize = 3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ActivityDisclosure {
     Generic,
+    /// The tool-group summary row is the disclosure target.
+    ToolGroup,
     /// Retained output lines not fully visible in the preview, excluding storage omissions.
     OutputLines(usize),
 }

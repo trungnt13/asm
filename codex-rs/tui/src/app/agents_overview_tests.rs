@@ -100,7 +100,7 @@ async fn server_version_overview_notice_updates_and_clears() {
     let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     app.chat_widget.show_bottom_pane_view(Box::new(view));
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-    insta::assert_snapshot!(rendered.lines().last().unwrap(), @"  Service v0.151.0 < Codex CLI v0.153.0");
+    insta::assert_snapshot!(rendered.lines().last().unwrap(), @"  Service v0.151.0 < ASM CLI v0.153.0");
 
     app.update_server_version_overview_notice("0.153.0", /*server_version*/ None);
     let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
@@ -1810,6 +1810,51 @@ async fn root_switch_preserves_idle_root_with_running_subagent() -> Result<()> {
         child_id, /*agent_nickname*/ None, /*agent_role*/ None, /*is_closed*/ false,
     );
     app.agent_navigation.mark_running(child_id);
+    let [nested_id, late_child_id, unrelated_id, fork_id] =
+        std::array::from_fn(|_| ThreadId::new());
+    for (id, parent, status) in [
+        (
+            child_id,
+            Some(previous_root_id),
+            ThreadStatus::Active {
+                active_flags: Vec::new(),
+            },
+        ),
+        (idle_child_id, Some(previous_root_id), ThreadStatus::Idle),
+        (nested_id, Some(child_id), ThreadStatus::Idle),
+        (
+            unrelated_id,
+            Some(target_thread_id),
+            ThreadStatus::Active {
+                active_flags: Vec::new(),
+            },
+        ),
+        (
+            fork_id,
+            None,
+            ThreadStatus::Active {
+                active_flags: Vec::new(),
+            },
+        ),
+    ] {
+        let mut thread = overview_thread(id, parent, "Count fixture", status);
+        if id == fork_id {
+            thread.parent_thread_id = Some(previous_root_id.to_string());
+            thread.forked_from_id = Some(previous_root_id.to_string());
+        }
+        app.agents_overview.threads.insert(id, Some(thread));
+    }
+    let mut parent_turn: codex_app_server_protocol::Turn =
+        serde_json::from_value(serde_json::json!({
+            "id": "counted-turn", "items": [], "status": "inProgress"
+        }))?;
+    // Start accounting without changing the original idle-root navigation fixture.
+    app.track_turn_agents(&ServerNotification::TurnStarted(
+        codex_app_server_protocol::TurnStartedNotification {
+            thread_id: previous_root_id.to_string(),
+            turn: parent_turn.clone(),
+        },
+    ));
     app.active_thread_id = Some(child_id);
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
@@ -1842,6 +1887,120 @@ async fn root_switch_preserves_idle_root_with_running_subagent() -> Result<()> {
         })
         .await?;
     assert_eq!(response.status, ThreadUnsubscribeStatus::Unsubscribed);
+    for status in [
+        ThreadStatus::Idle,
+        ThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    ] {
+        app.handle_app_server_event(
+            &app_server,
+            AppServerEvent::ServerNotification(Box::new(ServerNotification::ThreadStatusChanged(
+                codex_app_server_protocol::ThreadStatusChangedNotification {
+                    thread_id: child_id.to_string(),
+                    status,
+                },
+            ))),
+        )
+        .await;
+    }
+    for notification in [
+        ServerNotification::ThreadStatusChanged(
+            codex_app_server_protocol::ThreadStatusChangedNotification {
+                thread_id: nested_id.to_string(),
+                status: ThreadStatus::Active {
+                    active_flags: Vec::new(),
+                },
+            },
+        ),
+        ServerNotification::ThreadStarted(codex_app_server_protocol::ThreadStartedNotification {
+            thread: overview_thread(
+                late_child_id,
+                Some(previous_root_id),
+                "Late child",
+                ThreadStatus::Active {
+                    active_flags: Vec::new(),
+                },
+            ),
+        }),
+    ] {
+        app.handle_app_server_event(
+            &app_server,
+            AppServerEvent::ServerNotification(Box::new(notification)),
+        )
+        .await;
+    }
+    parent_turn.status = codex_app_server_protocol::TurnStatus::Completed;
+    app.handle_app_server_event(
+        &app_server,
+        AppServerEvent::ServerNotification(Box::new(ServerNotification::TurnCompleted(
+            codex_app_server_protocol::TurnCompletedNotification {
+                thread_id: previous_root_id.to_string(),
+                turn: parent_turn.clone(),
+            },
+        ))),
+    )
+    .await;
+    assert_eq!(
+        app.turn_agent_counts
+            .count(previous_root_id, &parent_turn.id),
+        Some(3)
+    );
+    app.handle_app_server_event(
+        &app_server,
+        AppServerEvent::ServerNotification(Box::new(ServerNotification::ThreadStatusChanged(
+            codex_app_server_protocol::ThreadStatusChangedNotification {
+                thread_id: idle_child_id.to_string(),
+                status: ThreadStatus::Active {
+                    active_flags: Vec::new(),
+                },
+            },
+        ))),
+    )
+    .await;
+    app.handle_app_server_event(
+        &app_server,
+        AppServerEvent::ServerNotification(Box::new(ServerNotification::TurnCompleted(
+            codex_app_server_protocol::TurnCompletedNotification {
+                thread_id: previous_root_id.to_string(),
+                turn: parent_turn.clone(),
+            },
+        ))),
+    )
+    .await;
+    assert_eq!(
+        app.turn_agent_counts
+            .count(previous_root_id, &parent_turn.id),
+        Some(3)
+    );
+    assert_eq!(
+        app.turn_agent_counts
+            .count(previous_root_id, "unobserved-history"),
+        None
+    );
+    app.insert_history_cell(
+        &mut tui,
+        Box::new(
+            crate::history_cell::FinalMessageSeparator::new(
+                /*elapsed_seconds*/ Some(1),
+                /*runtime_metrics*/ None,
+            )
+            .with_session_id(Some(previous_root_id))
+            .with_turn_id(parent_turn.id.clone()),
+        ),
+    );
+    let footer = app
+        .transcript_cells
+        .last()
+        .expect("inserted completion footer")
+        .raw_lines()
+        .last()
+        .expect("completion footer line")
+        .to_string();
+    assert!(
+        footer.ends_with(&format!(" • 3ag • {previous_root_id}")),
+        "footer: {footer}"
+    );
     app_server.shutdown().await?;
     Ok(())
 }
@@ -2454,6 +2613,7 @@ async fn resume_picker_round_trip_preserves_each_threads_input() -> Result<()> {
                             id: "turn-with-follow-up".to_string(),
                             root_turn_id: None,
                             items_view: codex_app_server_protocol::TurnItemsView::Full,
+                            token_usage: None,
                             items: Vec::new(),
                             status: codex_app_server_protocol::TurnStatus::InProgress,
                             error: None,

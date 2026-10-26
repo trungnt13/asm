@@ -3447,24 +3447,28 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
 
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: Some(info1),
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: None,
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: Some(info2.clone()),
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
+            output_tokens_per_second: None,
             info: None,
             rate_limits: None,
         },
@@ -4990,6 +4994,7 @@ async fn open_thread_persistence(session: &mut Session) -> PathBuf {
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
+            prompt_cache_key: None,
             thread_id: session.thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -6827,6 +6832,38 @@ async fn responses_metadata_uses_selected_harness_analytics_client() {
     }
 }
 
+pub(crate) fn install_reviewer_scoped_skills(config: &mut Config) {
+    let rules = ["review", "oracle"].map(|name| {
+        let skill_dir = config.codex_home.join("skills").join(name);
+        std::fs::create_dir_all(&skill_dir).expect("create scoped skill directory");
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: reviewer skill\n---\n\nReviewer body\n"),
+        ).expect("write scoped skill");
+        format!("[[skills.config]]\nname = \"{name}\"\nenabled = true\nallowed_agent_roles = [\"reviewer\"]\n")
+    });
+    config.config_layer_stack = config
+        .config_layer_stack
+        .with_user_config(
+            &config.codex_home.join("config.toml"),
+            toml::from_str(&rules.join("\n")).expect("parse scoped skills config"),
+        )
+        .expect("add scoped skills config layer");
+}
+
+pub(crate) fn reviewer_skill_enablement(turn: &TurnContext) -> [bool; 2] {
+    let snapshot = turn.skills_snapshot();
+    ["review", "oracle"].map(|name| {
+        let skill = snapshot
+            .outcome()
+            .skills
+            .iter()
+            .find(|skill| skill.name == name)
+            .expect("scoped reviewer skill metadata should exist");
+        snapshot.outcome().is_skill_enabled(skill)
+    })
+}
+
 // todo: use online model info
 pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let (tx_event, _rx_event) = async_channel::unbounded();
@@ -6962,7 +6999,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_runtime,
         mcp_handler_cache: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
-            config.background_terminal_max_timeout,
+            config.background_terminal_timeout_bounds(),
         ),
         elicitations: crate::elicitation::ElicitationService::new(),
         analytics_events_client: AnalyticsEventsClient::new(
@@ -7049,6 +7086,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     };
 
     let session = Session {
+        claude_runtime: Default::default(),
         thread_id,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
@@ -7056,6 +7094,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         agent_status: agent_status_tx,
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
+        ephemeral_rollout_items: None,
         code_mode_message_tasks: Default::default(),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
         features: config.features.clone(),
@@ -8742,6 +8781,7 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
+            prompt_cache_key: None,
             thread_id: session.thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -8863,6 +8903,7 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
+            prompt_cache_key: None,
             thread_id: session.thread_id,
             extra_config: None,
             forked_from_id: None,
@@ -9247,7 +9288,7 @@ where
         mcp_runtime,
         mcp_handler_cache: Default::default(),
         unified_exec_manager: UnifiedExecProcessManager::new(
-            config.background_terminal_max_timeout,
+            config.background_terminal_timeout_bounds(),
         ),
         elicitations: crate::elicitation::ElicitationService::new(),
         analytics_events_client: AnalyticsEventsClient::new(
@@ -9334,6 +9375,7 @@ where
     };
 
     let session = Arc::new(Session {
+        claude_runtime: Default::default(),
         thread_id,
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
@@ -9341,6 +9383,7 @@ where
         agent_status: agent_status_tx,
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
+        ephemeral_rollout_items: None,
         code_mode_message_tasks: Default::default(),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
         features: config.features.clone(),
@@ -11799,6 +11842,7 @@ async fn attach_in_memory_thread_store(
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
+            prompt_cache_key: None,
             thread_id: session.thread_id,
             extra_config: None,
             forked_from_id: None,

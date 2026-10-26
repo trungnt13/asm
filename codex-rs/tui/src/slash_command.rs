@@ -13,6 +13,7 @@ pub enum SlashCommand {
     // DO NOT ALPHA-SORT! Enum order is presentation order in the popup, so
     // more frequently used commands should be listed first.
     Model,
+    System1,
     Presets,
     Daybreak,
     Ide,
@@ -30,6 +31,8 @@ pub enum SlashCommand {
     Hooks,
     Review,
     Rename,
+    #[strum(serialize = "autorename")]
+    AutoRename,
     New,
     Archive,
     Delete,
@@ -47,7 +50,13 @@ pub enum SlashCommand {
     Agents,
     Side,
     Btw,
+    #[strum(serialize = "sendlast")]
+    SendLast,
+    Sync,
+    Parallel,
     Copy,
+    #[strum(serialize = "copyid")]
+    CopyId,
     Export,
     Raw,
     Tui,
@@ -92,14 +101,15 @@ impl SlashCommand {
     /// User-visible description shown in the popup.
     pub fn description(self) -> &'static str {
         match self {
-            SlashCommand::Config => "configure Codex preferences",
+            SlashCommand::Config => "configure ASM preferences",
             SlashCommand::Feedback => "send logs to maintainers",
             SlashCommand::New => "start a new chat during a conversation",
-            SlashCommand::Init => "create an AGENTS.md file with instructions for Codex",
+            SlashCommand::Init => "create an AGENTS.md file with instructions for ASM",
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Recap => "summarize the current conversation now",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Rename => "rename the current thread",
+            SlashCommand::AutoRename => "generate and apply a name using auto_rename settings",
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Archive => "archive this session",
             SlashCommand::Delete => "permanently delete this session",
@@ -107,14 +117,15 @@ impl SlashCommand {
             SlashCommand::Fork => "fork the current chat",
             SlashCommand::Worktree => "start or continue a conversation in a new worktree",
             SlashCommand::App => "continue this session in the Desktop app",
-            SlashCommand::Quit | SlashCommand::Exit => "exit Codex",
+            SlashCommand::Quit | SlashCommand::Exit => "exit ASM",
             SlashCommand::Copy => "copy the last response or part of it",
+            SlashCommand::CopyId => "copy the current session ID to the clipboard",
             SlashCommand::Export => "export the conversation as markdown",
             SlashCommand::Raw => "toggle raw scrollback mode for copy-friendly terminal selection",
             SlashCommand::Tui => "choose the TUI mode for the next launch",
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
-            SlashCommand::Skills => "use skills to improve how Codex performs specific tasks",
+            SlashCommand::Skills => "use skills to improve how ASM performs specific tasks",
             SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Daemon => "Manage the local background server",
@@ -133,6 +144,7 @@ impl SlashCommand {
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
+            SlashCommand::System1 => "turn System1 on/off or show status and stats",
             SlashCommand::Presets => "run or save reusable prompts and slash commands",
             SlashCommand::Daybreak => "turn Daybreak on or off",
             SlashCommand::Ide => {
@@ -146,7 +158,10 @@ impl SlashCommand {
             SlashCommand::Side | SlashCommand::Btw => {
                 "start a side conversation in an ephemeral fork"
             }
-            SlashCommand::Permissions => "choose what Codex is allowed to do",
+            SlashCommand::SendLast => "send the last side reply to main with optional instructions",
+            SlashCommand::Sync => "replace side history with the latest main context",
+            SlashCommand::Parallel => "start a saved parallel conversation",
+            SlashCommand::Permissions => "choose what ASM is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",
             SlashCommand::ElevateSandbox => "set up elevated agent sandbox",
@@ -156,7 +171,7 @@ impl SlashCommand {
             SlashCommand::Mcp => "list MCP tools; use /mcp verbose or /mcp login <name>",
             SlashCommand::Apps => "manage apps",
             SlashCommand::Plugins => "browse plugins",
-            SlashCommand::Logout => "log out of Codex",
+            SlashCommand::Logout => "log out of ASM",
             SlashCommand::Rollout => "print the rollout file path",
             SlashCommand::TestApproval => "test approval request",
         }
@@ -189,12 +204,16 @@ impl SlashCommand {
                 | SlashCommand::Mcp
                 | SlashCommand::Export
                 | SlashCommand::Raw
+                | SlashCommand::System1
                 | SlashCommand::Cd
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
                 | SlashCommand::Pets
                 | SlashCommand::Side
                 | SlashCommand::Btw
+                | SlashCommand::SendLast
+                | SlashCommand::Sync
+                | SlashCommand::Parallel
                 | SlashCommand::Resume
         )
     }
@@ -203,7 +222,11 @@ impl SlashCommand {
     pub fn available_in_side_conversation(self) -> bool {
         matches!(
             self,
-            SlashCommand::Copy
+            SlashCommand::Fork
+                | SlashCommand::SendLast
+                | SlashCommand::Sync
+                | SlashCommand::Copy
+                | SlashCommand::CopyId
                 | SlashCommand::Agents
                 | SlashCommand::Export
                 | SlashCommand::Raw
@@ -241,6 +264,7 @@ impl SlashCommand {
                 | SlashCommand::Pwd
                 | SlashCommand::Rollout
                 | SlashCommand::Copy
+                | SlashCommand::CopyId
                 | SlashCommand::Raw
         )
     }
@@ -251,6 +275,7 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Delete
             | SlashCommand::Fork
+            | SlashCommand::Sync
             | SlashCommand::Worktree
             | SlashCommand::Init
             | SlashCommand::Compact
@@ -274,12 +299,15 @@ impl SlashCommand {
             | SlashCommand::Archive
             | SlashCommand::Resume
             | SlashCommand::Model
+            | SlashCommand::System1
             | SlashCommand::Presets
             | SlashCommand::Daybreak
             | SlashCommand::Permissions
             | SlashCommand::Copy
+            | SlashCommand::CopyId
             | SlashCommand::Raw
             | SlashCommand::Rename
+            | SlashCommand::AutoRename
             | SlashCommand::Mention
             | SlashCommand::Skills
             | SlashCommand::Hooks
@@ -305,7 +333,9 @@ impl SlashCommand {
             | SlashCommand::Quit
             | SlashCommand::Exit
             | SlashCommand::Side
-            | SlashCommand::Btw => true,
+            | SlashCommand::Btw
+            | SlashCommand::SendLast
+            | SlashCommand::Parallel => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,
@@ -315,7 +345,7 @@ impl SlashCommand {
 
     fn is_visible(self) -> bool {
         match self {
-            SlashCommand::Copy => !cfg!(target_os = "android"),
+            SlashCommand::Copy | SlashCommand::CopyId => !cfg!(target_os = "android"),
             SlashCommand::App => cfg!(any(target_os = "macos", target_os = "windows")),
             SlashCommand::Voice => true,
             SlashCommand::Rollout | SlashCommand::TestApproval => cfg!(debug_assertions),
@@ -362,7 +392,8 @@ mod tests {
         assert!(SlashCommand::Title.available_during_task());
         assert!(SlashCommand::Statusline.available_during_task());
         assert!(SlashCommand::Raw.available_during_task());
-        assert!(SlashCommand::Raw.available_in_side_conversation());
+        assert!(SlashCommand::System1.available_during_task());
+        assert!(SlashCommand::System1.supports_inline_args());
         assert!(SlashCommand::Raw.supports_inline_args());
         assert!(SlashCommand::App.available_during_task());
     }

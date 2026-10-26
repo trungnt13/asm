@@ -116,7 +116,7 @@ async fn resumed_session_hides_unknown_token_usage_until_an_update_arrives() {
     chat.refresh_status_line();
     assert_eq!(
         status_line_text(&chat),
-        Some("Context 30% left · Context 70% used · 0 in · 0 out".to_string())
+        Some("Ctx30%left·Ctx70%·0 in·0 out".to_string())
     );
 }
 
@@ -265,7 +265,7 @@ async fn token_usage_update_uses_runtime_context_window() {
 
     assert_eq!(
         chat.status_line_value_for_item(crate::bottom_pane::StatusLineItem::ContextWindowSize),
-        Some("950K window".to_string())
+        Some("950K".to_string())
     );
     assert_eq!(chat.bottom_pane.context_window_percent(), Some(100));
 
@@ -3044,6 +3044,102 @@ async fn status_line_hostname_renders_current_machine_hostname() {
 }
 
 #[tokio::test]
+async fn status_line_cache_hit_rate_uses_latest_request() {
+    let (frame_requester, mut draw_rx) = FrameRequester::test_channel();
+    let (mut chat, _rx, _ops) = make_chatwidget_manual_with_auth(
+        /*model_override*/ None,
+        /*has_chatgpt_account*/ false,
+        /*has_codex_backend_auth*/ false,
+        frame_requester,
+    )
+    .await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.local_settings.tui.status_line =
+        Some(vec!["cache-hit-rate".to_string(), "output-tps".to_string()]);
+    let mut info = make_token_info(
+        /*total_tokens*/ 22_000, /*context_window*/ 200_000,
+    );
+    info.total_token_usage.input_tokens = 20_000;
+    info.total_token_usage.cached_input_tokens = 10_000;
+    info.last_token_usage.input_tokens = 10_000;
+    info.last_token_usage.cached_input_tokens = 8_960;
+    handle_token_count(&mut chat, Some(info));
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
+    while draw_rx.try_recv().is_ok() {}
+
+    let usage = codex_app_server_protocol::TokenUsageBreakdown {
+        total_tokens: 10_600,
+        input_tokens: 10_000,
+        cached_input_tokens: 8_960,
+        cache_write_input_tokens: 0,
+        output_tokens: 600,
+        reasoning_output_tokens: 200,
+    };
+    let mut notification = codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+        thread_id: chat.thread_id.unwrap().to_string(),
+        turn_id: "turn-1".to_string(),
+        output_tokens_per_second: None,
+        token_usage: codex_app_server_protocol::ThreadTokenUsage {
+            total: usage.clone(),
+            last: usage,
+            model_context_window: Some(200_000),
+        },
+    };
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    while draw_rx.try_recv().is_ok() {}
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    let usage_redraws = std::iter::from_fn(|| draw_rx.try_recv().ok()).count();
+    notification.output_tokens_per_second = Some(7.49);
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(
+        std::iter::from_fn(|| draw_rx.try_recv().ok()).count(),
+        usage_redraws
+    );
+    assert_eq!(chat.output_tps, Some("7tps".to_string()));
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%".to_string()));
+
+    // The app performs this refresh for token usage, not the notification cache handler.
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("Cch89.6%·7tps".to_string()));
+    notification.output_tokens_per_second = Some(f64::NAN);
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        /*replay_kind*/ None,
+    );
+    assert_eq!(chat.output_tps, Some("7tps".to_string()));
+    notification.output_tokens_per_second = Some(7.5);
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        Some(ReplayKind::ThreadSnapshot),
+    );
+    assert_eq!(chat.output_tps, Some("8tps".to_string()));
+    notification.output_tokens_per_second = None;
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification.clone()),
+        Some(ReplayKind::ThreadSnapshot),
+    );
+    notification.output_tokens_per_second = Some(75.0);
+    notification.thread_id = ThreadId::new().to_string();
+    chat.handle_server_notification(
+        ServerNotification::ThreadTokenUsageUpdated(notification),
+        /*replay_kind*/ None,
+    );
+    chat.set_token_info(/*info*/ None);
+    chat.refresh_status_line();
+    assert_eq!(status_line_text(&chat), Some("8tps".to_string()));
+}
+
+#[tokio::test]
 async fn status_line_context_used_renders_labeled_percent() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
@@ -3051,7 +3147,7 @@ async fn status_line_context_used_renders_labeled_percent() {
 
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
+    assert_eq!(status_line_text(&chat), Some("Ctx0%".to_string()));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "context-used should remain a valid status line item"
@@ -3066,10 +3162,7 @@ async fn status_line_context_remaining_renders_labeled_percent() {
 
     chat.refresh_status_line();
 
-    assert_eq!(
-        status_line_text(&chat),
-        Some("Context 100% left".to_string())
-    );
+    assert_eq!(status_line_text(&chat), Some("Ctx100%left".to_string()));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "context-remaining should remain a valid status line item"
@@ -3084,7 +3177,7 @@ async fn status_line_legacy_context_usage_renders_context_used_percent() {
 
     chat.refresh_status_line();
 
-    assert_eq!(status_line_text(&chat), Some("Context 0% used".to_string()));
+    assert_eq!(status_line_text(&chat), Some("Ctx0%".to_string()));
     assert!(
         drain_insert_history(&mut rx).is_empty(),
         "legacy context-usage should remain a valid status line item"
@@ -3194,7 +3287,7 @@ async fn status_line_thread_credits_and_cost_share_one_backend_request() {
     ));
     assert_eq!(
         status_line_text(&chat),
-        Some("5.2 credits · ~$0.21".to_string())
+        Some("5.2 credits·~$0.21".to_string())
     );
     assert!(rx.try_recv().is_err(), "idle refresh must not poll");
 }
@@ -4036,11 +4129,11 @@ async fn status_line_fast_mode_renders_on_and_off() {
     chat.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
 
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("Fast on".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:on".to_string()));
 }
 
 #[tokio::test]
@@ -4050,18 +4143,18 @@ async fn status_line_fast_mode_updates_visibility_on_model_change() {
     chat.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
 
     chat.set_model("gpt-5.2");
     assert_eq!(status_line_text(&chat), None);
 
     chat.set_model("gpt-5.4");
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
 
     chat.set_model("uncatalogued-model");
-    assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
-    assert_eq!(status_line_text(&chat), Some("Fast on".to_string()));
+    assert_eq!(status_line_text(&chat), Some("F:on".to_string()));
 }
 
 #[tokio::test]
@@ -4112,7 +4205,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.4 xhigh fast · Context 0% used · {test_cwd}"))
+        Some(format!("54 xhi fast·Ctx0%·{test_cwd}"))
     );
 
     chat.set_model("gpt-5.2");
@@ -4120,7 +4213,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.2 xhigh · Context 0% used · {test_cwd}"))
+        Some(format!("52 xhi·Ctx0%·{test_cwd}"))
     );
 }
 
@@ -4151,7 +4244,7 @@ async fn status_line_and_terminal_title_reasoning_render_only_effort() {
     chat.refresh_status_line();
     chat.refresh_terminal_title();
 
-    assert_eq!(status_line_text(&chat), Some("xhigh".to_string()));
+    assert_eq!(status_line_text(&chat), Some("xhi".to_string()));
     assert_eq!(chat.last_terminal_title, Some("xhigh".to_string()));
 }
 
@@ -4162,13 +4255,13 @@ async fn status_line_reasoning_updates_on_mode_switch_without_manual_refresh() {
     chat.local_settings.tui.status_line = Some(vec!["reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    assert_eq!(status_line_text(&chat), Some("high".to_string()));
+    assert_eq!(status_line_text(&chat), Some("hig".to_string()));
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
         .expect("expected plan collaboration mode");
     chat.set_collaboration_mask(plan_mask);
 
-    assert_eq!(status_line_text(&chat), Some("medium".to_string()));
+    assert_eq!(status_line_text(&chat), Some("med".to_string()));
 }
 
 #[tokio::test]
@@ -4178,19 +4271,19 @@ async fn status_line_model_with_reasoning_updates_on_mode_switch_without_manual_
     chat.local_settings.tui.status_line = Some(vec!["model-with-reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    assert_eq!(status_line_text(&chat), Some("gpt-5.2 high".to_string()));
+    assert_eq!(status_line_text(&chat), Some("52 hig".to_string()));
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
         .expect("expected plan collaboration mode");
     chat.set_collaboration_mask(plan_mask);
 
-    assert_eq!(status_line_text(&chat), Some("gpt-5.2 medium".to_string()));
+    assert_eq!(status_line_text(&chat), Some("52 med".to_string()));
 
     let default_mask = collaboration_modes::default_mask(chat.model_catalog.as_ref())
         .expect("expected default collaboration mode");
     chat.set_collaboration_mask(default_mask);
 
-    assert_eq!(status_line_text(&chat), Some("gpt-5.2 high".to_string()));
+    assert_eq!(status_line_text(&chat), Some("52 hig".to_string()));
 }
 
 #[tokio::test]
@@ -4198,7 +4291,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.2")).await;
     chat.show_welcome_banner = false;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
     chat.local_settings.tui.status_line = Some(vec!["model-with-reasoning".to_string()]);
@@ -4214,9 +4307,110 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw plan-mode footer");
+    let baseline_footer = normalized_backend_snapshot(terminal.backend());
+    let thread_id = ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8")
+        .expect("valid snapshot thread id");
+    chat.thread_id = Some(thread_id);
+    chat.turn_lifecycle.last_turn_id = Some("captured-turn".to_string());
+    chat.handle_server_notification(
+        ServerNotification::System1Updated(codex_app_server_protocol::System1UpdatedNotification {
+            thread_id: thread_id.to_string(),
+            enabled: true,
+            system1_revision: 5,
+            error: None,
+            failure_episode: 0,
+            warning: None,
+        }),
+        /*replay_kind*/ None,
+    );
+    chat.handle_server_notification(
+        ServerNotification::ReasoningEffortUpdated(
+            codex_app_server_protocol::ReasoningEffortUpdatedNotification {
+                thread_id: thread_id.to_string(),
+                turn_id: "captured-turn".to_string(),
+                reasoning_effort: Some(ReasoningEffortConfig::Low),
+                system1: true,
+            },
+        ),
+        /*replay_kind*/ None,
+    );
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw system1 footer");
+    let system1_footer = normalized_backend_snapshot(terminal.backend());
+    chat.add_status_output(
+        /*refreshing_rate_limits*/ false, /*request_id*/ None,
+    );
+    let lines = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+    let status = lines
+        .iter()
+        .filter(|line| line.contains("reasoning low"))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    chat.handle_server_notification(
+        ServerNotification::System1Updated(codex_app_server_protocol::System1UpdatedNotification {
+            thread_id: thread_id.to_string(),
+            enabled: true,
+            system1_revision: 6,
+            error: Some(codex_protocol::protocol::System1Error::Credentials),
+            failure_episode: 1,
+            warning: Some(codex_protocol::protocol::System1FailureWarning {
+                warmup_timeout_seconds: None,
+                reasoning_effort: Some(ReasoningEffortConfig::Low),
+                cooldown_seconds: None,
+            }),
+        }),
+        /*replay_kind*/ None,
+    );
+    terminal
+        .draw(|f| chat.render(f.area(), f.buffer_mut()))
+        .expect("draw error footer");
+    let error_footer = normalized_backend_snapshot(terminal.backend());
+    chat.add_status_output(
+        /*refreshing_rate_limits*/ false, /*request_id*/ None,
+    );
+    let error_lines = drain_insert_history(&mut rx)
+        .into_iter()
+        .flatten()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
+    chat.handle_server_notification(
+        ServerNotification::System1Updated(codex_app_server_protocol::System1UpdatedNotification {
+            thread_id: thread_id.to_string(),
+            enabled: false,
+            system1_revision: 7,
+            error: None,
+            failure_episode: 0,
+            warning: None,
+        }),
+        /*replay_kind*/ None,
+    );
+    let transitions = lines
+        .into_iter()
+        .chain(
+            drain_insert_history(&mut rx)
+                .into_iter()
+                .flatten()
+                .map(|line| line.to_string()),
+        )
+        .filter(|line| line.contains("System1 turned"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(transitions.contains("System1 turned on."));
+    assert!(transitions.contains("System1 turned off."));
+    assert!(status.contains("low (system1; baseline medium)"));
     assert_chatwidget_snapshot!(
         "status_line_model_with_reasoning_plan_mode_footer",
-        normalized_backend_snapshot(terminal.backend())
+        format!(
+            "{baseline_footer}\n\nCaptured System1 step:\n{system1_footer}\n\nApplied status:\n{status}\n\nError footer:\n{error_footer}\n\nError details:\n{error_lines}\n\nMode transitions:\n{transitions}"
+        )
     );
 }
 
@@ -4432,6 +4626,12 @@ async fn session_configured_clears_goal_status_footer() {
 
     let rollout_file = NamedTempFile::new().unwrap();
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
+        agent_role: None,
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),

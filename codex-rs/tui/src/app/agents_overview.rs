@@ -115,7 +115,7 @@ impl App {
                     (!workload_identity_selected).then(|| SelectionItem {
                         name: "Start background server".to_string(),
                         description: Some(
-                            "Open `codex agents` in another terminal afterward".to_string(),
+                            "Open `asm agents` in another terminal afterward".to_string(),
                         ),
                         actions: vec![Box::new(|tx| tx.send(AppEvent::StartAgentsDaemon))],
                         dismiss_on_select: true,
@@ -239,6 +239,11 @@ impl App {
                         }
                         thread.turns.clear();
                         self.agents_overview.threads.insert(thread_id, Some(thread));
+                        if self.turn_agent_counts.running.get(&thread_id).is_some_and(
+                            |(_, observed_during)| *observed_during != Some(request_id),
+                        ) {
+                            self.turn_agent_counts.running.remove(&thread_id);
+                        }
                     } else {
                         self.agents_overview.threads.entry(thread_id).or_default();
                     }
@@ -265,6 +270,7 @@ impl App {
                 self.track_agents_overview_notification(&notification);
             }
         }
+        self.sample_turn_agents();
         if std::mem::take(&mut self.agents_overview.refresh_pending)
             || (refill_succeeded
                 && (self.agents_overview.refill_count > 0
@@ -709,6 +715,33 @@ impl App {
                     }
                 }
             };
+            // Keep the destination's new subscription and work when leaving parallel mode.
+            if self
+                .side_threads
+                .get(&root_thread_id)
+                .is_some_and(|state| state.kind == CompanionKind::Parallel)
+            {
+                self.side_threads.remove(&root_thread_id);
+            }
+            if !previous_running_thread_ids.is_empty() {
+                for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
+                    let discarded = match startup_draft.as_deref_mut() {
+                        Some(draft) => {
+                            draft
+                                .run_until(
+                                    tui,
+                                    self.discard_side_thread(app_server, side_thread_id),
+                                )
+                                .await?
+                        }
+                        None => self.discard_side_thread(app_server, side_thread_id).await,
+                    };
+                    if !discarded {
+                        let _ = app_server.thread_unsubscribe(root_thread_id).await;
+                        return Ok(AppRunControl::Continue);
+                    }
+                }
+            }
             for (thread_id, requests) in previous_pending_requests {
                 self.agents_overview
                     .dispatched_requests
@@ -778,6 +811,7 @@ impl App {
             if let Err(error) = self
                 .replace_chat_widget_with_app_server_thread(
                     tui,
+                    app_server,
                     resumed,
                     presentation,
                     /*initial_user_message*/ None,
@@ -869,7 +903,7 @@ impl App {
             || (self.thread_unavailable(root_thread_id)
                 && !self.chat_widget.is_external_writer_view())
         {
-            self.select_agent_thread(tui, app_server, root_thread_id)
+            self.select_agent_thread_and_discard_side(tui, app_server, root_thread_id)
                 .await?;
         }
         let read_only = self.chat_widget.is_external_writer_view();

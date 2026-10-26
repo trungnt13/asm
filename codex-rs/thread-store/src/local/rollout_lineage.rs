@@ -31,6 +31,61 @@ pub(super) struct RolloutLineage {
 }
 
 impl LocalThreadStore {
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(super) async fn resolve_rollout_lineage_for_history(
+        &self,
+        requested_thread_id: ThreadId,
+    ) -> ThreadStoreResult<RolloutLineage> {
+        let lineage = self
+            .resolve_rollout_lineage(requested_thread_id, /*initial_path*/ None)
+            .await?;
+        for segment in lineage.segments() {
+            self.ensure_history_projection(segment).await?;
+        }
+        Ok(lineage)
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(super) async fn ensure_history_projection(
+        &self,
+        segment: &RolloutLineageSegment,
+    ) -> ThreadStoreResult<()> {
+        let coordination = self
+            .live_writer_locks
+            .coordination(segment.rollout_id())
+            .await;
+        let _projection_guard = coordination.writer.lock().await;
+        let mut completed = coordination.history_projection.lock().await;
+        let revision = super::history_revision::read(&segment.rollout_path).await;
+        let state = super::thread_history::projection_state(self, segment.rollout_id()).await?;
+        if let (Some(revision), Some(state)) = (&revision, &state)
+            && completed.as_ref()
+                == Some(&(revision.clone(), state.next_byte_offset, state.next_ordinal))
+        {
+            return Ok(());
+        }
+        // A committed batch is not a completed rebuild. Errors and cancellation must leave
+        // the segment retryable, while unchanged successful reads avoid decoding it again.
+        *completed = None;
+        super::thread_history_materialization::materialize_to_sqlite(
+            self,
+            segment.rollout_id(),
+            &segment.rollout_path,
+        )
+        .await?;
+        if let Some(revision) = revision
+            && super::history_revision::read(&segment.rollout_path)
+                .await
+                .as_ref()
+                == Some(&revision)
+            && let Some(state) =
+                super::thread_history::projection_state(self, segment.rollout_id()).await?
+        {
+            *completed = Some((revision, state.next_byte_offset, state.next_ordinal));
+        }
+        Ok(())
+    }
+
     pub(super) async fn resolve_rollout_lineage(
         &self,
         requested_thread_id: ThreadId,

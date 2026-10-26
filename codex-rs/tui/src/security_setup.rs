@@ -18,6 +18,9 @@ use serde::Deserialize;
 use std::time::Duration;
 use uuid::Uuid;
 
+// ASM hides optional setup reminders, not authentication or server-enforced security.
+pub(crate) const REMINDERS_ENABLED: bool = false;
+
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct Notice {
     pub title: String,
@@ -74,7 +77,8 @@ pub(crate) fn prefetch(
     tx: AppEventSender,
     request_id: Uuid,
 ) {
-    if config.model_provider_id != "openai" || server.uses_remote_workspace() {
+    if !REMINDERS_ENABLED || config.model_provider_id != "openai" || server.uses_remote_workspace()
+    {
         return;
     }
     let config = config.clone();

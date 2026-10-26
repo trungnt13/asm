@@ -2,6 +2,7 @@ use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::context::world_state::validate_managed_developer_instructions;
 use crate::path_utils::normalize_for_native_workdir;
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use crate::unified_exec::DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS;
 use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
@@ -167,6 +168,7 @@ use toml_edit::DocumentMut;
 
 mod auth_keyring;
 pub mod edit;
+mod external_model_provider;
 mod managed_features;
 mod metrics;
 mod network_config;
@@ -641,7 +643,6 @@ pub struct Config {
 
     /// Optional override of model selection.
     pub model: Option<String>,
-
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak_enabled: bool,
 
@@ -649,11 +650,23 @@ pub struct Config {
     /// `default` means the user explicitly selected standard routing.
     pub service_tier: Option<String>,
 
+    /// Child-only routing overrides, keyed by model and reasoning effort.
+    pub subagent_service_tiers: HashMap<String, HashMap<ReasoningEffort, String>>,
+
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
 
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
+
+    /// Keeps a child role limit separate from the inherited scalar fallback.
+    pub(crate) role_model_context_window: Option<i64>,
+
+    /// Keeps selected role instructions separate from inherited developer instructions.
+    pub(crate) role_developer_instructions: Option<String>,
+
+    /// Model-specific context windows for V2 spawned children, in tokens.
+    pub subagent_model_context_windows: HashMap<String, i64>,
 
     /// Token usage threshold triggering auto-compaction of conversation history.
     pub model_auto_compact_token_limit: Option<i64>,
@@ -756,6 +769,12 @@ pub struct Config {
     /// Whether to inject the `<collaboration_mode>` developer block.
     pub include_collaboration_mode_instructions: bool,
 
+    /// Include the generated spawn-model catalog without changing tool arguments.
+    pub include_model_catalog_in_spawn_agent_list: bool,
+
+    /// Include the Copyright compliance subsection in the local `web.run` description.
+    pub include_web_search_copyright_compliance: bool,
+
     /// Whether to inject the `<skills_instructions>` developer block.
     pub include_skill_instructions: bool,
 
@@ -825,6 +844,8 @@ pub struct Config {
 
     /// Start the composer in Vim mode (`Normal`) by default.
     pub tui_vim_mode_default: bool,
+    /// Plain Enter edits multiline drafts; explicit modified submit keys still send.
+    pub tui_multiline_enter: bool,
     pub tui_question_esc_back: bool,
 
     /// Start the TUI in raw scrollback mode for copy-friendly transcript output.
@@ -835,12 +856,18 @@ pub struct Config {
 
     /// Mouse wheel speed multiplier for transcript scrolling; defaults to one row per event.
     pub tui_mouse_scroll_speed: Option<f64>,
+    /// Group consecutive tools in the fullscreen transcript.
+    pub tui_collapse_tool_calls: bool,
+
+    /// Optional positive row budget for collapsed fullscreen activity summaries.
+    pub tui_collapse_tool_calls_max_lines: Option<std::num::NonZeroUsize>,
 
     /// Override the terminal default for copying transcript, footer, and composer selections.
     pub tui_copy_on_select: codex_config::types::CopyOnSelect,
 
     /// Whether to deselect read-only transcript or footer text after confirmed automatic copy.
     pub tui_copy_on_select_clear_selection: bool,
+    pub tui_click_to_quote: bool,
 
     /// Right-click text paste fallback for the fullscreen TUI.
     pub tui_right_click_paste: codex_config::types::RightClickPaste,
@@ -926,6 +953,9 @@ pub struct Config {
     /// Definition for MCP servers that Codex can reach out to for tool calls.
     pub mcp_servers: Constrained<HashMap<String, McpServerConfig>>,
 
+    /// Enable built-in MCP resource helpers without changing server connections.
+    pub mcp_resource_tools_enabled: bool,
+
     /// Trusted IdP shared by all permitted EMA MCP registrations.
     pub mcp_enterprise_managed_auth: Option<McpEnterpriseManagedAuthConfig>,
 
@@ -1002,6 +1032,9 @@ pub struct Config {
     /// Resolved configuration shared by all Codex SQLite databases.
     pub sqlite: codex_state::SqliteConfig,
 
+    /// Enables diagnostic capture at process startup without changing session history.
+    pub diagnostic_log_capture: bool,
+
     /// Directory for log files (defaults to `$CODEX_HOME/log`).
     /// SQLite logs use this directory only when `log_dir` is explicitly configured
     /// and no managed `sqlite_home` requirement applies.
@@ -1046,6 +1079,15 @@ pub struct Config {
     /// Value to use for `reasoning.effort` when making a request using the
     /// Responses API.
     pub model_reasoning_effort: Option<ReasoningEffort>,
+    pub system1: codex_config::System1Config,
+    /// Retains role restrictions across live-toggle inheritance and child reloads.
+    pub(crate) role_system1_disabled: bool,
+    /// Restores inherited bounds before a new child applies its own role.
+    pub(crate) role_system1_base_bounds: Option<(ReasoningEffort, ReasoningEffort)>,
+    /// Runtime-only revision seed when an evicted child session is reloaded.
+    pub system1_initial_revision: u64,
+    pub system1_initial_error: Option<codex_protocol::protocol::System1Error>,
+    pub system1_initial_failure_episode: u64,
     /// Optional Plan-mode-specific reasoning effort override used by the TUI.
     ///
     /// When unset, Plan mode uses the built-in Plan preset default (currently
@@ -1061,6 +1103,8 @@ pub struct Config {
     /// Optional full model catalog loaded from `model_catalog_json`.
     /// When set, this replaces the bundled catalog for the current process.
     pub model_catalog: Option<ModelsResponse>,
+
+    pub load_external_models_json: bool,
 
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
@@ -1134,6 +1178,10 @@ pub struct Config {
 
     /// Configuration for the experimental code-mode tool surface.
     pub code_mode: CodeModeConfig,
+
+    /// Minimum poll window for background terminal output (`write_stdin`), in milliseconds.
+    /// Default: `5000` (5 seconds).
+    pub background_terminal_min_timeout: u64,
 
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
     /// Default: `300000` (5 minutes).
@@ -1637,6 +1685,13 @@ async fn config_toml_from_layers(layers: &ConfigLayerStack) -> std::io::Result<C
 }
 
 impl Config {
+    pub(crate) fn background_terminal_timeout_bounds(&self) -> BackgroundTerminalTimeoutBounds {
+        BackgroundTerminalTimeoutBounds {
+            min_ms: self.background_terminal_min_timeout,
+            max_ms: self.background_terminal_max_timeout,
+        }
+    }
+
     pub fn sqlite_config(&self) -> &codex_state::SqliteConfig {
         &self.sqlite
     }
@@ -3349,6 +3404,17 @@ impl Config {
 
         validate_model_providers(&cfg.model_providers)
             .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidInput, message))?;
+        let subagent_model_context_windows = cfg.subagent_model_context_windows
+            .iter()
+            .map(|(model, tokens)| {
+                i64::try_from(tokens.get())
+                    .map(|tokens| (model.clone(), tokens))
+                    .map_err(|_| std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("subagent_model_context_windows[{model:?}] must not exceed {} tokens", i64::MAX),
+                    ))
+            })
+            .collect::<std::io::Result<HashMap<_, _>>>()?;
         for (slot, dial) in cfg.tui.iter().flat_map(|tui| &tui.quick_dials) {
             if !matches!(slot.as_bytes(), [b'0'..=b'9']) {
                 return Err(std::io::Error::new(
@@ -3545,6 +3611,19 @@ impl Config {
             feature_requirements,
             &mut startup_warnings,
         )?;
+        let system1 = cfg.system1.clone().unwrap_or_default();
+        system1
+            .validate()
+            .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
+        if system1.enabled
+            && (!features.enabled(Feature::ReasoningEffortOverride)
+                || !features.enabled(Feature::StepModelSwitching))
+        {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
+            ));
+        }
         if let Some(FeatureToml::Config(guardian)) = cfg
             .features
             .as_ref()
@@ -4116,10 +4195,23 @@ impl Config {
             .as_ref()
             .and_then(|agents| agents.interrupt_message)
             .unwrap_or(true);
+        let background_terminal_min_timeout = cfg
+            .background_terminal_min_timeout
+            .unwrap_or(MIN_EMPTY_YIELD_TIME_MS);
         let background_terminal_max_timeout = cfg
             .background_terminal_max_timeout
-            .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
-            .max(MIN_EMPTY_YIELD_TIME_MS);
+            .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS);
+        if background_terminal_min_timeout == 0
+            || background_terminal_min_timeout > background_terminal_max_timeout
+            || std::time::Instant::now()
+                .checked_add(Duration::from_millis(background_terminal_max_timeout))
+                .is_none()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "background terminal timeout bounds must be positive, ordered, and representable",
+            ));
+        }
         let thread_unload_delay =
             Duration::from_secs(cfg.thread_unload_delay_secs.unwrap_or(/*default*/ 1800));
         if std::time::Instant::now()
@@ -4222,6 +4314,8 @@ impl Config {
         let include_apps_instructions = cfg.include_apps_instructions.unwrap_or(true);
         let include_collaboration_mode_instructions =
             cfg.include_collaboration_mode_instructions.unwrap_or(true);
+        let include_model_catalog_in_spawn_agent_list =
+            cfg.include_model_catalog_in_spawn_agent_list.unwrap_or(true);
         let include_skill_instructions = cfg
             .skills
             .as_ref()
@@ -4506,8 +4600,12 @@ impl Config {
             model,
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
             service_tier,
+            subagent_service_tiers: cfg.subagent_service_tiers,
             review_model,
             model_context_window: cfg.model_context_window,
+            role_model_context_window: None,
+            role_developer_instructions: None,
+            subagent_model_context_windows,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: cfg
                 .model_auto_compact_token_limit_scope
@@ -4546,6 +4644,10 @@ impl Config {
             include_permissions_instructions,
             include_apps_instructions,
             include_collaboration_mode_instructions,
+            include_model_catalog_in_spawn_agent_list,
+            include_web_search_copyright_compliance: cfg
+                .include_web_search_copyright_compliance
+                .unwrap_or(true),
             include_skill_instructions,
             skill_max_context_tokens,
             cloud_skill_enabled,
@@ -4562,6 +4664,7 @@ impl Config {
                 ),
             },
             mcp_servers,
+            mcp_resource_tools_enabled: cfg.mcp_resource_tools_enabled.unwrap_or(true),
             non_prefixed_mcp_tool_servers,
             mcp_enterprise_managed_auth,
             // The config.toml omits "_mode" because it's a config file. However, "_mode"
@@ -4614,7 +4717,12 @@ impl Config {
             memories: memories_config,
             agent_interrupt_message_enabled,
             codex_home,
-            sqlite,
+            sqlite: sqlite.with_diagnostic_log_capture(if cfg.diagnostic_log_capture.unwrap_or(false) {
+                codex_state::DiagnosticLogCapture::Enabled
+            } else {
+                codex_state::DiagnosticLogCapture::Disabled
+            }),
+            diagnostic_log_capture: cfg.diagnostic_log_capture.unwrap_or(false),
             log_dir,
             config_layer_stack,
             application_network_policy: Default::default(),
@@ -4653,9 +4761,16 @@ impl Config {
                 .and_then(|auto_review| auto_review.circuit_break_action)
                 .unwrap_or_default(),
             model_reasoning_effort: cfg.model_reasoning_effort,
+            system1,
+            role_system1_disabled: false,
+            role_system1_base_bounds: None,
+            system1_initial_revision: 0,
+            system1_initial_error: None,
+            system1_initial_failure_episode: 0,
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_catalog,
+            load_external_models_json: cfg.load_external_models_json.unwrap_or(true),
             model_verbosity: cfg.model_verbosity,
             chatgpt_base_url_is_explicit,
             chatgpt_base_url: cfg
@@ -4698,6 +4813,7 @@ impl Config {
             update_plan_enabled,
             tool_registry,
             code_mode,
+            background_terminal_min_timeout,
             background_terminal_max_timeout,
             thread_unload_delay,
             ghost_snapshot,
@@ -4749,6 +4865,7 @@ impl Config {
                 .map(|t| t.model_availability_nux.clone())
                 .unwrap_or_default(),
             tui_question_esc_back: cfg.tui.as_ref().map(|t| t.question_esc_back).unwrap_or(true),
+            tui_multiline_enter: cfg.tui.as_ref().is_some_and(|tui| tui.multiline_enter),
             tui_vim_mode_default: cfg
                 .tui
                 .as_ref()
@@ -4759,6 +4876,11 @@ impl Config {
                 .as_ref()
                 .map(|t| t.raw_output_mode)
                 .unwrap_or(false),
+            tui_collapse_tool_calls: cfg.tui.as_ref().is_some_and(|tui| tui.collapse_tool_calls),
+            tui_collapse_tool_calls_max_lines: cfg
+                .tui
+                .as_ref()
+                .and_then(|tui| tui.collapse_tool_calls_max_lines),
             tui_fullscreen_transcript: cfg
                 .tui
                 .as_ref()
@@ -4773,6 +4895,7 @@ impl Config {
                 .tui
                 .as_ref()
                 .is_some_and(|tui| tui.copy_on_select_clear_selection),
+            tui_click_to_quote: cfg.tui.as_ref().is_some_and(|tui| tui.click_to_quote),
             tui_right_click_paste: cfg
                 .tui
                 .as_ref()
@@ -4821,6 +4944,7 @@ impl Config {
             tracing::warn!("{message}");
             config.startup_warnings.push(message.to_string());
         }
+        config.apply_external_model_provider()?;
         Ok(config)
         })
         .await

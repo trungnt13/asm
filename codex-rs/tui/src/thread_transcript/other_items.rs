@@ -82,7 +82,11 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &AbsolutePathBuf) -> Transcrip
             )));
         }
         item @ ThreadItemPayload::CollabAgentToolCall { .. } => {
-            if let Some(cell) = multi_agents::tool_call_history_cell(
+            if let Some(cell) = multi_agents::AgentWaitHistory::default()
+                .cell(&item, |_| multi_agents::AgentMetadata::default())
+            {
+                cells.push(Arc::new(cell));
+            } else if let Some(cell) = multi_agents::tool_call_history_cell(
                 &item,
                 /*cached_spawn_request*/ None,
                 |_| multi_agents::AgentMetadata::default(),
@@ -133,7 +137,8 @@ pub(super) fn cells(item: ThreadItemPayload, cwd: &AbsolutePathBuf) -> Transcrip
                 cells.push(Arc::new(cell));
             }
         }
-        ThreadItemPayload::UserMessage { .. }
+        ThreadItemPayload::InterAgentMessage { .. }
+        | ThreadItemPayload::UserMessage { .. }
         | ThreadItemPayload::AgentMessage { .. }
         | ThreadItemPayload::FunctionCallOutput { .. }
         | ThreadItemPayload::Plan { .. }

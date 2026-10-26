@@ -535,6 +535,7 @@ mod tests {
                     attached_thread: false,
                     creator_account_id: None,
                     session_id: thread_id.into(),
+                    prompt_cache_key: None,
                     id: thread_id,
                     forked_from_id: Some(
                         ThreadId::from_string(&Uuid::now_v7().to_string()).expect("thread id"),
@@ -786,6 +787,7 @@ mod tests {
                     attached_thread: false,
                     creator_account_id: None,
                     session_id: thread_id.into(),
+                    prompt_cache_key: None,
                     id: thread_id,
                     forked_from_id: None,
                     forked_from_ordinal_exclusive: None,

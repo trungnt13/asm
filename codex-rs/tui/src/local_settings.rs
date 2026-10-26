@@ -23,6 +23,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LocalSettings {
+    pub(crate) auto_rename: codex_config::AutoRenameConfig,
     pub(crate) audio: Result<codex_config::config_toml::RealtimeAudioToml, String>,
     pub(crate) tui: Tui,
     pub(crate) transcript_mode: TranscriptMode,
@@ -50,6 +51,21 @@ impl LocalSettings {
         screen_reader_default: crate::motion::MotionMode,
     ) -> Self {
         let mut settings = Self {
+            auto_rename: config
+                .config_layer_stack
+                .effective_config()
+                .get("auto_rename")
+                .cloned()
+                .map(|value| {
+                    value.try_into().unwrap_or_else(|error| {
+                        tracing::error!(%error, "invalid validated auto_rename settings");
+                        codex_config::AutoRenameConfig {
+                            enabled: false,
+                            ..Default::default()
+                        }
+                    })
+                })
+                .unwrap_or_default(),
             audio: Ok(Default::default()),
             transcript_mode: TranscriptMode::resolve(
                 config.tui_fullscreen_transcript,
@@ -66,12 +82,16 @@ impl LocalSettings {
                 auto_recap: config.tui_auto_recap,
                 disable_paste_burst: Some(config.disable_paste_burst),
                 vim_mode_default: config.tui_vim_mode_default,
+                multiline_enter: config.tui_multiline_enter,
                 question_esc_back: config.tui_question_esc_back,
                 raw_output_mode: config.tui_raw_output_mode,
                 fullscreen_transcript: config.tui_fullscreen_transcript,
                 mouse_scroll_speed: config.tui_mouse_scroll_speed,
+                collapse_tool_calls: config.tui_collapse_tool_calls,
+                collapse_tool_calls_max_lines: config.tui_collapse_tool_calls_max_lines,
                 copy_on_select: config.tui_copy_on_select,
                 copy_on_select_clear_selection: config.tui_copy_on_select_clear_selection,
+                click_to_quote: config.tui_click_to_quote,
                 right_click_paste: config.tui_right_click_paste,
                 alternate_screen: config.tui_alternate_screen,
                 status_line: config.tui_status_line.clone(),
@@ -128,6 +148,7 @@ impl LocalSettings {
         tui.session_picker_view = Some(tui.session_picker_view.unwrap_or_default());
         tui.screen_reader_detection_done = None;
         let mut settings = Self {
+            auto_rename: config.auto_rename.clone().unwrap_or_default(),
             audio: Ok(Default::default()),
             transcript_mode: TranscriptMode::resolve(
                 tui.fullscreen_transcript,

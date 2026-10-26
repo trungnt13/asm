@@ -31,8 +31,7 @@ impl ChatWidget {
             return;
         };
         if !self.can_change_working_directory(thread_id) {
-            let message =
-                "Changing directories requires an idle primary session without queued input.";
+            let message = "Changing directories requires an idle session without queued input.";
             self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::new_error_event(message.to_string()),
             )));

@@ -3,6 +3,7 @@ use sqlx::FromRow;
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
 
+use super::super::LocalThreadStore;
 use super::super::rollout_lineage::RolloutLineage;
 use super::super::rollout_lineage::RolloutLineageSegment;
 use super::read::CursorScope;
@@ -17,6 +18,7 @@ use super::read::serialize_cursor;
 use super::read::stored_thread_item_row;
 use super::read::stored_turn_row;
 use super::thread_history_error;
+use super::turn_lookup::query_turn_row;
 use crate::ItemSortKey;
 use crate::ListItemsParams;
 use crate::ListItemsPosition;
@@ -43,6 +45,7 @@ pub(super) fn validate_page_size(page_size: usize) -> ThreadStoreResult<()> {
 }
 
 pub(super) async fn page_turn_rows(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     requested_thread_id: ThreadId,
     lineage: &RolloutLineage,
@@ -53,12 +56,20 @@ pub(super) async fn page_turn_rows(
 ) -> ThreadStoreResult<SegmentPage<StoredTurnRow>> {
     let cursor = parse_cursor(cursor, requested_thread_id, CursorScope::Turns)?;
     let mut rows = Vec::new();
+    let mut ensured_from = lineage.segments().len();
     for (segment_index, segment, segment_cursor) in
         segments_from_cursor(lineage, direction, cursor.as_ref())?
     {
         let remaining = remaining_limit(page_size, rows.len())?;
         if remaining == 0 {
             break;
+        }
+        // Newer segments can shadow this segment's turns, even for ascending pages.
+        if segment_index < ensured_from {
+            for required_segment in &lineage.segments()[segment_index..ensured_from] {
+                store.ensure_history_projection(required_segment).await?;
+            }
+            ensured_from = segment_index;
         }
         let mut query = QueryBuilder::<Sqlite>::new("");
         if matches!(items_view, StoredTurnItemsView::Summary) {
@@ -192,6 +203,7 @@ fn push_summary_item_join(
 }
 
 pub(super) async fn page_item_rows(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     lineage: &RolloutLineage,
     params: &ListItemsParams,
@@ -228,6 +240,7 @@ pub(super) async fn page_item_rows(
                 message: "update-ordinal item paging requires one rollout segment".to_string(),
             });
         };
+        store.ensure_history_projection(segment).await?;
         return page_updated_item_rows(
             pool,
             segment.rollout_id(),
@@ -236,6 +249,20 @@ pub(super) async fn page_item_rows(
             after_updated_at_ordinal,
         )
         .await;
+    }
+    let mut first_segment = 0;
+    if let Some(turn_id) = params.turn_id.as_deref() {
+        for (index, segment) in lineage.segments().iter().enumerate().rev() {
+            store.ensure_history_projection(segment).await?;
+            if let Some(turn) = query_turn_row(pool, segment, turn_id).await? {
+                // A synthetic fork-boundary abort has no local start: retain its inherited
+                // items. A real local start cannot have items in earlier rollout segments.
+                if turn.rollout_end_ordinal != Some(turn.rollout_ordinal) {
+                    first_segment = index;
+                }
+                break;
+            }
+        }
     }
     let cursor = if let Some(anchor_item_id) = anchor_item_id {
         let turn_id = params
@@ -249,7 +276,8 @@ pub(super) async fn page_item_rows(
             return Err(invalid_item_anchor());
         }
         let mut anchor = None;
-        for segment in lineage.segments() {
+        for segment in &lineage.segments()[first_segment..] {
+            store.ensure_history_projection(segment).await?;
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT rollout_ordinal FROM thread_items WHERE thread_id = ",
             );
@@ -284,11 +312,14 @@ pub(super) async fn page_item_rows(
     let mut rows = Vec::new();
     for (_, segment, segment_cursor) in
         segments_from_cursor(lineage, params.sort_direction, cursor.as_ref())?
+            .into_iter()
+            .filter(|(index, _, _)| *index >= first_segment)
     {
         let remaining = remaining_limit(params.page_size, rows.len())?;
         if remaining == 0 {
             break;
         }
+        store.ensure_history_projection(segment).await?;
         let mut query = QueryBuilder::<Sqlite>::new(
             r#"
 SELECT turn_id, item_id, rollout_ordinal, updated_at_ordinal, created_at_ms, started_at_ms, completed_at_ms, item_json

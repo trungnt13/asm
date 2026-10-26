@@ -1,0 +1,345 @@
+{
+  "models": [
+    {
+      "slug": "claude-code/sonnet-5-5",
+      "alias": "claude/sonnet-5.5",
+      "tool_mode": "direct",
+      "display_name": "Sonnet 5.5 · CC",
+      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 100,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true
+    },
+    {
+      "slug": "claude-code/opus-5-5",
+      "alias": "claude/opus-5.5",
+      "tool_mode": "direct",
+      "display_name": "Opus 5.5 · CC",
+      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 101,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true
+    },
+    {
+      "slug": "cursor-agent/claude-opus-5-5",
+      "alias": "cursor/opus-5.5",
+      "tool_mode": "direct",
+      "display_name": "Opus 5.5 · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 102,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 300000
+    },
+    {
+      "slug": "cursor-agent/claude-sonnet-5-5",
+      "alias": "cursor/sonnet-5.5",
+      "tool_mode": "direct",
+      "display_name": "Sonnet 5.5 · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 103,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 300000
+    },
+    {
+      "slug": "cursor-agent/claude-haiku-5-5",
+      "alias": "cursor/haiku-5.5",
+      "tool_mode": "direct",
+      "display_name": "Haiku 5.5 · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 104,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 300000
+    },
+    {
+      "slug": "cursor-agent/auto-smart",
+      "alias": "cursor/auto-smart",
+      "tool_mode": "direct",
+      "display_name": "Auto · Cursor",
+      "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
+      "default_reasoning_level": null,
+      "supported_reasoning_levels": [],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 105,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true
+    },
+    {
+      "slug": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "alias": "fireworks/deepseek-v4.1-flash",
+      "display_name": "DeepSeek V4.1 Flash 1017 · Fireworks",
+      "description": "Uses the configured Fireworks provider with ASM tools.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "none",
+          "description": "Disable thinking"
+        },
+        {
+          "effort": "low",
+          "description": "Low reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning effort"
+        }
+      ],
+      "shell_type": "default",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 110,
+      "availability_nux": null,
+      "upgrade": null,
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": false,
+      "model_provider": "fireworks",
+      "input_modalities": ["text", "image"],
+      "tool_mode": "direct",
+      "context_window": 300000,
+      "max_context_window": 1000000
+    }
+  ]
+}

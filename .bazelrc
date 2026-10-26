@@ -216,6 +216,9 @@ common:ci-v8 --config=ci
 common:ci-v8 --build_metadata=TAG_workflow=v8
 common:ci-v8 --build_metadata=TAG_os=linux
 
+# Fork V8 builds use small hosted runners without a remote executor.
+common:fork-v8-local --jobs=2
+common:fork-v8-local --strategy=CcConfigureMakeRule=sandboxed,local
 # Native Windows MSVC builds inherit the runner's MSVC SDK environment.
 # Client environment capture and repository discovery happen before target
 # transitions, so these runner settings cannot live in runtime_package.bzl.

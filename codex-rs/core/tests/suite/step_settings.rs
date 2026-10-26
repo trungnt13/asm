@@ -2249,7 +2249,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
             "type": "object",
             "properties": {
                 "target": {"type": "string", "description": format!("Agent on {model}.")},
-                "message": {"type": "string", "encrypted": true},
+                "message": {"type": "string"},
             },
             "required": ["target"],
             "additionalProperties": false,

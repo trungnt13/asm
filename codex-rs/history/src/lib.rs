@@ -65,6 +65,10 @@ pub struct ResponseItemEnvelope {
 ///
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct CodexHarnessMetadata {
+    /// Original spawn arguments for transcript display, never model input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_arguments: Option<String>,
+
     /// Complete retained records actually delivered by this Guardian message. Host-only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub guardian_sources: Vec<RetainedSource>,

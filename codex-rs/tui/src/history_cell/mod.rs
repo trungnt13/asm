@@ -12,6 +12,9 @@
 
 mod activity_group;
 pub(crate) use activity_group::ActivityGroup;
+mod tool_summary;
+pub(crate) use tool_summary::ToolCallSummary;
+pub(crate) use tool_summary::command_names;
 
 use crate::diff_model::FileChange;
 use crate::diff_render::create_diff_summary;
@@ -260,6 +263,12 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         Vec::new()
     }
 
+    /// Identify tool calls eligible for grouped summaries without reading their output.
+    /// Return `None` for failures or content that must keep its own visible preview.
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        None
+    }
+
     /// Available activity details, preserving source order and any upstream truncation notices.
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.transcript_hyperlink_lines(width)
@@ -269,6 +278,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Prefer source metadata so collapsed rendering does not materialize hidden content.
     fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {
         Some(ActivityDisclosure::Generic)
+    }
+
+    /// Separate group-only identities from cells with their own disclosure controls.
+    fn supports_individual_disclosure(&self) -> bool {
+        true
     }
 
     fn display_lines_for_mode(&self, width: u16, mode: HistoryRenderMode) -> Vec<Line<'static>> {

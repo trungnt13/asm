@@ -296,7 +296,7 @@ fn assert_interrupted_sleep_output(output: Option<&str>) {
     };
     let Some(wall_time) = output
         .strip_prefix("Wall time: ")
-        .and_then(|output| output.strip_suffix(" seconds\nSleep interrupted by new input."))
+        .and_then(|output| output.strip_suffix(" seconds\nSleep interrupted by new input. Handle the new input, then resume the pending work unless canceled, paused, replaced, or blocked.\nReason for waiting (quoted context): \"Waiting for pending work\""))
     else {
         panic!("sleep output should include wall time");
     };
@@ -803,7 +803,9 @@ async fn any_new_input_interrupts_sleep(input: WaitInput) {
     const SLEEP_DURATION_MS: u64 = 3_600_000;
     const INITIAL_PROMPT: &str = "sleep for a while";
     const STEER_PROMPT: &str = "stop sleeping and continue";
-    let sleep_arguments = json!({ "duration_ms": SLEEP_DURATION_MS }).to_string();
+    let sleep_arguments =
+        json!({ "duration_ms": SLEEP_DURATION_MS, "reason": "Waiting for pending work" })
+            .to_string();
 
     let (release_sleep, sleep_gate) = oneshot::channel();
     let first_chunks = vec![

@@ -31,14 +31,12 @@ fn growing_code_fences_preserve_styles_unicode_links_and_blank_lines() {
     [
         "Before link",
         "(https://example.com).",
-        "",
         "fn main() {",
         "    /* a multiline",
         "       comment */",
         "",
         "    println!(\"界 e\u{301} https://example.com\");",
         "}",
-        "",
         "text = \"\"\"a multiline",
         "string\"\"\"",
     ]

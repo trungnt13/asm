@@ -348,6 +348,27 @@ pub(super) async fn ensure_listener_task_running(
                             .then(|| thread_state.turn_summary.clone());
                         (thread_state.experimental_raw_events, terminal)
                     };
+                    if let EventMsg::RawResponseItem(raw) = &event.msg
+                        && let Some(item) = codex_app_server_protocol::ThreadItem::from_inter_agent_message(
+                            &raw.item,
+                            &event.id,
+                            raw.spawn_arguments.as_deref(),
+                        )
+                    {
+                        let recipients = thread_state_manager
+                            .subscribed_connection_ids(conversation_id)
+                            .await;
+                        ThreadScopedOutgoingMessageSender::new(
+                            outgoing_for_task.clone(), recipients, conversation_id,
+                        ).send_server_notification(ServerNotification::ItemCompleted(
+                            codex_app_server_protocol::ItemCompletedNotification {
+                                thread_id: conversation_id.to_string(),
+                                turn_id: event.id.clone(),
+                                item,
+                                completed_at_ms: chrono::Utc::now().timestamp_millis(),
+                            },
+                        )).await;
+                    }
                     if matches!(
                         &event.msg,
                         EventMsg::RawResponseItem(_) | EventMsg::RawResponseCompleted(_) | EventMsg::PrivateSessionEvent(_)
@@ -894,6 +915,10 @@ pub(super) async fn handle_pending_thread_resume_request(
     let sandbox = config_snapshot.sandbox_policy().into();
     let cwd = config_snapshot.cwd().clone();
     let ThreadConfigSnapshot {
+        system1_enabled,
+        system1_revision,
+        system1_error,
+        system1_failure_episode,
         model,
         disabled_plugin_ids,
         model_provider_id,
@@ -914,6 +939,10 @@ pub(super) async fn handle_pending_thread_resume_request(
     thread.session_id = session_id;
 
     let response = ThreadResumeResponse {
+        system1_enabled,
+        system1_revision,
+        system1_error,
+        system1_failure_episode,
         thread,
         disabled_plugin_ids,
         model,

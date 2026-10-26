@@ -163,11 +163,20 @@ pub struct RuntimeDbPath {
     pub(crate) background_reclamation: bool,
 }
 
+/// Selects whether startup opens diagnostic storage and starts log maintenance.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DiagnosticLogCapture {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
 /// Resolved configuration shared by all Codex SQLite connections.
 /// Clones share directory locks, filesystem probes, and quick-check attempts.
 #[derive(Clone, Debug)]
 pub struct SqliteConfig {
     sqlite_home: AbsolutePathBuf,
+    diagnostic_log_capture: DiagnosticLogCapture,
     local_logs_dir: Option<LocalLogsDir>,
     is_nfs: Arc<OnceCell<bool>>,
     logs_is_nfs: Arc<OnceCell<bool>>,
@@ -190,6 +199,7 @@ impl SqliteConfig {
     pub fn from_sqlite_home(sqlite_home: AbsolutePathBuf) -> Self {
         Self {
             sqlite_home,
+            diagnostic_log_capture: DiagnosticLogCapture::Disabled,
             local_logs_dir: None,
             is_nfs: Arc::new(OnceCell::new()),
             logs_is_nfs: Arc::new(OnceCell::new()),
@@ -199,6 +209,16 @@ impl SqliteConfig {
 
     pub fn new_for_testing(sqlite_home: AbsolutePathBuf) -> Self {
         Self::from_sqlite_home(sqlite_home)
+            .with_diagnostic_log_capture(DiagnosticLogCapture::Enabled)
+    }
+
+    pub fn with_diagnostic_log_capture(mut self, policy: DiagnosticLogCapture) -> Self {
+        self.diagnostic_log_capture = policy;
+        self
+    }
+
+    pub fn diagnostic_log_capture(&self) -> DiagnosticLogCapture {
+        self.diagnostic_log_capture
     }
 
     pub fn home(&self) -> &Path {
@@ -282,7 +302,8 @@ impl SqliteConfig {
             .map(|spec| RuntimeDbPath {
                 label: spec.label,
                 path: spec.path(self),
-                background_reclamation: spec.background_reclamation,
+                background_reclamation: spec.background_reclamation
+                    && self.diagnostic_log_capture == DiagnosticLogCapture::Enabled,
             })
             .collect()
     }
@@ -481,6 +502,27 @@ impl SqliteConfig {
         }
 
         Ok(pool)
+    }
+
+    /// Open historical diagnostics for an explicit purge without creating a database.
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn open_existing_logs_pool(&self) -> anyhow::Result<Option<SqlitePool>> {
+        let path = self.logs_db_path();
+        if !tokio::fs::try_exists(&path).await? {
+            return Ok(None);
+        }
+        let options = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(false)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(DEFAULT_BUSY_TIMEOUT)
+            .log_statements(LevelFilter::Off);
+        Ok(Some(
+            SqlitePoolOptions::new()
+                .max_connections(/*max*/ 1)
+                .connect_with(options)
+                .await?,
+        ))
     }
 
     /// Open an existing Codex SQLite database without creating or modifying it.

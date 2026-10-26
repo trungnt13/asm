@@ -252,6 +252,11 @@ impl App {
 
             return;
         }
+        if let ServerNotification::ThreadNameUpdated(name) = &notification
+            && let Ok(thread_id) = ThreadId::from_string(&name.thread_id)
+        {
+            self.observe_automatic_thread_name(thread_id, name.thread_name.as_deref());
+        }
         self.handle_agent_picker_visibility_notification(app_server_client, &notification);
 
         if let ServerNotification::ThreadStarted(started) = &notification
@@ -269,7 +274,22 @@ impl App {
                 .entry(thread_id)
                 .or_default();
         }
+        if let ServerNotification::System1Updated(mode) = &notification
+            && let Ok(thread_id) = ThreadId::from_string(&mode.thread_id)
+            && self.agents_overview.blank_sessions.contains_key(&thread_id)
+            && !self.thread_event_channels.contains_key(&thread_id)
+        {
+            self.apply_system1_to_cached_session(
+                thread_id,
+                mode.enabled,
+                mode.system1_revision,
+                mode.error,
+                mode.failure_episode,
+            )
+            .await;
+        }
         self.track_agents_overview_notification(&notification);
+        self.track_turn_agents(&notification);
         // Retained blank sessions stay subscribed after their event channels are cleared.
         if let ServerNotification::ThreadSettingsUpdated(settings) = &notification
             && let Ok(thread_id) = ThreadId::from_string(&settings.thread_id)

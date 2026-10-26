@@ -39,14 +39,14 @@ impl App {
         app_server: &mut AppServerSession,
         pending: PendingWorkingDirectoryChange,
     ) {
-        if self.primary_thread_id != Some(pending.source_thread_id)
+        if self.current_displayed_thread_id() != Some(pending.source_thread_id)
             || self.config.cwd != pending.source_cwd
             || !self
                 .chat_widget
                 .can_change_working_directory(pending.source_thread_id)
         {
             return self.working_directory_error(
-                "Changing directories requires an idle primary session without queued input.",
+                "Changing directories requires an idle session without queued input.",
             );
         }
         if crate::uses_remote_workspace_or_environment(
@@ -85,7 +85,7 @@ impl App {
             ));
             return Ok(());
         }
-        if self.primary_thread_id != Some(source_thread_id)
+        if self.current_displayed_thread_id() != Some(source_thread_id)
             || self.config.cwd.as_path() != source_cwd.as_path()
             || !self
                 .chat_widget
@@ -594,7 +594,7 @@ impl App {
         }
         let attach_widget = App::replace_chat_widget_with_app_server_thread;
         let (lineage, message) = (ThreadAttachPresentation::SessionLineage, None);
-        if let Err(error) = attach_widget(self, tui, started, lineage, message).await {
+        if let Err(error) = attach_widget(self, tui, app_server, started, lineage, message).await {
             return self.working_directory_error(format!("Could not restore session: {error}"));
         }
         if selected_profile.is_some() {

@@ -19,18 +19,19 @@ const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE_V2: &str = "Spawned agents inherit yo
 const SPAWN_AGENT_MODEL_CATALOG_GUIDANCE: &str =
     "Pick model overrides from the latest <model_catalog> listing.";
 const SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1: &str = "Agent type override for the new agent. Omit to inherit the parent agent type with a full-history fork; otherwise, `default` is used.";
-const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str =
-    "Model override for the new agent. Omit unless an explicit override is needed.";
+const SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION: &str = "Model override for the new agent, taking precedence over the role model. Role effort constraints still apply. Omit unless an explicit override is needed.";
 const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 
 #[derive(Debug, Clone)]
 pub struct SpawnAgentToolOptions {
     pub available_models: Vec<ModelPreset>,
+    pub external_model_aliases: Vec<String>,
     pub agent_type_description: String,
     pub expose_agent_type: bool,
     pub hide_agent_type_model_reasoning: bool,
     pub expose_spawn_agent_model_overrides: bool,
     pub multi_agent_version: MultiAgentVersion,
+    pub include_model_catalog_in_spawn_agent_list: bool,
     pub model_catalog_in_context: bool,
     pub usage_hint_text: Option<String>,
 }
@@ -39,11 +40,13 @@ impl Default for SpawnAgentToolOptions {
     fn default() -> Self {
         Self {
             available_models: Vec::new(),
+            external_model_aliases: Vec::new(),
             agent_type_description: String::new(),
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
             expose_spawn_agent_model_overrides: false,
             multi_agent_version: MultiAgentVersion::Disabled,
+            include_model_catalog_in_spawn_agent_list: true,
             model_catalog_in_context: false,
             usage_hint_text: None,
         }
@@ -68,7 +71,8 @@ impl Default for WaitAgentTimeoutOptions {
 }
 
 pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
-    let available_models_description = (!options.model_catalog_in_context
+    let available_models_description = (options.include_model_catalog_in_spawn_agent_list
+        && !options.model_catalog_in_context
         && !options.hide_agent_type_model_reasoning)
         .then(|| {
             spawn_agent_models_description(&options.available_models, options.multi_agent_version)
@@ -90,12 +94,17 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
         description: MULTI_AGENT_V1_NAMESPACE_DESCRIPTION.to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "spawn_agent".to_string(),
-            description: spawn_agent_tool_description(
-                available_models_description.as_deref(),
-                options.model_catalog_in_context,
-                inherited_model_guidance,
-                return_value_description,
-                options.usage_hint_text,
+            description: append_external_model_aliases(
+                spawn_agent_tool_description(
+                    available_models_description.as_deref(),
+                    options.include_model_catalog_in_spawn_agent_list
+                        && options.model_catalog_in_context,
+                    inherited_model_guidance,
+                    return_value_description,
+                    options.usage_hint_text,
+                ),
+                &options.external_model_aliases,
+                "fork_context=false",
             ),
             strict: false,
             defer_loading: None,
@@ -109,7 +118,8 @@ pub fn create_spawn_agent_tool_v2(
     options: SpawnAgentToolOptions,
     description_override: Option<&str>,
 ) -> ToolSpec {
-    let available_models_description = (!options.model_catalog_in_context
+    let available_models_description = (options.include_model_catalog_in_spawn_agent_list
+        && !options.model_catalog_in_context
         && options.expose_spawn_agent_model_overrides)
         .then(|| {
             spawn_agent_models_description(&options.available_models, options.multi_agent_version)
@@ -140,15 +150,20 @@ pub fn create_spawn_agent_tool_v2(
 
     ToolSpec::Function(ResponsesApiTool {
         name: "spawn_agent".to_string(),
-        description: spawn_agent_tool_description_v2(
-            available_models_description.as_deref(),
-            options.model_catalog_in_context,
-            options
-                .expose_spawn_agent_model_overrides
-                .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
-            inherited_model_guidance,
-            options.usage_hint_text,
-            description_override,
+        description: append_external_model_aliases(
+            spawn_agent_tool_description_v2(
+                available_models_description.as_deref(),
+                options.include_model_catalog_in_spawn_agent_list
+                    && options.model_catalog_in_context,
+                options
+                    .expose_spawn_agent_model_overrides
+                    .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
+                inherited_model_guidance,
+                options.usage_hint_text,
+                description_override,
+            ),
+            &options.external_model_aliases,
+            "fork_turns=\"none\"",
         ),
         strict: false,
         defer_loading: None,
@@ -213,14 +228,13 @@ pub fn create_send_message_tool() -> ToolSpec {
             "message".to_string(),
             JsonSchema::string(Some(
                 "Message text to queue on the target agent.".to_string(),
-            ))
-            .with_encrypted(),
+            )),
         ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "send_message".to_string(),
-        description: "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn."
+        description: "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn. Busy Claude Code agents receive it after their current native tool finishes, without stopping work; use interrupt_agent first to redirect urgently. Idle agents remain queued."
             .to_string(),
         strict: false,
         defer_loading: None,
@@ -246,8 +260,7 @@ pub fn create_followup_task_tool() -> ToolSpec {
             "message".to_string(),
             JsonSchema::string(Some(
                 "Message text to send to the target agent.".to_string(),
-            ))
-            .with_encrypted(),
+            )),
         ),
     ]);
 
@@ -652,8 +665,7 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
             "message".to_string(),
             JsonSchema::string(Some(
                 "Initial plain-text task for the new agent.".to_string(),
-            ))
-            .with_encrypted(),
+            )),
         ),
         (
             "agent_type".to_string(),
@@ -687,6 +699,19 @@ fn hide_spawn_agent_metadata_options(properties: &mut BTreeMap<String, JsonSchem
     properties.remove("agent_type");
     properties.remove("model");
     properties.remove("reasoning_effort");
+}
+
+fn append_external_model_aliases(
+    mut description: String,
+    aliases: &[String],
+    fork_argument: &str,
+) -> String {
+    if !aliases.is_empty() {
+        description.push_str("\nExternal models (native runtimes or configured providers; runtime/service availability is not verified):\n- ");
+        description.push_str(&aliases.join("\n- "));
+        description.push_str(&format!("\nUse these exact model aliases. Cross-provider spawns require `{fork_argument}`; native-runtime spawns also require fresh history; include all needed context in `message`."));
+    }
+    description
 }
 
 fn spawn_agent_tool_description(
@@ -800,7 +825,7 @@ fn spawn_agent_tool_description_v2(
             r#"
 {catalog_prefix}        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.
 You are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.
-The spawned agent will have the same tools as you and the ability to spawn its own subagents.
+Codex-runtime agents will have the same tools as you and the ability to spawn their own subagents.
 {inherited_model_guidance}{catalog_suffix}
 It will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.
 The new agent's canonical task name will be provided to it along with the message.
@@ -808,6 +833,10 @@ The new agent's canonical task name will be provided to it along with the messag
 Note that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context."#
         )
     };
+
+    let tool_description = format!(
+        "{tool_description}\nNative runtime models (`claude-code/*`, `cursor-agent/*`) require `fork_turns=\"none\"`; `all` and its default are rejected before launch. Include all needed context in `message`. They use their native instructions, tools and permissions, not the parent's. Cursor agents cannot call agent messaging tools; their final answer is still returned."
+    );
 
     if let Some(usage_hint_text) = usage_hint_text {
         return format!(

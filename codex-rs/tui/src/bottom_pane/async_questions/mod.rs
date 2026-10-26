@@ -159,7 +159,7 @@ impl AsyncQuestions {
                     &question.title,
                     Some(width),
                     /*cwd*/ None,
-                    &crate::markdown_render::hide_web_link_destination,
+                    &crate::markdown_render::hide_link_destination,
                 )
                 .into_iter()
                 .flat_map(|line| {

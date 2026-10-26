@@ -20,8 +20,7 @@ pub(super) use read::list_items;
 pub(super) use read::list_turns;
 pub(super) use realtime::list_timeline;
 pub(super) use search::search_thread_occurrences;
-pub(super) use turn_lookup::find_source_turn;
-pub(super) use turn_lookup::find_visible_turn;
+pub(super) use turn_lookup::find_materialized_turn;
 
 /// A valid complete rollout line with its absolute byte span in durable JSONL.
 ///
@@ -526,6 +525,7 @@ WHERE thread_id = ?
                 ..
             }
             | ThreadItemPayload::HookPrompt { .. }
+            | ThreadItemPayload::InterAgentMessage { .. }
             | ThreadItemPayload::FunctionCallOutput { .. }
             | ThreadItemPayload::Plan { .. }
             | ThreadItemPayload::Reasoning { .. }

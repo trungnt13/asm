@@ -165,6 +165,11 @@ impl App {
             user_items.iter().map(|(_, item)| item.clone()),
             visibility,
             Some(&self.config),
+            self.agent_navigation.is_parent_owned(thread_id),
+            self.chat_widget
+                .collab_agent_metadata(thread_id)
+                .agent_role
+                .as_deref(),
         );
         let persisted_user_cells = user_items
             .into_iter()
@@ -224,6 +229,7 @@ impl App {
         cwd: &AbsolutePathBuf,
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
+        self.turn_agent_counts.record_native_turns(thread_id, turns);
         let mut cells = Vec::new();
         for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
             // Internal prompts stay invisible, but still separate adjacent tool groups.
@@ -234,13 +240,19 @@ impl App {
                     visible.iter().cloned(),
                     visibility,
                     Some(&self.config),
+                    self.agent_navigation.is_parent_owned(thread_id),
+                    self.chat_widget
+                        .collab_agent_metadata(thread_id)
+                        .agent_role
+                        .as_deref(),
                 ));
             }
             if let Some(turn) = completed_turn
-                && let Some(completion) = self
+                && let Some(mut completion) = self
                     .chat_widget
                     .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
             {
+                completion.set_agent_count(self.turn_agent_counts.count(thread_id, &turn.id));
                 cells.push(Arc::new(completion));
             }
         }

@@ -282,9 +282,9 @@ impl App {
             Err(external_editor::EditorError::MissingEditor) => {
                 self.chat_widget
                     .add_to_history(history_cell::new_error_event(
-                    "Cannot open external editor: set $VISUAL or $EDITOR before starting Codex."
-                        .to_string(),
-                ));
+                        "Cannot open external editor: set $VISUAL or $EDITOR before starting ASM."
+                            .to_string(),
+                    ));
                 self.reset_external_editor_state(tui);
                 return;
             }
@@ -470,7 +470,9 @@ impl App {
                 .adjacent_thread_id_with_backfill(app_server, AgentNavigationDirection::Previous)
                 .await
             {
-                let _ = self.select_agent_thread(tui, app_server, thread_id).await;
+                let _ = self
+                    .select_agent_thread_and_discard_side(tui, app_server, thread_id)
+                    .await;
             }
             return;
         }
@@ -485,7 +487,9 @@ impl App {
                 .adjacent_thread_id_with_backfill(app_server, AgentNavigationDirection::Next)
                 .await
             {
-                let _ = self.select_agent_thread(tui, app_server, thread_id).await;
+                let _ = self
+                    .select_agent_thread_and_discard_side(tui, app_server, thread_id)
+                    .await;
             }
             return;
         }
@@ -533,17 +537,17 @@ impl App {
                     items: [
                         (
                             "Cancel task",
-                            "Stop the current task and stay in Codex",
+                            "Stop the current task and stay in ASM",
                             RunningTaskExitAction::CancelTask,
                         ),
                         (
                             "Run in background",
-                            "Exit Codex and leave the task running",
+                            "Exit ASM and leave the task running",
                             RunningTaskExitAction::RunInBackground,
                         ),
                         (
                             "Exit",
-                            "Stop the current task and exit Codex",
+                            "Stop the current task and exit ASM",
                             RunningTaskExitAction::Exit,
                         ),
                     ]
@@ -774,6 +778,7 @@ impl App {
     pub(crate) fn should_handle_backtrack_esc(&self, key_event: KeyEvent) -> bool {
         !self.chat_widget.is_external_writer_view()
             && !self.chat_widget.side_conversation_active()
+            && !self.chat_widget.parallel_conversation_active()
             && !self.chat_widget.shortcut_overlay_visible()
             && self.chat_widget.is_normal_backtrack_mode()
             && self.chat_widget.composer_is_empty()
@@ -781,7 +786,8 @@ impl App {
     }
 
     pub(super) fn should_reject_side_backtrack_esc(&self, key_event: KeyEvent) -> bool {
-        self.chat_widget.side_conversation_active()
+        (self.chat_widget.side_conversation_active()
+            || self.chat_widget.parallel_conversation_active())
             && !self.chat_widget.shortcut_overlay_visible()
             && self.chat_widget.is_normal_backtrack_mode()
             && self.chat_widget.composer_is_empty()

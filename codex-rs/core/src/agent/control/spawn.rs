@@ -4,6 +4,8 @@ use super::spawn_telemetry::SpawnMeasurements;
 use super::spawn_telemetry::record_spawn_success;
 use super::*;
 use crate::agent::child_config::build_agent_resume_config;
+use crate::agent::child_config::matching_subagent_service_tier;
+use crate::agent::child_config::select_subagent_service_tier;
 use crate::agent::role::apply_role_to_config;
 use crate::agent::types::AgentMetadata;
 use crate::agent::types::LiveAgent;
@@ -35,6 +37,7 @@ use codex_context_fragments::to_annotated_content;
 use codex_features::Feature;
 use codex_history::ResponseItemEnvelope;
 use codex_prompts::ResolvedModelMessages;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::intersect_effective_permission_profiles;
 use codex_protocol::protocol::EnvironmentConfigState;
@@ -362,11 +365,13 @@ impl LocalAgentControl {
         {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
-        let evicted_environments = self.runtime.registry.evicted_environments(thread_id);
-        let mut environment_selections = evicted_environments
+        let evicted_runtime_state = self.runtime.registry.evicted_runtime_state(thread_id);
+        let mut environment_selections = evicted_runtime_state
             .as_ref()
-            .map(|environments| environments.selections.clone());
-        let evicted_environments = evicted_environments.map(|environments| environments.bindings);
+            .map(|state| state.environments.selections.clone());
+        let evicted_environments = evicted_runtime_state
+            .as_ref()
+            .map(|state| state.environments.bindings.clone());
 
         let stored_thread = state
             .read_stored_thread(ReadThreadParams {
@@ -427,6 +432,17 @@ impl LocalAgentControl {
         } else {
             None
         };
+        if let Some(evicted) = &evicted_runtime_state {
+            config.role_system1_disabled |= evicted.role_system1_disabled;
+            if evicted.web_search_disabled {
+                config
+                    .web_search_mode
+                    .set(WebSearchMode::Disabled)
+                    .map_err(|err| {
+                        CodexErr::InvalidRequest(format!("web_search is invalid: {err}"))
+                    })?;
+            }
+        }
         config.model_reasoning_effort = stored_reasoning_effort;
         if let Some(role_name) = session_source.get_agent_role() {
             let runtime_approval_policy = config.permissions.approval_policy.value();
@@ -480,6 +496,46 @@ impl LocalAgentControl {
                 })?;
             config.model_provider_id = stored_model_provider;
         }
+        if !config.subagent_service_tiers.is_empty() {
+            let model = config.model.as_deref().ok_or_else(|| {
+                CodexErr::InvalidRequest(
+                    "could not resolve the reloaded child model for service tier selection"
+                        .to_string(),
+                )
+            })?;
+            let model_info = state
+                .models_manager
+                .get_model_info(model, &config.to_models_manager_config())
+                .await;
+            let reasoning_effort = config
+                .model_reasoning_effort
+                .as_ref()
+                .or(model_info.default_reasoning_level.as_ref());
+            if matching_subagent_service_tier(&config, &model_info.slug, reasoning_effort).is_some()
+            {
+                config.service_tier = select_subagent_service_tier(
+                    &config,
+                    &model_info,
+                    reasoning_effort,
+                    self.root_service_tier(),
+                )
+                .map_err(CodexErr::InvalidRequest)?;
+            }
+        }
+        // Reload restores this child's runtime toggle, never the parent's current preference.
+        config.system1.enabled = evicted_runtime_state
+            .as_ref()
+            .is_some_and(|state| state.system1_enabled)
+            && !config.role_system1_disabled;
+        config.system1_initial_revision = evicted_runtime_state
+            .as_ref()
+            .map_or(/*default*/ 0, |state| state.system1_revision);
+        config.system1_initial_error = evicted_runtime_state
+            .as_ref()
+            .and_then(|state| state.system1_error);
+        config.system1_initial_failure_episode = evicted_runtime_state
+            .as_ref()
+            .map_or(/*default*/ 0, |state| state.system1_failure_episode);
         let parent_thread_id = owner_thread_id
             .or_else(|| initial_history.get_resumed_parent_thread_id())
             .or(stored_parent_thread_id);
@@ -678,7 +734,7 @@ impl LocalAgentControl {
                     let residency_pin = runtime
                         .pin_v2_residency(&state, &reloaded_thread.thread)
                         .await?;
-                    runtime.registry.clear_evicted_environments(thread_id);
+                    runtime.registry.clear_evicted_runtime_state(thread_id);
                     residency_slot.commit(reloaded_thread.thread_id);
                     // Register before listeners can forward events from the resumed thread.
                     if let Some((client_metadata, source)) = subagent_analytics {
@@ -708,7 +764,7 @@ impl LocalAgentControl {
                     if let Some(parent_thread_id) = owner_thread_id {
                         self.validate_loaded_v2_child(&thread, parent_thread_id)?;
                     }
-                    self.runtime.registry.clear_evicted_environments(thread_id);
+                    self.runtime.registry.clear_evicted_runtime_state(thread_id);
                     drop(residency_slot);
                     return self.runtime.pin_v2_residency(&state, &thread).await;
                 }
@@ -719,11 +775,14 @@ impl LocalAgentControl {
 
     pub(super) async fn spawn_agent_internal(
         &self,
-        config: Config,
+        mut config: Config,
         initial_input: SpawnInitialInput,
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        config.system1_initial_revision = 0;
+        config.system1_initial_error = None;
+        config.system1_initial_failure_episode = 0;
         let membership = self.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
         let state = self.runtime.upgrade()?;
@@ -733,6 +792,17 @@ impl LocalAgentControl {
             .as_ref()
             .and_then(SessionSource::parent_thread_id)
             .or(options.parent_thread_id);
+        if let Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id, ..
+        })) = session_source.as_ref()
+        {
+            // Freeze the parent's live toggle without relaxing inherited role restrictions.
+            // Later parent changes do not belong to this child's runtime state.
+            config.system1.enabled = match state.get_thread(*parent_thread_id).await {
+                Ok(parent) => parent.config_snapshot().await.system1_enabled,
+                Err(_) => false,
+            } && !config.role_system1_disabled;
+        }
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
                 &InitialHistory::New,

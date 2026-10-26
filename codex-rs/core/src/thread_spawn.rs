@@ -30,6 +30,7 @@ use codex_protocol::protocol::SubAgentSource;
 /// Child creation options; omitted overrides retain native MAv2 inheritance and role rules.
 pub(crate) struct ThreadSpawnRequest {
     pub task_name: String,
+    pub spawn_arguments: String,
     /// Explicit encoding: hosts normally provide plaintext; native tools can forward ciphertext.
     pub message: AgentMessage,
     /// `None` starts fresh; `FullHistory` uses native fork preparation.
@@ -64,6 +65,7 @@ pub(crate) async fn spawn(
     let turn = &step_context.turn;
     let ThreadSpawnRequest {
         task_name,
+        spawn_arguments,
         message,
         fork_mode,
         agent_type,
@@ -134,6 +136,10 @@ pub(crate) async fn spawn(
     } else {
         None
     };
+    let communication_prompt = match &message {
+        AgentMessage::Plaintext(text) => Some(text.clone()),
+        AgentMessage::Encrypted(_) => None,
+    };
     let (agent, config) = session
         .services
         .agent_control
@@ -146,6 +152,7 @@ pub(crate) async fn spawn(
             },
             source: spawn_source,
             options: SpawnAgentOptions {
+                spawn_arguments: Some(spawn_arguments),
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.to_string()),
                 fork_mode,
                 parent_thread_id: Some(session.thread_id),
@@ -159,6 +166,17 @@ pub(crate) async fn spawn(
             },
         })
         .await?;
+    if let Some(prompt) = communication_prompt {
+        crate::tools::handlers::multi_agents_v2::emit_inter_agent_communication(
+            session,
+            turn,
+            call_id,
+            codex_protocol::items::CollabAgentTool::SpawnAgent,
+            agent.thread_id,
+            prompt,
+        )
+        .await;
+    }
     Ok(ThreadSpawnResult {
         agent,
         config,

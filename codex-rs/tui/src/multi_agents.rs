@@ -4,7 +4,9 @@
 //! picker entries, and the fast-switch keyboard shortcuts. Higher-level coordination, such as
 //! deciding which thread becomes active or when a thread closes, stays in [`crate::app::App`].
 
+use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
+use crate::history_cell::ToolCallSummary;
 use crate::render::line_utils::prefix_lines;
 use crate::style::accent_color;
 use crate::text_formatting::truncate_text;
@@ -26,6 +28,12 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use std::collections::HashSet;
+
+mod communication;
+pub(crate) use communication::communication_history_cell;
+
+mod wait_history;
+pub(crate) use wait_history::AgentWaitHistory;
 
 const COLLAB_PROMPT_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_ERROR_PREVIEW_GRAPHEMES: usize = 160;
@@ -207,6 +215,7 @@ pub(crate) fn tool_call_history_cell(
     mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
 ) -> Option<PlainHistoryCell> {
     let ThreadItemPayload::CollabAgentToolCall {
+        id,
         tool,
         status,
         receiver_thread_ids,
@@ -217,6 +226,12 @@ pub(crate) fn tool_call_history_cell(
     else {
         return None;
     };
+
+    // Fork communication projections are visible only in parent-owned chat views.
+    // Their lifecycle activity already supplies the ordinary transcript summary.
+    if id.starts_with(codex_protocol::items::INTER_AGENT_COMMUNICATION_ITEM_PREFIX) {
+        return None;
+    }
 
     let first_receiver = receiver_thread_ids
         .first()
@@ -308,19 +323,73 @@ pub(crate) fn sub_agent_activity_display(
     })
 }
 
+#[derive(Debug)]
+pub(crate) struct SubAgentActivityHistoryCell {
+    preview: PlainHistoryCell,
+    id: String,
+    kind: SubAgentActivityKind,
+    agent_path: String,
+}
+
+impl HistoryCell for SubAgentActivityHistoryCell {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        self.preview.display_lines(width)
+    }
+
+    fn raw_lines(&self) -> Vec<Line<'static>> {
+        self.preview.raw_lines()
+    }
+
+    fn activity_ids(&self) -> Vec<String> {
+        if self.kind != SubAgentActivityKind::Interrupted {
+            vec![format!("subagent:{}", self.id)]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn tool_call_summary(&self) -> Option<ToolCallSummary> {
+        // Lifecycle notifications describe successful agent outcomes, not extra tool calls.
+        let mut summary = ToolCallSummary {
+            names: vec![self.agent_path.clone()],
+            ..Default::default()
+        };
+        match self.kind {
+            SubAgentActivityKind::Started => summary.agent_starts = 1,
+            SubAgentActivityKind::Interacted => summary.count = 1,
+            SubAgentActivityKind::Completed => summary.agent_completions = 1,
+            SubAgentActivityKind::Interrupted => return None,
+        }
+        Some(summary)
+    }
+
+    fn activity_disclosure(&self, _width: u16) -> Option<crate::history_cell::ActivityDisclosure> {
+        None
+    }
+
+    fn supports_individual_disclosure(&self) -> bool {
+        false
+    }
+}
+
 pub(crate) fn sub_agent_activity_history_cell(
     item: &ThreadItemPayload,
-) -> Option<PlainHistoryCell> {
+) -> Option<SubAgentActivityHistoryCell> {
     let ThreadItemPayload::SubAgentActivity {
-        kind, agent_path, ..
+        id,
+        kind,
+        agent_path,
+        ..
     } = item
     else {
         return None;
     };
-    Some(collab_event(
-        sub_agent_activity_title(*kind, agent_path),
-        Vec::new(),
-    ))
+    Some(SubAgentActivityHistoryCell {
+        preview: collab_event(sub_agent_activity_title(*kind, agent_path), Vec::new()),
+        id: id.clone(),
+        kind: *kind,
+        agent_path: agent_path.clone(),
+    })
 }
 
 fn sub_agent_activity_title(kind: SubAgentActivityKind, agent_path: &str) -> Line<'static> {

@@ -32,6 +32,8 @@ use crate::init_state_db;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::session::SessionSettingsUpdate;
 use crate::session::step_context::StepContext;
+use crate::session::tests::install_reviewer_scoped_skills;
+use crate::session::tests::reviewer_skill_enablement;
 use crate::thread_manager::ForkSnapshot;
 use crate::thread_manager::StartThreadOptions;
 use crate::tools::handlers::multi_agents_common::thread_spawn_source;
@@ -1127,7 +1129,7 @@ async fn cancelled_v2_send_finishes_reload_registration() {
         control
             .runtime
             .registry
-            .evicted_environments(child_id)
+            .evicted_runtime_state(child_id)
             .is_some()
     );
 
@@ -1179,7 +1181,7 @@ async fn cancelled_v2_send_finishes_reload_registration() {
         control
             .runtime
             .registry
-            .evicted_environments(child_id)
+            .evicted_runtime_state(child_id)
             .is_none()
     );
     // Evict and reload again with the single child slot. This also catches a leaked
@@ -1254,7 +1256,14 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     let (home, mut config) = test_config().await;
     let _ = config.features.enable(Feature::MultiAgentV2);
     let _ = config.features.enable(Feature::Sqlite);
-    config.model = Some("gpt-5.6-sol".to_string());
+    config.model = Some("gpt-6-astra".to_string());
+    config.features.enable(Feature::StepModelSwitching).unwrap();
+    config
+        .features
+        .enable(Feature::ReasoningEffortOverride)
+        .unwrap();
+    config.system1.decision_model_api_env =
+        Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
     config.multi_agent_v2.max_concurrent_threads_per_session = 3;
     config.permissions.allow_login_shell = true;
     config
@@ -1311,8 +1320,19 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     let inherited_instructions = parent_thread.session.inherited_instructions().await;
     assert!(inherited_instructions.user.is_some());
     assert!(inherited_instructions.thread.is_some());
+    let born_system1 = matches!(route, V2ReloadRoute::Sender);
+    parent_thread
+        .session
+        .set_system1_enabled(born_system1)
+        .await
+        .unwrap();
     let mut child_config = harness.config.clone();
-    child_config.model = Some("gpt-5.6-luna".to_string());
+    child_config.system1.enabled = !born_system1;
+    child_config.system1_initial_revision = 999;
+    child_config.system1_initial_error =
+        Some(codex_protocol::protocol::System1Error::InvalidResponse);
+    child_config.system1_initial_failure_episode = 999;
+    child_config.model = Some("gpt-6.1-sol".to_string());
     let spawned_agent =
         spawn_v2_reload_test_child(&control, child_config, &parent_thread, "worker").await;
     let agent_path = spawned_agent
@@ -1332,10 +1352,57 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         )])
         .await
         .expect("child rollout should persist with v2 metadata");
-    child_thread
-        .shutdown_and_wait()
+    assert_eq!(
+        child_thread.config_snapshot().await.system1_enabled,
+        born_system1
+    );
+    parent_thread
+        .session
+        .set_system1_enabled(!born_system1)
         .await
-        .expect("child thread should shut down");
+        .unwrap();
+    assert_eq!(
+        child_thread.config_snapshot().await.system1_revision,
+        u64::from(born_system1),
+        "fresh child owns only its startup-health revision, never parent/config revision"
+    );
+    child_thread
+        .session
+        .set_system1_enabled(!born_system1)
+        .await
+        .unwrap();
+    child_thread
+        .session
+        .set_system1_enabled(born_system1)
+        .await
+        .unwrap();
+    let born_revision = child_thread.config_snapshot().await.system1_revision;
+    assert_eq!(
+        born_revision,
+        2 + u64::from(born_system1),
+        "child owns its mode and health revision before eviction"
+    );
+    let child_health = child_thread.config_snapshot().await;
+    assert_eq!(
+        (
+            child_health.system1_error,
+            child_health.system1_failure_episode
+        ),
+        (
+            born_system1.then_some(codex_protocol::protocol::System1Error::Credentials),
+            u64::from(born_system1)
+        )
+    );
+    child_thread.session.mark_interrupted();
+    *child_thread.session.active_turn.lock().await = None;
+    assert_eq!(
+        harness
+            .manager
+            .try_evict_v2_thread(Arc::clone(&child_thread))
+            .await
+            .unwrap(),
+        ThreadEvictionOutcome::Evicted
+    );
     let stored_child = child_thread
         .read_thread(
             /*include_archived*/ true, /*include_history*/ false,
@@ -1347,9 +1414,9 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     assert!(
         harness
             .manager
-            .remove_thread(&spawned_agent.thread_id)
+            .get_thread(spawned_agent.thread_id)
             .await
-            .is_some()
+            .is_err()
     );
     assert_matches!(
         control
@@ -1401,6 +1468,15 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
                 })
                 .await
                 .expect("save parent environments");
+            // Genuine child eviction freed a residency slot. Fill it so reloading
+            // the original child must evict its idle parent rather than reuse free capacity.
+            let _occupant = spawn_v2_reload_test_child(
+                &control,
+                harness.config.clone(),
+                &parent_thread,
+                "capacity_occupant",
+            )
+            .await;
             parent_thread.session.mark_interrupted();
             // The fixture has no task runner to finish the turn or consume child results.
             *parent_thread.session.active_turn.lock().await = None;
@@ -1434,6 +1510,22 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
             crate::ThreadEvictionOutcome::Busy,
         );
     }
+    let restored_health = reloaded_child.config_snapshot().await;
+    assert_eq!(
+        (
+            restored_health.system1_enabled,
+            restored_health.system1_revision,
+            restored_health.system1_error,
+            restored_health.system1_failure_episode
+        ),
+        (
+            born_system1,
+            born_revision,
+            child_health.system1_error,
+            child_health.system1_failure_episode
+        ),
+        "reload retains this child's own mode and failure episode"
+    );
     let reloaded_instructions = reloaded_child.session.inherited_instructions().await;
     assert_eq!(
         (reloaded_instructions.user, reloaded_instructions.thread),
@@ -1461,7 +1553,7 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
     }
     assert_eq!(
         reloaded_child.config_snapshot().await.model,
-        "gpt-5.6-luna",
+        "gpt-6.1-sol",
         "residency reload must preserve the worker model instead of inheriting its parent model",
     );
     assert_eq!(
@@ -2104,9 +2196,26 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         .features
         .enable(Feature::MultiAgentV2)
         .expect("enable v2");
-    config.model_reasoning_effort = selected_effort.clone();
+    config.model = Some("gpt-6-astra".to_string());
+    config.model_reasoning_effort = Some(ReasoningEffort::Medium);
+    config.features.enable(Feature::StepModelSwitching).unwrap();
+    config
+        .features
+        .enable(Feature::ReasoningEffortOverride)
+        .unwrap();
+    config.system1.decision_model_api_env =
+        Some("CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string());
     let harness = AgentControlHarness::new_with_config(home, config).await;
     let (parent_id, parent) = harness.start_thread().await;
+    parent
+        .session
+        .set_system1_enabled(/*enabled*/ true)
+        .await
+        .unwrap();
+    let mut child_config = harness.config.clone();
+    child_config.model = Some("gpt-5.5".to_string());
+    child_config.model_reasoning_effort = selected_effort.clone();
+    child_config.system1.enabled = false;
     let source = thread_spawn_source(
         parent_id,
         &parent.session_source,
@@ -2119,7 +2228,7 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         .control
         .spawn(SpawnRequest {
             caller: parent_id,
-            config: harness.config.clone(),
+            config: child_config,
             input: AgentInput::Message {
                 message: AgentMessage::Plaintext("child task".to_string()),
                 mode: MessageDeliveryMode::TriggerTurn,
@@ -2144,6 +2253,42 @@ async fn v2_spawn_resolves_reported_effort_without_changing_child_selection(
         ),
         (Some(reported_effort), selected_effort),
     );
+    assert!(snapshot.system1_enabled);
+    parent
+        .session
+        .set_system1_enabled(/*enabled*/ false)
+        .await
+        .unwrap();
+    assert!(child.config_snapshot().await.system1_enabled);
+    let mut second_config = harness.config.clone();
+    second_config.system1.enabled = true;
+    let second_id = harness
+        .control
+        .spawn_agent(
+            second_config,
+            text_input("born with system1 off"),
+            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: parent_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: None,
+            })),
+        )
+        .await
+        .expect("spawn second child");
+    let second = harness.manager.get_thread(second_id).await.unwrap();
+    assert!(!second.config_snapshot().await.system1_enabled);
+    parent
+        .session
+        .set_system1_enabled(/*enabled*/ true)
+        .await
+        .unwrap();
+    assert!(!second.config_snapshot().await.system1_enabled);
+    second
+        .shutdown_and_wait()
+        .await
+        .expect("shutdown second child");
     child.shutdown_and_wait().await.expect("shutdown child");
     parent.shutdown_and_wait().await.expect("shutdown parent");
 }
@@ -4896,7 +5041,16 @@ async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
 /// Resume restores the child's saved metadata and roots even after its parent deselects an environment.
 #[tokio::test]
 async fn resume_thread_subagent_restores_stored_metadata() {
-    let (home, config) = test_config().await;
+    let (home, mut config) = test_config().await;
+    install_reviewer_scoped_skills(&mut config);
+    config.agent_roles.insert(
+        "reviewer".to_string(),
+        AgentRoleConfig {
+            description: None,
+            config_file: None,
+            nickname_candidates: None,
+        },
+    );
     let thread_store = Arc::new(InMemoryThreadStore::default());
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
     let manager = ThreadManager::new(
@@ -4943,7 +5097,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         .expect("start parent with roots");
     let parent_thread_id = parent.thread_id;
     let parent_thread = parent.thread;
-    let agent_path = AgentPath::from_string("/root/explorer".to_string())
+    let agent_path = AgentPath::from_string("/root/reviewer".to_string())
         .expect("test agent path should be valid");
 
     let child_thread_id = harness
@@ -4956,7 +5110,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
                 depth: 1,
                 agent_path: Some(agent_path.clone()),
                 agent_nickname: None,
-                agent_role: Some("explorer".to_string()),
+                agent_role: Some("reviewer".to_string()),
             })),
         )
         .await
@@ -4997,6 +5151,14 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         child_thread.session.services.selected_capability_roots,
         roots
     );
+    let original_turn = child_thread.session.new_default_turn().await;
+    let root_turn = parent_thread.session.new_default_turn().await;
+    assert_eq!(
+        original_turn.config.permissions,
+        root_turn.config.permissions
+    );
+    assert_eq!(reviewer_skill_enablement(&original_turn), [true; 2]);
+    assert_eq!(reviewer_skill_enablement(&root_turn), [false; 2]);
     let original_snapshot = child_thread.config_snapshot().await;
     let original_nickname = original_snapshot
         .session_source
@@ -5012,7 +5174,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
                 })
                 .await
                 && stored_thread.agent_nickname.is_some()
-                && stored_thread.agent_role.as_deref() == Some("explorer")
+                && stored_thread.agent_role.as_deref() == Some("reviewer")
                 && stored_thread.agent_path.as_deref() == Some(agent_path.as_str())
             {
                 break;
@@ -5101,6 +5263,11 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         child_turn.initial_environments.selected_capability_roots(),
         roots
     );
+    assert_eq!(
+        child_turn.config.permissions,
+        original_turn.config.permissions
+    );
+    assert_eq!(reviewer_skill_enablement(&child_turn), [true; 2]);
     let resumed_snapshot = resumed_thread.config_snapshot().await;
     let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: resumed_parent_thread_id,
@@ -5117,7 +5284,7 @@ async fn resume_thread_subagent_restores_stored_metadata() {
     assert_eq!(resumed_depth, 1);
     assert_eq!(resumed_agent_path, Some(agent_path));
     assert_eq!(resumed_nickname, Some(original_nickname));
-    assert_eq!(resumed_role, Some("explorer".to_string()));
+    assert_eq!(resumed_role, Some("reviewer".to_string()));
 
     let _ = harness
         .control

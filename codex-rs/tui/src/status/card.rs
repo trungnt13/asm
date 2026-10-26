@@ -7,6 +7,7 @@ use crate::line_truncation::line_width;
 use crate::style::accent_color;
 use crate::token_usage::TokenUsage;
 use crate::token_usage::TokenUsageInfo;
+use crate::token_usage::context_window_remaining_percent;
 use crate::version::CODEX_CLI_VERSION;
 use chrono::DateTime;
 use chrono::Local;
@@ -20,6 +21,7 @@ use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_DANGER_FULL_ACCESS;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_READ_ONLY;
 use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_path_uri::PathUri;
 use codex_utils_sandbox_summary::summarize_permission_profile;
@@ -61,6 +63,8 @@ struct StatusContextWindowData {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StatusTokenUsageData {
+    /// False when the runtime reports no token usage, as with Cursor.
+    reported: bool,
     total: i64,
     input: i64,
     output: i64,
@@ -213,6 +217,7 @@ pub(crate) fn new_status_output_with_rate_limits(
         model_name,
         collaboration_mode,
         reasoning_effort_override,
+        /*captured_reasoning_label*/ None,
         "<none>".to_string(),
         refreshing_rate_limits,
     )
@@ -237,6 +242,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
     model_name: &str,
     collaboration_mode: Option<&str>,
     reasoning_effort_override: Option<Option<ReasoningEffort>>,
+    captured_reasoning_label: Option<String>,
     agents_summary: String,
     refreshing_rate_limits: bool,
 ) -> (CompositeHistoryCell, StatusHistoryHandle) {
@@ -258,6 +264,7 @@ pub(crate) fn new_status_output_with_rate_limits_handle(
         model_name,
         collaboration_mode,
         reasoning_effort_override,
+        captured_reasoning_label,
         agents_summary,
         refreshing_rate_limits,
     ));
@@ -290,9 +297,14 @@ impl StatusHistoryCell {
         model_name: &str,
         collaboration_mode: Option<&str>,
         reasoning_effort_override: Option<Option<ReasoningEffort>>,
+        captured_reasoning_label: Option<String>,
         agents_summary: String,
         refreshing_rate_limits: bool,
     ) -> Self {
+        let native_runtime = NativeRuntime::for_model(model_name)
+            .or_else(|| config.model.as_deref().and_then(NativeRuntime::for_model))
+            .map(|(runtime, _)| runtime);
+        let claude_runtime = native_runtime.is_some();
         let approval_policy = AskForApproval::from(config.permissions.approval_policy.value());
         let permission_profile = config.permissions.effective_permission_profile();
         let workspace_roots = config.effective_workspace_roots();
@@ -316,10 +328,12 @@ impl StatusHistoryCell {
             config_entries.insert(2, ("provider", provider_id.clone()));
         }
         if config.model_provider.wire_api == WireApi::Responses {
-            let effort_value = reasoning_effort_override
-                .unwrap_or_else(|| config.model_reasoning_effort.clone())
-                .map(|effort| effort.to_string())
-                .unwrap_or_else(|| "none".to_string());
+            let effort_value = captured_reasoning_label.unwrap_or_else(|| {
+                reasoning_effort_override
+                    .unwrap_or_else(|| config.model_reasoning_effort.clone())
+                    .map(|effort| effort.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            });
             config_entries.push(("reasoning effort", effort_value));
             if remote_connection.is_none() {
                 config_entries.push((
@@ -341,14 +355,22 @@ impl StatusHistoryCell {
         let sandbox = status_permission_summary(&permission_profile, &cwd, &workspace_roots);
         let workspace_root_suffix = workspace_root_suffix(&workspace_roots, &cwd);
         let approval = status_approval_label(approval_policy, config.approvals_reviewer, &approval);
-        let permissions = status_permissions_label(
-            active_permission_profile.as_ref(),
-            &permission_profile,
-            approval_policy,
-            &sandbox,
-            &approval,
-            workspace_root_suffix.as_deref(),
-        );
+        let permissions = if let Some(runtime) = native_runtime {
+            let owner = match runtime {
+                NativeRuntime::ClaudeCode => "Claude Code",
+                NativeRuntime::CursorAgent => "Cursor Agent",
+            };
+            format!("{owner}-managed (ASM sandbox and approvals do not apply)")
+        } else {
+            status_permissions_label(
+                active_permission_profile.as_ref(),
+                &permission_profile,
+                approval_policy,
+                &sandbox,
+                &approval,
+                workspace_root_suffix.as_deref(),
+            )
+        };
         let show_chatgpt_usage_link = requires_openai_auth;
         let account = compose_account_display(account_display);
         let session_id = session_id.as_ref().map(std::string::ToString::to_string);
@@ -356,15 +378,21 @@ impl StatusHistoryCell {
         let default_usage = TokenUsage::default();
         let (context_usage, context_window) = match token_info {
             Some(info) => (&info.last_token_usage, info.model_context_window),
+            None if claude_runtime => (&default_usage, None),
             None => (&default_usage, config.model_context_window),
         };
         let context_window = context_window.map(|window| StatusContextWindowData {
-            percent_remaining: context_usage.percent_of_context_window_remaining(window),
+            percent_remaining: context_window_remaining_percent(
+                context_usage,
+                window,
+                claude_runtime,
+            ),
             tokens_in_context: context_usage.tokens_in_context_window(),
             window,
         });
 
         let token_usage = StatusTokenUsageData {
+            reported: native_runtime != Some(NativeRuntime::CursorAgent),
             total: total_usage.blended_total(),
             input: total_usage.non_cached_input(),
             output: total_usage.output_tokens,
@@ -403,6 +431,9 @@ impl StatusHistoryCell {
     }
 
     fn token_usage_spans(&self) -> Vec<Span<'static>> {
+        if !self.token_usage.reported {
+            return vec![Span::from("unavailable").dim()];
+        }
         let total_fmt = format_tokens_compact(self.token_usage.total);
         let input_fmt = format_tokens_compact(self.token_usage.input);
         let output_fmt = format_tokens_compact(self.token_usage.output);
@@ -745,7 +776,7 @@ impl StatusHistoryCell {
                 (None, None) => "ChatGPT".to_string(),
             },
             StatusAccountDisplay::ApiKey => {
-                "API key configured (run codex login to use ChatGPT)".to_string()
+                "API key configured (run asm login to use ChatGPT)".to_string()
             }
         });
 

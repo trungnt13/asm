@@ -145,6 +145,7 @@ pub(crate) struct MentionBinding {
     pub(crate) path: String,
 }
 mod chat_composer;
+pub(crate) use chat_composer::ComposerMode;
 mod chat_composer_history;
 mod command_popup;
 pub(crate) mod custom_prompt_view;
@@ -266,7 +267,9 @@ pub(crate) use chat_composer::ChatComposerConfig;
 pub(crate) use chat_composer::ClipboardPasteTarget;
 pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
+pub(crate) use chat_composer::PendingQuote;
 pub(crate) use chat_composer::QueuedInputAction;
+pub(crate) use chat_composer::QuoteComment;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer_history::HistoryEntry;
 pub(crate) use textarea::KillBufferSnapshot;
@@ -668,6 +671,13 @@ impl BottomPane {
     pub fn set_voice_command_enabled(&mut self, enabled: bool) {
         self.composer.set_voice_command_enabled(enabled);
         self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_mode(&mut self, mode: ComposerMode) {
+        if self.composer.mode != mode {
+            self.composer.mode = mode;
+            self.request_redraw();
+        }
     }
 
     pub(crate) fn set_side_conversation_active(&mut self, active: bool) {
@@ -1146,6 +1156,18 @@ impl BottomPane {
         ) {
             self.request_redraw_in(delay);
         }
+    }
+
+    pub(crate) fn set_composer_quotes(&mut self, quotes: Vec<String>) {
+        self.composer
+            .edit_stored_draft(|composer| composer.set_quotes(quotes));
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_composer_quote_comments(&mut self, comments: Vec<QuoteComment>) {
+        self.composer
+            .edit_stored_draft(|composer| composer.set_quote_comments(comments));
+        self.request_redraw();
     }
 
     /// Replace the composer text with `text`.
@@ -2000,8 +2022,12 @@ impl BottomPane {
         self.composer.prepare_mouse(event)
     }
 
-    pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
-        self.composer.handle_mouse(event)
+    pub(crate) fn handle_composer_mouse(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        pending_quote: &mut Option<PendingQuote>,
+    ) -> bool {
+        self.composer.handle_mouse(event, pending_quote)
     }
 
     pub(crate) fn show_view(&mut self, view: Box<dyn BottomPaneView>) {

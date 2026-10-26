@@ -87,6 +87,7 @@ fn transcript_export_excludes_hidden_review_prompts_and_nested_duplicates() {
         root_turn_id: None,
         items: items.into_iter().map(ThreadItem::untimed).collect(),
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status,
         error: None,
         started_at: None,
@@ -228,6 +229,8 @@ fn persisted_web_and_image_activity_preserves_full_details() {
         items,
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         /*config*/ None,
+        /*show_communication*/ false,
+        /*own_agent_role*/ None,
     );
     insta::assert_snapshot!(render_markdown_transcript(&cells).expect("exported transcript"));
 }

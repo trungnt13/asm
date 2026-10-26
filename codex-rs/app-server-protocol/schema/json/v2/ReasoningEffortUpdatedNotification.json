@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ReasoningEffort": {
+      "description": "A non-empty reasoning effort value advertised by the model.",
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "description": "Reports captured step effort without changing the thread's saved settings.",
+  "properties": {
+    "reasoningEffort": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ReasoningEffort"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "system1": {
+      "description": "Automatic mode is active, including when a decision falls back to current effort.",
+      "type": "boolean"
+    },
+    "threadId": {
+      "type": "string"
+    },
+    "turnId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "system1",
+    "threadId",
+    "turnId"
+  ],
+  "title": "ReasoningEffortUpdatedNotification",
+  "type": "object"
+}

@@ -1045,14 +1045,56 @@ impl ModelInfo {
     }
 }
 
+/// Official native CLI runtime selected by an explicit `<runtime>/<native-model>` model ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeRuntime {
+    ClaudeCode,
+    CursorAgent,
+}
+
+impl NativeRuntime {
+    /// Returns the runtime and its native model suffix for a runtime model ID.
+    pub fn for_model(model: &str) -> Option<(Self, &str)> {
+        [Self::ClaudeCode, Self::CursorAgent]
+            .into_iter()
+            .find_map(|runtime| {
+                let native_model = model.strip_prefix(runtime.id())?.strip_prefix('/')?;
+                Some((runtime, native_model))
+            })
+    }
+
+    /// Model ID prefix without its separator, also used as the native activity server name.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::CursorAgent => "cursor-agent",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "Claude",
+            Self::CursorAgent => "Cursor",
+        }
+    }
+}
+
+pub fn is_native_runtime_model(model: &str) -> bool {
+    NativeRuntime::for_model(model).is_some()
+}
+
 impl ModelPreset {
-    /// Filter models based on authentication mode.
-    ///
-    /// In ChatGPT mode, all models are visible. Otherwise, only API-supported models are shown.
+    /// Keep native runtime models independent of OpenAI authentication.
+    /// Other models retain their authentication-based visibility.
     pub fn filter_by_auth(models: Vec<ModelPreset>, chatgpt_mode: bool) -> Vec<ModelPreset> {
         models
             .into_iter()
-            .filter(|model| chatgpt_mode || model.supported_in_api)
+            .filter(|model| {
+                chatgpt_mode
+                    || model.supported_in_api
+                    || NativeRuntime::for_model(&model.model)
+                        .is_some_and(|(_, native_model)| !native_model.is_empty())
+            })
             .collect()
     }
 

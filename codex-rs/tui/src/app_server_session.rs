@@ -15,6 +15,7 @@ pub(crate) mod provider_selection;
 mod provider_selection_tests;
 mod realtime;
 mod rollout_history;
+mod side_conversations;
 mod startup_launch;
 mod thread_list;
 mod web_search;
@@ -328,6 +329,7 @@ pub(crate) struct AppServerSession {
     client: AppServerClient,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
+    side_conversations: Option<crate::side_conversations::SideConversationStore>,
     task_tool_threads: HashSet<ThreadId>,
     task_tool_capabilities_dir: Option<AbsolutePathBuf>,
     task_search_generation: Arc<AtomicU64>,
@@ -452,6 +454,7 @@ impl AppServerSession {
             client,
             next_request_id: 1,
             history_pagination: HashMap::new(),
+            side_conversations: None,
             task_tool_threads: HashSet::new(),
             task_tool_capabilities_dir: None,
             task_search_generation: Arc::new(AtomicU64::new(0)),
@@ -1161,6 +1164,15 @@ impl AppServerSession {
             }
         };
         let mut response = response;
+        if presentation == ForkPresentation::SideConversation && !response.thread.ephemeral {
+            // Saved parallel views skip inherited-history hydration, but boundary capture needs
+            // the actual rollout format returned by the server, including remote legacy servers.
+            let side_id = ThreadId::from_string(&response.thread.id)?;
+            self.history_pagination
+                .entry(side_id)
+                .or_default()
+                .history_mode = response.thread.history_mode;
+        }
         if presentation == ForkPresentation::Regular
             && !response.thread.ephemeral
             && let Err(error) = self
@@ -1197,7 +1209,7 @@ impl AppServerSession {
         if let Some(permissions) = selected_permissions {
             started.session.permission_profile = permissions;
         }
-        if presentation == ForkPresentation::SideConversation {
+        if presentation == ForkPresentation::SideConversation && config.ephemeral {
             started.session.daybreak_enabled = false;
         }
         started.session.fork_parent_title = fork_parent.and_then(|thread| thread.name);
@@ -1298,7 +1310,12 @@ impl AppServerSession {
             })
             .await;
         let mut response: ThreadReadResponse = match response {
-            Ok(response) => return Ok(response.thread),
+            Ok(mut response) => {
+                if let Some(side) = self.side_conversation(thread_id) {
+                    side.trim_turns(&mut response.thread.turns);
+                }
+                return Ok(response.thread);
+            }
             Err(TypedRequestError::Server { source, .. })
                 if include_turns
                     && source.message
@@ -1399,12 +1416,54 @@ impl AppServerSession {
             .wrap_err("thread/metadata/update failed while syncing git branch")
     }
 
+    #[tracing::instrument(skip_all)]
     pub(crate) async fn thread_settings_update(
         &mut self,
         params: ThreadSettingsUpdateParams,
     ) -> Result<bool> {
+        Ok(self.request_thread_settings_update(params).await?.is_some())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn system1_stats_read(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<codex_app_server_protocol::ThreadSystem1StatsReadResponse> {
+        let request_id = self.next_request_id();
+        Ok(self
+            .client
+            .request_typed(ClientRequest::ThreadSystem1StatsRead {
+                request_id,
+                params: codex_app_server_protocol::ThreadSystem1StatsReadParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await?)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn system1_update(
+        &mut self,
+        params: ThreadSettingsUpdateParams,
+    ) -> Result<Option<ThreadSettingsUpdateResponse>> {
+        let requested = params.system1_enabled;
+        Ok(self
+            .request_thread_settings_update(params)
+            .await?
+            .and_then(|response| {
+                (requested.is_some() && response.system1_enabled == requested)
+                    .then_some(response)
+                    .filter(|response| response.system1_revision.is_some())
+            }))
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn request_thread_settings_update(
+        &mut self,
+        params: ThreadSettingsUpdateParams,
+    ) -> Result<Option<ThreadSettingsUpdateResponse>> {
         if !self.thread_settings_update_supported {
-            return Ok(false);
+            return Ok(None);
         }
         let request_id = self.next_request_id();
         match self
@@ -1415,7 +1474,7 @@ impl AppServerSession {
             })
             .await
         {
-            Ok(_) => Ok(true),
+            Ok(response) => Ok(Some(response)),
             Err(TypedRequestError::Server { source, .. })
                 if is_thread_settings_update_unsupported(&source) =>
             {
@@ -1425,7 +1484,7 @@ impl AppServerSession {
                 // downgrade so local TUI setting changes stay best-effort instead
                 // of showing an error every time the user changes model, effort, or mode.
                 self.thread_settings_update_supported = false;
-                Ok(false)
+                Ok(None)
             }
             Err(err) => Err(err).wrap_err("thread/settings/update failed in TUI"),
         }
@@ -2478,6 +2537,12 @@ async fn thread_session_state_from_thread_start_response(
         local_settings,
     )
     .await?;
+    session.system1_enabled = response.system1_enabled;
+    session.system1_revision = response.system1_revision;
+    session.system1_error = response.system1_error;
+    session.system1_failure_episode = response.system1_failure_episode;
+    session.agent_role = response.thread.agent_role.clone();
+    session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response
         .thread
         .daybreak_enabled
@@ -2516,6 +2581,12 @@ async fn thread_session_state_from_thread_resume_response(
         local_settings,
     )
     .await?;
+    session.system1_enabled = response.system1_enabled;
+    session.system1_revision = response.system1_revision;
+    session.system1_error = response.system1_error;
+    session.system1_failure_episode = response.system1_failure_episode;
+    session.agent_role = response.thread.agent_role.clone();
+    session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.collaboration_mode = response.collaboration_mode.clone().map(Box::new);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
@@ -2553,6 +2624,12 @@ async fn thread_session_state_from_thread_fork_response(
         local_settings,
     )
     .await?;
+    session.system1_enabled = response.system1_enabled;
+    session.system1_revision = response.system1_revision;
+    session.system1_error = response.system1_error;
+    session.system1_failure_episode = response.system1_failure_episode;
+    session.agent_role = response.thread.agent_role.clone();
+    session.thread_source = response.thread.thread_source.clone().map(Into::into);
     session.daybreak_enabled = response.thread.daybreak_enabled.unwrap_or(false);
     Ok(session)
 }
@@ -2618,6 +2695,12 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
+        agent_role: None,
+        thread_source: None,
         daybreak_enabled: false,
         windows_sandbox_host,
         thread_id,
@@ -3844,7 +3927,7 @@ mod tests {
             )
             .expect("create source rollout"),
         )?;
-        let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
         let mut preset = crate::test_support::TEST_MODEL_PRESETS
             .iter()
             .find(|preset| preset.model == "gpt-5.5")
@@ -3858,16 +3941,67 @@ mod tests {
         preset.default_service_tier = Some(ServiceTier::Fast.request_value().to_string());
         app_server.available_models = vec![preset];
 
-        let resumed = app_server
-            .resume_thread(
-                &LocalSettings::from(&config),
-                config,
-                thread_id,
-                ResumeModelSettings::RestoreFromThread,
-            )
-            .await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &LocalSettings::from(&config),
+            config.clone(),
+            thread_id,
+            ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
 
         assert_eq!(resumed.session.service_tier, None);
+
+        config.service_tier = Some("priority".to_string());
+        let forked =
+            Box::pin(app_server.fork_thread(&LocalSettings::from(&config), config, thread_id))
+                .await?;
+        let fork_id = forked.session.thread_id;
+        assert_eq!(forked.session.service_tier.as_deref(), Some("priority"));
+        app_server.shutdown().await?;
+
+        // A disk default applies to new sessions, not the selected tier of a saved fork.
+        std::fs::write(
+            codex_home.path().join("config.toml"),
+            "service_tier = \"default\"\n[features]\nfast_mode = true\n",
+        )?;
+        let config = build_config(&codex_home).await;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &LocalSettings::from(&config),
+            config,
+            fork_id,
+            ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
+        assert_eq!(
+            (
+                resumed.session.model.as_str(),
+                resumed.session.service_tier.as_deref(),
+                resumed.session.thread_source.as_ref(),
+            ),
+            (
+                "gpt-5.5",
+                Some("priority"),
+                Some(&codex_protocol::protocol::ThreadSource::User),
+            ),
+        );
+        app_server.shutdown().await?;
+
+        // An explicit launch choice still overrides the saved tier on cold resume.
+        let config = ConfigBuilder::default()
+            .codex_home(codex_home.path().to_path_buf())
+            .cli_overrides(vec![("service_tier".to_string(), "default".into())])
+            .build()
+            .await?;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(&config)).await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &LocalSettings::from(&config),
+            config,
+            fork_id,
+            ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
+        assert_eq!(resumed.session.service_tier.as_deref(), Some("default"));
         app_server.shutdown().await?;
         Ok(())
     }
@@ -4224,6 +4358,10 @@ mod tests {
         let forked_from_id = ThreadId::new();
         let read_only_profile = PermissionProfile::read_only();
         let response = ThreadResumeResponse {
+            system1_enabled: true,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
             thread: codex_app_server_protocol::Thread {
                 originator: None,
@@ -4261,6 +4399,7 @@ mod tests {
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
+                    token_usage: None,
                     items: vec![
                         ThreadItem::untimed(
                             codex_app_server_protocol::ThreadItemPayload::UserMessage {
@@ -4331,6 +4470,7 @@ mod tests {
         .await
         .expect("resume response should map");
         assert_eq!(started.session.forked_from_id, Some(forked_from_id));
+        assert!(started.session.system1_enabled);
         assert_eq!(
             started.session.runtime_workspace_roots,
             response.runtime_workspace_roots
@@ -4348,6 +4488,7 @@ mod tests {
         let (mut chat, _sender, _events, mut commands) =
             crate::chatwidget::tests::helpers::make_chatwidget_manual_with_sender().await;
         chat.handle_thread_session(started.session);
+        assert!(chat.system1_enabled());
         insta::assert_snapshot!(
             "resumed_plan_mode",
             crate::chatwidget::tests::helpers::normalize_snapshot_paths(

@@ -3,6 +3,7 @@ use super::ThreadEnvironment;
 use super::ThreadItem;
 use super::ThreadItemPayload;
 use super::ThreadStatus;
+use super::TokenUsageBreakdown;
 use super::TurnStatus;
 use crate::JsonSchema;
 use crate::TS;
@@ -385,6 +386,9 @@ impl<'de> Deserialize<'de> for Thread {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct Turn {
+    /// Provider-reported token totals for this turn, including compaction, when available.
+    #[serde(default)]
+    pub token_usage: Option<TokenUsageBreakdown>,
     /// Identifier for this turn. Codex-generated turn IDs are UUIDv7.
     pub id: String,
     /// ID of the first turn in the chain of work that led to this turn.

@@ -27,6 +27,10 @@ struct Args {
     /// Reject unknown config fields and require explicit managed constraints.
     #[arg(long)]
     strict: bool,
+
+    /// Enable diagnostic logging controlled by RUST_LOG.
+    #[arg(long)]
+    diagnostic_log_capture: bool,
 }
 
 impl Args {
@@ -59,10 +63,13 @@ impl ConfigReloader for StaticConfigReloader {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
     let args = Args::parse();
+    if args.diagnostic_log_capture {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .init();
+    }
     let mut bytes = Vec::new();
     std::fs::File::open(&args.config)
         .with_context(|| {

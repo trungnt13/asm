@@ -15,6 +15,7 @@ impl ChatWidget {
     pub(crate) fn set_parent_owned_thread(&mut self) {
         self.cancel_image_submission();
         self.blocks_direct_input = true;
+        self.show_interagent_communication = true;
         self.bottom_pane.set_parent_owned_thread();
     }
 
@@ -293,6 +294,7 @@ impl ChatWidget {
                             user_message,
                             pending_pastes,
                             &mut used_paste_placeholders,
+                            &mut Vec::new(),
                         );
                     if !self.current_model().trim().is_empty()
                         && (self.current_model_supports_images()

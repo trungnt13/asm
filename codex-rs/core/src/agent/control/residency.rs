@@ -4,11 +4,13 @@ use super::LocalAgentControl;
 use super::LocalAgentRuntime;
 use super::runtime::AgentTreeMembership;
 use crate::agent::AgentStatus;
+use crate::agent::registry::EvictedAgentRuntimeState;
 use crate::agent::registry::EvictedEnvironments;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
 use crate::thread_manager::ThreadManagerState;
 use codex_protocol::ThreadId;
+use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrKind;
@@ -60,6 +62,8 @@ impl ThreadManagerState {
         tokio::spawn(async move {
             let _residency_guard = residency_guard;
             thread.ensure_rollout_materialized().await;
+            // Keep effective child restrictions when a different sender reloads it.
+            let child_config = thread.session.get_config().await;
             if let Err(err) = thread.shutdown_and_wait().await {
                 teardown.record_shutdown_failure("stop_resident", CodexErrKind::from(&err).into());
                 teardown.complete();
@@ -87,6 +91,7 @@ impl ThreadManagerState {
                     .turn_environments
                     .configured_snapshot_now(),
             };
+            let system1 = thread.config_snapshot().await;
             let mut threads = manager.threads.write().await;
             if threads
                 .get(&thread_id)
@@ -95,9 +100,19 @@ impl ThreadManagerState {
                 teardown.complete();
                 return Ok(ThreadEvictionOutcome::NotCurrent);
             }
-            runtime
-                .registry
-                .save_evicted_environments(thread_id, environments);
+            runtime.registry.save_evicted_runtime_state(
+                thread_id,
+                EvictedAgentRuntimeState {
+                    environments,
+                    system1_enabled: system1.system1_enabled,
+                    role_system1_disabled: child_config.role_system1_disabled,
+                    web_search_disabled: child_config.web_search_mode.value()
+                        == WebSearchMode::Disabled,
+                    system1_revision: system1.system1_revision,
+                    system1_error: system1.system1_error,
+                    system1_failure_episode: system1.system1_failure_episode,
+                },
+            );
             let removed = threads.remove(&thread_id).is_some();
             runtime.residency.remove(thread_id);
             teardown.complete();

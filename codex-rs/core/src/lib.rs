@@ -7,6 +7,7 @@
 
 mod apply_patch;
 mod apps;
+mod claude_runtime;
 mod client;
 mod client_common;
 mod model_request;
@@ -126,7 +127,11 @@ pub use plugins::plugins_manager_for_config;
 #[doc(hidden)]
 pub(crate) mod prompt_debug;
 #[doc(hidden)]
+pub use prompt_debug::PromptRequestAudit;
+#[doc(hidden)]
 pub use prompt_debug::build_prompt_input;
+#[doc(hidden)]
+pub use prompt_debug::build_prompt_request_from_thread;
 pub(crate) mod mentions {
     pub(crate) use crate::plugins::build_connector_slug_counts;
     pub(crate) use crate::plugins::collect_explicit_app_ids;
@@ -260,3 +265,6 @@ pub mod otel_init;
 // Captured environment bindings can be passed back to ThreadManager by internal reviewers.
 pub use environment_selection::TurnEnvironmentSnapshot;
 pub use environment_selection::validate_environment_ids_and_cwds;
+
+mod native_tool_cli;
+pub use native_tool_cli::run_native_tool_cli;

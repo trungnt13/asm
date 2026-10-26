@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
@@ -114,7 +116,7 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::TerminalName;
 
-/// Codex CLI
+/// ASM CLI
 ///
 /// If no subcommand is specified, options will be forwarded to the interactive CLI.
 #[derive(Debug, Parser)]
@@ -154,7 +156,7 @@ enum Subcommand {
     /// Internal: forward a local TCP socket through an HTTP/3 CONNECT proxy.
     #[clap(hide = true)]
     TcpTunnel(codex_tcp_tunnel::Args),
-    /// Run Codex non-interactively.
+    /// Run ASM non-interactively.
     #[clap(visible_alias = "e")]
     Exec(ExecCli),
 
@@ -167,10 +169,10 @@ enum Subcommand {
     /// Remove stored authentication credentials.
     Logout(LogoutCommand),
 
-    /// Manage external MCP servers for Codex.
+    /// Manage external MCP servers for ASM.
     Mcp(McpCli),
 
-    /// Manage Codex plugins.
+    /// Manage ASM plugins.
     Plugin(PluginCli),
 
     /// [experimental] Run the app server or related tooling.
@@ -189,10 +191,10 @@ enum Subcommand {
     /// Update Codex to the latest version.
     Update,
 
-    /// Diagnose local Codex installation, config, auth, and runtime health.
+    /// Diagnose local ASM installation, config, auth, and runtime health.
     Doctor(DoctorCommand),
 
-    /// Run commands within a Codex-provided sandbox.
+    /// Run commands within an ASM-provided sandbox.
     Sandbox(SandboxCommand),
 
     /// Debugging tools.
@@ -202,7 +204,7 @@ enum Subcommand {
     #[clap(hide = true)]
     Execpolicy(ExecpolicyCommand),
 
-    /// Apply the latest diff produced by Codex agent as a `git apply` to your local working tree.
+    /// Apply the latest diff produced by the ASM agent as a `git apply` to your local working tree.
     #[clap(visible_alias = "a")]
     Apply(ApplyCommand),
 
@@ -273,6 +275,9 @@ enum DebugSubcommand {
     /// Render the model-visible prompt input list as JSON.
     PromptInput(DebugPromptInputCommand),
 
+    /// Audit a standalone model request as versioned JSON without running inference.
+    PromptRequest(DebugPromptRequestCommand),
+
     /// Replay a rollout trace bundle and write reduced state JSON.
     #[clap(hide = true)]
     TraceReduce(DebugTraceReduceCommand),
@@ -312,6 +317,28 @@ struct DebugPromptInputCommand {
 }
 
 #[derive(Debug, Parser)]
+struct DebugPromptRequestCommand {
+    #[clap(flatten)]
+    input: DebugPromptInputCommand,
+
+    /// JSON schema file to include in the model's output format.
+    #[arg(long = "output-schema", value_name = "FILE")]
+    output_schema: Option<PathBuf>,
+
+    /// Permit creating local session and state files for state-backed tools.
+    #[arg(long = "allow-session-state", default_value_t = false)]
+    allow_session_state: bool,
+}
+
+enum DebugPromptOutput {
+    Input,
+    Request {
+        output_schema: Option<PathBuf>,
+        allow_session_state: bool,
+    },
+}
+
+#[derive(Debug, Parser)]
 struct DebugModelsCommand {
     /// Skip refresh and dump only the bundled catalog shipped with this binary.
     #[arg(long = "bundled", default_value_t = false)]
@@ -320,7 +347,7 @@ struct DebugModelsCommand {
 
 #[derive(Debug, Parser)]
 struct ReviewCommand {
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of ASM.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -400,7 +427,7 @@ struct SessionArchiveConfigOverrides {
     #[clap(flatten)]
     shared: SharedCliOptions,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of ASM.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -525,13 +552,13 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | asm login --with-api-key`)"
     )]
     with_api_key: bool,
 
     #[arg(
         long = "with-access-token",
-        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | codex login --with-access-token`)"
+        help = "Read the access token from stdin (e.g. `printenv CODEX_ACCESS_TOKEN | asm login --with-access-token`)"
     )]
     with_access_token: bool,
 
@@ -588,7 +615,7 @@ struct AppServerCommand {
     #[command(flatten)]
     code_mode_host: codex_app_server::AppServerCodeModeHostArgs,
 
-    /// Error out when config.toml contains fields that are not recognized by this version of Codex.
+    /// Error out when config.toml contains fields that are not recognized by this version of ASM.
     #[arg(long = "strict-config", default_value_t = false)]
     strict_config: bool,
 
@@ -803,6 +830,9 @@ fn run_update_action(
     action: UpdateAction,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        anyhow::bail!(codex_install_context::EXTERNAL_UPDATE_MESSAGE);
+    }
     if let UpdateAction::Daemon(source) = action {
         let executable = cli_executable
             .ok_or_else(|| anyhow::anyhow!("Cannot locate the launching Codex CLI"))?;
@@ -815,7 +845,7 @@ fn run_update_action(
             status.success(),
             "Daemon update failed with status {status}"
         );
-        println!("Relaunch Codex to reconnect.");
+        println!("Relaunch ASM to reconnect.");
         return Ok(());
     }
     println!();
@@ -884,6 +914,9 @@ fn resolve_windows_update_command_from_path(
 }
 
 fn run_update_command() -> anyhow::Result<()> {
+    if !codex_install_context::BUILT_IN_UPDATES_ENABLED {
+        anyhow::bail!(codex_install_context::EXTERNAL_UPDATE_MESSAGE);
+    }
     #[cfg(debug_assertions)]
     {
         anyhow::bail!(
@@ -1041,6 +1074,11 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
+    if std::env::args_os().nth(/*n*/ 1).as_deref()
+        == Some(std::ffi::OsStr::new("--asm-native-tools"))
+    {
+        return codex_core::run_native_tool_cli();
+    }
     codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
@@ -1083,7 +1121,7 @@ async fn cli_main(
         && let Some(agents_endpoint) = &options.remote.remote
         && root_endpoint != agents_endpoint
     {
-        anyhow::bail!("`codex agents` received conflicting remote server endpoints");
+        anyhow::bail!("`asm agents` received conflicting remote server endpoints");
     }
     let root_remote = agents_options
         .and_then(|options| options.remote.remote.clone())
@@ -1114,7 +1152,7 @@ async fn cli_main(
             );
             if open_agents_overview {
                 if interactive.prompt.is_some() || !interactive.images.is_empty() {
-                    anyhow::bail!("`codex agents` does not accept an initial prompt or images");
+                    anyhow::bail!("`asm agents` does not accept an initial prompt or images");
                 }
                 if root_remote.is_some()
                     && (interactive.oss
@@ -1132,13 +1170,11 @@ async fn cli_main(
                             }))
                 {
                     anyhow::bail!(
-                        "`codex agents` cannot apply local provider or additional-directory overrides to a remote server"
+                        "`asm agents` cannot apply local provider or additional-directory overrides to a remote server"
                     );
                 }
                 if is_workload_identity_selected() {
-                    anyhow::bail!(
-                        "`codex agents` is unavailable while workload identity is active"
-                    );
+                    anyhow::bail!("`asm agents` is unavailable while workload identity is active");
                 }
                 if root_remote.is_none() {
                     resolve_remote_endpoint(
@@ -1146,7 +1182,7 @@ async fn cli_main(
                         root_remote_auth_token_env.clone(),
                     )?;
                     #[cfg(not(any(unix, windows)))]
-                    anyhow::bail!("`codex agents` requires `--remote` on this platform");
+                    anyhow::bail!("`asm agents` requires `--remote` on this platform");
                 }
                 interactive.agents_overview = true;
             }
@@ -1689,7 +1725,7 @@ async fn cli_main(
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | codex login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | asm login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
@@ -1818,7 +1854,7 @@ async fn cli_main(
             #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
             {
                 let _ = loader_overrides;
-                anyhow::bail!("`codex sandbox` is not supported on this operating system");
+                anyhow::bail!("`asm sandbox` is not supported on this operating system");
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
@@ -1844,12 +1880,31 @@ async fn cli_main(
                     root_remote_auth_token_env.as_deref(),
                     "debug prompt-input",
                 )?;
-                run_debug_prompt_input_command(
+                Box::pin(run_debug_prompt_command(
                     cmd,
+                    DebugPromptOutput::Input,
                     root_config_overrides,
                     interactive,
                     arg0_paths.clone(),
-                )
+                ))
+                .await?;
+            }
+            DebugSubcommand::PromptRequest(cmd) => {
+                reject_remote_mode_for_subcommand(
+                    root_remote.as_deref(),
+                    root_remote_auth_token_env.as_deref(),
+                    "debug prompt-request",
+                )?;
+                Box::pin(run_debug_prompt_command(
+                    cmd.input,
+                    DebugPromptOutput::Request {
+                        output_schema: cmd.output_schema,
+                        allow_session_state: cmd.allow_session_state,
+                    },
+                    root_config_overrides,
+                    interactive,
+                    arg0_paths.clone(),
+                ))
                 .await?;
             }
             DebugSubcommand::TraceReduce(cmd) => {
@@ -1996,10 +2051,10 @@ fn profile_v2_for_subcommand<'a>(
         | Subcommand::MigrateNfsDb(_)
         | Subcommand::Sandbox(_)
         | Subcommand::Debug(DebugCommand {
-            subcommand: DebugSubcommand::PromptInput(_),
+            subcommand: DebugSubcommand::PromptInput(_) | DebugSubcommand::PromptRequest(_),
         }) => Ok(Some(profile_v2)),
         _ => anyhow::bail!(
-            "--profile only applies to runtime commands, `codex mcp`, and `codex migrate-nfs-db`: `codex`, `codex exec`, `codex review`, `codex resume`, `codex queue`, `codex archive`, `codex delete`, `codex unarchive`, `codex fork`, `codex mcp`, `codex migrate-nfs-db`, `codex sandbox`, and `codex debug prompt-input`."
+            "--profile only applies to runtime commands, `asm mcp`, and `asm migrate-nfs-db`: `asm`, `asm exec`, `asm review`, `asm resume`, `asm queue`, `asm archive`, `asm delete`, `asm unarchive`, `asm fork`, `asm mcp`, `asm migrate-nfs-db`, `asm sandbox`, `asm debug prompt-input`, and `asm debug prompt-request`."
         ),
     }
 }
@@ -2084,12 +2139,34 @@ async fn run_debug_trace_reduce_command(cmd: DebugTraceReduceCommand) -> anyhow:
     Ok(())
 }
 
-async fn run_debug_prompt_input_command(
+#[tracing::instrument(skip_all)]
+async fn run_debug_prompt_command(
     cmd: DebugPromptInputCommand,
+    output: DebugPromptOutput,
     root_config_overrides: CliConfigOverrides,
     interactive: TuiCli,
     arg0_paths: Arg0DispatchPaths,
 ) -> anyhow::Result<()> {
+    let output_schema = match &output {
+        DebugPromptOutput::Input => None,
+        DebugPromptOutput::Request { output_schema, .. } => match output_schema {
+            Some(path) => {
+                let contents = tokio::fs::read_to_string(path).await.map_err(|err| {
+                    anyhow::anyhow!(
+                        "Failed to read output schema file {}: {err}",
+                        path.display()
+                    )
+                })?;
+                Some(serde_json::from_str(&contents).map_err(|err| {
+                    anyhow::anyhow!(
+                        "Output schema file {} is not valid JSON: {err}",
+                        path.display()
+                    )
+                })?)
+            }
+            None => None,
+        },
+    };
     let loader_overrides = loader_overrides_for_profile(interactive.config_profile_v2.as_ref())?;
     let shared = interactive.shared.into_inner();
     let mut cli_kv_overrides = root_config_overrides
@@ -2143,6 +2220,19 @@ async fn run_debug_prompt_input_command(
             text: prompt.replace("\r\n", "\n").replace('\r', "\n"),
             text_elements: Vec::new(),
         });
+    }
+
+    if let DebugPromptOutput::Request {
+        allow_session_state,
+        ..
+    } = output
+    {
+        let mut config = config;
+        config.ephemeral = !allow_session_state;
+        let prompt_request =
+            codex_app_server::build_prompt_request(config, input, output_schema).await?;
+        println!("{}", serde_json::to_string_pretty(&prompt_request)?);
+        return Ok(());
     }
 
     let user_instructions_provider = Arc::new(CodexHomeUserInstructionsProvider::new(
@@ -2266,12 +2356,12 @@ fn reject_remote_mode_for_subcommand(
 ) -> anyhow::Result<()> {
     if let Some(remote) = remote {
         anyhow::bail!(
-            "`--remote {remote}` is only supported for interactive TUI commands, not `codex {subcommand}`"
+            "`--remote {remote}` is only supported for interactive TUI commands, not `asm {subcommand}`"
         );
     }
     if remote_auth_token_env.is_some() {
         anyhow::bail!(
-            "`--remote-auth-token-env` is only supported for interactive TUI commands, not `codex {subcommand}`"
+            "`--remote-auth-token-env` is only supported for interactive TUI commands, not `asm {subcommand}`"
         );
     }
     Ok(())
@@ -2301,12 +2391,12 @@ fn reject_unsupported_worktree_for_subcommand(
         None => Ok(()),
         Some(Subcommand::Fork(command)) if command.session_id.is_some() && !command.last => Ok(()),
         Some(Subcommand::Fork(_)) => {
-            anyhow::bail!("`codex fork --worktree` requires an explicit session ID")
+            anyhow::bail!("`asm fork --worktree` requires an explicit session ID")
         }
         Some(Subcommand::Exec(command)) => match &command.command {
             None | Some(ExecCommand::Fork(_)) => Ok(()),
             Some(ExecCommand::Resume(_)) => anyhow::bail!(
-                "`--worktree` cannot resume an existing session; use `codex exec fork --worktree`"
+                "`--worktree` cannot resume an existing session; use `asm exec fork --worktree`"
             ),
             Some(ExecCommand::Review(_)) => {
                 anyhow::bail!("`--worktree` is not supported for code review")
@@ -2314,7 +2404,7 @@ fn reject_unsupported_worktree_for_subcommand(
         },
         _ => {
             anyhow::bail!(
-                "`--worktree` supports new interactive sessions, `codex fork`, `codex exec`, and `codex exec fork`"
+                "`--worktree` supports new interactive sessions, `asm fork`, `asm exec`, and `asm exec fork`"
             )
         }
     }
@@ -2409,7 +2499,7 @@ fn reject_strict_config_for_unsupported_subcommand(
     subcommand: &str,
 ) -> anyhow::Result<()> {
     if strict_config {
-        anyhow::bail!("`--strict-config` is not supported for `codex {subcommand}`");
+        anyhow::bail!("`--strict-config` is not supported for `asm {subcommand}`");
     }
     Ok(())
 }
@@ -2501,7 +2591,7 @@ async fn run_interactive_tui(
     if interactive.no_daemon {
         if interactive.agents_overview {
             return Ok(AppExitInfo::fatal(
-                "--no-daemon cannot be used with codex agents. The agents overview requires a shared server. Use codex --no-daemon to work without it.",
+                "--no-daemon cannot be used with asm agents. The agents overview requires a shared server. Use asm --no-daemon to work without it.",
             ));
         }
         if remote.is_some() {
@@ -2524,7 +2614,7 @@ async fn run_interactive_tui(
         }
 
         eprintln!(
-            "WARNING: TERM is set to \"dumb\". Codex's interactive TUI may not work in this terminal."
+            "WARNING: TERM is set to \"dumb\". ASM's interactive TUI may not work in this terminal."
         );
         if !confirm("Continue anyway? [y/N]: ")? {
             return Ok(AppExitInfo::fatal(
@@ -2547,7 +2637,7 @@ async fn run_interactive_tui(
         let output = codex_app_server_daemon::run(AppServerLifecycleCommand::Start)
             .await
             .map_err(|err| std::io::Error::other(format!(
-                "{err:#}\nThe agents overview requires a shared server. Use codex --no-daemon to work without it."
+                "{err:#}\nThe agents overview requires a shared server. Use asm --no-daemon to work without it."
             )))?;
         interactive.managed_daemon = output.backend.is_some();
     }
@@ -3174,6 +3264,12 @@ enabled = true
             Some("work")
         );
         assert_eq!(
+            profile_v2_for_args(&["codex", "--profile", "work", "debug", "prompt-request"])
+                .expect("debug prompt-request supports profile-v2")
+                .as_deref(),
+            Some("work")
+        );
+        assert_eq!(
             profile_v2_for_args(&["codex", "--profile", "work", "mcp", "list"])
                 .expect("mcp supports profile-v2")
                 .as_deref(),
@@ -3524,6 +3620,53 @@ enabled = true
         assert_eq!(
             cmd.images,
             vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")]
+        );
+
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "debug",
+            "prompt-request",
+            "hello",
+            "--image",
+            "/tmp/a.png,/tmp/b.png",
+            "--output-schema",
+            "/tmp/schema.json",
+            "--allow-session-state",
+        ])
+        .expect("parse");
+
+        let Some(Subcommand::Debug(DebugCommand {
+            subcommand: DebugSubcommand::PromptRequest(cmd),
+        })) = cli.subcommand
+        else {
+            panic!("expected debug prompt-request subcommand");
+        };
+
+        assert_eq!(cmd.input.prompt.as_deref(), Some("hello"));
+        assert_eq!(
+            cmd.input.images,
+            vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.png")]
+        );
+        assert_eq!(cmd.output_schema, Some(PathBuf::from("/tmp/schema.json")));
+        assert!(cmd.allow_session_state);
+        let cli = MultitoolCli::try_parse_from(["codex", "debug", "prompt-request"])
+            .expect("parse default request audit");
+        let Some(Subcommand::Debug(DebugCommand {
+            subcommand: DebugSubcommand::PromptRequest(cmd),
+        })) = cli.subcommand
+        else {
+            panic!("expected debug prompt-request subcommand");
+        };
+        assert!(!cmd.allow_session_state);
+        assert!(
+            MultitoolCli::try_parse_from([
+                "codex",
+                "debug",
+                "prompt-input",
+                "--output-schema",
+                "/tmp/schema.json",
+            ])
+            .is_err()
         );
     }
 
@@ -3988,7 +4131,7 @@ enabled = true
             vec![
                 "Token usage: total=2 input=0 output=2".to_string(),
                 "To continue this session, run:".to_string(),
-                "  codex resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
+                "  asm resume 123e4567-e89b-12d3-a456-426614174000".to_string(),
             ]
         );
     }
@@ -4003,7 +4146,7 @@ enabled = true
                 insta::assert_snapshot!(lines.join("\n"), @"
                 Token usage: total=2 input=0 output=2
                 To continue this session, run:
-                  codex resume 123e4567-e89b-12d3-a456-426614174000
+                  asm resume 123e4567-e89b-12d3-a456-426614174000
                 ");
             }
         }
@@ -4021,7 +4164,7 @@ enabled = true
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "  \u{1b}[36masm resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
             ]
         );
     }
@@ -4036,8 +4179,8 @@ enabled = true
         insta::assert_snapshot!(lines.join("\n"), @"
         Token usage: total=2 input=0 output=2
         To continue this session, run:
-          codex resume 123e4567-e89b-12d3-a456-426614174000
-        Or run codex resume and select my-thread.
+          asm resume 123e4567-e89b-12d3-a456-426614174000
+        Or run asm resume and select my-thread.
         ");
     }
 
@@ -4053,8 +4196,8 @@ enabled = true
             vec![
                 "Token usage: total=2 input=0 output=2",
                 "To continue this session, run:",
-                "  \u{1b}[36mcodex resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
-                "Or run \u{1b}[36mcodex resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
+                "  \u{1b}[36masm resume 123e4567-e89b-12d3-a456-426614174000\u{1b}[39m",
+                "Or run \u{1b}[36masm resume\u{1b}[39m and select \u{1b}[36mmy-thread\u{1b}[39m.",
             ]
         );
     }
@@ -4457,7 +4600,7 @@ enabled = true
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `codex mcp`"
+            "`--strict-config` is not supported for `asm mcp`"
         );
 
         let cli = MultitoolCli::try_parse_from(["codex", "--strict-config", "remote-control"])
@@ -4470,7 +4613,7 @@ enabled = true
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `codex remote-control`"
+            "`--strict-config` is not supported for `asm remote-control`"
         );
     }
 
@@ -4486,7 +4629,7 @@ enabled = true
 
         assert_eq!(
             err.to_string(),
-            "`--strict-config` is not supported for `codex app-server proxy`"
+            "`--strict-config` is not supported for `asm app-server proxy`"
         );
     }
 

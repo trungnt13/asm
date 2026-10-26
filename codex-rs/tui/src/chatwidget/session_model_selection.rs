@@ -50,11 +50,48 @@ impl AstraModelPickerAction {
 }
 
 impl ChatWidget {
+    pub(super) fn model_selection_needs_new_session(&self, model: &str) -> bool {
+        (codex_models_manager::provider_for_model(self.current_model())
+            != codex_models_manager::provider_for_model(model))
+            || (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
+                || codex_protocol::openai_models::is_native_runtime_model(&model))
+                && self.current_model() != model
+    }
+
+    pub(crate) fn confirm_model_session(
+        &mut self,
+        model: String,
+        effort: Option<ReasoningEffortConfig>,
+    ) {
+        let thread_id = self.thread_id();
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Start a new session?".to_string()),
+            subtitle: Some(format!("Use {model}. The current session stays saved; conversation history is not copied. The selected model uses its configured provider or native runtime.")),
+            items: vec![SelectionItem {
+                name: "Start new session".to_string(),
+                dismiss_on_select: true,
+                actions: vec![Box::new(move |tx| tx.send(AppEvent::StartModelSession {
+                    thread_id,
+                    model: model.clone(),
+                    effort: effort.clone(),
+                    confirmed: true,
+                }))],
+                ..Default::default()
+            }],
+            ..SelectionViewParams::picker()
+        });
+    }
+
     pub(super) fn session_model_selection_action(
         &self,
         model: String,
         effort: Option<ReasoningEffortConfig>,
     ) -> Option<SelectionSecondaryAction> {
+        if codex_protocol::openai_models::is_native_runtime_model(&model)
+            || self.model_selection_needs_new_session(&model)
+        {
+            return None;
+        }
         // Reserve selections are already session-only.
         if model == LUNA_RESERVE_MODEL {
             return None;

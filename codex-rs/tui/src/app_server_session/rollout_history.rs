@@ -70,12 +70,15 @@ impl AppServerSession {
                 })
                 .await?;
             thread.turns = page.data.into_iter().rev().collect();
+            if let Some(side) = self.side_conversation(thread_id) {
+                side.trim_turns(&mut thread.turns);
+            }
             self.history_pagination.remove(&thread_id);
             history_notice = Some(
                 "Showing up to 100 recent prompts and final replies. Intermediate messages and tool activity are unavailable.",
             );
         }
-        let session = thread_session_state_from_thread_response(
+        let mut session = thread_session_state_from_thread_response(
             &thread.id,
             crate::windows_sandbox::host_from_environments(thread.environments.as_deref()),
             thread.forked_from_id.clone(),
@@ -96,6 +99,7 @@ impl AppServerSession {
         )
         .await
         .map_err(color_eyre::eyre::Report::msg)?;
+        session.thread_source = thread.thread_source.clone().map(Into::into);
         Ok((
             AppServerStartedThread {
                 session,
@@ -174,6 +178,37 @@ impl AppServerSession {
         );
         if model_settings == ResumeModelSettings::OverrideFromCurrentConfig {
             params.model_provider = self.explicit_model_provider(&config);
+        }
+        let has_launch_tier_override = config
+            .config_layer_stack
+            .origins()
+            .get("service_tier")
+            .is_some_and(|origin| {
+                matches!(
+                    origin.name,
+                    codex_config::ConfigLayerSource::SessionFlags
+                        | codex_config::ConfigLayerSource::User {
+                            profile: Some(_),
+                            ..
+                        }
+                )
+            });
+        if model_settings == ResumeModelSettings::RestoreFromThread
+            && params.service_tier.is_some()
+            && !has_launch_tier_override
+        {
+            // Global new-thread defaults must not overwrite a saved fork's selected tier.
+            // Read only metadata; do not hydrate any history or alter non-fork resumes.
+            let thread = self.thread_read(thread_id, /*include_turns*/ false).await?;
+            if !thread.ephemeral
+                && thread.forked_from_id.is_some()
+                && thread.thread_source == Some(codex_app_server_protocol::ThreadSource::User)
+            {
+                params.service_tier = None;
+                if let Some(overrides) = params.config.as_mut() {
+                    overrides.remove("service_tier");
+                }
+            }
         }
         self.thread_tool_transport()
             .configure_mcp(&mut params.config);

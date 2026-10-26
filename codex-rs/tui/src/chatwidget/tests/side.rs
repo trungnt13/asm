@@ -52,8 +52,10 @@ async fn slash_rename_is_rejected_for_side_threads() {
         "Side conversations are ephemeral and cannot be renamed.".to_string(),
     );
 
-    chat.dispatch_command(SlashCommand::Rename);
-    assert_side_rename_rejected(&mut rx, &mut op_rx);
+    for command in [SlashCommand::Rename, SlashCommand::AutoRename] {
+        chat.dispatch_command(command);
+        assert_side_rename_rejected(&mut rx, &mut op_rx);
+    }
 }
 
 #[tokio::test]
@@ -287,6 +289,7 @@ async fn side_context_label_preserves_status_line_snapshot() {
     chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
     chat.refresh_status_line();
     chat.set_side_conversation_active(/*active*/ true);
+    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Side);
     chat.set_side_conversation_context_label(Some(
         "Side from main thread · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
@@ -308,6 +311,7 @@ async fn side_context_label_shows_parent_status_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
     chat.set_side_conversation_active(/*active*/ true);
+    chat.set_composer_mode(crate::bottom_pane::ComposerMode::Side);
     chat.set_side_conversation_context_label(Some(
         "Side from main thread · main needs input · ctrl+/ to switch · ctrl+c to close".to_string(),
     ));
@@ -350,4 +354,110 @@ async fn side_context_label_shows_hidden_side_snapshot() {
         )),
     );
     assert_chatwidget_snapshot!("side_context_label_shows_hidden_side", terminal.backend());
+}
+
+#[tokio::test]
+async fn temporary_side_rejects_navigation_and_mutating_commands() {
+    for command in [
+        SlashCommand::Btw,
+        SlashCommand::Parallel,
+        SlashCommand::Rename,
+        SlashCommand::New,
+        SlashCommand::Clear,
+        SlashCommand::Resume,
+        SlashCommand::Worktree,
+        SlashCommand::Compact,
+        SlashCommand::Delete,
+    ] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.thread_id = Some(ThreadId::new());
+        chat.set_side_conversation_active(/*active*/ true);
+
+        chat.dispatch_command(command);
+
+        let Ok(AppEvent::InsertHistoryCell(cell)) = rx.try_recv() else {
+            panic!("expected temporary-side command error for {command:?}");
+        };
+        let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 200));
+        let name = command.command();
+        assert_eq!(
+            rendered,
+            format!(
+                "■ '/{name}' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
+            )
+        );
+        assert!(rx.try_recv().is_err(), "{command:?}");
+        assert!(op_rx.try_recv().is_err(), "{command:?}");
+        assert!(!chat.bottom_pane.has_active_view(), "{command:?}");
+    }
+
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    for command in [SlashCommand::SendLast, SlashCommand::Sync] {
+        chat.dispatch_command(command);
+        let errors = drain_insert_history(&mut rx);
+        assert!(lines_to_single_string(&errors[0]).contains("only available in Side"));
+    }
+    chat.set_side_conversation_active(/*active*/ true);
+    assert_eq!(chat.last_side_reply_markdown(), None);
+    chat.transcript.last_agent_markdown = Some("displayed reply".to_string());
+    chat.transcript.last_agent_source = Some("original reply".to_string());
+    assert_eq!(chat.last_side_reply_markdown(), Some("original reply"));
+
+    chat.dispatch_command(SlashCommand::Fork);
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::SideConversationAction {
+            action: crate::app_event::SideConversationAction::Fork { name: None },
+        })
+    );
+    chat.dispatch_command_with_args(SlashCommand::Fork, "saved chat".to_string(), Vec::new());
+    assert_matches!(rx.try_recv(), Ok(AppEvent::SideConversationAction {
+        action: crate::app_event::SideConversationAction::Fork { name: Some(name) },
+    }) if name == "saved chat");
+    chat.dispatch_command(SlashCommand::Sync);
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::SideConversationAction {
+            action: crate::app_event::SideConversationAction::Sync,
+        })
+    );
+    chat.dispatch_command_with_args(SlashCommand::Sync, "unexpected".to_string(), Vec::new());
+    let errors = drain_insert_history(&mut rx);
+    assert!(lines_to_single_string(&errors[0]).contains("Usage: /sync"));
+    assert!(rx.try_recv().is_err());
+
+    chat.on_task_started();
+    for command in [SlashCommand::Fork, SlashCommand::Sync] {
+        chat.dispatch_command(command);
+        let errors = drain_insert_history(&mut rx);
+        assert!(
+            lines_to_single_string(&errors[0]).contains("disabled while a task is in progress")
+        );
+        assert!(rx.try_recv().is_err());
+    }
+    chat.dispatch_command_with_args(
+        SlashCommand::SendLast,
+        "use this result".to_string(),
+        Vec::new(),
+    );
+    assert_matches!(rx.try_recv(), Ok(AppEvent::SideConversationAction {
+        action: crate::app_event::SideConversationAction::SendLast { text },
+    }) if text == "use this result");
+    assert!(op_rx.try_recv().is_err());
+    assert!(!chat.bottom_pane.has_active_view());
+}
+
+#[tokio::test]
+async fn temporary_side_rejects_inline_rename() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_side_conversation_active(/*active*/ true);
+    chat.dispatch_command_with_args(SlashCommand::Rename, "investigate".to_string(), Vec::new());
+    let errors = drain_insert_history(&mut rx);
+    assert!(
+        lines_to_single_string(&errors[0])
+            .contains("'/rename' is unavailable in side conversations.")
+    );
+    assert!(!chat.bottom_pane.has_active_view());
+    assert!(op_rx.try_recv().is_err());
 }

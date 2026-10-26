@@ -88,6 +88,12 @@ static LIVE_THREADS: Gauge = Gauge::new("core.threads.live");
 
 #[derive(Clone, Debug)]
 pub struct ThreadConfigSnapshot {
+    /// Current session-only automatic reasoning mode; never a saved preference.
+    pub system1_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    pub system1_revision: u64,
+    pub system1_error: Option<codex_protocol::protocol::System1Error>,
+    pub system1_failure_episode: u64,
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,
@@ -911,6 +917,30 @@ impl CodexThread {
             .await
     }
 
+    /// Captures complete replay history for an idle temporary root fork without saving it.
+    /// Other threads return `None` and continue using their normal store-backed history.
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub async fn ephemeral_fork_history(&self) -> CodexResult<Option<Vec<RolloutItem>>> {
+        let Some(history) = &self.session.ephemeral_rollout_items else {
+            return Ok(None);
+        };
+        loop {
+            {
+                let active_turn = self.session.active_turn.lock().await;
+                if active_turn.is_some() {
+                    return Err(CodexErr::InvalidRequest(
+                        "cannot save a temporary fork while a turn is running".to_string(),
+                    ));
+                }
+                if let Ok(history) = history.try_lock() {
+                    return Ok(Some(history.clone()));
+                }
+            }
+            // Wait without the turn lock, then recheck idle state before copying.
+            drop(history.lock().await);
+        }
+    }
+
     pub async fn load_history(
         &self,
         include_archived: bool,
@@ -971,6 +1001,14 @@ impl CodexThread {
 
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
         self.session.thread_config_snapshot().await
+    }
+
+    pub fn system1_decision_connection(&self) -> Option<codex_protocol::System1DecisionConnection> {
+        self.session.system1_decision_connection()
+    }
+
+    pub fn system1_stats(&self) -> codex_protocol::System1Stats {
+        self.session.system1_stats()
     }
 
     pub async fn resume_config_snapshot(&self) -> (ThreadConfigSnapshot, Option<String>) {

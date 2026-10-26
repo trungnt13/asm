@@ -556,6 +556,7 @@ impl TurnToolCounts {
             ThreadItemPayload::ImageGeneration(_) => self.image_generation += 1,
             ThreadItemPayload::UserMessage { .. }
             | ThreadItemPayload::HookPrompt { .. }
+            | ThreadItemPayload::InterAgentMessage { .. }
             | ThreadItemPayload::AgentMessage { .. }
             | ThreadItemPayload::FunctionCallOutput { .. }
             | ThreadItemPayload::Plan { .. }
@@ -2913,6 +2914,12 @@ fn warn_missing_analytics_context(
 }
 
 pub(crate) fn tracked_tool_item_id(item: &ThreadItemPayload) -> Option<&str> {
+    if item
+        .id()
+        .starts_with(codex_protocol::items::INTER_AGENT_COMMUNICATION_ITEM_PREFIX)
+    {
+        return None;
+    }
     match item {
         ThreadItemPayload::CommandExecution { id, .. }
         | ThreadItemPayload::FileChange { id, .. }
@@ -2923,6 +2930,7 @@ pub(crate) fn tracked_tool_item_id(item: &ThreadItemPayload) -> Option<&str> {
         ThreadItemPayload::ImageGeneration(item) => Some(&item.id),
         ThreadItemPayload::UserMessage { .. }
         | ThreadItemPayload::HookPrompt { .. }
+        | ThreadItemPayload::InterAgentMessage { .. }
         | ThreadItemPayload::AgentMessage { .. }
         | ThreadItemPayload::FunctionCallOutput { .. }
         | ThreadItemPayload::Plan { .. }

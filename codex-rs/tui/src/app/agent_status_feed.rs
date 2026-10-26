@@ -203,7 +203,8 @@ fn activity_summary(item: &ThreadItemPayload) -> Option<String> {
         ThreadItemPayload::ContextCompaction { .. } => {
             return Some("Compacted context".to_string());
         }
-        ThreadItemPayload::UserMessage { .. }
+        ThreadItemPayload::InterAgentMessage { .. }
+        | ThreadItemPayload::UserMessage { .. }
         | ThreadItemPayload::HookPrompt { .. }
         | ThreadItemPayload::FunctionCallOutput { .. }
         | ThreadItemPayload::Sleep(_) => {

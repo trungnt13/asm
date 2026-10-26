@@ -247,7 +247,36 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
     Box::pin(sess.reload_user_config_layer()).await;
 }
 
+async fn reject_native_operation(sess: &Session, sub_id: &str, operation: &str) -> bool {
+    let model = sess.thread_settings_snapshot().await.model;
+    if !crate::claude_runtime::is_native_model(&model) {
+        return false;
+    }
+    sess.send_event_raw(Event {
+        id: sub_id.to_string(),
+        msg: EventMsg::Warning(WarningEvent {
+            message: format!(
+                "Native runtimes do not support {operation}; current work was not changed"
+            ),
+        }),
+    })
+    .await;
+    true
+}
+
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
+    if crate::claude_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Warning(WarningEvent {
+                message:
+                    "Native runtimes do not support manual compaction; current work was not changed"
+                        .to_string(),
+            }),
+        })
+        .await;
+        return;
+    }
     // Stop the old turn before the compact task picks up the next turn's environments.
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
     let turn_context = sess
@@ -300,9 +329,19 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     if let Some(startup_prewarm) = startup_prewarm {
         startup_prewarm.abort().await;
     }
+    sess.stop_system1().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    crate::claude_runtime::shutdown(sess).await;
     super::async_compaction::shutdown(sess).await;
+    // Cancel the turn before starting the bounded, best-effort diagnostic drain.
+    if let Some(log) = sess
+        .services
+        .thread_extension_data
+        .get::<Arc<super::decision_log::DecisionLog>>()
+    {
+        log.close();
+    }
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();
     if let Some(shell_snapshot_prewarm) = shell_snapshot_prewarm {
         shell_snapshot_prewarm.abort();
@@ -409,6 +448,9 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
+    if reject_native_operation(sess, &sub_id, "native review mode").await {
+        return;
+    }
     let turn_context = sess
         .new_turn_with_default_settings(sub_id.clone(), Default::default())
         .await;
@@ -509,6 +551,9 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationStart(params) => {
+                    if reject_native_operation(&sess, &sub.id, "realtime conversations").await {
+                        return false;
+                    }
                     if let Err(err) =
                         handle_realtime_conversation_start(&sess, sub.id.clone(), params).await
                     {
@@ -525,6 +570,12 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationAttach { params, reply } => {
+                    if crate::claude_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
+                        let _ = reply.send(Err(CodexErr::InvalidRequest(
+                            "Native runtimes do not support realtime conversations".to_string(),
+                        )));
+                        return false;
+                    }
                     let result =
                         crate::realtime_conversation::handle_attach(&sess, sub.id, params).await;
                     let _ = reply.send(result);
@@ -608,21 +659,44 @@ pub(super) async fn submission_loop(
                     should_exit
                 }
                 Op::ThreadSettings {
-                    thread_settings,
+                    mut thread_settings,
                     reply,
                 } => {
-                    let _settings_guard = thread_settings::acquire_persistence_lock(&sess).await;
+                    let system1_enabled = thread_settings.system1_enabled.take();
+                    let persistent = thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default();
                     let thread_settings = WithTurnExtensionData {
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
                     };
-                    match thread_settings::update(&sess, thread_settings).await {
+                    let result = async {
+                        if system1_enabled.is_some() && persistent {
+                            return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
+                        }
+                        let _settings_guard = if system1_enabled.is_none() {
+                            Some(thread_settings::acquire_persistence_lock(&sess).await)
+                        } else {
+                            None
+                        };
+                        let snapshot = if system1_enabled.is_none() {
+                            Some(thread_settings::update(&sess, thread_settings).await
+                                .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?)
+                        } else {
+                            None
+                        };
+                        if let Some(enabled) = system1_enabled {
+                            sess.set_system1_enabled(enabled).await?;
+                        }
+                        Ok::<_, CodexErr>(snapshot)
+                    }.await;
+                    match result {
                         Ok(snapshot) => {
                             // Reply first: the caller may hold a lock its event consumer needs.
                             if let Some(reply) = reply {
                                 let _ = reply.send(Ok(()));
                             }
-                            thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            if let Some(snapshot) = snapshot {
+                                thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            }
                         }
                         Err(error) => {
                             let message = format!("invalid thread settings override: {error}");

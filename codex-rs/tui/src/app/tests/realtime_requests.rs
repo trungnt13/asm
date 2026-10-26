@@ -70,11 +70,15 @@ fn test_user_message(id: &str, text: &str) -> ThreadItemPayload {
 
 fn empty_thread_snapshot(app: &App, thread_id: ThreadId) -> ThreadEventSnapshot {
     ThreadEventSnapshot {
+        output_tps: None,
+        inferred_session: false,
         delegated_turns: Vec::new(),
         session: Some(test_thread_session(thread_id, app.config.cwd.to_path_buf())),
         turns: Vec::new(),
         events: Vec::new(),
         active_reasoning_item: None,
+        reasoning_state: Default::default(),
+        latest_turn_id: None,
         input_state: None,
     }
 }
@@ -112,6 +116,7 @@ async fn check_remote_voice_start(
             /*failed_thread_name*/ None,
             crate::app_server_session::ThreadParamsMode::Remote,
             RealtimeRequestBehavior::AcceptStart,
+            super::session_lifecycle_requests::TurnStartBehavior::Forward,
             codex_config::LoaderOverrides::default(),
         )
         .await?;
@@ -303,6 +308,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer.clone())],
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -676,6 +682,7 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
             ThreadItem::untimed(test_agent_message("voice-answer", "spoken answer")),
         ],
         items_view: TurnItemsView::Summary,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,
@@ -692,11 +699,15 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
     };
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: vec![voice.id.clone()],
             session: Some(test_thread_session(source, app.config.cwd.to_path_buf())),
             turns: vec![voice, typed],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -869,11 +880,15 @@ async fn buffered_voice_items_reconcile_captions_after_thread_switch() {
         .collect();
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: vec!["buffered-turn".into()],
             session: Some(test_thread_session(source, app.config.cwd.to_path_buf())),
             turns: Vec::new(),
             events: events_to_replay,
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -939,6 +954,7 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
                     root_turn_id: None,
                     items: items.into_iter().map(ThreadItem::untimed).collect(),
                     items_view: TurnItemsView::Summary,
+                    token_usage: None,
                     status,
                     error: None,
                     started_at: None,
@@ -950,6 +966,8 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
     };
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: vec!["started".into(), "evicted".into(), "interrupted".into()],
             session: Some(test_thread_session(source, app.config.cwd.to_path_buf())),
             turns: Vec::new(),
@@ -977,6 +995,8 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
                 ),
             ],
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -1226,6 +1246,7 @@ async fn rejected_realtime_speech_restores_the_delegated_final_answer() -> Resul
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer)],
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -1326,6 +1347,7 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer)],
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -1400,6 +1422,8 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
         .insert(original, vec![("replayed-turn".to_string(), older_item)]);
     app.replay_thread_snapshot(
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(original, app.config.cwd.to_path_buf())),
             turns: vec![Turn {
@@ -1407,6 +1431,7 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(replayed_item)],
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -1415,6 +1440,8 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
             }],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,
@@ -1613,6 +1640,7 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer)],
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -1691,6 +1719,7 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(second_answer)],
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -1922,6 +1951,7 @@ async fn remote_voice_catalog_success_and_failure() -> Result<()> {
                 /*failed_thread_name*/ None,
                 crate::app_server_session::ThreadParamsMode::Remote,
                 RealtimeRequestBehavior::Forward,
+                super::session_lifecycle_requests::TurnStartBehavior::Forward,
                 codex_config::LoaderOverrides::default(),
             )
             .await?;

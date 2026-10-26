@@ -122,6 +122,13 @@ async fn local_load_preserves_defaults_and_resolved_overrides() -> anyhow::Resul
     for config_text in [
         "",
         r#"
+[auto_rename]
+enabled = false
+model = "gpt-5.2"
+first_trigger = "first_completed_turn"
+context = "recent_conversation"
+max_context_bytes = 8192
+
 [tui]
 animations = false
 show_tooltips = false
@@ -129,10 +136,13 @@ show_server_version_notice = false
 auto_recap = false
 fullscreen_transcript = true
 mouse_scroll_speed = 0.5
+collapse_tool_calls = true
+collapse_tool_calls_max_lines = 3
 copy_on_select = "never"
 copy_on_select_clear_selection = true
 right_click_paste = "off"
 vim_mode_default = true
+multiline_enter = true
 terminal_resize_reflow_max_rows = 0
 session_picker_view = "comfortable"
 [tui.effects]
@@ -173,6 +183,16 @@ fast_default_opt_out = true
             .await?;
         assert_eq!(config.startup_warnings, Vec::<String>::new());
         assert_eq!(config.tui_mouse_scroll_speed, Some(1.5));
+        assert_eq!(
+            config
+                .tui_collapse_tool_calls_max_lines
+                .map(std::num::NonZeroUsize::get),
+            if config_text.is_empty() {
+                None
+            } else {
+                Some(3)
+            }
+        );
         assert!(config.tui_fullscreen_transcript);
         let bootstrap = crate::legacy_core::config::load_config_toml_with_layer_stack(
             home.path(),
@@ -193,6 +213,14 @@ fast_default_opt_out = true
             LocalSettings::from(&config),
         );
         assert_eq!(config.features.legacy_feature_usages().count(), 1);
+    }
+    for value in ["0", "-1", "1.5"] {
+        assert!(
+            toml::from_str::<codex_config::types::Tui>(&format!(
+                "collapse_tool_calls_max_lines = {value}"
+            ))
+            .is_err()
+        );
     }
     Ok(())
 }

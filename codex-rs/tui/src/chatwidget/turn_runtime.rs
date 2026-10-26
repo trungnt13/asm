@@ -188,6 +188,7 @@ impl ChatWidget {
         self.input_queue.user_turn_pending_start = false;
         self.clear_active_hook_cell();
         self.clear_guardian_review_status();
+        self.agent_wait_history.clear();
         self.turn_lifecycle.finish();
         self.status_state.program_status_after_turn = if from_replay {
             crate::terminal_program_status::ProgramStatus::Idle
@@ -353,6 +354,7 @@ impl ChatWidget {
         // Reset running state and clear streaming buffers.
         self.input_queue.user_turn_pending_start = false;
         self.clear_guardian_review_status();
+        self.agent_wait_history.clear();
         self.turn_lifecycle.finish();
         self.status_state.program_status_after_turn = if self.thread_usage.replaying_turn_completion
         {

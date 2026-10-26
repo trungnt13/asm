@@ -19,6 +19,7 @@ use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SubAgentSource;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -31,6 +32,8 @@ pub(crate) struct LoadedSubagentThread {
     pub(crate) agent_nickname: Option<String>,
     pub(crate) agent_role: Option<String>,
     pub(crate) agent_path: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
     pub(crate) blocks_direct_input: bool,
     pub(crate) is_running: bool,
     pub(crate) is_closed: bool,
@@ -96,6 +99,8 @@ pub(crate) fn find_loaded_subagent_threads_for_primary(
                     agent_nickname: thread.agent_nickname,
                     agent_role: thread.agent_role,
                     agent_path: thread_spawn_agent_path(&thread.source),
+                    model: thread.model,
+                    reasoning_effort: thread.reasoning_effort,
                 })
         })
         .collect();
@@ -129,6 +134,7 @@ mod tests {
     use codex_app_server_protocol::Thread;
     use codex_app_server_protocol::ThreadStatus;
     use codex_protocol::ThreadId;
+    use codex_protocol::openai_models::ReasoningEffort;
     use codex_utils_absolute_path::test_support::PathBufExt;
     use codex_utils_absolute_path::test_support::test_path_buf;
     use pretty_assertions::assert_eq;
@@ -208,6 +214,8 @@ mod tests {
         );
         child.agent_nickname = Some("Scout".to_string());
         child.agent_role = Some("explorer".to_string());
+        child.model = Some("gpt-6-sol".to_string());
+        child.reasoning_effort = Some(ReasoningEffort::High);
         child.can_accept_direct_input = Some(true);
         child.status = ThreadStatus::Active {
             active_flags: Vec::new(),
@@ -245,6 +253,8 @@ mod tests {
                     agent_nickname: Some("Scout".to_string()),
                     agent_role: Some("explorer".to_string()),
                     agent_path: None,
+                    model: Some("gpt-6-sol".to_string()),
+                    reasoning_effort: Some(ReasoningEffort::High),
                     is_running: true,
                     is_closed: false,
                 },
@@ -254,6 +264,8 @@ mod tests {
                     agent_nickname: Some("Atlas".to_string()),
                     agent_role: Some("worker".to_string()),
                     agent_path: None,
+                    model: None,
+                    reasoning_effort: None,
                     is_running: false,
                     is_closed: true,
                 },

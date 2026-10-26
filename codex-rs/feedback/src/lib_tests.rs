@@ -37,6 +37,29 @@ fn ring_buffer_drops_front_when_full() {
     let snap = fb.snapshot(/*session_id*/ None);
     // Capacity 8: after writing 10 bytes, we should keep the last 8.
     pretty_assertions::assert_eq!(std::str::from_utf8(&snap.bytes).unwrap(), "cdefghij");
+
+    let disabled = CodexFeedback::disabled();
+    assert!(disabled.inner.is_none());
+    assert!(
+        disabled
+            .logger_layer::<tracing_subscriber::Registry>()
+            .is_none()
+    );
+    assert!(
+        disabled
+            .metadata_layer::<tracing_subscriber::Registry>()
+            .is_none()
+    );
+    disabled
+        .make_writer()
+        .make_writer()
+        .write_all(b"discarded")
+        .unwrap();
+    disabled.report_failure("discarded failure");
+    let mut snapshot = disabled.snapshot(/*session_id*/ None);
+    snapshot.refresh_logs(&disabled);
+    assert!(snapshot.bytes.is_empty());
+    assert!(snapshot.tags.is_empty());
 }
 
 #[test]
@@ -151,7 +174,7 @@ async fn feedback_upload_allows_slow_reports() {
         content_type: None,
         buffer: b"later diagnostic".to_vec(),
     };
-    upload_test_feedback(&CodexFeedback::new(), &dsn, vec![attachment])
+    upload_test_feedback(&CodexFeedback::disabled(), &dsn, vec![attachment])
         .await
         .expect("all three envelopes should finish across twelve seconds of network waits");
 }

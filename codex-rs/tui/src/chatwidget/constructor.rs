@@ -63,6 +63,11 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
+        let system1_enabled = config.system1.enabled
+            && !config
+                .model_reasoning_effort
+                .as_ref()
+                .is_some_and(Self::is_advanced_reasoning_effort);
         let empty_state_animation = crate::empty_state_animation::EmptyStateAnimation::default();
         let header = Self::placeholder_session_header_cell(&config);
         let active_cell = Some(header);
@@ -96,23 +101,35 @@ impl ChatWidget {
             pet_http_client.clone(),
         );
         let config_panel_tui = local_settings.tui.clone();
+        let bottom_pane_params = BottomPaneParams {
+            frame_requester: frame_requester.clone(),
+            app_event_tx: app_event_tx.clone(),
+            has_input_focus: true,
+            enhanced_keys_supported,
+            placeholder_text: placeholder.clone(),
+            disable_paste_burst: local_settings.tui.disable_paste_burst.unwrap_or(false),
+            animations_enabled: local_settings.tui.animations,
+            effects: local_settings.tui.effects,
+            skills: None,
+        };
+        let bottom_pane = if local_settings.tui.multiline_enter {
+            BottomPane::new_with_composer_config(
+                bottom_pane_params,
+                crate::bottom_pane::ChatComposerConfig {
+                    multiline_enter: true,
+                    ..Default::default()
+                },
+            )
+        } else {
+            BottomPane::new(bottom_pane_params)
+        };
         let mut widget = Self {
             empty_state_animation: std::cell::RefCell::new(empty_state_animation),
             daybreak_enabled: false,
             app_event_tx: app_event_tx.clone(),
             frame_requester: frame_requester.clone(),
             codex_op_target,
-            bottom_pane: BottomPane::new(BottomPaneParams {
-                frame_requester,
-                app_event_tx,
-                has_input_focus: true,
-                enhanced_keys_supported,
-                placeholder_text: placeholder.clone(),
-                disable_paste_burst: local_settings.tui.disable_paste_burst.unwrap_or(false),
-                animations_enabled: local_settings.tui.animations,
-                effects: local_settings.tui.effects,
-                skills: None,
-            }),
+            bottom_pane,
             transcript: TranscriptState::new(active_cell),
             raw_output_mode: local_settings.tui.raw_output_mode,
             config,
@@ -150,6 +167,7 @@ impl ChatWidget {
             windows_sandbox_elevated_setup_complete: false,
             token_info: None,
             token_usage_pending: false,
+            output_tps: None,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
             refreshing_status_outputs: Vec::new(),
             next_status_refresh_request_id: 0,
@@ -188,6 +206,7 @@ impl ChatWidget {
             copy_last_response_binding,
             running_commands: HashMap::new(),
             collab_agent_metadata: HashMap::new(),
+            agent_wait_history: Default::default(),
             pending_collab_spawn_requests: HashMap::new(),
             suppressed_exec_calls: HashSet::new(),
             last_unified_wait: None,
@@ -219,7 +238,10 @@ impl ChatWidget {
             reasoning_buffer: String::new(),
             reasoning_header: None,
             reasoning_summary_parts: Vec::new(),
-            status_state: StatusState::default(),
+            status_state: StatusState {
+                system1_enabled,
+                ..Default::default()
+            },
             review: ReviewState::default(),
             active_hook_cell: None,
             pet_http_client,
@@ -236,7 +258,9 @@ impl ChatWidget {
             thread_name: None,
             thread_rename_block_message: None,
             active_side_conversation: false,
+            active_parallel_conversation: false,
             blocks_direct_input: false,
+            show_interagent_communication: false,
             external_writer_view: false,
             fork_in_progress: false,
             misalignment_policy_violation: None,

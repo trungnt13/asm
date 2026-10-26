@@ -5,7 +5,7 @@ expression: "format!(\"{buffer:?}\")"
 Buffer {
     area: Rect { x: 0, y: 0, width: 48, height: 6 },
     content: [
-        "                                                ",
+        "                                           Main ",
         "› Ask Codex to do anything                      ",
         "                                                ",
         "                                                ",
@@ -14,6 +14,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Rgb(244, 244, 244), underline: Reset, modifier: NONE,
+        x: 42, y: 0, fg: Rgb(85, 87, 83), bg: Rgb(217, 218, 217), underline: Reset, modifier: BOLD,
         x: 0, y: 1, fg: Reset, bg: Rgb(244, 244, 244), underline: Reset, modifier: BOLD,
         x: 1, y: 1, fg: Reset, bg: Rgb(244, 244, 244), underline: Reset, modifier: NONE,
         x: 2, y: 1, fg: Reset, bg: Rgb(244, 244, 244), underline: Reset, modifier: DIM,

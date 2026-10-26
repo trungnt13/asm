@@ -5,21 +5,16 @@ expression: "plain(r\"\\[\n\\underset{x,u,m\\ge0}{\\operatorname{minimize}}\\qua
                          N
 minimize    ∑ x_{gpt}+λ  ∑ yᵢ
 x,u,m≥0    g,t          i=1
-
  N  xᵢ def
  ∑  ──  =  min  zⱼ
 i=1 yᵢ     j∈ J
-
    N
    ∑    xⱼ
 j=∑ᵢⁿ i
-
 100   ij
  ∑ x+  ∑ y
 ij    100
-
 ∑ᵢ xᵢ
 ─────+√(∑ᵢ xᵢ)+x^{∑ᵢ aᵢ}+x_{(min)_{i}}+ ∑ zₖ
 ∑ⱼ yⱼ                                   k
-
 Inline: ∑ᵢ₌₁^{N} xᵢ, (min)_{x≥0} x.

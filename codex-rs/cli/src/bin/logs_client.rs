@@ -7,9 +7,9 @@ use clap::Parser;
 use clap::ValueEnum;
 use codex_core::config::ConfigBuilder;
 use codex_state::LogQuery;
+use codex_state::LogReader;
 use codex_state::LogRow;
 use codex_state::SqliteConfig;
-use codex_state::StateRuntime;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use owo_colors::OwoColorize;
 
@@ -109,17 +109,18 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let sqlite = resolve_sqlite_config(&args).await?;
     let filter = build_filter(&args)?;
-    let runtime = StateRuntime::init(sqlite, "logs-client".to_string()).await?;
+    let runtime = LogReader::open(&sqlite).await?.context(
+        "no diagnostic log database exists; enable diagnostic_log_capture to collect logs",
+    )?;
 
-    let mut last_id =
-        print_backfill(runtime.as_ref(), &filter, args.backfill, args.compact).await?;
+    let mut last_id = print_backfill(&runtime, &filter, args.backfill, args.compact).await?;
     if last_id == 0 {
-        last_id = fetch_max_id(runtime.as_ref(), &filter).await?;
+        last_id = fetch_max_id(&runtime, &filter).await?;
     }
 
     let poll_interval = Duration::from_millis(args.poll_ms);
     loop {
-        let rows = fetch_new_rows(runtime.as_ref(), &filter, last_id).await?;
+        let rows = fetch_new_rows(&runtime, &filter, last_id).await?;
         for row in rows {
             last_id = last_id.max(row.id);
             println!("{}", format_row(&row, args.compact));
@@ -206,7 +207,7 @@ fn parse_timestamp(value: &str) -> anyhow::Result<i64> {
 }
 
 async fn print_backfill(
-    runtime: &StateRuntime,
+    runtime: &LogReader,
     filter: &LogFilter,
     backfill: usize,
     compact: bool,
@@ -227,7 +228,7 @@ async fn print_backfill(
 }
 
 async fn fetch_backfill(
-    runtime: &StateRuntime,
+    runtime: &LogReader,
     filter: &LogFilter,
     backfill: usize,
 ) -> anyhow::Result<Vec<LogRow>> {
@@ -244,7 +245,7 @@ async fn fetch_backfill(
 }
 
 async fn fetch_new_rows(
-    runtime: &StateRuntime,
+    runtime: &LogReader,
     filter: &LogFilter,
     last_id: i64,
 ) -> anyhow::Result<Vec<LogRow>> {
@@ -260,7 +261,7 @@ async fn fetch_new_rows(
         .context("failed to fetch new logs")
 }
 
-async fn fetch_max_id(runtime: &StateRuntime, filter: &LogFilter) -> anyhow::Result<i64> {
+async fn fetch_max_id(runtime: &LogReader, filter: &LogFilter) -> anyhow::Result<i64> {
     let query = to_log_query(
         filter, /*limit*/ None, /*after_id*/ None, /*descending*/ false,
     );

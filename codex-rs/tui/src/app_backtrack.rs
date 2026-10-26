@@ -122,7 +122,9 @@ impl App {
 
     /// Revert the current thread before the selected prompt.
     pub(crate) fn apply_backtrack_selection(&mut self, selection: BacktrackSelection) {
-        if self.chat_widget.side_conversation_active() {
+        if self.chat_widget.side_conversation_active()
+            || self.chat_widget.parallel_conversation_active()
+        {
             self.reset_backtrack_state();
             self.chat_widget
                 .add_error_message(SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE.to_string());
@@ -756,6 +758,7 @@ mod tests {
                 .map(ThreadItem::untimed)
                 .collect(),
             items_view: codex_app_server_protocol::TurnItemsView::Full,
+            token_usage: None,
             status,
             error: None,
             started_at: None,

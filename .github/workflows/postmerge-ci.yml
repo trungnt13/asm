@@ -1,40 +1,162 @@
 name: postmerge-ci
 
-# This is the single entrypoint for main-only CI that is intentionally outside
-# the merge-blocking suite. It keeps the broader postmerge signal in one run.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+    paths-ignore:
+      - AGENTS.md
+      - docs/porting-from-codex.md
+
+concurrency:
+  group: ${{ github.workflow }}::${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
 
 jobs:
-  # Keep reusable workflow calls alphabetized. Each child retains its own
-  # workflow_dispatch trigger so maintainers can rerun flaky suites directly.
-  rust-ci-full:
-    name: rust-ci-full
-    uses: ./.github/workflows/rust-ci-full.yml
-    secrets: inherit
-
-  v8-canary:
-    name: v8-canary
-    uses: ./.github/workflows/v8-canary.yml
-    secrets: inherit
-
-  results:
-    name: Postmerge CI results
-    needs:
-      - rust-ci-full
-      - v8-canary
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
+  build:
+    name: Release build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: "off"
+      CARGO_PROFILE_RELEASE_STRIP: "debuginfo"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            timeout: 180
+            target: aarch64-apple-darwin
+          - runner: ubuntu-22.04
+            timeout: 90
+            target: x86_64-unknown-linux-gnu
     steps:
-      # Postmerge runs use the pushed main commit, so this helper always comes
-      # from the same revision that defined the parent workflow.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
-
-      - name: Require successful dependencies
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Python for package assembly and verification
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.11'
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Install GNU build tools
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-gnu-build-tools.sh"
+      - if: ${{ contains(matrix.target, 'linux-gnu') }}
+        name: Disable aws-lc jitter entropy
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "AWS_LC_SYS_NO_JITTER_ENTROPY=1" >> "$GITHUB_ENV"
+          target_no_jitter="AWS_LC_SYS_NO_JITTER_ENTROPY_${{ matrix.target }}"
+          target_no_jitter="${target_no_jitter//-/_}"
+          echo "${target_no_jitter}=1" >> "$GITHUB_ENV"
+      - name: Configure rusty_v8 artifacts
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+          repository: trungnt13/asm
+      - name: Build ASM with resource sampling
+        shell: bash
         env:
-          NEEDS: ${{ toJSON(needs) }}
-        run: python3 .github/scripts/check_ci_results.py
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/diagnostics"
+          (while true; do
+            echo "Resource sample $(date -u)"
+            df -h "${GITHUB_WORKSPACE}" || echo 'Filesystem sample unavailable'
+            if [[ "$RUNNER_OS" == macOS ]]; then
+              memory_pressure | sed -n '1,8p' || echo 'Memory-pressure sample unavailable'
+              sysctl vm.swapusage || echo 'Swap sample unavailable'
+              top -l 1 -n 0 | sed -n '1,12p' || echo 'System sample unavailable'
+              ps -Ao pid,ppid,%cpu,rss,comm | sort -k4,4nr | sed -n '1,15p' || echo 'Process sample unavailable'
+            else
+              free -h || echo 'Memory sample unavailable'
+              ps -eo pid,comm,%cpu,%mem,rss --sort=-rss | sed -n '1,12p' || echo 'Process sample unavailable'
+            fi
+            sleep 60
+          done) > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log" 2>&1 &
+          sampler_pid=$!
+          trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            cargo build --locked --release --target "$TARGET" --bin bwrap
+            CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
+            export CODEX_BWRAP_SHA256
+          fi
+          cargo build --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings
+
+      - name: Create archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          release_dir="target/${TARGET}/release"
+          archive="${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz"
+          # macOS Bash 3.2 treats empty arrays as unset under nounset.
+          resource_args=(--force)
+          if [[ "$TARGET" == *-linux-gnu ]]; then
+            resource_args+=(--bwrap-bin "${release_dir}/bwrap")
+          fi
+          CODEX_REPO_ROOT="$GITHUB_WORKSPACE" python3 "${GITHUB_WORKSPACE}/scripts/build_codex_package.py" \
+            --target "$TARGET" --cargo-profile release \
+            --entrypoint-bin "${release_dir}/codex" \
+            --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
+            --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
+            --archive-output "$archive" "${resource_args[@]}"
+
+      - name: Smoke packaged ASM
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-${TARGET}.log"
+
+      - name: Smoke packaged ASM on clean Ubuntu 22.04
+        if: ${{ contains(matrix.target, 'linux-gnu') }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
+          bash "${GITHUB_WORKSPACE}/.github/scripts/smoke-ubuntu-archive.sh" "${GITHUB_WORKSPACE}/dist/codex-${TARGET}.tar.gz" "$version" | tee "${GITHUB_WORKSPACE}/diagnostics/smoke-ubuntu-${TARGET}.log"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: codex-${{ matrix.target }}
+          path: dist/codex-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+      - name: Upload build diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: diagnostics-${{ matrix.target }}
+          path: |
+            diagnostics/resources-${{ matrix.target }}.log
+            diagnostics/smoke-${{ matrix.target }}.log
+            diagnostics/smoke-ubuntu-${{ matrix.target }}.log
+            codex-rs/target/cargo-timings/cargo-timing*.html
+          if-no-files-found: warn
+
+  results:
+    name: Fork postmerge results
+    if: ${{ always() }}
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require successful builds
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: '[[ "$BUILD_RESULT" == success ]]'

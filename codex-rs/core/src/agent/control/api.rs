@@ -87,8 +87,10 @@ impl AgentControl for LocalAgentControl {
                         .ok_or_else(|| {
                             CodexErr::InvalidRequest("spawn input needs a child path".to_string())
                         })?;
+                    let mut communication = message.into_communication(author, recipient, mode);
+                    communication.spawn_arguments = options.spawn_arguments.clone();
                     SpawnInitialInput::InterAgentCommunication(
-                        message.into_communication(author, recipient, mode),
+                        communication,
                         AgentCommunicationContext::new(AgentCommunicationKind::Spawn, caller),
                     )
                 }
@@ -144,7 +146,11 @@ impl AgentControl for LocalAgentControl {
                     // racing an in-progress eviction when it acquires the residency pin.
                     let _residency_pin = if mode == MessageDeliveryMode::TriggerTurn
                         || (self.runtime.upgrade()?.get_thread(target).await.is_err()
-                            && self.runtime.registry.evicted_environments(target).is_none())
+                            && self
+                                .runtime
+                                .registry
+                                .evicted_runtime_state(target)
+                                .is_none())
                     {
                         self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
                             .await?

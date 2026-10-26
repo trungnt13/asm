@@ -268,7 +268,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
         // A shutdown error can cover the initial command center when its first New fails.
         if previous_thread.is_none() && overview_initialized {
             app.show_agents_overview_error(
-                Some("Codex's background server is shutting down"),
+                Some("ASM's background server is shutting down"),
                 "Waiting for active turns.".into(),
             );
         }
@@ -341,7 +341,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 if let AppEvent::InsertHistoryCell(cell) = &event {
                     let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 100));
                     if rendered.contains("Windows sandbox setup was interrupted") {
-                        insta::assert_snapshot!(rendered, @"■ Windows sandbox setup was interrupted. Restart Codex before using Agent mode.");
+                        insta::assert_snapshot!(rendered, @"■ Windows sandbox setup was interrupted. Restart ASM before using Agent mode.");
                         saw_warning = true;
                         continue;
                     }
@@ -363,7 +363,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             while app.agents_overview.request_id.is_some() {
                 let event = events.recv().await.expect("inventory refresh event");
                 if matches!(event, AppEvent::AgentsOverviewThreadsLoaded { .. }) {
-                    app.handle_event(&mut tui, &mut session, event).await?;
+                    Box::pin(app.handle_event(&mut tui, &mut session, event)).await?;
                 } else {
                     deferred.push(event);
                 }
@@ -409,12 +409,13 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             assert_snapshot!(
                 "daemon_command_center_vanished_rename",
                 render_bottom_popup(&app.chat_widget, /*width*/ 100)
+                    .replace(CODEX_CLI_VERSION, "<VERSION>")
             );
-            app.handle_tui_event(
+            Box::pin(app.handle_tui_event(
                 &mut tui,
                 &mut session,
                 TuiEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            )
+            ))
             .await?;
             assert!(
                 !std::iter::from_fn(|| events.try_recv().ok())
@@ -443,11 +444,11 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
         assert!(!app.agents_overview.visible_thread_ids.contains(&vanished));
 
         if let Some(id) = previous_thread {
-            app.handle_tui_event(
+            Box::pin(app.handle_tui_event(
                 &mut tui,
                 &mut session,
                 TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-            )
+            ))
             .await?;
 
             assert!(!app.chat_widget.has_active_view());
@@ -455,11 +456,11 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             let history = drain_history(&mut app, &mut tui, &mut session, &mut events).await?;
             assert!(history.contains("Cached previous conversation"));
 
-            app.handle_tui_event(
+            Box::pin(app.handle_tui_event(
                 &mut tui,
                 &mut session,
                 TuiEvent::Key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL)),
-            )
+            ))
             .await?;
             let preserved_history =
                 drain_history(&mut app, &mut tui, &mut session, &mut events).await?;
@@ -476,31 +477,31 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 )
             );
 
-            app.handle_tui_event(
+            Box::pin(app.handle_tui_event(
                 &mut tui,
                 &mut session,
                 TuiEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            )
+            ))
             .await?;
             assert_eq!(app.chat_widget.composer_text_with_pending(), "latest draft");
             assert!(
                 !std::iter::from_fn(|| events.try_recv().ok())
                     .any(|event| matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })))
             );
-            app.handle_tui_event(&mut tui, &mut session, TuiEvent::Paste("!".into()))
+            Box::pin(app.handle_tui_event(&mut tui, &mut session, TuiEvent::Paste("!".into())))
                 .await?;
             assert_eq!(
                 app.chat_widget.composer_text_with_pending(),
                 "latest draft!"
             );
-            app.handle_event(&mut tui, &mut session, AppEvent::OpenAgentsOverview)
+            Box::pin(app.handle_event(&mut tui, &mut session, AppEvent::OpenAgentsOverview))
                 .await?;
             assert!(app.chat_widget.has_active_view());
-            app.handle_tui_event(
+            Box::pin(app.handle_tui_event(
                 &mut tui,
                 &mut session,
                 TuiEvent::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
-            )
+            ))
             .await?;
             assert_eq!(
                 app.chat_widget.composer_text_with_pending(),
@@ -510,8 +511,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 !changed_child_permissions,
                 std::sync::atomic::Ordering::SeqCst,
             );
-            app.select_agent_thread(&mut tui, &mut session, child)
-                .await?;
+            Box::pin(app.select_agent_thread(&mut tui, &mut session, child)).await?;
             assert_eq!(app.recap.progress(), child_recap);
             assert_eq!(app.primary_thread_id, Some(id));
             assert_eq!(
@@ -528,7 +528,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 app.runtime_permission_profile_override = Some(
                     RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),
                 );
-                app.select_agent_thread(&mut tui, &mut session, id).await?;
+                Box::pin(app.select_agent_thread(&mut tui, &mut session, id)).await?;
                 assert!(app.thread_unavailable(id));
                 assert_eq!(app.current_displayed_thread_id(), Some(id));
                 assert_eq!(
@@ -540,11 +540,11 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 );
             }
             available.store(true, std::sync::atomic::Ordering::SeqCst);
-            app.handle_event(
+            Box::pin(app.handle_event(
                 &mut tui,
                 &mut session,
                 AppEvent::SelectAgentsOverviewThread { thread_id: id },
-            )
+            ))
             .await?;
             assert!(!app.thread_unavailable(id));
             assert_eq!(
@@ -566,7 +566,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                     KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
                     KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
                 ] {
-                    app.handle_tui_event(&mut tui, &mut session, TuiEvent::Key(key))
+                    Box::pin(app.handle_tui_event(&mut tui, &mut session, TuiEvent::Key(key)))
                         .await?;
                 }
                 assert!(std::iter::from_fn(|| events.try_recv().ok())
@@ -578,19 +578,19 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                     )),
                 )
                 .await;
-                app.drain_active_thread_events(&mut tui).await?;
+                app.drain_active_thread_events(&mut tui, &session).await?;
                 app.chat_widget
                     .restore_user_message_to_composer("latest draft!".into());
             }
-            app.handle_tui_event(
+            Box::pin(app.handle_tui_event(
                 &mut tui,
                 &mut session,
                 TuiEvent::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            )
+            ))
             .await?;
             while let Ok(event) = events.try_recv() {
                 if matches!(event, AppEvent::CodexOp(AppCommand::UserTurn { .. })) {
-                    app.handle_event(&mut tui, &mut session, event).await?;
+                    Box::pin(app.handle_event(&mut tui, &mut session, event)).await?;
                 }
             }
             let channel = app.thread_event_channels.get(&id).unwrap();

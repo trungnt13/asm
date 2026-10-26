@@ -14,6 +14,7 @@ use http::HeaderMap;
 use http::Method;
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::time::Instant;
 use tracing::instrument;
 
 pub(crate) struct EndpointSession<T: HttpTransport> {
@@ -126,7 +127,7 @@ impl<T: HttpTransport> EndpointSession<T> {
         extra_headers: HeaderMap,
         body: Option<EncodedJsonBody>,
         configure: C,
-    ) -> Result<StreamResponse, ApiError>
+    ) -> Result<(StreamResponse, Instant), ApiError>
     where
         C: Fn(&mut Request),
     {
@@ -145,7 +146,10 @@ impl<T: HttpTransport> EndpointSession<T> {
                 let transport = &self.transport;
                 async move {
                     let req = auth.apply_auth(req).await.map_err(TransportError::from)?;
-                    transport.stream(req).await
+                    // Each retry gets its own start; failed attempts and backoff are excluded.
+                    let request_started_at = Instant::now();
+                    let stream = transport.stream(req).await?;
+                    Ok((stream, request_started_at))
                 }
             },
         )

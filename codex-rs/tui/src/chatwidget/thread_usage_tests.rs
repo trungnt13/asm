@@ -277,6 +277,7 @@ async fn replayed_turn_completions_do_not_start_live_billing_refreshes() {
                     root_turn_id: None,
                     items: Vec::new(),
                     items_view: TurnItemsView::NotLoaded,
+                    token_usage: None,
                     status: status.clone(),
                     error,
                     started_at: None,

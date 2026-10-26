@@ -8,6 +8,8 @@
 use super::*;
 use crate::app::WindowsSandboxHost;
 use crate::app_event::ManagedWorktreeMode;
+use crate::app_event::SideConversationAction;
+use crate::app_event::System1Action;
 use crate::app_event::ThreadGoalSetMode;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
@@ -34,6 +36,7 @@ struct PreparedSlashCommandArgs {
 }
 
 const SIDE_STARTING_CONTEXT_LABEL: &str = "Side starting...";
+const PARALLEL_STARTING_CONTEXT_LABEL: &str = "Parallel starting...";
 const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
     "Press Ctrl+C to return to the main thread first.";
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
@@ -41,6 +44,17 @@ const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
 
 impl ChatWidget {
+    pub(crate) fn last_side_reply_markdown(&self) -> Option<&str> {
+        if !self.active_side_conversation {
+            return None;
+        }
+        self.transcript
+            .last_agent_source
+            .as_ref()
+            .or(self.transcript.last_agent_markdown.as_ref())
+            .map(String::as_str)
+    }
+
     /// Dispatch a bare slash command and record its staged local-history entry.
     ///
     /// The composer stages history before returning `InputResult::Command`; this wrapper commits
@@ -109,7 +123,8 @@ impl ChatWidget {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
     ) {
-        self.set_side_conversation_context_label(Some(SIDE_STARTING_CONTEXT_LABEL.to_string()));
+        let label = SIDE_STARTING_CONTEXT_LABEL;
+        self.set_side_conversation_context_label(Some(label.to_string()));
         self.request_redraw();
         self.app_event_tx.send(AppEvent::StartSide {
             parent_thread_id,
@@ -127,6 +142,19 @@ impl ChatWidget {
         };
 
         self.request_side_conversation(parent_thread_id, /*user_message*/ None);
+    }
+
+    fn request_parallel_conversation(
+        &mut self,
+        parent_thread_id: ThreadId,
+        user_message: Option<UserMessage>,
+    ) {
+        self.set_side_conversation_context_label(Some(PARALLEL_STARTING_CONTEXT_LABEL.to_string()));
+        self.request_redraw();
+        self.app_event_tx.send(AppEvent::StartParallel {
+            parent_thread_id,
+            user_message,
+        });
     }
 
     fn emit_raw_output_mode_changed(&self, enabled: bool) {
@@ -285,7 +313,9 @@ impl ChatWidget {
                             ..Default::default()
                         },
                         SelectionItem {
-                            name: if self.remote_connection.is_some() {
+                            name: if self.parallel_conversation_active() {
+                                "Yes, delete and return to main"
+                            } else if self.remote_connection.is_some() {
                                 "Yes, delete and return to command center"
                             } else {
                                 "Yes, delete and exit"
@@ -310,7 +340,16 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::OpenResumePicker);
             }
             SlashCommand::Fork => {
-                self.show_session_checkout_picker(ManagedWorktreeMode::Fork, /*name*/ None);
+                if self.active_side_conversation {
+                    self.app_event_tx.send(AppEvent::SideConversationAction {
+                        action: SideConversationAction::Fork { name: None },
+                    });
+                } else {
+                    self.show_session_checkout_picker(
+                        ManagedWorktreeMode::Fork,
+                        /*name*/ None,
+                    );
+                }
             }
             SlashCommand::Worktree => {
                 self.show_managed_worktree_picker();
@@ -369,6 +408,19 @@ impl ChatWidget {
                     self.defer_input_until_settings_applied();
                 }
             }
+            SlashCommand::AutoRename => {
+                if !self.ensure_thread_rename_allowed() {
+                    return;
+                }
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx
+                        .send(AppEvent::AutoRenameThread { thread_id });
+                } else {
+                    self.add_error_message(
+                        "Session is still starting; try /autorename again in a moment.".to_string(),
+                    );
+                }
+            }
             SlashCommand::Rename => {
                 self.session_telemetry
                     .counter("codex.thread.rename", /*inc*/ 1, &[]);
@@ -405,8 +457,29 @@ impl ChatWidget {
                     control: crate::app_event::VoiceControl::Toggle,
                 });
             }
+            SlashCommand::SendLast => {
+                self.app_event_tx.send(AppEvent::SideConversationAction {
+                    action: SideConversationAction::SendLast {
+                        text: String::new(),
+                    },
+                });
+            }
+            SlashCommand::Sync => {
+                self.app_event_tx.send(AppEvent::SideConversationAction {
+                    action: SideConversationAction::Sync,
+                });
+            }
             SlashCommand::Side | SlashCommand::Btw => {
                 self.request_empty_side_conversation(cmd);
+            }
+            SlashCommand::Parallel => {
+                let Some(parent_thread_id) = self.thread_id else {
+                    self.add_error_message(
+                        "'/parallel' is unavailable before the session starts.".to_string(),
+                    );
+                    return;
+                };
+                self.request_parallel_conversation(parent_thread_id, /*user_message*/ None);
             }
             SlashCommand::Agents => {
                 self.app_event_tx.send(AppEvent::OpenAgentsOverview);
@@ -492,9 +565,21 @@ impl ChatWidget {
             SlashCommand::Copy => {
                 self.show_copy_picker();
             }
+            SlashCommand::CopyId => {
+                if let Some(thread_id) = self.thread_id {
+                    self.app_event_tx.send(AppEvent::CopySelection {
+                        text: Arc::from(thread_id.to_string()),
+                        label: "Session ID".to_string(),
+                        format: crate::clipboard_copy::CopyFormat::PlainText,
+                    });
+                } else {
+                    self.add_error_message("No session ID to copy.".to_string());
+                }
+            }
             SlashCommand::Export => {
                 self.show_transcript_export_popup();
             }
+            SlashCommand::System1 => self.request_system1(System1Action::Toggle),
             SlashCommand::Raw => {
                 let enabled = self.toggle_raw_output_mode_and_notify();
                 self.emit_raw_output_mode_changed(enabled);
@@ -903,6 +988,20 @@ impl ChatWidget {
                 }
                 _ => self.add_error_message("Usage: /keymap [debug]".to_string()),
             },
+            SlashCommand::System1 => match trimmed.to_ascii_lowercase().as_str() {
+                "" => self.request_system1(System1Action::Toggle),
+                "on" => self.request_system1(System1Action::Enable),
+                "off" => self.request_system1(System1Action::Disable),
+                "status" => {
+                    if let Some(thread_id) = self.thread_id {
+                        self.app_event_tx
+                            .send(AppEvent::ShowSystem1Status { thread_id });
+                    } else {
+                        self.add_error_message("No active session for System1.".to_string());
+                    }
+                }
+                _ => self.add_error_message("Usage: /system1 [on|off|status]".to_string()),
+            },
             SlashCommand::Raw => match trimmed.to_ascii_lowercase().as_str() {
                 "on" => {
                     self.set_raw_output_mode_and_notify(/*enabled*/ true);
@@ -938,9 +1037,27 @@ impl ChatWidget {
                 });
             }
             SlashCommand::Fork if !trimmed.is_empty() => {
-                self.show_session_checkout_picker(
-                    ManagedWorktreeMode::Fork,
-                    Some(trimmed.to_string()),
+                if self.active_side_conversation {
+                    self.app_event_tx.send(AppEvent::SideConversationAction {
+                        action: SideConversationAction::Fork {
+                            name: Some(trimmed.to_string()),
+                        },
+                    });
+                } else {
+                    self.show_session_checkout_picker(
+                        ManagedWorktreeMode::Fork,
+                        Some(trimmed.to_string()),
+                    );
+                }
+            }
+            SlashCommand::SendLast => {
+                self.app_event_tx.send(AppEvent::SideConversationAction {
+                    action: SideConversationAction::SendLast { text: args },
+                });
+            }
+            SlashCommand::Sync if !trimmed.is_empty() => {
+                self.add_error_message(
+                    "Usage: /sync (replaces side history with main context)".to_string(),
                 );
             }
             SlashCommand::Plan if !trimmed.is_empty() => {
@@ -1094,7 +1211,9 @@ impl ChatWidget {
                     self.clear_live_goal_submission();
                 }
             }
-            SlashCommand::Side | SlashCommand::Btw if !trimmed.is_empty() => {
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
+                if !trimmed.is_empty() =>
+            {
                 let Some(parent_thread_id) = self.thread_id else {
                     let command = cmd.command();
                     self.add_error_message(format!(
@@ -1110,7 +1229,11 @@ impl ChatWidget {
                     mention_bindings,
                     source,
                 );
-                self.request_side_conversation(parent_thread_id, Some(user_message));
+                if cmd == SlashCommand::Parallel {
+                    self.request_parallel_conversation(parent_thread_id, Some(user_message));
+                } else {
+                    self.request_side_conversation(parent_thread_id, Some(user_message));
+                }
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 self.submit_op(AppCommand::review(ReviewTarget::Custom {
@@ -1304,12 +1427,15 @@ impl ChatWidget {
             | SlashCommand::Plugins
             | SlashCommand::Rollout
             | SlashCommand::Copy
+            | SlashCommand::CopyId
             | SlashCommand::Raw
             | SlashCommand::Vim
             | SlashCommand::Daybreak
+            | SlashCommand::System1
             | SlashCommand::Diff
             | SlashCommand::App
             | SlashCommand::Rename
+            | SlashCommand::AutoRename
             | SlashCommand::Voice
             | SlashCommand::Recap
             | SlashCommand::TestApproval => QueueDrain::Continue,
@@ -1342,6 +1468,9 @@ impl ChatWidget {
             | SlashCommand::Goal
             | SlashCommand::Side
             | SlashCommand::Btw
+            | SlashCommand::SendLast
+            | SlashCommand::Sync
+            | SlashCommand::Parallel
             | SlashCommand::Keymap
             | SlashCommand::Agents
             | SlashCommand::MultiAgents
@@ -1392,6 +1521,13 @@ impl ChatWidget {
     }
 
     fn ensure_slash_command_allowed_in_side_conversation(&mut self, cmd: SlashCommand) -> bool {
+        if !self.active_side_conversation
+            && matches!(cmd, SlashCommand::SendLast | SlashCommand::Sync)
+        {
+            self.add_error_message(format!("'/{}' is only available in Side.", cmd.command()));
+            self.bottom_pane.drain_pending_submission_state();
+            return false;
+        }
         if !self.active_side_conversation || cmd.available_in_side_conversation() {
             return true;
         }
@@ -1404,7 +1540,11 @@ impl ChatWidget {
     }
 
     fn ensure_side_command_allowed_outside_review(&mut self, cmd: SlashCommand) -> bool {
-        if !matches!(cmd, SlashCommand::Side | SlashCommand::Btw) || !self.review.is_review_mode {
+        if !matches!(
+            cmd,
+            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
+        ) || !self.review.is_review_mode
+        {
             return true;
         }
 

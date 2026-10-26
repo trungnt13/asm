@@ -68,7 +68,7 @@ fn file_citations_inside_code_existing_links_and_html_remain_literal() {
             &format!("[{citation}](https://example.com)"),
             /*cwd*/ None
         ),
-        format!("{citation} (https://example.com)"),
+        citation.to_string(),
     );
 }
 
@@ -132,7 +132,7 @@ fn file_citations_preserve_escaped_nested_and_reference_directives() {
             &format!("`{citation}`\n\n[report][file]\n\n[file]: {citation}\n\n{citation}"),
             /*cwd*/ None,
         ),
-        format!("{citation}\n\nreport ({citation})\n\n/tmp/report.xlsx"),
+        format!("{citation}\nreport ({citation})\n/tmp/report.xlsx"),
     );
 }
 
@@ -192,7 +192,7 @@ fn file_citation_after_local_link_soft_break_starts_a_new_line_snapshot() {
     let rendered = rendered_text(&markdown, Some(&cwd));
 
     insta::assert_snapshot!(rendered, @r"
-    first (first.txt)
+    first
     second.txt
     ");
 }

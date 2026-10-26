@@ -382,6 +382,7 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
         root_turn_id: None,
         items: vec![call, ThreadItem::untimed(reasoning)],
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,
@@ -395,6 +396,8 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
             items.iter().map(|entry| entry.payload.clone()),
             RawReasoningVisibility::Hidden,
             /*config*/ None,
+            /*show_communication*/ false,
+            /*own_agent_role*/ None,
         )
     };
     for selecting in [false, true] {

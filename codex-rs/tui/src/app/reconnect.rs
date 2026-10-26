@@ -68,6 +68,7 @@ pub(super) async fn reconnect(
             let client = crate::app_server_connection::connect(&target).await?;
             let mut session = AppServerSession::new(backend_id, client, mode)
                 .with_local_codex_home(&config.codex_home)
+                .with_side_conversations(&config.codex_home, &target)
                 .with_remote_cwd_override(remote_cwd.clone())
                 .with_thread_tool_transport(task_tools.clone());
             let bootstrap = session.bootstrap(&config).await?;
@@ -513,6 +514,8 @@ impl App {
                 }
                 return Err(err);
             }
+            self.restore_automatic_thread_title(id, self.chat_widget.thread_name().as_deref())
+                .await;
             self.config = self.chat_widget.config_ref().clone();
             self.refresh_pending_thread_approvals().await;
             if self.thread_unavailable(id) && !self.chat_widget.is_external_writer_view() {
@@ -557,7 +560,7 @@ impl App {
         #[cfg(any(target_os = "windows", test))]
         if interrupted_windows_setup {
             self.chat_widget.add_error_message(
-                "Windows sandbox setup was interrupted. Restart Codex before using Agent mode."
+                "Windows sandbox setup was interrupted. Restart ASM before using Agent mode."
                     .to_string(),
             );
         }

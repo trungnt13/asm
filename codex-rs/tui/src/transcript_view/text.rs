@@ -139,6 +139,7 @@ impl TextLayout {
             layout =
                 layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
         }
+        layout.disclosure |= self.disclosure;
         layout.image = self.image.clone();
         if self.leading_blank_hidden {
             layout = layout.without_leading_blank_row();
@@ -316,7 +317,10 @@ impl TextLayout {
     }
 
     pub(super) fn disclosure_row(&self) -> Option<usize> {
-        self.disclosure_control.as_ref().map(|control| control.row)
+        self.disclosure_control
+            .as_ref()
+            .map(|control| control.row)
+            .or_else(|| self.disclosure.then_some(usize::from(self.separated)))
     }
 
     pub(super) fn disclosure_columns(&self) -> Range<u16> {
@@ -407,7 +411,9 @@ impl TextLayout {
         if self.visible_image().is_some() && offset >= self.text.len() {
             return self.row_count().saturating_sub(1);
         }
-        let before_control = if let Some(control_row) = self.disclosure_row() {
+        let before_control = if let Some(control_row) =
+            self.disclosure_control.as_ref().map(|control| control.row)
+        {
             let after_control = &self.rows[control_row + 1..];
             let matching_rows = after_control.partition_point(|row| row.source.start <= offset);
             if matching_rows > 0 {

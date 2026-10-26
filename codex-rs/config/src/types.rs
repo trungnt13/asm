@@ -24,6 +24,7 @@ pub use codex_protocol::config_types::Personality;
 pub use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::ToolExposureSurface;
 pub use codex_protocol::config_types::WebSearchMode;
+use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -351,8 +352,12 @@ pub struct MemoriesToml {
     pub min_rate_limit_remaining_percent: Option<i64>,
     /// Model used for thread summarisation.
     pub extract_model: Option<String>,
+    /// Overrides extraction reasoning effort; defaults to `low` when omitted.
+    pub extract_reasoning_effort: Option<ReasoningEffort>,
     /// Model used for memory consolidation.
     pub consolidation_model: Option<String>,
+    /// Overrides consolidation reasoning effort; defaults to `medium` when omitted.
+    pub consolidation_reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// Effective memories settings after defaults are applied.
@@ -371,7 +376,9 @@ pub struct MemoriesConfig {
     pub min_rollout_idle_hours: i64,
     pub min_rate_limit_remaining_percent: i64,
     pub extract_model: Option<String>,
+    pub extract_reasoning_effort: Option<ReasoningEffort>,
     pub consolidation_model: Option<String>,
+    pub consolidation_reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl Default for MemoriesConfig {
@@ -390,7 +397,9 @@ impl Default for MemoriesConfig {
             min_rollout_idle_hours: DEFAULT_MEMORIES_MIN_ROLLOUT_IDLE_HOURS,
             min_rate_limit_remaining_percent: DEFAULT_MEMORIES_MIN_RATE_LIMIT_REMAINING_PERCENT,
             extract_model: None,
+            extract_reasoning_effort: None,
             consolidation_model: None,
+            consolidation_reasoning_effort: None,
         }
     }
 }
@@ -438,7 +447,9 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .unwrap_or(defaults.min_rate_limit_remaining_percent)
                 .clamp(0, 100),
             extract_model: toml.extract_model,
+            extract_reasoning_effort: toml.extract_reasoning_effort,
             consolidation_model: toml.consolidation_model,
+            consolidation_reasoning_effort: toml.consolidation_reasoning_effort,
         }
     }
 }
@@ -643,7 +654,7 @@ pub struct OtelConfigToml {
     /// Optional trace exporter
     pub trace_exporter: Option<OtelExporterKind>,
 
-    /// Metrics exporter. Defaults to `statsig`, which follows `analytics.enabled`.
+    /// Metrics exporter. Defaults to none; the built-in Statsig exporter is inactive in ASM.
     /// Custom OTLP exporters are independent of `analytics.enabled`; `none` disables metrics export.
     pub metrics_exporter: Option<OtelExporterKind>,
 
@@ -679,7 +690,7 @@ impl Default for OtelConfig {
             environment: DEFAULT_OTEL_ENVIRONMENT.to_owned(),
             exporter: OtelExporterKind::None,
             trace_exporter: OtelExporterKind::None,
-            metrics_exporter: OtelExporterKind::Statsig,
+            metrics_exporter: OtelExporterKind::None,
             span_attributes: BTreeMap::new(),
             tracestate: BTreeMap::new(),
         }
@@ -856,6 +867,11 @@ pub struct Tui {
     #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
 
+    /// Plain Enter inserts a newline in multiline drafts when also bound to editor newline.
+    /// Single-line drafts and modified submit bindings still send. Defaults to `false`.
+    #[serde(default)]
+    pub multiline_enter: bool,
+
     /// Enable animations (welcome screen, shimmer effects, spinners).
     /// Defaults to `true`.
     #[serde(default = "default_true")]
@@ -917,6 +933,20 @@ pub struct Tui {
     #[serde(default, deserialize_with = "crate::tui_mouse_scroll::deserialize")]
     #[schemars(schema_with = "crate::tui_mouse_scroll::schema")]
     pub mouse_scroll_speed: Option<f64>,
+    /// Group consecutive tool calls into compact fullscreen transcript summaries.
+    /// Defaults to `false` to preserve existing tool previews.
+    #[serde(default)]
+    pub collapse_tool_calls: bool,
+
+    /// Maximum physical lines in a collapsed activity summary, including counts and names.
+    /// Omit to use one line; values must be positive.
+    #[serde(default)]
+    pub collapse_tool_calls_max_lines: Option<std::num::NonZeroUsize>,
+
+    /// Attach a fresh transcript selection when clicking the fullscreen composer.
+    /// Defaults to `false`; native scrollback does not support this gesture.
+    #[serde(default)]
+    pub click_to_quote: bool,
 
     /// Copy selected transcript, footer, or composer text when the mouse button is released.
     /// Defaults to `auto`: enabled except in direct terminals known to forward their native

@@ -46,6 +46,7 @@ from .v2_all import PlanDeltaNotification
 from .v2_all import ProcessExitedNotification
 from .v2_all import ProcessOutputDeltaNotification
 from .v2_all import ProjectChangedNotification
+from .v2_all import ReasoningEffortUpdatedNotification
 from .v2_all import ReasoningSummaryPartAddedNotification
 from .v2_all import ReasoningSummaryTextDeltaNotification
 from .v2_all import ReasoningTextDeltaNotification
@@ -53,6 +54,7 @@ from .v2_all import RemoteControlStatusChangedNotification
 from .v2_all import ServerRequestResolvedNotification
 from .v2_all import SkillsChangedNotification
 from .v2_all import StrictReviewRequiredNotification
+from .v2_all import System1UpdatedNotification
 from .v2_all import TerminalInteractionNotification
 from .v2_all import ThreadArchivedNotification
 from .v2_all import ThreadAttachmentUpdatedNotification
@@ -131,6 +133,7 @@ KnownNotificationPayload: TypeAlias = (
     | ProcessExitedNotification
     | ProcessOutputDeltaNotification
     | ProjectChangedNotification
+    | ReasoningEffortUpdatedNotification
     | ReasoningSummaryPartAddedNotification
     | ReasoningSummaryTextDeltaNotification
     | ReasoningTextDeltaNotification
@@ -138,6 +141,7 @@ KnownNotificationPayload: TypeAlias = (
     | ServerRequestResolvedNotification
     | SkillsChangedNotification
     | StrictReviewRequiredNotification
+    | System1UpdatedNotification
     | TerminalInteractionNotification
     | ThreadArchivedNotification
     | ThreadAttachmentUpdatedNotification
@@ -253,12 +257,14 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "thread/settings/updated": ThreadSettingsUpdatedNotification,
     "thread/started": ThreadStartedNotification,
     "thread/status/changed": ThreadStatusChangedNotification,
+    "thread/system1Updated": System1UpdatedNotification,
     "thread/tokenUsage/updated": ThreadTokenUsageUpdatedNotification,
     "thread/unarchived": ThreadUnarchivedNotification,
     "turn/completed": TurnCompletedNotification,
     "turn/diff/updated": TurnDiffUpdatedNotification,
     "turn/moderationMetadata": TurnModerationMetadataNotification,
     "turn/plan/updated": TurnPlanUpdatedNotification,
+    "turn/reasoningEffortUpdated": ReasoningEffortUpdatedNotification,
     "turn/started": TurnStartedNotification,
     "warning": WarningNotification,
     "windows/worldWritableWarning": WindowsWorldWritableWarningNotification,
@@ -284,6 +290,7 @@ DIRECT_TURN_ID_NOTIFICATION_TYPES: tuple[type[BaseModel], ...] = (
     ModelSafetyBufferingUpdatedNotification,
     ModelVerificationNotification,
     PlanDeltaNotification,
+    ReasoningEffortUpdatedNotification,
     ReasoningSummaryPartAddedNotification,
     ReasoningSummaryTextDeltaNotification,
     ReasoningTextDeltaNotification,
