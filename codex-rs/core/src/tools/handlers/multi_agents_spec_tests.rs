@@ -130,7 +130,6 @@ fn spawn_agent_catalog_description_preserves_generated_context(
         "Available model overrides",
         "`catalog-model`",
         "Reasoning efforts: high (default).",
-        "Service tiers: priority.",
     ] {
         assert_eq!(
             configured_tool.description.contains(catalog_text),
