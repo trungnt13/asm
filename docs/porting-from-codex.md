@@ -1137,3 +1137,7 @@ Keep the existing sleep lifecycle items and app-server API unchanged.
 ### Test-only dependencies
 
 Keep `codex-ollama`'s `wiremock` dependency under `[dev-dependencies]` while only tests use it. This removes its test-server dependency chain from production builds, not necessarily the linked binary. Drop this drift if upstream adopts it; restore the normal dependency if production code needs it.
+
+### Advertised subagent models
+
+`[features.multi_agent_v2].subagent_model_list` optionally selects advertised model IDs in user order for both the spawn-tool description and `<model_catalog>` context. Omission retains automatic picker-visible selection; `[]` advertises no choices. Explicit IDs may select hidden models from the loaded catalog. Duplicate IDs are deduplicated; only the first five choices are advertised, and the context catalog retains its 1,000-byte bound. All configured IDs are checked against the loaded catalog and spawning-backend compatibility before truncation; an invalid ID renders a configuration error instead of falling back. This setting does not restrict runtime spawning or change the model picker.

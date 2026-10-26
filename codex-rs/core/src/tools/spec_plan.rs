@@ -1461,10 +1461,32 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
     let turn_context = context.turn_context;
     if collab_tools_enabled(turn_context, context.model_info) {
         let external_model_aliases = if turn_context.config.load_external_models_json {
-            turn_context
-                .available_models
-                .iter()
-                .filter(|model| model.show_in_picker)
+            let models = if turn_context.multi_agent_version == MultiAgentVersion::V2
+                && turn_context
+                    .config
+                    .multi_agent_v2
+                    .subagent_model_list
+                    .is_some()
+            {
+                crate::agent::model_catalog::advertised_models(
+                    &turn_context.available_models,
+                    turn_context.multi_agent_version,
+                    turn_context
+                        .config
+                        .multi_agent_v2
+                        .subagent_model_list
+                        .as_deref(),
+                )
+                .unwrap_or_default()
+            } else {
+                turn_context
+                    .available_models
+                    .iter()
+                    .filter(|model| model.show_in_picker)
+                    .collect()
+            };
+            models
+                .into_iter()
                 .filter(|model| {
                     crate::agent::child_config::model_supports_multi_agent_backend(
                         model,
@@ -1509,6 +1531,11 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     SpawnAgentHandlerV2::new(
                         SpawnAgentToolOptions {
                             available_models: turn_context.available_models.clone(),
+                            subagent_model_list: turn_context
+                                .config
+                                .multi_agent_v2
+                                .subagent_model_list
+                                .clone(),
                             external_model_aliases: if turn_context
                                 .config
                                 .multi_agent_v2
@@ -1566,6 +1593,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
             registry.add_with_exposure(
                 SpawnAgentHandler::new(SpawnAgentToolOptions {
                     available_models: turn_context.available_models.clone(),
+                    subagent_model_list: None,
                     external_model_aliases,
                     multi_agent_version: turn_context.multi_agent_version,
                     include_model_catalog_in_spawn_agent_list: turn_context
