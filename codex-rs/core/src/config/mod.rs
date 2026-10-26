@@ -3498,6 +3498,7 @@ impl Config {
             cli_auth_credentials_store,
             chatgpt_base_url: _,
             sqlite_home: _,
+            unsafe_enforce_sqlite_journal_mode,
             log_dir: _,
             model_catalog_json: _,
             model_provider: _,
@@ -4216,7 +4217,7 @@ impl Config {
             ));
         }
         let thread_unload_delay =
-            Duration::from_secs(cfg.thread_unload_delay_secs.unwrap_or(/*default*/ 1800));
+            Duration::from_secs(cfg.thread_unload_delay_secs.unwrap_or(/*default*/ 60));
         if std::time::Instant::now()
             .checked_add(thread_unload_delay)
             .is_none()
@@ -4409,7 +4410,12 @@ impl Config {
             .cloned()
             .or(sqlite_home_env)
             .unwrap_or_else(|| codex_home.clone());
-        let mut sqlite = codex_state::SqliteConfig::from_sqlite_home(sqlite_home);
+        let enforce_delete_on_nfs =
+            unsafe_enforce_sqlite_journal_mode.is_some_and(|required| required.value);
+        let mut sqlite = codex_state::SqliteConfig::from_sqlite_home_with_nfs_enforcement(
+            sqlite_home,
+            enforce_delete_on_nfs,
+        );
         let requirements = config_layer_stack.requirements_toml();
         if cfg.log_dir.is_some() && requirements.sqlite_home.is_none() {
             sqlite = sqlite.with_local_logs_home(log_dir.clone());

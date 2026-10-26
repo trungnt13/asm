@@ -5,6 +5,7 @@ use super::AppServerStartedThread;
 use super::HistoryHydrationScope;
 use super::ResumeModelSettings;
 use super::ThreadHistorySupport;
+use super::ThreadSettingsOwner;
 use super::bootstrap_request_error;
 use super::is_history_pagination_unsupported;
 use super::started_thread_from_resume_response;
@@ -159,7 +160,9 @@ impl AppServerSession {
         model_settings: ResumeModelSettings,
         permission_overrides: crate::resume_permissions::ResumePermissions,
     ) -> Result<AppServerStartedThread> {
-        self.thread_tool_transport().validate_config(&config)?;
+        if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
+            self.thread_tool_transport().validate_config(&config)?;
+        }
         let session_config = if matches!(
             model_settings,
             ResumeModelSettings::RestoreFromThread | ResumeModelSettings::PreserveExistingThread
@@ -176,7 +179,9 @@ impl AppServerSession {
             model_settings,
             permission_overrides,
         );
-        if model_settings == ResumeModelSettings::OverrideFromCurrentConfig {
+        if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client
+            && model_settings == ResumeModelSettings::OverrideFromCurrentConfig
+        {
             params.model_provider = self.explicit_model_provider(&config);
         }
         let has_launch_tier_override = config
@@ -194,6 +199,7 @@ impl AppServerSession {
                 )
             });
         if model_settings == ResumeModelSettings::RestoreFromThread
+            && self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client
             && params.service_tier.is_some()
             && !has_launch_tier_override
         {
@@ -210,8 +216,10 @@ impl AppServerSession {
                 }
             }
         }
-        self.thread_tool_transport()
-            .configure_mcp(&mut params.config);
+        if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
+            self.thread_tool_transport()
+                .configure_mcp(&mut params.config);
+        }
         let mut rollout_maintenance_guard = None;
         params.exclude_turns = if self.history_support == ThreadHistorySupport::Paginated {
             let known_legacy_history = self

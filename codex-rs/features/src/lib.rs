@@ -287,6 +287,8 @@ pub enum Feature {
     DeferredToolWorldState,
     /// Track top-level tool definitions in world state and emit incremental context updates.
     IncrementalTools,
+    /// Preserve inherited tool declarations in MCP-disabled prediction forks.
+    PredictionPreserveParentTools,
     /// Expose MCP model-visible namespaces without the legacy `mcp__` prefix.
     NonPrefixedMcpToolNames,
     /// Enable discoverable tool suggestions for apps.
@@ -351,6 +353,9 @@ pub enum Feature {
     ComputerUse,
     /// Enable the PS-backed remote plugin catalog.
     RemotePlugin,
+    /// Prefetch the plugin directory, featured plugins, and recommendations at app-server startup.
+    /// Inventory-only hosts can disable this. Legacy suggestions read the cached directory.
+    PluginDiscoveryPrefetch,
     /// Enable remote plugin sharing flows.
     PluginSharing,
     /// Removed compatibility flag retained as a no-op.
@@ -375,6 +380,8 @@ pub enum Feature {
     SkillMcpDependencyInstall,
     /// Run cheap skill-search methods in shadow mode and emit experiment metrics.
     SkillSearch,
+    /// Append skill additions and edits within a cumulative context budget.
+    SkillCatalogDeltas,
     /// Removed compatibility flag for deleted skill env var dependency prompting.
     SkillEnvVarDependencyPrompt,
     /// Enable the unified mention popup used by default in the TUI.
@@ -1691,6 +1698,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
+        id: Feature::PredictionPreserveParentTools,
+        key: "prediction_preserve_parent_tools",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
         id: Feature::NonPrefixedMcpToolNames,
         key: "non_prefixed_mcp_tool_names",
         stage: Stage::UnderDevelopment,
@@ -1817,6 +1830,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
+        id: Feature::PluginDiscoveryPrefetch,
+        key: "plugin_discovery_prefetch",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
         id: Feature::PluginSharing,
         key: "plugin_sharing",
         stage: Stage::Stable,
@@ -1887,6 +1906,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "skill_search",
         stage: Stage::Stable,
         default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::SkillCatalogDeltas,
+        key: "skill_catalog_deltas",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::SkillEnvVarDependencyPrompt,

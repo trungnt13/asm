@@ -170,7 +170,6 @@ use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::protocol::WorldStateItem;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
-use codex_protocol::request_permissions::RequestPermissionsArgs;
 use codex_protocol::request_permissions::RequestPermissionsEvent;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::request_user_input::RequestUserInputArgs;
@@ -339,12 +338,12 @@ use crate::stream_events_utils::HandleOutputCtx;
 use crate::stream_events_utils::handle_output_item_done;
 use crate::tasks::ReviewTask;
 use crate::tools::ApprovalContext;
+use crate::tools::handlers::PreparedPermissionRequest;
 use crate::tools::network_approval::NetworkApprovalService;
 use crate::tools::network_approval::build_blocked_request_observer;
 use crate::tools::network_approval::build_network_policy_decider;
 #[cfg(test)]
 use crate::tools::parallel::ToolCallRuntime;
-use crate::tools::sandboxing::ApprovalAction;
 use crate::tools::sandboxing::ApprovalStore;
 use crate::turn_timing::TurnTimingState;
 use crate::turn_timing::record_turn_ttfm_metric;
@@ -1969,6 +1968,18 @@ impl Session {
                 } else {
                     self.persist_rollout_items(&rollout_items).await;
                 }
+                if self.preserve_parent_tool_declarations() {
+                    let notice = DeveloperInstructions::new(
+                        "<mcp_tools>\nMCP tools are unavailable for this request.\n</mcp_tools>",
+                    )
+                    .with_metadata(ContentItemMetadata::tool(/*namespace*/ None));
+                    self.record_conversation_items(
+                        &turn_context,
+                        turn_context.model_info(),
+                        &[ContextualUserFragment::into(notice)],
+                    )
+                    .await;
+                }
 
                 // Agent spawn owns its final durability barrier so it can overlap the edge write.
                 let persist_context = match self.fork_persistence {
@@ -3376,8 +3387,7 @@ impl Session {
         self: &Arc<Self>,
         step_context: &Arc<StepContext>,
         call_id: String,
-        args: RequestPermissionsArgs,
-        environment_selection: TurnEnvironmentSelection,
+        request: PreparedPermissionRequest,
         cancellation_token: CancellationToken,
     ) -> Option<RequestPermissionsResponse> {
         let turn_context = &step_context.turn;
@@ -3386,9 +3396,7 @@ impl Session {
         let Some(environment) = step_context
             .environments
             .turn_environments()
-            .find(|candidate| {
-                candidate.selection.environment_id == environment_selection.environment_id
-            })
+            .find(|candidate| candidate.selection.environment_id == request.environment_id)
             .cloned()
         else {
             return Some(RequestPermissionsResponse {
@@ -3420,17 +3428,11 @@ impl Session {
             | AskForApproval::Granular(_) => {}
         }
 
-        let requested_permissions = args.permissions;
+        let action = request.approval_action(&call_id, &turn_context.sub_id);
+        let requested_permissions = request.permissions;
         let sandbox_context = environment.sandbox_context(/*additional_permissions*/ None);
         let context = sandbox_context.policy_context();
         {
-            let action = ApprovalAction::RequestPermissions {
-                id: call_id.clone(),
-                environment_id: environment_selection.environment_id.clone(),
-                turn_id: turn_context.sub_id.clone(),
-                reason: args.reason.clone(),
-                permissions: requested_permissions.clone(),
-            };
             let approval_context = ApprovalContext {
                 review_context: crate::guardian::GuardianReviewContext::from(step_context),
                 cancellation_token: Some(cancellation_token.clone()),
@@ -3526,7 +3528,7 @@ impl Session {
             turn_id: turn_context.sub_id.clone(),
             environment_id: Some(environment.selection.environment_id.clone()),
             started_at_ms: now_unix_timestamp_ms(),
-            reason: args.reason,
+            reason: request.reason,
             permissions: requested_permissions,
             cwd: Some(cwd.clone().into()),
         });
@@ -4797,6 +4799,16 @@ impl Session {
             state.queue_pending_session_start_source(codex_hooks::SessionStartSource::Compact);
         }
         true
+    }
+
+    fn preserve_parent_tool_declarations(&self) -> bool {
+        // Only prediction forks and thread/sample set this marker when they disable MCP.
+        self.enabled(Feature::PredictionPreserveParentTools)
+            && self
+                .services
+                .thread_extension_data
+                .get::<crate::McpServersDisabled>()
+                .is_some()
     }
 
     pub fn enabled(&self, feature: Feature) -> bool {

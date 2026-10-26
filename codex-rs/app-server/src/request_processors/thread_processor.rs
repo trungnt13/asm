@@ -8,8 +8,8 @@ mod daemon_snapshot;
 mod system1_stats;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
+use super::persisted_resume_settings::latest_owned_thread_settings;
 use super::persisted_resume_settings::latest_persisted_model_settings;
-use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
 use super::thread_input::can_accept_direct_input;
@@ -41,7 +41,6 @@ use codex_protocol::SanitizedGitUrl;
 use codex_protocol::config_types::MultiAgentMode;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
-use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::PersistContext;
@@ -108,7 +107,6 @@ struct ResumeConfigState {
     workspace_roots: Option<Vec<AbsolutePathBuf>>,
     persisted_metadata: Option<ThreadMetadata>,
     persisted_settings: Option<PersistedResumeSettings>,
-    persisted_permission_profile: Option<PermissionProfile>,
 }
 
 struct PreparedResumeConfig {
@@ -310,6 +308,29 @@ fn has_permission_override(
         || request_overrides.is_some_and(|overrides| {
             overrides.contains_key("sandbox_mode") || overrides.contains_key("default_permissions")
         })
+}
+
+fn apply_persisted_permission_profile(
+    settings: &PersistedResumeSettings,
+    request_overrides: Option<&HashMap<String, serde_json::Value>>,
+    config_overrides: &mut ConfigOverrides,
+) {
+    if has_permission_override(request_overrides, config_overrides) {
+        return;
+    }
+    config_overrides.persisted_permission_profile_id = settings
+        .active_permission_profile
+        .as_ref()
+        .map(|profile| profile.id.clone());
+    if !request_overrides.is_some_and(|overrides| {
+        overrides.keys().any(|key| {
+            key == "sandbox_workspace_write" || key.starts_with("sandbox_workspace_write.")
+        })
+    }) {
+        config_overrides
+            .persisted_permission_profile
+            .clone_from(&settings.unnamed_permission_profile);
+    }
 }
 
 fn validate_dynamic_tools(tools: &[DynamicToolSpec]) -> Result<(), String> {
@@ -4158,16 +4179,9 @@ impl ThreadRequestProcessor {
         }
 
         // Copied or referenced history can contain another thread's settings. Only snapshots
-        // explicitly owned by this thread can restore its permissions, cwd, and workspace folders.
+        // explicitly owned by this thread can restore its cwd and workspace folders.
         let history_settings = if let InitialHistory::Resumed(resumed) = &thread_history {
-            resumed.history.iter().rev().find_map(|item| match item {
-                RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
-                    if event.thread_id == Some(resumed.conversation_id) =>
-                {
-                    Some(&event.thread_settings)
-                }
-                _ => None,
-            })
+            latest_owned_thread_settings(&resumed.history, resumed.conversation_id)
         } else {
             None
         };
@@ -4282,27 +4296,12 @@ impl ThreadRequestProcessor {
         let restore_summary = !has_override("model_reasoning_summary");
         let restore_personality =
             typesafe_overrides.personality.is_none() && !has_override("personality");
-        typesafe_overrides.persisted_permission_profile = history_settings
-            .filter(|settings| {
-                settings.active_permission_profile.is_none()
-                    && !has_permission_override(request_overrides.as_ref(), &typesafe_overrides)
-                    && !request_overrides.as_ref().is_some_and(|overrides| {
-                        overrides.keys().any(|key| {
-                            key == "sandbox_workspace_write"
-                                || key.starts_with("sandbox_workspace_write.")
-                        })
-                    })
-            })
-            .map(|settings| settings.permission_profile.clone());
-        let mut persisted_settings = match &thread_history {
-            InitialHistory::Resumed(resumed) => latest_persisted_resume_settings(&resumed.history),
+        let persisted_settings = match &thread_history {
+            InitialHistory::Resumed(resumed) => {
+                PersistedResumeSettings::from_history(&resumed.history, resumed.conversation_id)
+            }
             InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => None,
         };
-        // A TurnContext can describe an executor's profile, so an owned snapshot
-        // is authoritative for named permissions too.
-        if let (Some(settings), Some(snapshot)) = (&mut persisted_settings, history_settings) {
-            settings.active_permission_profile = snapshot.active_permission_profile.clone();
-        }
         let persisted_metadata = self
             .load_and_apply_persisted_resume_metadata(
                 &thread_history,
@@ -4321,7 +4320,6 @@ impl ThreadRequestProcessor {
             workspace_roots: typesafe_overrides.workspace_roots.clone(),
             persisted_metadata,
             persisted_settings,
-            persisted_permission_profile: typesafe_overrides.persisted_permission_profile.clone(),
         };
         let mut config = match prepared_config.take() {
             Some(prepared) if prepared.state == config_state => prepared.config,
@@ -4556,7 +4554,8 @@ impl ThreadRequestProcessor {
                         };
                         restored_token_usage_turn_id(response_history.get_rollout_items(), turns)
                     })
-                    .filter(|turn_id| !turn_id.is_empty());
+                    .filter(|turn_id| !turn_id.is_empty())
+                    .filter(|_| !paginated_resume || thread.forked_from_id.is_none());
                 if redact_resume_payloads {
                     redact_thread_resume_payloads(&mut thread.turns);
                     if let Some(initial_turns_page) = initial_turns_page.as_mut() {
@@ -4648,12 +4647,11 @@ impl ThreadRequestProcessor {
             {
                 typesafe_overrides.approvals_reviewer = persisted_settings.approvals_reviewer;
             }
-            if !has_permission_override(request_overrides.as_ref(), typesafe_overrides) {
-                typesafe_overrides.persisted_permission_profile_id = persisted_settings
-                    .active_permission_profile
-                    .as_ref()
-                    .map(|profile| profile.id.clone());
-            }
+            apply_persisted_permission_profile(
+                persisted_settings,
+                request_overrides.as_ref(),
+                typesafe_overrides,
+            );
         }
         let state_db_ctx = self.state_db.clone()?;
         let persisted_metadata = state_db_ctx
@@ -4905,7 +4903,8 @@ impl ThreadRequestProcessor {
                         });
                     restored_token_usage_turn_id(history, turns)
                 })
-                .filter(|turn_id| !turn_id.is_empty());
+                .filter(|turn_id| !turn_id.is_empty())
+                .filter(|_| !paginated_resume || thread_summary.forked_from_id.is_none());
             let paginated_initial_turns_page_with_active_slot = if paginated_resume {
                 match params.initial_turns_page.as_ref() {
                     Some(params)
@@ -5500,6 +5499,11 @@ impl ThreadRequestProcessor {
             None
         };
         let paginated_source = matches!(source_thread.history_mode, ThreadHistoryMode::Paginated);
+        if attach_to_source && !paginated_source {
+            return Err(invalid_request(
+                "attachToSource requires a paginated parent",
+            ));
+        }
         if last_turn_id.is_some() && before_turn_id.is_some() {
             return Err(invalid_request(
                 "`beforeTurnId` cannot be combined with `lastTurnId`",
@@ -5640,11 +5644,7 @@ impl ThreadRequestProcessor {
         let loaded_parent_settings = if paginated_source && needs_latest_settings {
             if let Some(parent) = loaded_parent.as_ref() {
                 let snapshot = parent.thread_settings_snapshot().await;
-                Some(PersistedResumeSettings {
-                    approval_policy: snapshot.approval_policy,
-                    approvals_reviewer: Some(snapshot.approvals_reviewer),
-                    active_permission_profile: snapshot.active_permission_profile,
-                })
+                Some(PersistedResumeSettings::from(&snapshot))
             } else {
                 None
             }
@@ -5684,11 +5684,10 @@ impl ThreadRequestProcessor {
                 .and_then(|parent| parent.multi_agent_version())
         });
         let persisted_settings = loaded_parent_settings.or_else(|| {
-            latest_persisted_resume_settings(
-                latest_context
-                    .as_deref()
-                    .unwrap_or_else(|| source_history_items.as_ref()),
-            )
+            let history = latest_context
+                .as_deref()
+                .unwrap_or_else(|| source_history_items.as_ref());
+            PersistedResumeSettings::from_history(history, source_thread_id)
         });
         if let Some(persisted_settings) = persisted_settings {
             if restore_approval_policy {
@@ -5697,11 +5696,11 @@ impl ThreadRequestProcessor {
             if restore_approvals_reviewer {
                 typesafe_overrides.approvals_reviewer = persisted_settings.approvals_reviewer;
             }
-            if restore_permission_profile {
-                typesafe_overrides.persisted_permission_profile_id = persisted_settings
-                    .active_permission_profile
-                    .map(|profile| profile.id);
-            }
+            apply_persisted_permission_profile(
+                &persisted_settings,
+                request_overrides.as_ref(),
+                &mut typesafe_overrides,
+            );
         }
         let (inherited_options, inherited_settings) = inherited_fork.unzip();
         let options = if let Some(options) = inherited_options {
@@ -5962,6 +5961,8 @@ impl ThreadRequestProcessor {
                 thread.turns.as_slice(),
             ));
         }
+        let token_usage_turn_id =
+            token_usage_turn_id.filter(|id| thread.turns.iter().any(|turn| turn.id == *id));
         if let Some(name) = source_thread_name {
             set_thread_name_from_title(&mut thread, name);
         }

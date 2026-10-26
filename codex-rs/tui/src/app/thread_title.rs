@@ -10,6 +10,7 @@ use crate::app_event::AppEvent;
 use crate::app_event::AutoRenameRequest;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
+use crate::app_server_session::ThreadSettingsOwner;
 use crate::temporary_structured_request::TemporaryStructuredThreadOptions;
 use crate::temporary_structured_request::run_temporary_structured_turn;
 use crate::temporary_structured_request::start_temporary_thread;
@@ -73,6 +74,13 @@ impl App {
         prompt: String,
         auto_rename: AutoRenameRequest,
     ) {
+        if app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server {
+            if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
+                self.chat_widget
+                    .apply_thread_name_suggestion(thread_id, request_id, /*suggestion*/ None);
+            }
+            return;
+        }
         if codex_protocol::openai_models::is_native_runtime_model(self.chat_widget.current_model())
         {
             if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {

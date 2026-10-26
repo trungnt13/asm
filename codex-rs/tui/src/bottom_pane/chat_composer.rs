@@ -37,7 +37,7 @@
 //!
 //! # Key Event Routing
 //!
-//! Plain Left opens agents when the local-daemon composer is empty and available for input.
+//! Plain Left opens agents from an empty, active composer connected to a local daemon or remote App Server.
 //! Explicit editor remaps take precedence.
 //! Most key handling goes through [`ChatComposer::handle_key_event`], which dispatches to a
 //! popup-specific handler if a popup is visible and otherwise to
@@ -137,6 +137,8 @@
 //! keys flush buffered pastes and send regardless of line count; popup actions stay unchanged.
 //! `Enter` otherwise submits immediately. `Tab` requests queuing while a task is running; if no task is
 //! running, `Tab` submits just like Enter so input is never dropped.
+//! Submit and queue bindings act only on fresh key presses; repeated events are consumed so a held
+//! key cannot dispatch a preserved draft after another input layer closes.
 //! Vim Replace shares Insert's composer actions; only textarea editing differs.
 //! Literal completion/paste edits discard stale Replace recovery; subsequent typing records anew.
 //! Token markers added during Replace are removed when restoring overwritten characters.
@@ -644,7 +646,7 @@ pub(crate) struct ChatComposer {
     pub(super) mention_usage: MentionUsage,
     app_event_tx: AppEventSender,
     history: ChatComposerHistory,
-    agents_navigation_enabled: bool,
+    pub(super) command_center_enabled: bool,
     footer: FooterState,
     has_focus: bool,
     frame_requester: Option<FrameRequester>,
@@ -781,7 +783,7 @@ impl ChatComposer {
             mention_usage: MentionUsage::default(),
             app_event_tx,
             history: ChatComposerHistory::new(),
-            agents_navigation_enabled: false,
+            command_center_enabled: false,
             footer: FooterState {
                 quit_shortcut_expires_at: None,
                 quit_shortcut_key: key_hint::ctrl(KeyCode::Char('c')),
@@ -3599,6 +3601,11 @@ impl ChatComposer {
             }
         } else {
             self.footer.mode = reset_mode_after_activity(self.footer.mode);
+        }
+        if key_event.kind == KeyEventKind::Repeat
+            && (self.queue_keys.is_pressed(key_event) || self.submit_keys.is_pressed(key_event))
+        {
+            return (InputResult::None, true);
         }
         if self.queue_keys.is_pressed(key_event)
             && (self.is_task_running || self.queue_submissions || !self.is_bang_shell_command())

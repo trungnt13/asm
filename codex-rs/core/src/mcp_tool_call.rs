@@ -583,10 +583,17 @@ async fn handle_approved_mcp_tool_call(
             } else {
                 call.await
             };
-            let mut result = call_result.map_err(|error| {
+            let result = call_result.map_err(|error| {
                     request_error_code = codex_rmcp_client::request_error_code(&error);
                     format!("tool call error: {error:?}")
-                })?;
+                });
+            // Keep the backend response intact, before callbacks or model/UI limits can change it.
+            sess.services.rollout_thread_trace.record_mcp_tool_result(
+                &turn_context.sub_id,
+                call_id,
+                &result,
+            );
+            let mut result = result?;
             crate::tools::record_confirmed_code_mode_send(
                 sess,
                 &turn_context.sub_id,
@@ -2602,6 +2609,13 @@ async fn notify_mcp_tool_call_skip(
         .await;
     }
 
+    let result = Err(message);
+    // Skipped calls never reach the backend-result recorder.
+    sess.services.rollout_thread_trace.record_mcp_tool_result(
+        &turn_context.sub_id,
+        call_id,
+        &result,
+    );
     notify_mcp_tool_call_completed(
         sess,
         turn_context,
@@ -2609,10 +2623,10 @@ async fn notify_mcp_tool_call_skip(
         invocation,
         item_metadata,
         Duration::ZERO,
-        truncate_mcp_tool_result_for_event(&Err(message.clone())),
+        truncate_mcp_tool_result_for_event(&result),
     )
     .await;
-    Err(message)
+    result
 }
 
 #[cfg(test)]

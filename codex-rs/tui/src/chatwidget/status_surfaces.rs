@@ -13,6 +13,7 @@ use crate::model_catalog::LUNA_RESERVE_MODEL;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
 use crate::status::format_tokens_compact;
+use crate::status::thread_cost_micros;
 use crate::status_line_labels::compact_model_name;
 use crate::status_line_labels::compact_reasoning_label;
 use crate::terminal_program_status::ProgramStatus;
@@ -833,11 +834,12 @@ impl ChatWidget {
             StatusLineItem::OutputTps => self.output_tps.clone(),
             StatusLineItem::ThreadCredits => self
                 .estimated_thread_usage()
+                .filter(|_| self.plan_type != Some(PlanType::Ent26))
                 .map(|usage| usage.estimated_usage_credits_micros)
                 .map(|credits| format!("{} credits", format_credit_micros(credits))),
             StatusLineItem::EstimatedThreadCost => self
                 .estimated_thread_usage()
-                .and_then(|usage| usage.estimated_usage_usd_micros)
+                .and_then(|usage| thread_cost_micros(usage, self.plan_type))
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
             StatusLineItem::FastMode => self
@@ -1040,17 +1042,29 @@ impl ChatWidget {
 
     fn model_with_reasoning_display_name(&self, model_name: &str, label: &str) -> String {
         let service_tier_label = self
-            .current_service_tier()
-            .and_then(|service_tier| {
-                self.current_model_service_tier_commands()
-                    .into_iter()
-                    .find(|tier| tier.id == service_tier)
-                    .map(|tier| tier.name)
-            })
-            .filter(|_| self.has_chatgpt_account)
+            .processing_tier_display_name()
             .map(|tier| format!(" {tier}"))
             .unwrap_or_default();
         format!("{model_name} {label}{service_tier_label}")
+    }
+
+    fn processing_tier_display_name(&self) -> Option<&str> {
+        let id = self.current_service_tier()?;
+        self.model_catalog
+            .models
+            .iter()
+            .find(|preset| preset.model == self.current_model())
+            .and_then(|preset| preset.service_tiers.iter().find(|tier| tier.id == id))
+            .map(|tier| tier.name.as_str())
+            .or_else(|| {
+                (id == ServiceTier::Flex.request_value()
+                    && self
+                        .config
+                        .model_providers
+                        .get(&self.config.model_provider_id)
+                        .is_some_and(|provider| !provider.is_amazon_bedrock()))
+                .then_some("Flex")
+            })
     }
 
     /// Computes the compact runtime status label used by word-based status items.

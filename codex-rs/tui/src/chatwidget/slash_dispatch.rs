@@ -315,7 +315,7 @@ impl ChatWidget {
                         SelectionItem {
                             name: if self.parallel_conversation_active() {
                                 "Yes, delete and return to main"
-                            } else if self.remote_connection.is_some() {
+                            } else if self.bottom_pane.command_center_enabled() {
                                 "Yes, delete and return to command center"
                             } else {
                                 "Yes, delete and exit"
