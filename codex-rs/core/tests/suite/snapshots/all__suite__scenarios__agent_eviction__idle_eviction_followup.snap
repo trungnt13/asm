@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_agent_eviction_tests.rs
-assertion_line: 275
 expression: "format!(\"{history}\\n\\nResumed worker mailbox:\\n{mailbox}\")"
 ---
 Scenario: A parent with no configured environment delegates an API migration, queues a note while the worker is idle, and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment, its earlier answer, and the unread note. Complete model streams are grouped as parent, then worker.
@@ -129,12 +128,8 @@ Resumed worker mailbox:
     "author": "/root",
     "content": [
       {
-        "text": "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n",
+        "text": "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nCheck who owns the API migration.",
         "type": "input_text"
-      },
-      {
-        "encrypted_content": "Check who owns the API migration.",
-        "type": "encrypted_content"
       }
     ],
     "recipient": "/root/worker",
@@ -144,12 +139,8 @@ Resumed worker mailbox:
     "author": "/root",
     "content": [
       {
-        "text": "Message Type: MESSAGE\nTask name: /root/worker\nSender: /root\nPayload:\n",
+        "text": "Message Type: MESSAGE\nTask name: /root/worker\nSender: /root\nPayload:\nUse the new API for the migration.",
         "type": "input_text"
-      },
-      {
-        "encrypted_content": "Use the new API for the migration.",
-        "type": "encrypted_content"
       }
     ],
     "recipient": "/root/worker",
@@ -159,12 +150,8 @@ Resumed worker mailbox:
     "author": "/root",
     "content": [
       {
-        "text": "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n",
+        "text": "Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\nContinue the migration with the queued note.",
         "type": "input_text"
-      },
-      {
-        "encrypted_content": "Continue the migration with the queued note.",
-        "type": "encrypted_content"
       }
     ],
     "recipient": "/root/worker",

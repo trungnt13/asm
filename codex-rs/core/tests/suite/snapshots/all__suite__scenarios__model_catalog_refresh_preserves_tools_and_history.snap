@@ -35,6 +35,10 @@ Settings:
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
     [02] <model_catalog>
+        - `claude-code/opus-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
+        - `claude-code/sonnet-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
+        - `cursor-agent/claude-opus-5-5`: Runs through Cursor Agent with native tools, instructions, and subscri...ing efforts: low, medium (default), high, xhigh, max. [hash=408d3677ec0016b6]
+        - `cursor-agent/claude-sonnet-5-5`: Runs through Cursor Agent with native tools, instructions, and subsc...ing efforts: low, medium, high (default), xhigh, max. [hash=2139f813725c57de]
         - `visible-model`: Fast and capable Reasoning efforts: low, medium (default), high. Service tiers: priority.
         </model_catalog>
 02:message/user:
@@ -42,6 +46,10 @@ Settings:
 -- request 2 (turn) --
 03:message/developer:
     <model_catalog>
+    - `claude-code/opus-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
+    - `claude-code/sonnet-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
+    - `cursor-agent/claude-opus-5-5`: Runs through Cursor Agent with native tools, instructions, and subscri...ing efforts: low, medium (default), high, xhigh, max. [hash=408d3677ec0016b6]
+    - `cursor-agent/claude-sonnet-5-5`: Runs through Cursor Agent with native tools, instructions, and subsc...ing efforts: low, medium, high (default), xhigh, max. [hash=2139f813725c57de]
     - `visible-model`: Updated picker copy Reasoning efforts: low, medium (default), high. Service tiers: priority.
     </model_catalog>
 04:message/user:
