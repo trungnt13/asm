@@ -240,7 +240,7 @@ impl SqliteConfig {
             sqlite_home,
             /*enforce_delete_on_nfs*/ false,
         )
-            .with_diagnostic_log_capture(DiagnosticLogCapture::Enabled)
+        .with_diagnostic_log_capture(DiagnosticLogCapture::Enabled)
     }
 
     pub fn with_diagnostic_log_capture(mut self, policy: DiagnosticLogCapture) -> Self {
