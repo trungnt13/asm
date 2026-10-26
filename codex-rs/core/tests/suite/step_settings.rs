@@ -3216,14 +3216,7 @@ async fn captured_step_controls_mcp_resource_output() -> Result<()> {
                     "type": "function",
                     "name": "read_mcp_resource",
                     "description": format!("Read resource for {model}."),
-                    "parameters": ({
-                            let mut schema = parameters(model);
-                            if name == "wait_agent" {
-                                schema["properties"]["reason"] = json!({"type":"string", "description":codex_tools::WAIT_REASON_DESCRIPTION});
-                                schema["required"] = json!(["target", "reason"]);
-                            }
-                            schema
-                        }),
+                    "parameters": parameters(model),
                     "strict": false,
                 })
             ))
