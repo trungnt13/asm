@@ -121,6 +121,16 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 ## Upstream sync
 
+### Live backend model catalog
+
+Every upstream rebase/sync must also fetch the live authenticated backend model catalog. Source searches and cached or bundled catalogs cannot establish current model availability; the backend can expose new models without a source update.
+
+- Use the configured backend and existing authorized sign-in. Follow the client’s catalog request path (`models?client_version=<client version>`), authentication, account routing, and discovery settings; never send credentials to an unverified endpoint. This is a read-only catalog request, not an inference call.
+- Save the successful raw JSON response as a timestamped, private task-owned `models.json` outside tracked source. Validate its model-list shape and record the fetch time, backend URL, client version, and returned model IDs. Never include credentials or authentication headers in evidence, logs, or commits.
+- Compare the live catalog with the bundled catalog and report newly exposed models, including their visibility and relevant capabilities. Link the saved JSON in the rebase report. Do not claim model execution works based on catalog presence alone, or change model/config defaults automatically.
+- If authentication, connectivity, or discovery policy prevents a fresh fetch, report the check as blocked with its reason; do not substitute cached data or claim live availability was checked.
+
+
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 - Last incorporated commit: `dd5521406a801212f7742432bcacb06e91823b01`.
