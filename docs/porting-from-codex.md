@@ -281,6 +281,30 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### Catalog-bound model providers
+
+When `load_external_models_json` is true, merge bundled external models into custom
+`model_catalog_json` catalogs in memory; exact custom IDs retain all their metadata overrides.
+When false, keep the custom catalog alone. Provider routing remains bundled and exact-ID-only.
+
+Bundled `external_models.json` entries may select an existing named `model_provider`.
+Resolve exact IDs only; remote catalogs cannot supply routing. Keep endpoints and
+credentials in user provider configuration and enforce managed provider requirements.
+DeepSeek V4.1 Flash 1017 selects `fireworks`; no custom agent role is required.
+Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
+Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
+Provider changes in the picker start fresh sessions and preserve the old chat.
+Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
+reuse and preserve saved provider identity on resume. Build a provider-specific
+model manager for bound models rather than reuse the parent's discovery identity.
+User-spawned subagents using a catalog-bound provider ID must select an explicitly
+bound model or a native runtime, including descendants and cold resumes. Reject
+unbound selections before startup rather than guessing reverse provider routing.
+For unbound custom subagent models, configure a separate provider ID. Ordinary
+main sessions and internal workers retain their existing provider behavior.
+Keep upstream catalog/API model types unchanged. Disabling bundled catalog display
+does not disable explicit selection, matching native external model behavior.
+
 ### Claude Code thread runtime
 
 Explicit `claude-code/<model>` IDs select the official persistent `claude -p` CLI
@@ -294,7 +318,8 @@ Top-level `load_external_models_json` defaults to `true`; set it to `false` to
 hide bundled external entries. Explicit `claude-code/<model>` selection remains available.
 Append external entries when reading the default catalog, including remote and cached catalogs.
 External entries override duplicate IDs without changing cached payloads.
-Explicit custom/provider catalogs remain authoritative and ignore this flag.
+Provider-owned catalogs remain authoritative and ignore this flag.
+Explicit custom catalogs honor this flag and retain metadata for duplicate IDs.
 Claude Code owns native model access and effort acceptance; metadata grants no access.
 
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
@@ -311,7 +336,21 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
   hooks and its internal subagents. Do not synchronize ASM developer instructions,
-  approval receipts or tool results into Claude's private conversation.
+  approval receipts or tool results into Claude's private conversation. The one instruction
+  exception is a spawned child's selected role: append only that role's own
+  `developer_instructions` through `--append-system-prompt`, preserving Claude's
+  default prompt. Pass the text as one argument, without shell interpolation or a
+  temporary prompt file. Process arguments expose the text and OS argument-size
+  limits apply; never truncate or silently fall back to a file. Never forward merged
+  or inherited ASM instructions.
+  Keep loaded role instructions during warm turns. On cold reload, recover the role
+  through normal child configuration and supply its current text on native startup.
+  Do not pin role text to saved linkage or reject changes to the same role. Native
+  prompt snapshots may defer changed instructions until a later context rebuild;
+  accepting reload does not promise immediate application. Keep runtime-setting and
+  uncertain-turn recovery checks unchanged.
+  Native main sessions receive no role instruction injection. Cursor children use the
+  capability-gated ACP path below, not a CLI prompt flag.
 - Main sessions and sides have no injected ASM communication tools. ASM-managed
   MultiAgentV2 children use one authenticated loopback JSON dispatcher, without MCP:
   Claude registers tools through a session-local native mod; Cursor calls the existing
@@ -496,6 +535,13 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   `rawOutput` fields only: nonzero `exitCode`, a string `error`, `rejected: true` or
   `permissionDenied: true`. A missing field means unknown; a failed tool does not fail the
   turn.
+- Forward only selected child-role instructions through ACP `systemPrompt` with
+  `mode = "append"` on both `session/new` and `session/load`. Require an advertised
+  `sessionCapabilities.systemPrompt` object before authentication or session creation/loading.
+  Unsupported Cursor versions fail explicitly; never fall back to user-message prefixes,
+  replacement prompts, or shared rule files. Supply current loaded role text on
+  cold reload, without comparing it to saved role text. Omit the field entirely when
+  no role text applies.
 - Child role context limits and `subagent_model_context_windows` set no Cursor compaction
   window and skip the Claude window validation; Cursor manages its own context.
 - Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.
@@ -626,18 +672,18 @@ keep credentials separate from main-model authentication and diagnostics sanitiz
 - Limit warm-up to three seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
 - Before each cadence-selected main step with an enabled trigger, collect current evidence and await Decisions and validation in the turn task, without a separate step job or completion channel. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit. Keep only warm-up and log writing in the background.
 - Publish a current result within its original deadline through live next-step settings. Keep captured requests unchanged. Later evidence invalidates pending decisions, not already applied settings.
-- For missing credentials, unsupported models, cancellation, refusals, invalid answers, request failure, or timeout, keep current effort. A Decisions failure must not stop the main step.
+- After a current main-step decision failure, restore the latest trusted configured/manual baseline for the next request and during cooldown or blocked recovery. Use the model default when the baseline is unset. Never replace the baseline with an adaptive selection. Preserve current effort for unsupported models/efforts, Ultra/Persistent, cancellation, or warmup-only failures. Role bounds restrict adaptive choices, not the configured/manual fallback. A Decisions failure must not stop the main step.
 - On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
 - Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
 - In the shared history-to-request projection, exclude effort updates without harness provenance and keep the last complete envelope in each adjacent update run after filtering. Preserve retained messages, reasoning, tool declarations, and tool results as separators. Do not change stored history or the request-effort pin. This repairs filtered forks and replayed checkpoints without a separate transport workaround. A changed projected tail can lose prefix/cache reuse; let existing incremental-request checks choose full input rather than force a session reset.
 - `/system1 status` reads the current thread's mode, selected and last captured effort, and reported health without changing settings or sending a model turn. Show decision backend/protocol, model, named profile or legacy configuration, and client initialization from the session-fixed resolved connection. Capture the profile name with its resolved settings; never present reloaded configuration as the connection used by an existing client. Before resolution report that identity is not resolved; initialization is not proof of a successful provider request. Do not resolve a profile, inspect credentials, or start warmup for status. It also queries fixed-size in-memory decision totals for the currently loaded backend runtime. Exclude warmup, cadence/backoff skips, and incomplete tasks; accepted includes unchanged decisions, effort changes include only applied changes. Count local client setup failures separately. Show total/last completed-decision wall time, not estimated net overhead, cost, or savings. Totals reset on runtime unload/restart; children have separate totals. Do not scan rollouts, persist totals, add per-step notifications, expose credentials/endpoints, or resume unloaded threads for this read. Older servers show stats unavailable.
 - Manual model and effort changes preserve adaptation’s on/off state and invalidate pending decisions. Effort changes refresh the baseline for subsequent decisions. Unsupported models skip adaptation without disabling it. Persistent thread settings refresh the active turn’s baseline without changing already captured requests or the existing live-step settings contract. Log mode transitions. Ordinary turn-start and spawn settings do not turn it off. Use `/system1` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
-- Report runtime mode and its revision at thread attachment and on each transition. Ignore older revisions so delayed notifications cannot restore old mode. Show `<effort>·auto` when adaptation is on without an outstanding error, including startup and the wait before a decision. Show `<effort>·err` after a Decisions error; keep adaptation on and retain current effort. When off, show only effort. Use the baseline before the first captured step. The marker reports runtime health, not a promised effort change. Unsupported steps keep their effort without a Decisions call. Before each eligible main request, report captured effort through `turn/reasoningEffortUpdated`, including fallback steps. Keep mode and captured effort separate; toggles do not change already-running steps.
+- Report runtime mode and its revision at thread attachment and on each transition. Ignore older revisions so delayed notifications cannot restore old mode. Show `<effort>·auto` when adaptation is on without an outstanding error, including startup and the wait before a decision. Show `<effort>·err` after a Decisions error; keep adaptation on and follow the main-step failure fallback rule above. When off, show only effort. Use the baseline before the first captured step. The marker reports runtime health, not a promised effort change. Unsupported steps keep their effort without a Decisions call. Before each eligible main request, report captured effort through `turn/reasoningEffortUpdated`, including fallback steps. Keep mode and captured effort separate; toggles do not change already-running steps.
 - A spawned subagent copies its parent’s runtime mode once at spawn. Later parent toggles do not change that child. Preserve the child’s own mode across live eviction and reload, not backend restarts. Do not apply this rule to internal workers. If the assigned task is encrypted and no readable task is available, log the fallback and keep current effort; never forward ciphertext or guess the task.
 - Retain captured effort and turn identity in live TUI thread snapshots, outside saved history. Restore them after switching threads without accepting stale history settings. Clear them for a new turn or manual settings change.
 - Deliver transient effort notifications directly to clients, without entering rollout persistence before the main request.
 - Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
-- Report errors through backend runtime state, independent of diagnostics. Include health at attachment and after live child reload. New children inherit mode, not parent errors. Deduplicate visible warnings by failure episode. Clear errors only after a current main-step decision passes acceptance guards, including unchanged effort. Warm-up errors count for health. Warm-up timeouts do not change recovery failures, cooldown, or blocked state. Other warm-up errors retain normal recovery behavior. Warm-up success, cancellation, and supersession do not clear errors. Identify warm-up timeouts explicitly with their deadline in the visible warning; record backend, model, elapsed time, and remaining deadline at request start in diagnostic tracing, without message content or endpoints.
+- Report errors through backend runtime state, independent of diagnostics. Include health at attachment and after live child reload. New children inherit mode, not parent errors. Deduplicate visible warnings by failure episode. Clear errors only after a current main-step decision passes acceptance guards, including unchanged effort. Warm-up errors count for health, but never arm the main-step effort fallback. Warm-up timeouts do not change recovery failures, cooldown, or blocked state. Other warm-up errors retain normal recovery behavior. Warm-up success, cancellation, and supersession do not clear errors. Identify warm-up timeouts explicitly with their deadline in the visible warning; record backend, model, elapsed time, and remaining deadline at request start in diagnostic tracing, without message content or endpoints.
 - With `diagnostic_log_capture = true`, append sanitized attempt metadata to a separate per-session `decision.jsonl`. Include credential failures, API outcome, and acceptance outcome. Do not log evidence, rubric text, bodies, or authentication headers. With capture off, create no log file or writer. Bound buffering and storage; never wait for disk on the decision path. Report dropped records or writer failures separately. Crash-interrupted attempts can lack an end record.
 - Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance with real-binary scenarios under the isolation and cost limits before making claims.
 
@@ -666,8 +712,8 @@ decision_every_n_steps = 1
   Due steps must still pass `update_on` and eligibility checks. Ineligible, failed,
   cancelled, or superseded decisions never advance spacing; try at a later eligible
   step when recovery permits. Collect fresh bounded evidence then.
-- Keep current effective effort between decisions and on failure. Skipped turns
-  use normal effective settings; skipping does not force a new effort.
+- Keep current effective effort between decisions, except for the failure fallback
+  above. Skipped turns do not force a new effort without a main-step failure.
 - Each agent owns recovery state across turns. A transient failure starts a
   one-second cooldown; consecutive failures double it, capped at 30 seconds.
   After expiry, probe on the next due eligible step. Never sleep the main turn or
@@ -693,8 +739,8 @@ Example with defaults, all shown steps eligible, and times measured from session
 | 1 / 1 | 0.0s | Accepted; next due step is 2 |
 | 1 / 2 | 0.2s | Accepted unchanged effort; next due step is 3 |
 | 1 / 3 | 0.4s | Transient failure; cooldown until 1.4s; step remains due |
-| 1 / 4 | 0.8s | Keep effort during cooldown |
-| 2 / 1 | 1.0s | New turn resets spacing, not cooldown; keep effort |
+| 1 / 4 | 0.8s | Use the baseline during cooldown |
+| 2 / 1 | 1.0s | New turn resets spacing, not cooldown; use its baseline |
 | 2 / 2 | 1.5s | Probe fails; cooldown doubles to 2s, until 3.5s |
 | 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 4 |
 | 2 / 4 | 3.8s | Accepted; next due step is 5 |
@@ -1026,6 +1072,11 @@ Keep the active prompt destination visible in the composer’s top-right padding
 
 ### Built-in agent role descriptions
 
+Explicit spawn `model` overrides the role model; the role model overrides inheritance.
+Resolve the final model before validating effort and selecting the runtime. Preserve
+role effort and other constraints; incompatible effective settings fail instead of
+switching runtimes. Keep the public `agent_type` spelling.
+
 Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list and concise Rules requiring explicit task/file ownership, preservation of concurrent edits, and one owner for shared prerequisites. Coordinate ownership before continuing overlapping work; continue independent work meanwhile.
 
 ### Subagent global instructions
@@ -1048,3 +1099,7 @@ and interruption. When new input interrupts sleep, remind the model to handle it
 and resume pending work unless canceled, paused, replaced, or blocked. This is
 model guidance, not guaranteed continuation or automatic resumption of the wait.
 Keep the existing sleep lifecycle items and app-server API unchanged.
+
+### Test-only dependencies
+
+Keep `codex-ollama`'s `wiremock` dependency under `[dev-dependencies]` while only tests use it. This removes its test-server dependency chain from production builds, not necessarily the linked binary. Drop this drift if upstream adopts it; restore the normal dependency if production code needs it.

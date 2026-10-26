@@ -83,9 +83,7 @@ fn remote_model_with_visibility(
 }
 
 fn with_external_models(mut models: Vec<ModelInfo>) -> Vec<ModelInfo> {
-    let external: ModelsResponse = serde_json::from_str(include_str!("../external_models.json"))
-        .expect("bundled external models should parse");
-    models.extend(external.models);
+    models.extend(crate::external_models::models().cloned());
     models
 }
 

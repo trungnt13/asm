@@ -2,6 +2,7 @@
   "models": [
     {
       "slug": "claude-code/sonnet-5-5",
+      "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · CC",
       "description": "Runs through Claude Code with native tools, instructions, and subscription.",
       "default_reasoning_level": "high",
@@ -49,6 +50,7 @@
     },
     {
       "slug": "claude-code/opus-5-5",
+      "tool_mode": "direct",
       "display_name": "Opus 5.5 · CC",
       "description": "Runs through Claude Code with native tools, instructions, and subscription.",
       "default_reasoning_level": "high",
@@ -96,6 +98,7 @@
     },
     {
       "slug": "cursor-agent/claude-opus-5-5",
+      "tool_mode": "direct",
       "display_name": "Opus 5.5 · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
       "default_reasoning_level": "medium",
@@ -132,6 +135,7 @@
     },
     {
       "slug": "cursor-agent/claude-sonnet-5-5",
+      "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
       "default_reasoning_level": "high",
@@ -168,6 +172,7 @@
     },
     {
       "slug": "cursor-agent/claude-haiku-5-5",
+      "tool_mode": "direct",
       "display_name": "Haiku 5.5 · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
       "default_reasoning_level": "high",
@@ -204,6 +209,7 @@
     },
     {
       "slug": "cursor-agent/auto-smart",
+      "tool_mode": "direct",
       "display_name": "Auto · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
       "default_reasoning_level": null,
@@ -231,6 +237,54 @@
       "experimental_supported_tools": [],
       "supports_reasoning_summary_parameter": false,
       "node_repl_disabled": true
+    },
+    {
+      "slug": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "display_name": "DeepSeek V4.1 Flash 1017 · Fireworks",
+      "description": "Uses the configured Fireworks provider with ASM tools.",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        {
+          "effort": "none",
+          "description": "Disable thinking"
+        },
+        {
+          "effort": "low",
+          "description": "Low reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum reasoning effort"
+        }
+      ],
+      "shell_type": "default",
+      "visibility": "list",
+      "supported_in_api": true,
+      "priority": 110,
+      "availability_nux": null,
+      "upgrade": null,
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": false,
+      "model_provider": "fireworks",
+      "input_modalities": ["text", "image"],
+      "tool_mode": "direct",
+      "context_window": 300000,
+      "max_context_window": 1000000
     }
   ]
 }

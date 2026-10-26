@@ -60,6 +60,8 @@ pub struct ClaudeOptions {
     pub effort: Option<String>,
     /// Native compaction window, not the model's maximum context capacity.
     pub auto_compact_window: Option<i64>,
+    /// Selected role instructions appended to the native system prompt, including on resume.
+    pub role_instructions: Option<String>,
     pub session: ClaudeSession,
     pub bridge_directory: Option<PathBuf>,
     /// Native tool names removed from this session, such as questions for headless children.
@@ -195,6 +197,10 @@ impl ClaudeRuntime {
                 .arg(directory)
                 .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
+        }
+        // Reapply on resume: Claude can rebuild its saved system prompt after compaction.
+        if let Some(instructions) = options.role_instructions {
+            command.arg("--append-system-prompt").arg(instructions);
         }
         if let Some(window) = options.auto_compact_window {
             // Settings can reapply env after startup; flag settings beat user/project settings.
@@ -609,8 +615,7 @@ impl ClaudeRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn shutdown(&mut self) -> Result<()> {
         self.usable = false;
-        let result = self.process.shutdown().await;
-        result
+        self.process.shutdown().await
     }
 }
 

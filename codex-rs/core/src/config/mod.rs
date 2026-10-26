@@ -166,6 +166,7 @@ use toml_edit::DocumentMut;
 
 mod auth_keyring;
 pub mod edit;
+mod external_model_provider;
 mod managed_features;
 mod metrics;
 mod network_config;
@@ -658,6 +659,9 @@ pub struct Config {
 
     /// Keeps a child role limit separate from the inherited scalar fallback.
     pub(crate) role_model_context_window: Option<i64>,
+
+    /// Keeps selected role instructions separate from inherited developer instructions.
+    pub(crate) role_developer_instructions: Option<String>,
 
     /// Model-specific context windows for V2 spawned children, in tokens.
     pub subagent_model_context_windows: HashMap<String, i64>,
@@ -4574,6 +4578,7 @@ impl Config {
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,
+            role_developer_instructions: None,
             subagent_model_context_windows,
             model_auto_compact_token_limit: cfg.model_auto_compact_token_limit,
             model_auto_compact_token_limit_scope: cfg
@@ -4912,6 +4917,7 @@ impl Config {
             tracing::warn!("{message}");
             config.startup_warnings.push(message.to_string());
         }
+        config.apply_external_model_provider()?;
         Ok(config)
         })
         .await
