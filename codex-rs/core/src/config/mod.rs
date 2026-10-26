@@ -4082,6 +4082,11 @@ impl Config {
             .or(model_provider)
             .or(cfg.model_provider)
             .unwrap_or_else(|| "openai".to_string());
+        Self::validate_external_runtime_selection(
+            cfg.load_external_models_json.unwrap_or(true),
+            &model_provider_id,
+            model.as_deref().or(cfg.model.as_deref()),
+        )?;
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {

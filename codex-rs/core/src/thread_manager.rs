@@ -2275,6 +2275,12 @@ impl ThreadManagerState {
                     &config.workspace_roots,
                 )
             });
+        Config::validate_external_runtime_selection(
+            config.load_external_models_json,
+            &config.model_provider_id,
+            config.model.as_deref(),
+        )?;
+        config.validate_external_runtime_history(&initial_history)?;
         let is_resumed_thread = matches!(&initial_history, InitialHistory::Resumed(_));
         if reserved_thread_id.is_some() && matches!(&initial_history, InitialHistory::Resumed(_)) {
             return Err(CodexErr::InvalidRequest(
@@ -2305,6 +2311,19 @@ impl ThreadManagerState {
                     }
                     let session_configured =
                         thread.startup_metadata().to_session_configured_event();
+                    if !config.load_external_models_json
+                        && thread.config().await.load_external_models_json
+                    {
+                        return Err(CodexErr::InvalidRequest(
+                            "Cannot disable external runtimes on an already-running thread; unload it before resuming with load_external_models_json=false".to_owned(),
+                        ));
+                    }
+                    let current = thread.config_snapshot().await;
+                    Config::validate_external_runtime_selection(
+                        config.load_external_models_json,
+                        &current.model_provider_id,
+                        Some(&current.model),
+                    )?;
                     startup_state.release_membership();
                     if let Some(startup_guard) = startup_guard {
                         startup_guard.disarm();

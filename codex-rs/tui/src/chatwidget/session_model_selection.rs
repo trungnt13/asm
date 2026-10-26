@@ -51,8 +51,9 @@ impl AstraModelPickerAction {
 
 impl ChatWidget {
     pub(super) fn model_selection_needs_new_session(&self, model: &str) -> bool {
-        (codex_models_manager::provider_for_model(self.current_model())
-            != codex_models_manager::provider_for_model(model))
+        (self.config.load_external_models_json
+            && codex_models_manager::provider_for_model(self.current_model())
+                != codex_models_manager::provider_for_model(model))
             || (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
                 || codex_protocol::openai_models::is_native_runtime_model(&model))
                 && self.current_model() != model

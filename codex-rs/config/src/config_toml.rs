@@ -442,7 +442,8 @@ pub struct ConfigToml {
     /// Per-thread `config` overrides are accepted but do not reapply this (no-ops).
     pub model_catalog_json: Option<AbsolutePathBuf>,
 
-    /// Load bundled external models into the default catalog. Defaults to true.
+    /// Enable bundled external models, aliases, providers, and native runtimes. Defaults to true.
+    /// When false, only the `openai` provider and non-native models are allowed.
     pub load_external_models_json: Option<bool>,
 
     /// Deprecated: `friendly` and `pragmatic` no longer select a style.

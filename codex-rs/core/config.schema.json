@@ -8392,7 +8392,7 @@
       "type": "string"
     },
     "load_external_models_json": {
-      "description": "Load bundled external models into the default catalog. Defaults to true.",
+      "description": "Enable bundled external models, aliases, providers, and native runtimes. Defaults to true. When false, only the `openai` provider and non-native models are allowed.",
       "type": "boolean"
     },
     "log_dir": {

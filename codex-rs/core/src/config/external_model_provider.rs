@@ -2,7 +2,70 @@ use super::Config;
 use std::io;
 
 impl Config {
+    pub(crate) fn validate_external_runtime_selection(
+        load_external_models_json: bool,
+        provider: &str,
+        model: Option<&str>,
+    ) -> io::Result<()> {
+        if !load_external_models_json
+            && (provider != "openai"
+                || model.is_some_and(|model| {
+                    crate::claude_runtime::is_native_model(model)
+                        || model.starts_with("claude/")
+                        || model.starts_with("cursor/")
+                }))
+        {
+            return Err(io::Error::other(
+                "External runtimes are disabled by load_external_models_json=false; use provider `openai` and a non-native model",
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_external_runtime_history(
+        &self,
+        history: &codex_history::InitialHistory,
+    ) -> io::Result<()> {
+        use codex_history::RolloutItem;
+        use codex_protocol::protocol::EventMsg;
+        if !self.load_external_models_json {
+            for item in history.get_rollout_items() {
+                match item {
+                    RolloutItem::SessionMeta(meta) => Config::validate_external_runtime_selection(
+                        /*load_external_models_json*/ false,
+                        meta.meta.model_provider.as_deref().unwrap_or("openai"),
+                        /*model*/ None,
+                    )?,
+                    RolloutItem::TurnContext(context) => {
+                        Config::validate_external_runtime_selection(
+                            /*load_external_models_json*/ false,
+                            "openai",
+                            Some(&context.model),
+                        )?
+                    }
+                    RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+                        Config::validate_external_runtime_selection(
+                            /*load_external_models_json*/ false,
+                            "openai",
+                            Some(&event.thread_settings.model),
+                        )?
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate_external_subagent_model(&self) -> io::Result<()> {
+        Self::validate_external_runtime_selection(
+            self.load_external_models_json,
+            &self.model_provider_id,
+            self.model.as_deref(),
+        )?;
+        if !self.load_external_models_json {
+            return Ok(());
+        }
         let provider = self.model_provider_id.as_str();
         if codex_models_manager::provider_has_model_bindings(provider)
             && !self.model.as_deref().is_some_and(|model| {
@@ -19,6 +82,14 @@ impl Config {
     }
 
     pub fn apply_external_model_provider(&mut self) -> io::Result<()> {
+        Self::validate_external_runtime_selection(
+            self.load_external_models_json,
+            &self.model_provider_id,
+            self.model.as_deref(),
+        )?;
+        if !self.load_external_models_json {
+            return Ok(());
+        }
         if let Some(model) = self
             .model
             .as_deref()

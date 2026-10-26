@@ -285,7 +285,15 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 When `load_external_models_json` is true, merge bundled external models into custom
 `model_catalog_json` catalogs in memory; exact custom IDs retain all their metadata overrides.
-When false, keep the custom catalog alone. Provider routing remains bundled and exact-match-only.
+When false, skip the bundled catalog, alias resolution, routing, and external picker metadata.
+Reject every provider ID except `openai`, and reject native runtimes and their `claude/…`
+and `cursor/…` alias namespaces before execution. Apply the gate to startup, model changes,
+subagents, and both saved and running thread resume; do not fall back to another model.
+The flag is session-static: unload existing threads before resuming with it disabled.
+Keep the custom catalog alone. Do not inspect endpoints for the allowed `openai` provider.
+Unknown model strings under `openai` stay unknown OpenAI model strings: with the catalog off,
+opaque external API slugs/aliases cannot be classified, but cannot select an external provider.
+When enabled, provider routing remains bundled and exact-match-only.
 
 Bundled `external_models.json` entries may select an existing named `model_provider`.
 Accept the bundled entry’s optional provider- or runtime-qualified `alias` as well as its canonical slug.

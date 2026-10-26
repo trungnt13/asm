@@ -310,6 +310,7 @@ fn configured_settings() -> StepSettings {
 
 fn step_settings_constraints(requirements: &ConfigRequirements) -> StepSettingsConstraints<'_> {
     StepSettingsConstraints {
+        load_external_models_json: true,
         requirements,
         guardian_approval_enabled: false,
         trusted_guardian_reviewer: false,

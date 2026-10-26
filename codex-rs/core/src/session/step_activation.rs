@@ -498,6 +498,7 @@ impl Session {
             )
         };
         let constraints = StepSettingsConstraints {
+            load_external_models_json: turn_context.config.load_external_models_json,
             requirements: &requirements,
             guardian_approval_enabled: self.features.enabled(Feature::GuardianApproval),
             trusted_guardian_reviewer,
@@ -533,6 +534,9 @@ impl Session {
             .config_layer_stack
             .requirements();
         settings.revalidate(&StepSettingsConstraints {
+            load_external_models_json: configuration
+                .original_config_do_not_use
+                .load_external_models_json,
             requirements,
             guardian_approval_enabled: self.features.enabled(Feature::GuardianApproval),
             trusted_guardian_reviewer: configuration.trusted_guardian_reviewer,

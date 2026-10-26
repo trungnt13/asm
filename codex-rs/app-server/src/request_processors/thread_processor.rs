@@ -3974,6 +3974,55 @@ impl ThreadRequestProcessor {
         let redact_resume_payloads =
             should_redact_thread_resume_payloads(app_server_client_name.as_deref());
 
+        let source = if params.history.is_none() {
+            self.read_stored_thread_for_resume(
+                &params.thread_id,
+                params.path.as_ref(),
+                /*include_history*/ false,
+            )
+            .await
+            .ok()
+        } else {
+            None
+        };
+        let existing_thread_id = source
+            .as_ref()
+            .map(|source| source.thread_id)
+            .or_else(|| ThreadId::from_string(&params.thread_id).ok());
+        let existing_config = if let Some(thread_id) = existing_thread_id
+            && let Ok(thread) = self.thread_manager.get_thread(thread_id).await
+        {
+            Some(thread.config().await)
+        } else {
+            None
+        };
+        let resume_cwd = params
+            .cwd
+            .as_ref()
+            .map(PathBuf::from)
+            .or_else(|| {
+                existing_config
+                    .as_ref()
+                    .map(|config| config.cwd.to_path_buf())
+            })
+            .or_else(|| source.as_ref().map(|source| source.cwd.clone()));
+        let mut warm_overrides = ConfigOverrides {
+            model: params.model.clone(),
+            model_provider: params.model_provider.clone(),
+            cwd: resume_cwd,
+            ..Default::default()
+        };
+        if !has_model_resume_override(params.config.as_ref(), &warm_overrides)
+            && let Some(source) = source.as_ref()
+        {
+            warm_overrides.model = source.model.clone();
+            warm_overrides.model_provider = Some(source.model_provider.clone());
+        }
+        let warm_resume_config = self
+            .config_manager
+            .load_with_overrides(params.config.clone(), warm_overrides)
+            .await
+            .map_err(|error| config_load_error(&error))?;
         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
         let stored_thread_from_running_probe = match target {
             ThreadResumeTarget::Client(request_id) => match self
@@ -3983,6 +4032,7 @@ impl ThreadRequestProcessor {
                     app_server_client_name.clone(),
                     app_server_client_version.clone(),
                     /*cold_resume_history*/ None,
+                    &warm_resume_config,
                 )
                 .await?
             {
@@ -4142,6 +4192,7 @@ impl ThreadRequestProcessor {
                     app_server_client_name,
                     app_server_client_version,
                     cold_resume_history,
+                    &warm_resume_config,
                 )
                 .await?
             {
@@ -4672,6 +4723,7 @@ impl ThreadRequestProcessor {
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         cold_resume_history: Option<&[RolloutItem]>,
+        warm_resume_config: &Config,
     ) -> Result<RunningThreadResumeResult, JSONRPCErrorError> {
         let running_thread = if params.history.is_some() {
             if let Ok(existing_thread_id) = ThreadId::from_string(&params.thread_id)
@@ -4717,6 +4769,14 @@ impl ThreadRequestProcessor {
         };
 
         if let Some((existing_thread_id, existing_thread, mut source_thread)) = running_thread {
+            let existing_config = existing_thread.config().await;
+            let resume_config = warm_resume_config;
+            if !resume_config.load_external_models_json && existing_config.load_external_models_json
+            {
+                return Err(invalid_request(
+                    "Cannot disable external runtimes on an already-running thread; unload it before resuming with load_external_models_json=false",
+                ));
+            }
             let paginated_resume =
                 matches!(source_thread.history_mode, ThreadHistoryMode::Paginated);
             let existing_thread_rollout_path = existing_thread.rollout_path();

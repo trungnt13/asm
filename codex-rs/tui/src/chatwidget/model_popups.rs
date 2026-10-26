@@ -245,7 +245,11 @@ impl ChatWidget {
         let mut items: Vec<SelectionItem> = Vec::new();
         let model_ids = presets.iter().map(|preset| preset.model.clone()).collect();
         for preset in presets.into_iter() {
-            let description = codex_models_manager::model_alias(&preset.model)
+            let description = self
+                .config
+                .load_external_models_json
+                .then(|| codex_models_manager::model_alias(&preset.model))
+                .flatten()
                 .map(|alias| format!("{alias} — {}", preset.description))
                 .or_else(|| {
                     (!preset.description.is_empty()).then_some(preset.description.to_string())

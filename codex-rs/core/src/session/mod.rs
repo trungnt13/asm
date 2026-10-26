@@ -622,12 +622,20 @@ impl Session {
     }
 
     async fn spawn_internal(mut args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
-        let bound_model = args
-            .config
-            .model
-            .as_deref()
-            .and_then(codex_models_manager::provider_for_model)
-            .is_some();
+        Config::validate_external_runtime_selection(
+            args.config.load_external_models_json,
+            &args.config.model_provider_id,
+            args.config.model.as_deref(),
+        )?;
+        args.config
+            .validate_external_runtime_history(&args.conversation_history)?;
+        let bound_model = args.config.load_external_models_json
+            && args
+                .config
+                .model
+                .as_deref()
+                .and_then(codex_models_manager::provider_for_model)
+                .is_some();
         if bound_model {
             args.config.apply_external_model_provider()?;
             args.models_manager = crate::thread_manager::build_models_manager(
@@ -642,18 +650,19 @@ impl Session {
             args.config.validate_external_subagent_model()?;
         }
         let history = args.conversation_history.get_rollout_items();
-        let saved_bound_model = history.iter().any(|item| {
-            let model = if let RolloutItem::TurnContext(context) = item {
-                Some(context.model.as_str())
-            } else if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = item {
-                Some(event.thread_settings.model.as_str())
-            } else {
-                None
-            };
-            model
-                .and_then(codex_models_manager::provider_for_model)
-                .is_some()
-        });
+        let saved_bound_model = args.config.load_external_models_json
+            && history.iter().any(|item| {
+                let model = if let RolloutItem::TurnContext(context) = item {
+                    Some(context.model.as_str())
+                } else if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = item {
+                    Some(event.thread_settings.model.as_str())
+                } else {
+                    None
+                };
+                model
+                    .and_then(codex_models_manager::provider_for_model)
+                    .is_some()
+            });
         if bound_model || saved_bound_model {
             let saved_provider = history.iter().find_map(|item| {
                 if let RolloutItem::SessionMeta(meta) = item {
@@ -863,6 +872,11 @@ impl Session {
                 )
                 .await
         };
+        Config::validate_external_runtime_selection(
+            config.load_external_models_json,
+            &config.model_provider_id,
+            Some(&model),
+        )?;
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),

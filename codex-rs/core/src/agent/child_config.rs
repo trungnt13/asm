@@ -93,13 +93,20 @@ pub(crate) async fn prepare_agent_spawn_config(
     if let Some(model) = explicit_model {
         config.model = Some(model);
     }
-    if let Some(model) = config
-        .model
-        .as_deref()
-        .and_then(codex_models_manager::canonical_model)
+    if config.load_external_models_json
+        && let Some(model) = config
+            .model
+            .as_deref()
+            .and_then(codex_models_manager::canonical_model)
     {
         config.model = Some(model.to_owned());
     }
+    Config::validate_external_runtime_selection(
+        config.load_external_models_json,
+        &config.model_provider_id,
+        config.model.as_deref(),
+    )
+    .map_err(|err| err.to_string())?;
     validate_spawn_agent_config_effort(session, &config).await?;
     config
         .apply_external_model_provider()
@@ -258,10 +265,20 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
-        let requested_model =
-            codex_models_manager::canonical_model(requested_model).unwrap_or(requested_model);
+        Config::validate_external_runtime_selection(
+            config.load_external_models_json,
+            &config.model_provider_id,
+            Some(requested_model),
+        )
+        .map_err(|err| err.to_string())?;
+        let requested_model = if config.load_external_models_json {
+            codex_models_manager::canonical_model(requested_model).unwrap_or(requested_model)
+        } else {
+            requested_model
+        };
         let native_model = crate::claude_runtime::is_native_model(requested_model);
-        let catalog_bound_model = config.model_catalog.is_none()
+        let catalog_bound_model = config.load_external_models_json
+            && config.model_catalog.is_none()
             && config.model_provider.model_catalog_url.is_none()
             && codex_models_manager::provider_for_model(requested_model).is_some();
         let selected_model_name = if native_model || catalog_bound_model {

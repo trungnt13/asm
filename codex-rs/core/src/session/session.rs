@@ -402,6 +402,7 @@ impl SessionConfiguration {
     ) -> StepSettingsConstraints<'_> {
         let permission_profile = self.effective_permission_profile(environments);
         StepSettingsConstraints {
+            load_external_models_json: self.original_config_do_not_use.load_external_models_json,
             requirements: self
                 .original_config_do_not_use
                 .config_layer_stack

@@ -262,6 +262,7 @@ pub(crate) struct StepSettingsUpdate {
 /// Constraints used when applying and validating a candidate settings version.
 /// Each caller supplies the permissions of the target environment selection.
 pub(crate) struct StepSettingsConstraints<'a> {
+    pub(crate) load_external_models_json: bool,
     pub(crate) requirements: &'a ConfigRequirements,
     pub(crate) guardian_approval_enabled: bool,
     pub(crate) trusted_guardian_reviewer: bool,
@@ -297,7 +298,22 @@ impl StepSettings {
                 /*developer_instructions*/ None,
             )
         });
-        if let Some(model) = codex_models_manager::canonical_model(next.collaboration_mode.model())
+        if !constraints.load_external_models_json {
+            crate::config::Config::validate_external_runtime_selection(
+                /*load_external_models_json*/ false,
+                "openai",
+                Some(next.collaboration_mode.model()),
+            )
+            .map_err(|error| ConstraintError::InvalidValue {
+                field_name: "model",
+                candidate: next.collaboration_mode.model().to_owned(),
+                allowed: error.to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            })?;
+        }
+        if constraints.load_external_models_json
+            && let Some(model) =
+                codex_models_manager::canonical_model(next.collaboration_mode.model())
         {
             next.collaboration_mode.settings.model = model.to_owned();
         }
@@ -341,8 +357,9 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
-        if codex_models_manager::provider_for_model(self.collaboration_mode.model())
-            != codex_models_manager::provider_for_model(next.collaboration_mode.model())
+        if constraints.load_external_models_json
+            && codex_models_manager::provider_for_model(self.collaboration_mode.model())
+                != codex_models_manager::provider_for_model(next.collaboration_mode.model())
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "Model provider (start a fresh thread to change)",

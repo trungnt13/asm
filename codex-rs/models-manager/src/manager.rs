@@ -538,13 +538,18 @@ impl ModelsManager for OpenAiModelsManager {
                 let entry = self.remote_models.read().await;
                 let models = self.models_for_entry(&entry);
                 match &self.catalog_source {
-                    CatalogSource::Default => crate::external_models::models()
-                        .find(|candidate| {
-                            candidate.slug == model
-                                && crate::external_models::provider_for_model(model).is_some()
-                        })
-                        .cloned()
-                        .or_else(|| find_model_from_candidates(model, &models)),
+                    CatalogSource::Default
+                        if self.load_external_models_json.load(Ordering::SeqCst) =>
+                    {
+                        crate::external_models::models()
+                            .find(|candidate| {
+                                candidate.slug == model
+                                    && crate::external_models::provider_for_model(model).is_some()
+                            })
+                            .cloned()
+                            .or_else(|| find_model_from_candidates(model, &models))
+                    }
+                    CatalogSource::Default => find_model_from_candidates(model, &models),
                     CatalogSource::ExplicitProvider(_) => models
                         .iter()
                         .find(|candidate| candidate.slug == model)
