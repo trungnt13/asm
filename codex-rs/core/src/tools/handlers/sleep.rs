@@ -33,7 +33,6 @@ pub struct SleepHandler;
 #[serde(deny_unknown_fields)]
 struct SleepArgs {
     duration_ms: u64,
-    #[serde(default)]
     reason: String,
 }
 
@@ -47,9 +46,7 @@ fn create_sleep_tool() -> ToolSpec {
         ),
         (
             "reason".to_string(),
-            JsonSchema::string(Some(
-                "Pending work to resume after being interrupted during sleep. Use an empty string for no reminder.".to_string(),
-            )),
+            JsonSchema::string(Some(codex_tools::WAIT_REASON_DESCRIPTION.to_string())),
         ),
     ]);
 
@@ -64,7 +61,7 @@ fn create_sleep_tool() -> ToolSpec {
             defer_loading: None,
             parameters: JsonSchema::object(
                 properties,
-                Some(vec!["duration_ms".to_string()]),
+                Some(vec!["duration_ms".to_string(), "reason".to_string()]),
                 /*additional_properties*/ Some(false.into()),
             ),
             output_schema: None,

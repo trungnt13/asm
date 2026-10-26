@@ -1090,11 +1090,11 @@ replacement through normal incremental context updates, not history rewriting.
 
 ### Wait and sleep intent reminders
 
-`clock.sleep` accepts an optional `reason`. V2 `agents.wait_agent`, Code Mode
+`clock.sleep`, V2 `agents.wait_agent`, Code Mode
 `wait`, ASM TUI `wait_threads` (including its MCP exposure), and empty-input
-`write_stdin` polls require it. Nonempty terminal input stays unchanged.
-Trim reasons and reject more than 500 characters. An empty reason, or an omitted
-sleep reason, produces no reminder. Return nonempty reasons as JSON-quoted tool
+`write_stdin` polls require a `reason`. Nonempty terminal input stays unchanged.
+Trim reasons and reject more than 500 characters. An empty reason produces no
+reminder. Return nonempty reasons as JSON-quoted tool
 context, separate from command/script output and its truncation budget.
 
 When new input interrupts a wait, remind the model to handle it and resume pending
