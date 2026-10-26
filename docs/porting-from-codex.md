@@ -325,8 +325,17 @@ Claude Code owns native model access and effort acceptance; metadata grants no a
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
 marking them API-supported. Preserve ordinary model defaults.
 The model picker starts a fresh session after confirmation when entering/leaving this
-runtime or changing its fixed model/effort. Keep the original history; never replay it
+runtime or changing its model. Keep the original history; never replay it
 into the new native conversation or change saved defaults as part of this action.
+Same-model/provider effort changes stay in the current conversation and leave saved
+model defaults untouched. Apply the native control at the next idle turn boundary,
+require confirmation, then save the new effort before submitting input. Preserve the
+native process, session ID and history; never rebuild context for an effort change.
+Cold resume restores saved effort before applying a requested change. Unsupported
+changes fail before prompting without fallback. Native caching remains provider-owned;
+preserve cache-relevant context, but do not promise an identical cache key or fixed hit
+rate. Claude Code gates cache-prefix preservation on its native
+`per_turn_effort_active` feature flag, which the native server can disable.
 ASM child selections use catalog defaults and supported efforts when present; native
 model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
 Keep the V2 spawn tool description explicit: `claude-code/*` requires
@@ -497,12 +506,14 @@ copy, backend hierarchy or event vocabulary; branch only where the protocols dif
 codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 ```
 
-- `<model>` must be one value from Cursor's ACP model list, or a base name matching exactly
-  one listed variant after filtering by the user's selected effort. Match the native
-  `effort`, `reasoning_effort` or `reasoning` parameter exactly and require ACP to confirm
-  the selected variant; unsupported efforts and unlisted bracket overrides fail before
-  the first prompt. Omitted effort retains native defaults. Auto has no adjustable effort.
-  The shared external model catalog exposes only supported native effort choices.
+- Bundle Cursor model and effort metadata in `external_models.json`, like Claude Code.
+  Catalog loading and startup must not launch or authenticate either native CLI.
+  Negotiate ACP `parameterizedModelPicker` only when starting a Cursor session. Validate
+  the requested model and effort against that session's advertised choices, apply the
+  actual parameter ID from the `thought_level` category, and require confirmation before
+  prompting. Unavailable choices fail without fallback. Saved bracket-encoded model IDs
+  retain their native parameters; an explicit effort replaces that parameter. Custom
+  catalogs remain authoritative; bundled metadata grants no native model access.
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
