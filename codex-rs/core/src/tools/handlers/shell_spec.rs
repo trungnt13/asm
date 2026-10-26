@@ -112,7 +112,7 @@ pub(crate) fn create_write_stdin_tool(bounds: BackgroundTerminalTimeoutBounds) -
     let properties = BTreeMap::from([
         (
             "reason".to_string(),
-            JsonSchema::string(Some("Required when polling without input: pending work to resume. At most 500 characters; use an empty string for no reminder.".to_string())),
+            JsonSchema::string(Some("Required when polling without input. Describe what you are waiting for and what work you should resume after an interruption. At most 500 characters; use an empty string for no reminder.".to_string())),
         ),
         (
             "session_id".to_string(),

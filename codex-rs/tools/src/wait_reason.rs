@@ -1,6 +1,6 @@
 use crate::JsonSchema;
 
-pub const WAIT_REASON_DESCRIPTION: &str = "Pending work to resume after waiting. At most 500 characters; use an empty string for no reminder.";
+pub const WAIT_REASON_DESCRIPTION: &str = "What you are waiting for and what work you should resume after an interruption. At most 500 characters; use an empty string for no reminder.";
 
 pub struct WaitReason(String);
 
