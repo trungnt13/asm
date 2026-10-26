@@ -5969,7 +5969,7 @@ async fn chatwidget_exec_and_status_layout_vt100_snapshot() {
     let cwd = chat.config.cwd.clone();
     handle_exec_begin(
         &mut chat,
-        AppServerThreadItem::CommandExecution {
+        AppServerThreadItemPayload::CommandExecution {
             model_context: None,
             sandbox_type: None,
             id: "c1".into(),
@@ -5988,7 +5988,7 @@ async fn chatwidget_exec_and_status_layout_vt100_snapshot() {
     );
     handle_exec_end(
         &mut chat,
-        AppServerThreadItem::CommandExecution {
+        AppServerThreadItemPayload::CommandExecution {
             model_context: None,
             sandbox_type: None,
             id: "c1".into(),

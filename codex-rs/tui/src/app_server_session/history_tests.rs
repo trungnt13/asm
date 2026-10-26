@@ -162,9 +162,11 @@ async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_bounda
         .build()
         .await?;
     let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
-    let visible = ThreadItem::ContextCompaction {
-        id: "side-item".into(),
-    };
+    let visible = ThreadItem::untimed(
+        codex_app_server_protocol::ThreadItemPayload::ContextCompaction {
+            id: "side-item".into(),
+        },
+    );
     let mut turns = vec![Turn {
         id: "side-turn".into(),
         root_turn_id: None,
@@ -192,9 +194,11 @@ async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_bounda
             },
             ThreadItemEntry {
                 turn_id: "older-parent-turn".into(),
-                item: ThreadItem::ContextCompaction {
-                    id: "parent-item".into(),
-                },
+                item: ThreadItem::untimed(
+                    codex_app_server_protocol::ThreadItemPayload::ContextCompaction {
+                        id: "parent-item".into(),
+                    },
+                ),
                 started_at_ms: None,
                 completed_at_ms: None,
             },

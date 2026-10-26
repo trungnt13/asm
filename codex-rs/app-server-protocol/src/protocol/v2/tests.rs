@@ -468,8 +468,12 @@ fn thread_items_list_round_trips() {
         let response = ThreadItemsListResponse {
             data: vec![ThreadItemEntry {
                 turn_id: "turn_456".to_string(),
-                item: ThreadItem::ContextCompaction {
-                    id: "item_1".to_string(),
+                item: ThreadItem {
+                    payload: ThreadItemPayload::ContextCompaction {
+                        id: "item_1".to_string(),
+                    },
+                    started_at_ms,
+                    completed_at_ms,
                 },
                 started_at_ms,
                 completed_at_ms,
@@ -483,7 +487,7 @@ fn thread_items_list_round_trips() {
             json!({
                 "data": [{
                     "turnId": "turn_456",
-                    "item": {"type": "contextCompaction", "id": "item_1"},
+                    "item": {"type": "contextCompaction", "id": "item_1", "startedAtMs": started_at_ms, "completedAtMs": completed_at_ms},
                     "startedAtMs": started_at_ms,
                     "completedAtMs": completed_at_ms,
                 }],
@@ -3171,8 +3175,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(user_item),
-        ThreadItem::UserMessage {
+        ThreadItemPayload::from(user_item),
+        ThreadItemPayload::UserMessage {
             id: "user-1".to_string(),
             client_id: Some("client-message-1".to_string()),
             content: vec![
@@ -3225,8 +3229,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(agent_item),
-        ThreadItem::AgentMessage {
+        ThreadItemPayload::from(agent_item),
+        ThreadItemPayload::AgentMessage {
             id: "agent-1".to_string(),
             text: "Hello world".to_string(),
             phase: None,
@@ -3256,8 +3260,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(agent_item_with_phase),
-        ThreadItem::AgentMessage {
+        ThreadItemPayload::from(agent_item_with_phase),
+        ThreadItemPayload::AgentMessage {
             id: "agent-2".to_string(),
             text: "final".to_string(),
             phase: Some(MessagePhase::FinalAnswer),
@@ -3275,7 +3279,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         }
     );
 
-    let async_item = ThreadItem::from(TurnItem::AgentMessage(AgentMessageItem {
+    let async_item = ThreadItemPayload::from(TurnItem::AgentMessage(AgentMessageItem {
         id: "async-1".to_string(),
         content: vec![AgentMessageContent::Text {
             text: "Which?".to_string(),
@@ -3295,13 +3299,13 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             "memoryCitation": null, "delivery": "async", "questions": [{"title": "Which?", "options": null}]
         })
     );
-    let old_item: ThreadItem = serde_json::from_value(json!({
+    let old_item: ThreadItemPayload = serde_json::from_value(json!({
         "type": "agentMessage", "id": "old-1", "text": "An old message"
     }))
     .unwrap();
     assert!(matches!(
         old_item,
-        ThreadItem::AgentMessage {
+        ThreadItemPayload::AgentMessage {
             questions: None,
             ..
         }
@@ -3314,8 +3318,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(reasoning_item),
-        ThreadItem::Reasoning {
+        ThreadItemPayload::from(reasoning_item),
+        ThreadItemPayload::Reasoning {
             id: "reasoning-1".to_string(),
             summary: vec!["line one".to_string(), "line two".to_string()],
             content: vec![],
@@ -3352,8 +3356,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(command_item),
-        ThreadItem::CommandExecution {
+        ThreadItemPayload::from(command_item),
+        ThreadItemPayload::CommandExecution {
             model_context: None,
             sandbox_type: None,
             id: "exec-1".to_string(),
@@ -3398,8 +3402,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(dynamic_tool_call_item),
-        ThreadItem::DynamicToolCall {
+        ThreadItemPayload::from(dynamic_tool_call_item),
+        ThreadItemPayload::DynamicToolCall {
             id: "dynamic-1".to_string(),
             namespace: Some("apps".to_string()),
             tool: "lookup".to_string(),
@@ -3439,8 +3443,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(collab_item),
-        ThreadItem::CollabAgentToolCall {
+        ThreadItemPayload::from(collab_item),
+        ThreadItemPayload::CollabAgentToolCall {
             id: "collab-1".to_string(),
             tool: CollabAgentTool::SendInput,
             status: CollabAgentToolCallStatus::Completed,
@@ -3473,8 +3477,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(sub_agent_activity_item),
-        ThreadItem::SubAgentActivity {
+        ThreadItemPayload::from(sub_agent_activity_item),
+        ThreadItemPayload::SubAgentActivity {
             model: Some("gpt-5".into()),
             reasoning_effort: Some(ReasoningEffort::High),
             id: "activity-1".to_string(),
@@ -3491,7 +3495,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         "agent_path": "/root/worker",
     }))
     .unwrap();
-    let old_wire_activity: ThreadItem = serde_json::from_value(json!({
+    let old_wire_activity: ThreadItemPayload = serde_json::from_value(json!({
         "type": "subAgentActivity",
         "id": "old-activity",
         "kind": "started",
@@ -3500,7 +3504,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     }))
     .unwrap();
     assert_eq!(
-        ThreadItem::from(TurnItem::SubAgentActivity(old_activity)),
+        ThreadItemPayload::from(TurnItem::SubAgentActivity(old_activity)),
         old_wire_activity
     );
 
@@ -3533,14 +3537,14 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     };
 
     assert_eq!(
-        ThreadItem::from(search_item),
-        ThreadItem::WebSearch(expected_search_item.clone())
+        ThreadItemPayload::from(search_item),
+        ThreadItemPayload::WebSearch(expected_search_item.clone())
     );
     assert_eq!(
-        ThreadItem::from(TurnItem::Extension(
+        ThreadItemPayload::from(TurnItem::Extension(
             codex_extension_items::ExtensionItem::WebSearch(expected_search_item.clone()),
         )),
-        ThreadItem::WebSearch(expected_search_item)
+        ThreadItemPayload::WebSearch(expected_search_item)
     );
 
     let image_view_item = TurnItem::ImageView(ImageViewItem {
@@ -3549,8 +3553,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(image_view_item),
-        ThreadItem::ImageView {
+        ThreadItemPayload::from(image_view_item),
+        ThreadItemPayload::ImageView {
             id: "view-image-1".to_string(),
             path: LegacyAppPathString::from_abs_path(&test_path_buf("/tmp/view-image.png").abs()),
         }
@@ -3573,8 +3577,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(file_change_item),
-        ThreadItem::FileChange {
+        ThreadItemPayload::from(file_change_item),
+        ThreadItemPayload::FileChange {
             id: "patch-1".to_string(),
             changes: vec![FileUpdateChange {
                 path: "README.md".to_string(),
@@ -3605,8 +3609,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(mcp_tool_call_item),
-        ThreadItem::McpToolCall {
+        ThreadItemPayload::from(mcp_tool_call_item),
+        ThreadItemPayload::McpToolCall {
             id: "mcp-1".to_string(),
             server: "server".to_string(),
             tool: "tool".to_string(),
@@ -3654,8 +3658,8 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     });
 
     assert_eq!(
-        ThreadItem::from(completed_mcp_tool_call_item),
-        ThreadItem::McpToolCall {
+        ThreadItemPayload::from(completed_mcp_tool_call_item),
+        ThreadItemPayload::McpToolCall {
             id: "mcp-2".to_string(),
             server: "server".to_string(),
             tool: "tool".to_string(),
@@ -3679,7 +3683,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
 
 #[test]
 fn mcp_tool_call_app_context_serializes_connector_id() {
-    let item = ThreadItem::McpToolCall {
+    let item = ThreadItemPayload::McpToolCall {
         id: "mcp-1".to_string(),
         server: "codex_apps".to_string(),
         tool: "calendar.create_event".to_string(),

@@ -123,9 +123,9 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `970111f6cb62cc02fe36a82ea7d71b37a2889c97`.
-- Date: 2026-10-23.
-- Subject: Allow configuring GCP project and location in provider settings (#56560).
+- Last incorporated commit: `dd5521406a801212f7742432bcacb06e91823b01`.
+- Date: 2026-10-26.
+- Subject: Enable zstd compression for code-mode gRPC responses (#57212).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:

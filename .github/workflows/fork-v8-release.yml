@@ -116,8 +116,7 @@ jobs:
           set -euo pipefail
           python3 .github/scripts/rusty_v8_bazel.py stage-release-pair \
             --platform "$PLATFORM" --target "$TARGET" --sandbox --compilation-mode opt \
-            --output-dir "dist/$TARGET" --bazel-config fork-v8-local \
-            "--bazel-config=v8-target-${CPU}"
+            --output-dir "dist/$TARGET" --bazel-config fork-v8-local
       - name: Smoke test V8 sandbox and JavaScript execution
         env:
           TARGET: ${{ matrix.target }}

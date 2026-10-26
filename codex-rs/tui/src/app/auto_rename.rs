@@ -12,6 +12,7 @@ use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_config::AutoRenameConfig;
@@ -148,7 +149,7 @@ impl App {
         };
         let (turn_id, items) = match (trigger, notification.as_ref()) {
             (AutoRenameFirstTrigger::FirstUserMessage, ServerNotification::ItemCompleted(item))
-                if matches!(item.item, ThreadItem::UserMessage { .. }) =>
+                if matches!(item.item.payload, ThreadItemPayload::UserMessage { .. }) =>
             {
                 (item.turn_id.as_str(), std::slice::from_ref(&item.item))
             }
@@ -253,13 +254,15 @@ impl App {
                             .iter()
                             .any(|(_, item)| item.id() == user.item_id)
                     })
-                    .map(|user| ThreadItem::UserMessage {
-                        id: user.item_id.clone(),
-                        client_id: None,
-                        content: vec![UserInput::Text {
-                            text: user.text.clone(),
-                            text_elements: Vec::new(),
-                        }],
+                    .map(|user| {
+                        ThreadItem::untimed(ThreadItemPayload::UserMessage {
+                            id: user.item_id.clone(),
+                            client_id: None,
+                            content: vec![UserInput::Text {
+                                text: user.text.clone(),
+                                text_elements: Vec::new(),
+                            }],
+                        })
                     });
                 if let Some(item) = retained_item.as_ref() {
                     let anchor = user_message
@@ -285,7 +288,8 @@ impl App {
                     conversation
                         .into_iter()
                         .map(|(_, item)| item)
-                        .filter(|item| seen.insert(item.id().to_string())),
+                        .filter(|item| seen.insert(item.id().to_string()))
+                        .map(|item| &item.payload),
                     Some(settings),
                     request.expected_name.as_deref(),
                 )?
@@ -476,7 +480,7 @@ pub(super) fn automatic_title_prompt(
 }
 
 pub(super) fn user_message_text(item: &ThreadItem) -> Option<String> {
-    let ThreadItem::UserMessage { content, .. } = item else {
+    let ThreadItemPayload::UserMessage { content, .. } = &item.payload else {
         return None;
     };
     Some(

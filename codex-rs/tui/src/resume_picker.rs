@@ -3739,6 +3739,7 @@ mod tests {
     use super::*;
     use chrono::Duration;
     use codex_app_server_protocol::ThreadItem;
+    use codex_app_server_protocol::ThreadItemPayload;
     use codex_app_server_protocol::ThreadSourceKind;
     use codex_config::CONFIG_TOML_FILE;
     use codex_protocol::ThreadId;
@@ -7048,26 +7049,26 @@ session_picker_view = "dense"
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 token_usage: None,
                 items: vec![
-                    ThreadItem::UserMessage {
+                    ThreadItem::untimed(ThreadItemPayload::UserMessage {
                         id: String::from("user-1"),
                         client_id: None,
                         content: vec![codex_app_server_protocol::UserInput::Text {
                             text: String::from("hello from user"),
                             text_elements: Vec::new(),
                         }],
-                    },
-                    ThreadItem::AgentMessage {
+                    }),
+                    ThreadItem::untimed(ThreadItemPayload::AgentMessage {
                         id: String::from("agent-1"),
                         text: String::from("hello from assistant"),
                         phase: None,
                         memory_citation: None,
                         delivery: None,
                         questions: None,
-                    },
-                    ThreadItem::Plan {
+                    }),
+                    ThreadItem::untimed(ThreadItemPayload::Plan {
                         id: String::from("plan-1"),
                         text: String::from("1. Do the thing"),
-                    },
+                    }),
                 ],
                 status: codex_app_server_protocol::TurnStatus::Completed,
                 error: None,
@@ -7136,11 +7137,11 @@ session_picker_view = "dense"
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 token_usage: None,
-                items: vec![ThreadItem::Reasoning {
+                items: vec![ThreadItem::untimed(ThreadItemPayload::Reasoning {
                     id: String::from("reasoning-1"),
                     summary: Vec::new(),
                     content: vec![String::from("private raw chain of thought")],
-                }],
+                })],
                 status: codex_app_server_protocol::TurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -7216,11 +7217,11 @@ session_picker_view = "dense"
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 token_usage: None,
-                items: vec![ThreadItem::Reasoning {
+                items: vec![ThreadItem::untimed(ThreadItemPayload::Reasoning {
                     id: String::from("reasoning-1"),
                     summary: vec![String::from("public summary")],
                     content: vec![String::from("raw reasoning content")],
-                }],
+                })],
                 status: codex_app_server_protocol::TurnStatus::Completed,
                 error: None,
                 started_at: None,

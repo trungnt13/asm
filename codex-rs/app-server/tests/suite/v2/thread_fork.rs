@@ -39,7 +39,7 @@ use codex_app_server_protocol::ThreadForkResponse;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadInjectItemsResponse;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadReadParams;
@@ -252,8 +252,8 @@ async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
     let turn = &thread.turns[0];
     assert_eq!(turn.status, TurnStatus::Interrupted);
     assert_eq!(turn.items.len(), 1, "expected user message item");
-    match &turn.items[0] {
-        ThreadItem::UserMessage { content, .. } => {
+    match &turn.items[0].payload {
+        ThreadItemPayload::UserMessage { content, .. } => {
             assert_eq!(
                 content,
                 &vec![UserInput::Text {
@@ -2104,8 +2104,8 @@ async fn assert_thread_fork_freezes_active_paginated_turn_as_interrupted(
     assert_eq!(turns[0].status, TurnStatus::Interrupted);
     assert_eq!(turns[0].items.len(), 1);
     assert!(matches!(
-        &turns[0].items[0],
-        ThreadItem::UserMessage { id, .. } if id == "before-fork"
+        &turns[0].items[0].payload,
+        ThreadItemPayload::UserMessage { id, .. } if id == "before-fork"
     ));
 
     let search: ThreadSearchOccurrencesResponse = mcp
@@ -2497,8 +2497,8 @@ async fn assert_thread_fork_ephemeral_remains_pathless_and_omits_listing(
         let turn = &thread.turns[0];
         assert_eq!(turn.status, TurnStatus::Completed);
         assert_eq!(turn.items.len(), 1, "expected user message item");
-        match &turn.items[0] {
-            ThreadItem::UserMessage { content, .. } => {
+        match &turn.items[0].payload {
+            ThreadItemPayload::UserMessage { content, .. } => {
                 assert_eq!(
                     content,
                     &vec![UserInput::Text {

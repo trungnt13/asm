@@ -8,7 +8,7 @@ use crate::transcript_view::tests::render;
 use crate::transcript_view::tests::text;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::SubAgentActivityKind;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -45,14 +45,16 @@ pub(super) fn subagent(
     agent_path: &str,
 ) -> Arc<dyn HistoryCell> {
     Arc::new(
-        crate::multi_agents::sub_agent_activity_history_cell(&ThreadItem::SubAgentActivity {
-            model: None,
-            reasoning_effort: None,
-            id: id.to_owned(),
-            kind,
-            agent_thread_id: "01912345-1234-7123-8123-123456789abc".to_owned(),
-            agent_path: agent_path.to_owned(),
-        })
+        crate::multi_agents::sub_agent_activity_history_cell(
+            &ThreadItemPayload::SubAgentActivity {
+                model: None,
+                reasoning_effort: None,
+                id: id.to_owned(),
+                kind,
+                agent_thread_id: "01912345-1234-7123-8123-123456789abc".to_owned(),
+                agent_path: agent_path.to_owned(),
+            },
+        )
         .unwrap(),
     )
 }
