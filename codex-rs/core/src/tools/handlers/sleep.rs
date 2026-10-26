@@ -33,28 +33,35 @@ pub struct SleepHandler;
 #[serde(deny_unknown_fields)]
 struct SleepArgs {
     duration_ms: u64,
+    reason: String,
 }
 
 fn create_sleep_tool() -> ToolSpec {
-    let properties = BTreeMap::from([(
-        "duration_ms".to_string(),
-        JsonSchema::number(Some(format!(
-            "How long to sleep in milliseconds. Must be between 1 and {MAX_SLEEP_DURATION_MS}."
-        ))),
-    )]);
+    let properties = BTreeMap::from([
+        (
+            "duration_ms".to_string(),
+            JsonSchema::number(Some(format!(
+                "How long to sleep in milliseconds. Must be between 1 and {MAX_SLEEP_DURATION_MS}."
+            ))),
+        ),
+        (
+            "reason".to_string(),
+            JsonSchema::string(Some(codex_tools::WAIT_REASON_DESCRIPTION.to_string())),
+        ),
+    ]);
 
     ToolSpec::Namespace(ResponsesApiNamespace {
         name: NAMESPACE.to_string(),
         description: "Tools for reading and waiting on time.".to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: TOOL_NAME.to_string(),
-            description: "Pause execution for a specified duration. The sleep ends early when new input arrives for the active turn. Returns the elapsed wall-clock time."
+            description: "Pause execution for a specified duration. The sleep ends early when new input arrives for the active turn. Returns the elapsed wall-clock time and the reason for waiting."
                 .to_string(),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
                 properties,
-                Some(vec!["duration_ms".to_string()]),
+                Some(vec!["duration_ms".to_string(), "reason".to_string()]),
                 /*additional_properties*/ Some(false.into()),
             ),
             output_schema: None,
@@ -99,6 +106,8 @@ impl ToolExecutor<ToolInvocation> for SleepHandler {
                 )));
             }
 
+            let reason = codex_tools::WaitReason::new(&args.reason)
+                .map_err(FunctionCallError::RespondToModel)?;
             let started = Instant::now();
             let item = TurnItem::Extension(ExtensionItem::Sleep(SleepItem {
                 id: call_id,
@@ -152,8 +161,18 @@ impl ToolExecutor<ToolInvocation> for SleepHandler {
                 "Sleep completed."
             };
             let wall_time_seconds = started.elapsed().as_secs_f64();
+            let mut output = format!("Wall time: {wall_time_seconds:.4} seconds\n{message}");
+            let outcome = if interrupted {
+                codex_tools::WaitReminder::Interrupted
+            } else {
+                codex_tools::WaitReminder::Returned
+            };
+            if let Some(reminder) = reason.reminder(outcome) {
+                output.push(' ');
+                output.push_str(&reminder);
+            }
             Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                format!("Wall time: {wall_time_seconds:.4} seconds\n{message}"),
+                output,
                 /*success*/ Some(true),
             )))
         })

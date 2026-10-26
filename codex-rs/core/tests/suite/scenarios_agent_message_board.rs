@@ -664,7 +664,7 @@ async fn board_unsubscribe_survives_post_and_resume_until_resubscribed(
                         "settle-worker",
                         "collaboration",
                         "wait_agent",
-                        "{}",
+                        r#"{"reason":""}"#,
                     ),
                     ev_completed("spawn-and-wait"),
                 ]),
@@ -694,7 +694,11 @@ async fn board_unsubscribe_survives_post_and_resume_until_resubscribed(
                 gate: Some(gate),
                 // TurnComplete precedes parent notification. Drain the worker's final mail
                 // before advancing phases, and force a follow-up so silence is observable.
-                body: tool(&format!("checkpoint-{phase}"), "wait_agent", json!({})),
+                body: tool(
+                    &format!("checkpoint-{phase}"),
+                    "wait_agent",
+                    json!({"reason":""}),
+                ),
             },
         ]);
         streams.push(response(tool(

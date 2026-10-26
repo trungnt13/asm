@@ -116,6 +116,7 @@ pub(in crate::local) async fn list_turns(
         .await?;
     let pool = store.thread_history_db().await?;
     let page = page_turn_rows(
+        store,
         pool,
         params.thread_id,
         &lineage,
@@ -136,7 +137,7 @@ pub(in crate::local) async fn list_turns(
             {
                 // Synthetic fork-boundary rows are interrupted without local summary IDs.
                 // Load their summary from the earliest visible source turn.
-                load_inherited_summary_items(pool, &lineage, &turn).await?
+                load_inherited_summary_items(store, pool, &lineage, &turn).await?
             }
             StoredTurnItemsView::Summary => turn.summary_items,
         };
@@ -191,7 +192,7 @@ pub(in crate::local) async fn list_items(
         .resolve_rollout_lineage_for_history_page(params.thread_id)
         .await?;
     let pool = store.thread_history_db().await?;
-    let page = page_item_rows(pool, &lineage, &params).await?;
+    let page = page_item_rows(store, pool, &lineage, &params).await?;
 
     Ok(ItemPage {
         items: page.rows.into_iter().map(|row| row.item).collect(),
@@ -231,11 +232,12 @@ pub(super) async fn validate_thread_for_paginated_reads(
 }
 
 async fn load_inherited_summary_items(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     lineage: &RolloutLineage,
     turn: &StoredTurnRow,
 ) -> ThreadStoreResult<Vec<StoredThreadItem>> {
-    let source = find_source_turn(pool, lineage, turn.turn_id.as_str()).await?;
+    let source = find_source_turn(store, pool, lineage, turn.turn_id.as_str()).await?;
     let Some(segment) = lineage
         .segments()
         .iter()

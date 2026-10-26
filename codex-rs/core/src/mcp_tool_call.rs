@@ -306,6 +306,7 @@ pub(crate) async fn handle_mcp_tool_call(
                 return handle_approved_mcp_tool_call(
                     &sess,
                     step_context.as_ref(),
+                    cancellation_token,
                     &call_id,
                     originating_call.as_ref(),
                     invocation,
@@ -398,6 +399,7 @@ pub(crate) async fn handle_mcp_tool_call(
     handle_approved_mcp_tool_call(
         &sess,
         step_context.as_ref(),
+        cancellation_token,
         &call_id,
         originating_call.as_ref(),
         invocation,
@@ -464,6 +466,7 @@ impl McpToolCallItemMetadata {
 async fn handle_approved_mcp_tool_call(
     sess: &Arc<Session>,
     step_context: &StepContext,
+    cancellation_token: &CancellationToken,
     call_id: &str,
     originating_call: Option<&ToolCallOrigin>,
     invocation: McpInvocation,
@@ -489,7 +492,7 @@ async fn handle_approved_mcp_tool_call(
     let mut request_error_code = None;
     let result = async {
         let result = async {
-            let result = prepared_call
+            let call = prepared_call
                 .call_with_preparation(/*requested_timeout*/ None, || async {
                     if let McpToolApprovalApplication::Apply { decision, policy } =
                         &approval_application
@@ -567,9 +570,20 @@ async fn handle_approved_mcp_tool_call(
                         rewritten_arguments,
                         mcp_call_trace.add_request_meta(request_meta),
                     ))
-                })
-                .await
-                .map_err(|error| {
+                });
+            let owned_wait = server == "codex_tui" && tool_name == "wait_threads"
+                && prepared_call.tool_info().tool.meta.as_ref()
+                    .and_then(|meta| meta.0.get("asm/interruptibleWait")) == Some(&JsonValue::Bool(true));
+            let call_result = if owned_wait {
+                tokio::select! {
+                    biased;
+                    result = call => result,
+                    _ = cancellation_token.cancelled() => Err(anyhow::anyhow!("wait_threads observation interrupted")),
+                }
+            } else {
+                call.await
+            };
+            let result = call_result.map_err(|error| {
                     request_error_code = codex_rmcp_client::request_error_code(&error);
                     format!("tool call error: {error:?}")
                 });

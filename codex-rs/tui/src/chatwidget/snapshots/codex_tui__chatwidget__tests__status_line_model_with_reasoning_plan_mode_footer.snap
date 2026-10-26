@@ -1,9 +1,57 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
-expression: normalized_backend_snapshot(terminal.backend())
+expression: "format!(\"{baseline_footer}\\n\\nCaptured System1 step:\\n{system1_footer}\\n\\nApplied status:\\n{status}\\n\\nError footer:\\n{error_footer}\\n\\nError details:\\n{error_lines}\\n\\nMode transitions:\\n{transitions}\")"
 ---
 "                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
 "                                                                                "
-"› Ask Codex to do anything                                                      "
+"  52 med                                             Plan mode (⇧tab to cycle)  "
+
+
+Captured System1 step:
 "                                                                                "
-"  gpt-5.2 medium                                     Plan mode (⇧tab to cycle)  "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  52 low·auto                                        Plan mode (⇧tab to cycle)  "
+
+
+Applied status:
+  Model:               gpt-5.2 (reasoning low (system1; baseline medium),
+
+Error footer:
+"                                                                                "
+"                                                                           Main "
+"› Ask ASM to do anything                                                        "
+"                                                                                "
+"  52 low·err                                         Plan mode (⇧tab to cycle)  "
+
+
+Error details:
+⚠ System 1 error CREDENTIALS, fallback to low, recovery blocked
+
+/status
+
+  >_ ASM (v0.164.1-alpha.3)
+
+  Visit https://chatgpt.com/settings/usage for up-to-date
+  information on rate limits and credits
+
+  Model:               gpt-5.2 (reasoning low (system1; baseline medium);
+                       system1 error: configured api key is missing; load the
+                       key in the backend environment and restart, summaries
+                       auto)
+  Model provider:      openai
+  Directory:           /tmp/project
+  Permissions:         Read Only (Ask for approval)
+  Agents.md:           <none>
+  Collaboration mode:  Plan
+  Session:             67e55044-10b1-426f-9247-bb680e5fe0c8
+
+  Token usage:         0 total  (0 input + 0 output)
+  Limits:              data not available yet
+
+Mode transitions:
+• System1 turned on.
+• System1 turned off.

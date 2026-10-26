@@ -42,19 +42,33 @@ fn error_notification(
 
 #[tokio::test]
 async fn misalignment_continuation_requires_current_review_and_submits_once() -> Result<()> {
-    for (reject, preserve, daybreak, rollout_enabled, has_chatgpt_account, server_owned) in [
-        (false, false, false, true, true, false),
-        (false, true, true, true, true, false),
-        (true, false, false, true, true, false),
-        (false, false, false, false, true, false),
-        (false, true, true, false, true, false),
+    for (
+        reject,
+        preserve,
+        daybreak,
+        rollout_enabled,
+        has_chatgpt_account,
+        server_owned,
+        stale_override,
+    ) in [
+        (false, false, false, true, true, false, false),
+        (false, true, true, true, true, false, false),
+        (true, false, false, true, true, false, false),
+        (false, false, false, false, true, false, false),
+        (false, true, true, false, true, false, false),
         // Continuations submit directly rather than via the normal turn-start path.
-        (false, false, false, true, false, false),
-        (false, true, true, true, false, false),
+        (false, false, false, true, false, false, false),
+        (false, true, true, true, false, false, false),
         // Server-owned continuations preserve the acknowledgement without local overrides.
-        (false, false, false, true, true, true),
+        (false, false, false, true, true, true, false),
+        (false, false, false, true, true, false, true),
     ] {
         let (mut app, mut rx, _) = make_test_app_with_channels().await;
+        if stale_override {
+            app.config
+                .permissions
+                .set_permission_profile(PermissionProfile::read_only())?;
+        }
         app.chat_widget
             .set_feature_enabled(Feature::CliDaybreak, rollout_enabled);
         app.chat_widget
@@ -83,6 +97,10 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
             server.start_thread(&app.config).await?.session
         };
         let thread_id = session.thread_id;
+        if stale_override {
+            // Preserve is safe here: the server already owns the readonly restriction.
+            assert_eq!(session.permission_profile, PermissionProfile::read_only());
+        }
         // Resend local restrictions restored after reconnect, rather than inheriting server settings.
         session.approval_policy = AskForApproval::OnRequest;
         session.permission_profile = PermissionProfile::read_only();
@@ -118,7 +136,14 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
                 .handle_key_event(KeyEvent::from(KeyCode::Esc));
             app.chat_widget.set_daybreak_enabled(daybreak);
         }
-        app.runtime_permission_profile_override = Some(if preserve {
+        app.runtime_permission_profile_override = Some(if stale_override {
+            let mut unrelated =
+                RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref());
+            unrelated.permission_profile = PermissionProfile::Disabled;
+            unrelated.active_permission_profile =
+                Some(ActivePermissionProfile::new(":danger-full-access"));
+            unrelated
+        } else if preserve {
             RuntimePermissionProfileOverride::from_restored_config(app.chat_widget.config_ref())
         } else {
             RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref())
@@ -136,11 +161,11 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
             })
             .expect("review action");
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.handle_event(
+        Box::pin(app.handle_event(
             &mut tui,
             &mut server,
             AppEvent::ReviewMisalignment(Arc::clone(&review)),
-        )
+        ))
         .await?;
         let Some(Overlay::Static(overlay)) = app.overlay.as_mut() else {
             panic!("findings overlay")
@@ -253,7 +278,7 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
                     .then(|| config.permissions.user_visible_workspace_roots().to_vec()),
                 approval_policy: (!server_owned).then_some(AskForApproval::OnRequest),
                 approvals_reviewer: (!server_owned).then(|| config.approvals_reviewer.into()),
-                sandbox_policy: (!server_owned && !preserve)
+                sandbox_policy: (!server_owned && !preserve && !stale_override)
                     .then(|| config.legacy_sandbox_policy().into()),
                 cyber_access_program: rollout_enabled.then_some(if daybreak {
                     CyberAccessProgram::DaybreakBlue.into()

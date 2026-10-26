@@ -208,6 +208,7 @@ pub(crate) mod agents_overview_discovery;
 mod agents_overview_threads;
 mod agents_overview_usage;
 mod agents_overview_view;
+mod turn_agent_counts;
 pub(crate) use agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 mod activity_groups;
 mod app_server_event_targets;
@@ -242,10 +243,14 @@ mod new_session;
 mod quick_dials;
 mod turn_tips;
 pub(crate) use new_session::has_launch_setting;
+mod auto_rename;
+mod auto_rename_persistence;
+mod autorename_command;
 mod clipboard;
 mod footer_selection;
 mod native_history;
 mod owned_transcript;
+mod parallel;
 mod pending_interactive_replay;
 mod permission_shortcuts;
 mod pets;
@@ -261,12 +266,15 @@ mod replay_filter;
 mod resize_reflow;
 mod resume_config;
 mod right_click_paste;
+mod system1;
 pub(crate) use right_click_paste::PasteEnvironment;
 mod safety_buffering;
 mod server_version_notice;
 mod session_lifecycle;
 mod session_picker;
 mod side;
+mod side_actions;
+mod side_persistence;
 mod startup;
 pub(crate) mod startup_bootstrap;
 mod startup_prompts;
@@ -294,6 +302,7 @@ use self::agent_navigation::AgentNavigationDirection;
 use self::agent_navigation::AgentNavigationState;
 use self::app_server_requests::PendingAppServerRequests;
 use self::loaded_threads::find_loaded_subagent_threads_for_primary;
+use self::parallel::CompanionKind;
 use self::pending_interactive_replay::PendingInteractiveReplayState;
 pub(crate) use self::platform_actions::WindowsSandboxHost;
 use self::platform_actions::*;
@@ -636,8 +645,10 @@ pub(crate) struct App {
     temporary_structured_requests: HashMap<ThreadId, mpsc::UnboundedSender<ServerNotification>>,
     /// Track title generation across thread switches and deduplicate automatic requests.
     pending_thread_titles: HashMap<(ThreadId, ThreadTitleDestination), CancellationToken>,
+    automatic_thread_titles: HashMap<ThreadId, auto_rename::AutoRenameState>,
     thread_event_listener_tasks: HashMap<ThreadId, JoinHandle<()>>,
     agent_navigation: AgentNavigationState,
+    turn_agent_counts: turn_agent_counts::TurnAgentCounts,
     agents_overview: agents_overview::AgentsOverviewState,
     side_threads: HashMap<ThreadId, SideThreadState>,
     abandoned_side_threads: HashSet<ThreadId>,

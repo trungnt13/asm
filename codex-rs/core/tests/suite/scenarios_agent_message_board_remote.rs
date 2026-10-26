@@ -148,7 +148,7 @@ async fn remote_board_uses_the_existing_tools_and_session_identity() -> anyhow::
                     "await-notification",
                     "collaboration",
                     "wait_agent",
-                    "{}",
+                    r#"{"reason":""}"#,
                 ),
                 responses::ev_completed("remote-post"),
             ]),

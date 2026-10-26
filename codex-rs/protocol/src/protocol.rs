@@ -613,6 +613,9 @@ pub struct ThreadSettingsOverrides {
     /// effort, or `None` to leave the existing value unchanged.
     pub effort: Option<Option<ReasoningEffortConfig>>,
 
+    /// Changes only this live session; it is never persisted as a thread default.
+    pub system1_enabled: Option<bool>,
+
     /// Updated reasoning summary preference (honored only for reasoning-capable models).
     pub summary: Option<ReasoningSummaryConfig>,
 
@@ -951,6 +954,11 @@ impl FromStr for ThreadHistoryMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct InterAgentCommunication {
+    /// Local transcript details; never included in model input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(skip)]
+    #[schemars(skip)]
+    pub spawn_arguments: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub id: Option<ResponseItemId>,
@@ -983,6 +991,7 @@ impl InterAgentCommunication {
             other_recipients,
             content,
             encrypted_content: None,
+            spawn_arguments: None,
             internal_chat_message_metadata_passthrough: None,
             trigger_turn,
         }
@@ -1001,6 +1010,7 @@ impl InterAgentCommunication {
             recipient,
             other_recipients,
             content: String::new(),
+            spawn_arguments: None,
             encrypted_content: Some(encrypted_content),
             internal_chat_message_metadata_passthrough: None,
             trigger_turn,
@@ -1017,6 +1027,7 @@ impl InterAgentCommunication {
     pub fn to_response_input_item(&self) -> ResponseInputItem {
         let mut communication = self.clone();
         communication.id = None;
+        communication.spawn_arguments = None;
         communication.internal_chat_message_metadata_passthrough = None;
         ResponseInputItem::Message {
             role: "assistant".to_string(),
@@ -1558,6 +1569,13 @@ pub enum EventMsg {
     /// v1 wire format uses `task_started`; accept `turn_started` for v2 interop.
     #[serde(rename = "task_started", alias = "turn_started")]
     TurnStarted(TurnStartedEvent),
+
+    /// Captured effort used by the next main model step.
+    ReasoningEffortUpdated(ReasoningEffortUpdatedEvent),
+
+    /// Runtime automatic reasoning mode changed.
+    #[serde(alias = "adaptive_reasoning_updated")]
+    System1Updated(System1UpdatedEvent),
 
     /// Persistent thread-settings overrides from the correlated submission have
     /// been applied to the session configuration.
@@ -2115,6 +2133,10 @@ impl CodexErrorInfo {
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
 pub struct RawResponseItemEvent {
+    /// Local transcript details, separate from the unchanged raw item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub spawn_arguments: Option<String>,
     pub item: ResponseItem,
 }
 
@@ -2415,6 +2437,114 @@ pub struct TurnStartedEvent {
     pub collaboration_mode_kind: ModeKind,
 }
 
+/// Provides bounded transport diagnostics.
+/// Excludes URLs, credentials, and raw error text.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum System1TransportCode {
+    SendTimeout,
+    SendTls,
+    SendProxyAuthentication,
+    SendProxyConfiguration,
+    SendProxyResolution,
+    SendConnect,
+    SendPolicy,
+    SendRedirect,
+    SendBuild,
+    SendOther,
+    BodyTimeout,
+    BodyRead,
+}
+
+impl System1TransportCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SendTimeout => "SEND_TIMEOUT",
+            Self::SendTls => "SEND_TLS",
+            Self::SendProxyAuthentication => "SEND_PROXY_AUTHENTICATION",
+            Self::SendProxyConfiguration => "SEND_PROXY_CONFIGURATION",
+            Self::SendProxyResolution => "SEND_PROXY_RESOLUTION",
+            Self::SendConnect => "SEND_CONNECT",
+            Self::SendPolicy => "SEND_POLICY",
+            Self::SendRedirect => "SEND_REDIRECT",
+            Self::SendBuild => "SEND_BUILD",
+            Self::SendOther => "SEND_OTHER",
+            Self::BodyTimeout => "BODY_TIMEOUT",
+            Self::BodyRead => "BODY_READ",
+        }
+    }
+}
+
+/// Describes a Decisions failure without exposing request or response content.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum System1Error {
+    Credentials,
+    InvalidRequest,
+    Transport,
+    TransportDetails { code: System1TransportCode },
+    Timeout,
+    Http { status: u16 },
+    ResponseTooLarge,
+    InvalidResponse,
+    Rejected,
+}
+
+impl std::fmt::Display for System1Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Credentials => f.write_str("configured API key is missing; load the key in the backend environment and restart"),
+            Self::InvalidRequest => f.write_str("invalid decision request"),
+            Self::Transport => f.write_str("decision backend connection failed"),
+            Self::TransportDetails { code } => write!(f, "decision transport failed ({})", code.as_str()),
+            Self::Timeout => f.write_str("decision request timed out"),
+            Self::Http { status } => write!(f, "decision backend HTTP {status}"),
+            Self::ResponseTooLarge => f.write_str("decision response exceeded the size limit"),
+            Self::InvalidResponse => f.write_str("invalid decision response"),
+            Self::Rejected => f.write_str("selected effort could not be applied"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct System1FailureWarning {
+    /// Deadline for a synthetic startup warmup timeout; absent for decision failures.
+    #[serde(default)]
+    pub warmup_timeout_seconds: Option<u64>,
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
+    /// Initial retry delay in seconds; absent when recovery is blocked.
+    pub cooldown_seconds: Option<u64>,
+}
+
+/// Reports the runtime mode without changing saved reasoning preferences.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct System1UpdatedEvent {
+    #[serde(default)]
+    pub warning: Option<System1FailureWarning>,
+    pub enabled: bool,
+    #[serde(default)]
+    pub error: Option<System1Error>,
+    #[serde(default)]
+    pub failure_episode: u64,
+    #[serde(default)]
+    #[serde(alias = "adaptive_reasoning_revision")]
+    pub system1_revision: u64,
+}
+
+/// Reports captured step effort without changing the thread's saved settings.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct ReasoningEffortUpdatedEvent {
+    pub turn_id: String,
+    pub reasoning_effort: Option<ReasoningEffortConfig>,
+    /// Automatic mode is active, including when a decision falls back to current effort.
+    #[serde(alias = "adaptive")]
+    pub system1: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct ThreadSettingsAppliedEvent {
     /// Logical task that owns this snapshot, independent of the physical rollout file.
@@ -2562,6 +2692,11 @@ impl TokenUsageInfo {
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshot>,
+    /// Successful inference request throughput in output tokens per second; live updates only.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    pub output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
@@ -3352,6 +3487,10 @@ pub struct SessionMeta {
     pub creator_account_id: Option<String>,
     /// session_id is equal to the root thread's ID.
     pub session_id: SessionId,
+    /// Cache routing shared by root forks, separate from session identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prompt_cache_key: Option<SessionId>,
     pub id: ThreadId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub forked_from_id: Option<ThreadId>,
@@ -3430,6 +3569,7 @@ impl Default for SessionMeta {
             creator_user_id: None,
             creator_account_id: None,
             session_id: id.into(),
+            prompt_cache_key: None,
             id,
             forked_from_id: None,
             attached_thread: false,
@@ -4218,6 +4358,17 @@ pub struct SessionConfiguredEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortConfig>,
 
+    /// Automatic reasoning mode when the session starts.
+    #[serde(alias = "adaptive_reasoning_enabled")]
+    pub system1_enabled: bool,
+    /// Monotonic session revision for ordering mode updates.
+    #[serde(alias = "adaptive_reasoning_revision")]
+    pub system1_revision: u64,
+    #[serde(alias = "adaptive_reasoning_error")]
+    pub system1_error: Option<System1Error>,
+    #[serde(alias = "adaptive_reasoning_failure_episode")]
+    pub system1_failure_episode: u64,
+
     /// Runtime proxy bind addresses, when the managed proxy was started for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4259,6 +4410,18 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: Option<ActivePermissionProfile>,
             cwd: AbsolutePathBuf,
             reasoning_effort: Option<ReasoningEffortConfig>,
+            #[serde(default)]
+            #[serde(alias = "adaptive_reasoning_enabled")]
+            system1_enabled: bool,
+            #[serde(default)]
+            #[serde(alias = "adaptive_reasoning_revision")]
+            system1_revision: u64,
+            #[serde(default)]
+            #[serde(alias = "adaptive_reasoning_error")]
+            system1_error: Option<System1Error>,
+            #[serde(default)]
+            #[serde(alias = "adaptive_reasoning_failure_episode")]
+            system1_failure_episode: u64,
             network_proxy: Option<SessionNetworkProxyRuntime>,
             rollout_path: Option<PathBuf>,
         }
@@ -4291,6 +4454,10 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: wire.active_permission_profile,
             cwd: wire.cwd,
             reasoning_effort: wire.reasoning_effort,
+            system1_enabled: wire.system1_enabled,
+            system1_revision: wire.system1_revision,
+            system1_error: wire.system1_error,
+            system1_failure_episode: wire.system1_failure_episode,
             network_proxy: wire.network_proxy,
             rollout_path: wire.rollout_path,
         })
@@ -4933,6 +5100,7 @@ mod tests {
     #[test]
     fn inter_agent_communication_response_input_item_preserves_commentary_phase() {
         let mut communication = InterAgentCommunication {
+            spawn_arguments: None,
             id: Some(ResponseItemId::with_suffix("amsg", "1")),
             author: AgentPath::root(),
             recipient: AgentPath::root().join("reviewer").expect("recipient path"),
@@ -6387,9 +6555,14 @@ mod tests {
         assert_eq!(session_meta.history_mode, ThreadHistoryMode::Legacy);
         assert_eq!(session_meta.history_base, None);
         assert_eq!(session_meta.forked_from_ordinal_exclusive, None);
+        assert_eq!(session_meta.prompt_cache_key, None);
         let serialized = serde_json::to_value(&session_meta)?;
         assert!(serialized.get("forked_from_ordinal_exclusive").is_none());
+        assert!(serialized.get("prompt_cache_key").is_none());
         assert_eq!(serialized["history_mode"], json!("legacy"));
+        let mut invalid_key = serialized.clone();
+        invalid_key["prompt_cache_key"] = json!("unbounded arbitrary cache routing");
+        assert!(serde_json::from_value::<SessionMeta>(invalid_key).is_err());
         let mut unknown = serialized;
         unknown["history_mode"] = json!("future");
         assert!(serde_json::from_value::<SessionMeta>(unknown).is_err());
@@ -6490,6 +6663,10 @@ mod tests {
         let event = Event {
             id: "1234".to_string(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
+                system1_enabled: false,
+                system1_revision: 0,
+                system1_error: None,
+                system1_failure_episode: 0,
                 session_id,
                 thread_id,
                 forked_from_id: None,
@@ -6514,6 +6691,10 @@ mod tests {
             "id": "1234",
             "msg": {
                 "type": "session_configured",
+                "system1_enabled": false,
+                "system1_revision": 0,
+                "system1_error": null,
+                "system1_failure_episode": 0,
                 "session_id": "67e55044-10b1-426f-9247-bb680e5fe0c7",
                 "thread_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
                 "model": "codex-mini-latest",

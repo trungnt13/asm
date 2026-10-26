@@ -242,6 +242,38 @@ impl InputQueue {
         pending.drain(..).collect()
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(crate) async fn take_current_turn_mail(
+        &self,
+        turn_state: &Mutex<TurnState>,
+    ) -> Vec<TurnInput> {
+        // Do not cross queued user input or followups that carry next-turn options.
+        let mut state = turn_state.lock().await;
+        let count = state
+            .pending_input
+            .items
+            .iter()
+            .take_while(|input| {
+                matches!(input, TurnInput::InterAgentCommunication(mail)
+                if !mail.trigger_turn && mail.encrypted_content.is_none())
+            })
+            .count();
+        let mut items: Vec<_> = state.pending_input.items.drain(..count).collect();
+        if !state.pending_input.items.is_empty() {
+            return items;
+        }
+        let mut pending = self.mailbox_pending_mails.lock().await;
+        self.read_mailbox(&mut pending);
+        while pending.front().is_some_and(|mail| {
+            !mail.communication.trigger_turn && mail.communication.encrypted_content.is_none()
+        }) {
+            if let Some(mail) = pending.pop_front() {
+                items.push(TurnInput::InterAgentCommunication(mail.communication));
+            }
+        }
+        items
+    }
+
     pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
         let pending_mails = self.drain_mailbox().await;
         // A later follow-up supersedes the earlier choice, including an omitted choice.

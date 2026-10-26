@@ -312,6 +312,16 @@ pub enum ThreadItemPayload {
     },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
+    InterAgentMessage {
+        id: String,
+        author: String,
+        recipient: String,
+        text: String,
+        #[serde(default)]
+        spawn_arguments: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
     AgentMessage {
         id: String,
         text: String,
@@ -514,11 +524,43 @@ pub struct HookPromptFragment {
     pub hook_run_id: String,
 }
 
+impl ThreadItem {
+    /// Projects readable inter-agent input without exposing encrypted message parts.
+    pub fn from_inter_agent_message(
+        item: &ResponseItem,
+        fallback_id: &str,
+        spawn_arguments: Option<&str>,
+    ) -> Option<Self> {
+        let ResponseItem::AgentMessage {
+            id,
+            author,
+            recipient,
+            content,
+            ..
+        } = item
+        else {
+            return None;
+        };
+        let text = codex_protocol::models::plaintext_agent_message_content(content)?;
+        Some(Self::untimed(ThreadItemPayload::InterAgentMessage {
+            id: id
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| fallback_id.to_string()),
+            author: author.clone(),
+            recipient: recipient.clone(),
+            text,
+            spawn_arguments: spawn_arguments.map(str::to_owned),
+        }))
+    }
+}
+
 impl ThreadItemPayload {
     pub fn id(&self) -> &str {
         match self {
             Self::UserMessage { id, .. }
             | Self::HookPrompt { id, .. }
+            | Self::InterAgentMessage { id, .. }
             | Self::AgentMessage { id, .. }
             | Self::FunctionCallOutput { id, .. }
             | Self::Plan { id, .. }

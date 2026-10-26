@@ -1,5 +1,6 @@
 //! Configured inputs retained independently of future thread settings.
 
+use crate::config::Config;
 use crate::config::Constrained;
 use crate::config::ConstraintError;
 use crate::config::ConstraintResult;
@@ -10,6 +11,7 @@ use codex_models_manager::manager::ModelsManager;
 use codex_otel::SessionTelemetry;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationMode;
+use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
@@ -17,6 +19,10 @@ use codex_protocol::config_types::ServiceTier;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::MultiAgentVersion;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Model and execution settings selected for an individual model step within
@@ -176,6 +182,8 @@ impl ResolvedStepSettings {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ModelInfoOverrides {
     pub(crate) context_window: Option<i64>,
+    // Keep model-specific child limits separate from the inherited scalar fallback.
+    pub(crate) subagent_context_windows: HashMap<String, i64>,
     pub(crate) auto_compact_token_limit: Option<i64>,
     pub(crate) tool_output_token_limit: Option<usize>,
     pub(crate) base_instructions: Option<String>,
@@ -185,6 +193,7 @@ impl From<ModelsManagerConfig> for ModelInfoOverrides {
     fn from(config: ModelsManagerConfig) -> Self {
         Self {
             context_window: config.model_context_window,
+            subagent_context_windows: HashMap::new(),
             auto_compact_token_limit: config.model_auto_compact_token_limit,
             tool_output_token_limit: config.tool_output_token_limit,
             base_instructions: config.base_instructions,
@@ -193,12 +202,36 @@ impl From<ModelsManagerConfig> for ModelInfoOverrides {
 }
 
 impl ModelInfoOverrides {
+    pub(crate) fn for_session(
+        config: &Config,
+        source: &SessionSource,
+        multi_agent_version: Option<MultiAgentVersion>,
+    ) -> Self {
+        let mut overrides = Self::from(config.to_models_manager_config());
+        if matches!(
+            source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            if let Some(window) = config.role_model_context_window {
+                overrides.context_window = Some(window);
+            } else if multi_agent_version == Some(MultiAgentVersion::V2) {
+                overrides.subagent_context_windows = config.subagent_model_context_windows.clone();
+            }
+        }
+        overrides
+    }
+
     pub(crate) fn models_manager_config(
         &self,
+        model: &str,
         personality: Option<Personality>,
     ) -> ModelsManagerConfig {
         ModelsManagerConfig {
-            model_context_window: self.context_window,
+            model_context_window: self
+                .subagent_context_windows
+                .get(model)
+                .copied()
+                .or(self.context_window),
             model_auto_compact_token_limit: self.auto_compact_token_limit,
             tool_output_token_limit: self.tool_output_token_limit,
             base_instructions: self.base_instructions.clone(),
@@ -242,7 +275,8 @@ impl StepSettings {
         models_manager: &dyn ModelsManager,
         overrides: &ModelInfoOverrides,
     ) -> ModelInfo {
-        let config = overrides.models_manager_config(self.personality);
+        let config =
+            overrides.models_manager_config(self.collaboration_mode.model(), self.personality);
         models_manager
             .get_model_info(self.collaboration_mode.model(), &config)
             .await
@@ -263,6 +297,10 @@ impl StepSettings {
                 /*developer_instructions*/ None,
             )
         });
+        if let Some(model) = codex_models_manager::canonical_model(next.collaboration_mode.model())
+        {
+            next.collaboration_mode.settings.model = model.to_owned();
+        }
         if let Some(summary) = update.reasoning_summary {
             next.reasoning_summary = Some(summary);
         }
@@ -303,6 +341,31 @@ impl StepSettings {
                 .can_set(&ApprovalsReviewer::AutoReview)?;
             next.approvals_reviewer = ApprovalsReviewer::AutoReview;
         }
+        if codex_models_manager::provider_for_model(self.collaboration_mode.model())
+            != codex_models_manager::provider_for_model(next.collaboration_mode.model())
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Model provider (start a fresh thread to change)",
+                candidate: next.collaboration_mode.model().to_string(),
+                allowed: self.collaboration_mode.model().to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
+        let current_claude =
+            crate::claude_runtime::is_native_model(self.collaboration_mode.model());
+        let claude_model_changed =
+            current_claude && self.collaboration_mode.model() != next.collaboration_mode.model();
+        if claude_model_changed
+            || (!current_claude
+                && crate::claude_runtime::is_native_model(next.collaboration_mode.model()))
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Native runtime model (start a fresh thread to change)",
+                candidate: next.collaboration_mode.model().to_string(),
+                allowed: self.collaboration_mode.model().to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         next.validate(constraints)?;
         Ok(next)
     }
@@ -312,6 +375,26 @@ impl StepSettings {
         &self,
         constraints: &StepSettingsConstraints<'_>,
     ) -> ConstraintResult<()> {
+        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
+            && self.collaboration_mode.mode != ModeKind::Default
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Native runtime collaboration mode",
+                candidate: self.collaboration_mode.mode.display_name().to_string(),
+                allowed: "default".to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
+        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
+            && self.approvals_reviewer != ApprovalsReviewer::User
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Native runtime approvals reviewer",
+                candidate: self.approvals_reviewer.to_string(),
+                allowed: "user".to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         if constraints.trusted_guardian_reviewer {
             return Ok(());
         }

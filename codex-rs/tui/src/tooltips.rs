@@ -116,13 +116,13 @@ fn pick_tooltip<R: Rng + ?Sized>(rng: &mut R, keymap: &TuiKeymap) -> Option<Stri
     resolved_tooltips(keymap.as_ref()).choose(rng)
 }
 
-/// Render shared tip styling and links, retaining visible URLs when the terminal needs them.
+/// Render shared tip styling with compact terminal links.
 pub(crate) fn render_tooltip_lines(tip: &str, width: usize, cwd: &Path) -> Vec<HyperlinkLine> {
     crate::markdown_render::render_streaming_markdown_lines_with_width_and_cwd(
         &format!("**Tip:** {tip}"),
         Some(width),
         Some(cwd),
-        &crate::markdown_render::hide_web_link_destination,
+        &crate::markdown_render::hide_link_destination,
         crate::markdown_render::ListSpacing::AfterMultiline,
     )
     .lines

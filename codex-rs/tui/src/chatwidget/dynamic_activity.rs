@@ -47,6 +47,9 @@ impl ChatWidget {
     }
 
     pub(super) fn finish_dynamic_activity(&mut self) {
+        for (_, cell) in self.transcript.native_calls.drain() {
+            cell.mark_failed();
+        }
         for (_, cell) in self.transcript.dynamic_calls.drain() {
             cell.mark_interrupted();
         }

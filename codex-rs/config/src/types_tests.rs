@@ -119,6 +119,7 @@ fn deserialize_skill_config_with_path_selector() {
             ),
             name: None,
             enabled: false,
+            allowed_agent_roles: None,
         }
     );
 }

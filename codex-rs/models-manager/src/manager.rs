@@ -136,6 +136,9 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     /// Static catalogs ignore this setting.
     fn set_api_key_model_discovery_enabled(&self, _enabled: bool) {}
 
+    /// Set startup external-model visibility. Explicit catalogs ignore this setting.
+    fn set_load_external_models_json(&self, _enabled: bool) {}
+
     /// List all available models, refreshing according to the specified strategy.
     ///
     /// Returns model presets sorted by priority and filtered by auth mode and visibility.
@@ -309,6 +312,7 @@ pub struct OpenAiModelsManager {
     endpoint_client: SharedModelsEndpointClient,
     catalog_source: CatalogSource,
     api_key_model_discovery_enabled: Arc<AtomicBool>,
+    load_external_models_json: Arc<AtomicBool>,
     auth_manager: Option<Arc<AuthManager>>,
 }
 
@@ -316,6 +320,7 @@ pub struct OpenAiModelsManager {
 #[derive(Debug)]
 pub struct StaticModelsManager {
     remote_models: Vec<ModelInfo>,
+    load_external_models_json: Option<AtomicBool>,
     auth_manager: Option<Arc<AuthManager>>,
 }
 
@@ -373,6 +378,7 @@ impl OpenAiModelsManager {
             }),
             cache,
             api_key_model_discovery_enabled: Arc::new(AtomicBool::new(false)),
+            load_external_models_json: Arc::new(AtomicBool::new(true)),
             endpoint_client,
             catalog_source: CatalogSource::Default,
             auth_manager,
@@ -393,8 +399,36 @@ impl StaticModelsManager {
     pub fn new(auth_manager: Option<Arc<AuthManager>>, model_catalog: ModelsResponse) -> Self {
         Self {
             remote_models: model_catalog.models,
+            load_external_models_json: None,
             auth_manager,
         }
+    }
+
+    /// Allow the external-catalog setting to supplement a user-configured catalog.
+    pub fn with_external_models(mut self) -> Self {
+        self.load_external_models_json = Some(AtomicBool::new(true));
+        self
+    }
+
+    fn models(&self) -> Vec<ModelInfo> {
+        let mut models = self.remote_models.clone();
+        if self
+            .load_external_models_json
+            .as_ref()
+            .is_some_and(|enabled| enabled.load(Ordering::SeqCst))
+        {
+            models.extend(
+                crate::external_models::models()
+                    .filter(|external| {
+                        !self
+                            .remote_models
+                            .iter()
+                            .any(|model| model.slug == external.slug)
+                    })
+                    .cloned(),
+            );
+        }
+        models
     }
 }
 
@@ -419,9 +453,15 @@ impl ModelsManager for OpenAiModelsManager {
             manager = manager.with_provider_catalog();
         }
         manager.api_key_model_discovery_enabled = Arc::clone(&self.api_key_model_discovery_enabled);
+        manager.load_external_models_json = Arc::clone(&self.load_external_models_json);
         let manager: SharedModelsManager = Arc::new(manager);
         managers.insert(originator, Arc::clone(&manager));
         Some(manager)
+    }
+
+    fn set_load_external_models_json(&self, enabled: bool) {
+        self.load_external_models_json
+            .store(enabled, Ordering::SeqCst);
     }
 
     fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
@@ -498,7 +538,13 @@ impl ModelsManager for OpenAiModelsManager {
                 let entry = self.remote_models.read().await;
                 let models = self.models_for_entry(&entry);
                 match &self.catalog_source {
-                    CatalogSource::Default => find_model_from_candidates(model, &models),
+                    CatalogSource::Default => crate::external_models::models()
+                        .find(|candidate| {
+                            candidate.slug == model
+                                && crate::external_models::provider_for_model(model).is_some()
+                        })
+                        .cloned()
+                        .or_else(|| find_model_from_candidates(model, &models)),
                     CatalogSource::ExplicitProvider(_) => models
                         .iter()
                         .find(|candidate| candidate.slug == model)
@@ -529,14 +575,24 @@ impl ModelsManager for OpenAiModelsManager {
 impl OpenAiModelsManager {
     /// Selects the catalog available under the current provider and auth identity.
     fn models_for_entry<'a>(&self, entry: &'a ModelsCacheEntry) -> Cow<'a, [ModelInfo]> {
-        if !self.api_key_discovery_disabled()
+        let mut models: Cow<'a, [ModelInfo]> = if !self.api_key_discovery_disabled()
             && entry.identity.is_some()
             && entry.identity == self.endpoint_client.identity()
         {
             Cow::Borrowed(&entry.models)
         } else {
             Cow::Owned(self.catalog_source.fallback_models().unwrap_or_default())
+        };
+        if matches!(self.catalog_source, CatalogSource::Default)
+            && self.load_external_models_json.load(Ordering::SeqCst)
+        {
+            let models = models.to_mut();
+            models.retain(|model| {
+                !crate::external_models::models().any(|external| external.slug == model.slug)
+            });
+            models.extend(crate::external_models::models().cloned());
         }
+        models
     }
 
     async fn raw_model_catalog(
@@ -819,15 +875,19 @@ impl OpenAiModelsManager {
 }
 
 impl ModelsManager for StaticModelsManager {
+    fn set_load_external_models_json(&self, enabled: bool) {
+        if let Some(setting) = &self.load_external_models_json {
+            setting.store(enabled, Ordering::SeqCst);
+        }
+    }
+
     #[tracing::instrument(skip_all, fields(model = model))]
     fn get_model_info<'a>(
         &'a self,
         model: &'a str,
         config: &'a ModelsManagerConfig,
     ) -> ModelsManagerFuture<'a, ModelInfo> {
-        Box::pin(
-            async move { construct_model_info_from_candidates(model, &self.remote_models, config) },
-        )
+        Box::pin(async move { construct_model_info_from_candidates(model, &self.models(), config) })
     }
 
     fn get_default_model<'a>(
@@ -879,11 +939,11 @@ impl ModelsManager for StaticModelsManager {
     }
 
     fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>> {
-        Box::pin(async { self.remote_models.clone() })
+        Box::pin(async { self.models() })
     }
 
     fn try_get_remote_models(&self) -> Result<Vec<ModelInfo>, TryLockError> {
-        Ok(self.remote_models.clone())
+        Ok(self.models())
     }
 
     fn auth_manager(&self) -> Option<&AuthManager> {

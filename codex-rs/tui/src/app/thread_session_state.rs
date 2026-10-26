@@ -83,10 +83,20 @@ impl App {
                 // thread-scoped state from the currently active session.
                 session.collaboration_mode = None;
                 session.daybreak_enabled = false;
+                session.system1_enabled = false;
+                session.system1_revision = 0;
+                session.system1_error = None;
+                session.system1_failure_episode = 0;
             }
             session
         } else {
             ThreadSessionState {
+                system1_enabled: false,
+                system1_revision: 0,
+                system1_error: None,
+                system1_failure_episode: 0,
+                agent_role: None,
+                thread_source: None,
                 daybreak_enabled: false,
                 windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
                 thread_id,
@@ -115,6 +125,8 @@ impl App {
         session.windows_sandbox_host =
             crate::windows_sandbox::host_from_environments(thread.environments.as_deref());
         session.thread_id = thread_id;
+        session.agent_role = thread.agent_role.clone();
+        session.thread_source = thread.thread_source.clone().map(Into::into);
         session.daybreak_enabled = thread.daybreak_enabled.unwrap_or(false);
         session.thread_name = thread.name.clone();
         session.model_provider_id = thread.model_provider.clone();
@@ -173,6 +185,12 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            system1_enabled: false,
+            system1_revision: 0,
+            system1_error: None,
+            system1_failure_episode: 0,
+            agent_role: None,
+            thread_source: None,
             daybreak_enabled: false,
             windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,

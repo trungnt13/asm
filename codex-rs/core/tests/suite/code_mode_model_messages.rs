@@ -67,6 +67,10 @@ async fn code_mode_wait_overrides_are_independent(
     }
     if valid_parameters {
         wait["parameters"] = serde_json::from_str(PARAMETERS)?;
+        wait["parameters"]["properties"]["reason"] = json!({
+            "type": "string", "description": codex_tools::WAIT_REASON_DESCRIPTION
+        });
+        wait["parameters"]["required"] = json!(["cell_id", "reason"]);
     }
     assert_eq!(requests[1].body_json()["tools"], expected);
     Ok(())

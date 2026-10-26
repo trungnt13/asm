@@ -1318,10 +1318,20 @@ async fn slash_rename_requests_and_prefills_an_editable_title_suggestion() {
     chat.thread_id = Some(thread_id);
     chat.thread_name = Some("Current project title".to_string());
 
+    chat.apply_external_edit("/autorename".to_string());
+    let autorename_popup = render_bottom_popup(&chat, /*width*/ 80);
+    assert!(autorename_popup.contains("/autorename"));
+    chat.apply_external_edit(String::new());
+    chat.dispatch_command(SlashCommand::AutoRename);
+    assert_matches!(rx.try_recv(), Ok(AppEvent::AutoRenameThread { thread_id: requested }) if requested == thread_id);
+
     chat.dispatch_command(SlashCommand::Rename);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("slash_rename_suggestion_loading", popup);
+    assert_chatwidget_snapshot!(
+        "slash_rename_suggestion_loading",
+        format!("{autorename_popup}\n\n{popup}")
+    );
 
     let request_id = match rx.try_recv() {
         Ok(AppEvent::SuggestThreadName {
@@ -3360,6 +3370,7 @@ async fn slash_cd_changes_current_session_after_replay_and_defaults_to_home() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
+    chat.set_parallel_conversation_active(/*active*/ true);
     chat.thread_name = Some("Completed task".to_string());
     chat.forked_from = Some(ThreadId::new());
     let (status, duration, error) = (AppServerTurnStatus::Completed, None, None);
@@ -3437,7 +3448,7 @@ async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
     }
     insta::assert_snapshot!(format!("{}{}", errors[0], errors[3]), @r"
 ■ The session must start before you can change its working directory.
-■ Changing directories requires an idle primary session without queued input.
+■ Changing directories requires an idle session without queued input.
 ");
 }
 
@@ -3483,6 +3494,7 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
     chat.bottom_pane.set_task_running(/*running*/ true);
+    chat.set_parallel_conversation_active(/*active*/ true);
 
     submit_composer_text(&mut chat, "/fast");
 
@@ -3776,6 +3788,20 @@ async fn raw_slash_command_toggles_and_accepts_on_off_args() {
             .iter()
             .any(|event| matches!(event, AppEvent::RawOutputModeChanged { enabled: true }))
     );
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.dispatch_command(SlashCommand::System1);
+    assert!(!chat.system1_enabled());
+    let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+    assert!(events.iter().any(|event| matches!(event, AppEvent::SetSystem1 { thread_id: id, action: crate::app_event::System1Action::Toggle } if *id == thread_id)));
+    for (args, expected) in [
+        ("on", crate::app_event::System1Action::Enable),
+        ("off", crate::app_event::System1Action::Disable),
+    ] {
+        chat.dispatch_command_with_args(SlashCommand::System1, args.to_string(), Vec::new());
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+        assert!(events.iter().any(|event| matches!(event, AppEvent::SetSystem1 { thread_id: id, action } if *id == thread_id && *action == expected)));
+    }
 }
 
 #[tokio::test]
@@ -3891,4 +3917,22 @@ async fn owned_copy_guard_defers_queued_input_until_released() {
         chat.maybe_send_next_queued_input();
         assert!(chat.input_queue.queued_user_messages.is_empty());
     }
+}
+
+#[tokio::test]
+async fn temporary_side_rejects_service_tier_dispatch() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
+    set_fast_mode_test_catalog(&mut chat);
+    chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
+    chat.set_side_conversation_active(/*active*/ true);
+
+    submit_composer_text(&mut chat, "/fast");
+
+    let errors = drain_insert_history(&mut rx);
+    assert_eq!(
+        lines_to_single_string(&errors[0]),
+        "■ '/fast' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
+    );
+    assert!(rx.try_recv().is_err());
+    assert!(op_rx.try_recv().is_err());
 }

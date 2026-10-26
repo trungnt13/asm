@@ -5,10 +5,12 @@ use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
 use codex_config::ConfigRequirementsToml;
 use codex_exec_server::LOCAL_FS;
+use codex_protocol::user_input::UserInput;
 use codex_skills::ImplicitSkillLookup;
 use codex_skills::LoadedSkillRoot;
 use codex_skills::SkillRootSnapshotCache;
 use codex_skills::SkillRootSnapshots;
+use codex_skills::collect_explicit_skill_mentions;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathBufExt;
 use codex_utils_absolute_path::test_support::PathExt;
@@ -206,6 +208,129 @@ async fn skills_for_config_reuses_cache_for_same_effective_config() {
         skills_for_config_with_stack(&skills_service, &cwd, &config_layer_stack, &[]).await;
     assert_eq!(outcome2.errors, outcome1.errors);
     assert_eq!(outcome2.skills, outcome1.skills);
+
+    let base_input = HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack);
+    let unscoped = skills_service
+        .snapshot_for_config(&base_input, Some(Arc::clone(&LOCAL_FS)))
+        .await;
+    let reviewer_input = base_input.with_agent_role(Some("reviewer".to_string()));
+    let unscoped_reviewer = skills_service
+        .snapshot_for_config(&reviewer_input, Some(Arc::clone(&LOCAL_FS)))
+        .await;
+    assert!(std::ptr::eq(
+        unscoped.outcome(),
+        unscoped_reviewer.outcome()
+    ));
+
+    for name in ["review", "oracle", "denied", "empty-scope"] {
+        write_user_skill(&codex_home, name, name, "role-scoped skill");
+    }
+    let scoped_input = HostSkillsLoadInput::new(
+        cwd.path().abs(),
+        Vec::new(),
+        config_stack(
+            &codex_home,
+            r#"
+[skills.bundled]
+enabled = false
+[[skills.config]]
+name = "review"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+[[skills.config]]
+name = "oracle"
+enabled = true
+allowed_agent_roles = ["reviewer"]
+[[skills.config]]
+name = "denied"
+enabled = false
+allowed_agent_roles = ["reviewer"]
+[[skills.config]]
+name = "empty-scope"
+enabled = true
+allowed_agent_roles = []
+"#,
+        ),
+    );
+    let mut scoped_snapshots = Vec::new();
+    for role in [None, Some("reviewer"), Some("default"), Some("other")] {
+        let input = scoped_input
+            .clone()
+            .with_agent_role(role.map(str::to_string));
+        let config_snapshot = skills_service
+            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+            .await;
+        let cwd_snapshot = skills_service
+            .for_request()
+            .snapshot_for_cwd(
+                &input,
+                /*force_reload*/ false,
+                Some(Arc::clone(&LOCAL_FS)),
+            )
+            .await;
+        let outcome = config_snapshot.outcome();
+        assert!(std::ptr::eq(outcome, cwd_snapshot.outcome()));
+        let is_reviewer = role == Some("reviewer");
+        let enabled_names = outcome
+            .skills
+            .iter()
+            .filter(|skill| outcome.is_skill_enabled(skill))
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            enabled_names,
+            if is_reviewer {
+                vec!["oracle", "review", "skill-a", "skill-b"]
+            } else {
+                vec!["skill-a", "skill-b"]
+            }
+        );
+        for name in ["review", "oracle"] {
+            let skill = outcome
+                .skills
+                .iter()
+                .find(|skill| skill.name == name)
+                .unwrap();
+            let path = skill.path_to_skills_md.to_abs_path().unwrap();
+            assert_eq!(
+                outcome.implicit_skill_for_doc_path(&path).is_some(),
+                is_reviewer
+            );
+            let scripts_dir = path.parent().unwrap().join("scripts");
+            assert_eq!(
+                outcome
+                    .implicit_skill_for_scripts_dir(&scripts_dir)
+                    .is_some(),
+                is_reviewer
+            );
+            for input in [
+                UserInput::Text {
+                    text: format!("${name}"),
+                    text_elements: Vec::new(),
+                },
+                UserInput::Skill {
+                    name: name.to_string(),
+                    path: path.to_path_buf(),
+                },
+            ] {
+                let selected = collect_explicit_skill_mentions(&[input], outcome, &HashMap::new());
+                let expected = if is_reviewer {
+                    vec![skill.clone()]
+                } else {
+                    Vec::new()
+                };
+                assert_eq!(selected, expected);
+            }
+            // Catalog visibility does not deny ordinary file reads.
+            let contents = config_snapshot.read_skill_text(skill).await.unwrap();
+            assert!(contents.contains("# Body"));
+        }
+        scoped_snapshots.push(config_snapshot);
+    }
+    let root = scoped_snapshots[0].outcome();
+    assert!(!std::ptr::eq(root, scoped_snapshots[1].outcome()));
+    assert!(std::ptr::eq(root, scoped_snapshots[2].outcome()));
+    assert!(std::ptr::eq(root, scoped_snapshots[3].outcome()));
 }
 
 #[tokio::test]

@@ -128,6 +128,8 @@ impl App {
                 AppEvent::OpenAgentPicker
                     | AppEvent::SelectAgentThread(_)
                     | AppEvent::StartSide { .. }
+                    | AppEvent::SideConversationAction { .. }
+                    | AppEvent::StartParallel { .. }
                     | AppEvent::ForkCurrentSession { .. }
                     | AppEvent::StartManagedWorktree {
                         mode: crate::app_event::ManagedWorktreeMode::Fork,
@@ -213,6 +215,16 @@ impl App {
                     self.chat_widget.show_misalignment_policy_precaution();
                 }
             }
+            AppEvent::StartModelSession { thread_id, model, effort, confirmed } => {
+                if self.chat_widget.thread_id() != thread_id {
+                    return Ok(AppRunControl::Continue);
+                }
+                if confirmed {
+                    self.start_model_session(tui, app_server, None, None, None, Some((model, effort))).await;
+                } else {
+                    self.chat_widget.confirm_model_session(model, effort);
+                }
+            }
             AppEvent::StartManagedWorktree { mode, name } => {
                 if self.pending_start_managed_worktree.is_some() {
                     self.chat_widget
@@ -281,11 +293,11 @@ impl App {
                 requested_cwd,
             } => {
                 if self.pending_working_directory_change.is_some()
-                    || self.primary_thread_id != Some(thread_id)
+                    || self.current_displayed_thread_id() != Some(thread_id)
                     || !self.chat_widget.can_change_working_directory(thread_id)
                 {
                     self.chat_widget.add_error_message(
-                        "Changing directories requires an idle primary session without queued input."
+                        "Changing directories requires an idle session without queued input."
                             .to_string(),
                     );
                 } else if crate::uses_remote_workspace_or_environment(
@@ -345,6 +357,7 @@ impl App {
                     && !self.agents_overview.threads.get(&thread_id).is_some_and(Option::is_some) {
                     self.agents_overview.threads.insert(thread_id, Some(thread));
                     self.agents_overview.refresh_thread_ids.insert(thread_id);
+                    self.sample_turn_agents();
                 }
                 self.refresh_changed_agents_overview_threads(app_server);
                 self.repaint_agents_overview();
@@ -463,6 +476,12 @@ impl App {
                     name,
                 )
                 .await;
+            }
+            AppEvent::ShowSystem1Status { thread_id } => {
+                self.show_system1_status(app_server, thread_id).await;
+            }
+            AppEvent::SetSystem1 { thread_id, action } => {
+                self.change_system1(app_server, thread_id, action).await;
             }
             AppEvent::RawOutputModeChanged { enabled } => {
                 self.apply_raw_output_mode(tui, enabled, /*notify*/ false);
@@ -645,6 +664,7 @@ impl App {
                             match self
                                 .replace_chat_widget_with_app_server_thread(
                                     tui,
+                                    app_server,
                                     forked,
                                     ThreadAttachPresentation::SessionLineage,
                                     /*initial_user_message*/ None,
@@ -1014,6 +1034,14 @@ impl App {
                         && self.chat_widget.submit_op(AppCommand::interrupt())
                     {
                         self.chat_widget.pause_active_goal_for_interrupt();
+                    } else if self
+                        .side_threads
+                        .get(&thread_id)
+                        .is_some_and(|state| state.kind == CompanionKind::Parallel)
+                    {
+                        if let Err(error) = self.interrupt_side_thread(app_server, thread_id).await {
+                            self.chat_widget.add_error_message(error);
+                        }
                     } else if self.side_threads.contains_key(&thread_id)
                         && let Err(error) = self
                             .try_submit_active_thread_op_via_app_server(
@@ -1340,7 +1368,9 @@ impl App {
             }
             AppEvent::SecuritySetupLoaded { request_id, identity, notice } => {
                 tracing::debug!(current = request_id == self.chat_widget.security_setup_request_id, "handling security setup notice");
-                if request_id == self.chat_widget.security_setup_request_id {
+                if crate::security_setup::REMINDERS_ENABLED
+                    && request_id == self.chat_widget.security_setup_request_id
+                {
                     self.chat_widget.show_security_setup(identity, notice);
                 }
             }
@@ -2574,7 +2604,7 @@ impl App {
                                     Line::from(vec!["• ".dim(), "Sandbox ready".into()]),
                                     Line::from(vec![
                                         "  ".into(),
-                                        "Codex can now safely edit files and execute commands in your computer"
+                                        "ASM can now safely edit files and execute commands in your computer"
                                             .dark_gray(),
                                     ]),
                                 ]);
@@ -2969,10 +2999,14 @@ impl App {
                 }
             }
             AppEvent::RenameAgentsOverviewThread { thread_id, name } => {
-                match app_server.thread_set_name(thread_id, name.clone()).await {
+                self.cancel_thread_title_generation(thread_id);
+                let result = match self.forget_automatic_thread_title(thread_id) {
+                    Ok(()) => app_server.thread_set_name(thread_id, name.clone()).await,
+                    Err(error) => Err(error.into()),
+                };
+                match result {
                     Ok(()) => {
                         self.chat_widget.expect_manual_thread_name(thread_id, name);
-                        self.cancel_thread_title_generation(thread_id);
                     }
                     Err(error) => {
                         if let Ok(mut state) = self.agents_overview.view_state.lock() {
@@ -2983,6 +3017,9 @@ impl App {
                         self.add_agents_overview_error(format!("Failed to rename task: {error}"));
                     }
                 }
+            }
+            AppEvent::AutoRenameThread { thread_id } => {
+                Box::pin(self.autorename_thread(app_server, thread_id)).await;
             }
             AppEvent::ToggleAgentsOverviewPin { thread_id, pinned } => {
                 self.toggle_agents_overview_pin(app_server, thread_id, pinned);
@@ -3004,7 +3041,15 @@ impl App {
                 self.suggest_thread_name(app_server, thread_id, request_id)
                     .await;
             }
+            AppEvent::StopAutomaticThreadTitles { thread_id, stopped } => {
+                self.stop_automatic_thread_titles(thread_id);
+                let result = self.forget_automatic_thread_title(thread_id).map_err(|error| error.to_string());
+                if let Err(error) = &result { self.chat_widget.add_error_message(error.clone()); }
+                let _ = stopped.send(result);
+            }
             AppEvent::ThreadTitleStarted {
+                auto_rename,
+                max_title_chars,
                 cancellation,
                 thread_id,
                 destination,
@@ -3018,11 +3063,15 @@ impl App {
                     destination,
                     prompt,
                     effort,
+                    max_title_chars,
+                    auto_rename,
                     result,
                     cancellation,
                 );
             }
             AppEvent::GeneratedThreadTitle {
+                auto_rename,
+                max_title_chars,
                 cancellation,
                 thread_id,
                 temporary_thread_id,
@@ -3039,26 +3088,22 @@ impl App {
                 match destination {
                     ThreadTitleDestination::Automatic => {
                         if let Ok(response) = result
-                            && let Some(title) = super::thread_title::parse_thread_title(&response)
-                            && let Ok(thread) = app_server
-                                .thread_read(thread_id, /*include_turns*/ false)
-                                .await
-                            && thread.name.is_none()
+                            && let Some(title) = super::thread_title::parse_thread_title(
+                                &response, max_title_chars,
+                            )
                         {
-                            match app_server.thread_set_name(thread_id, title.clone()).await {
-                                Ok(()) => self
-                                    .chat_widget
-                                    .on_thread_name_updated(thread_id, Some(title)),
-                                Err(error) => {
-                                    tracing::debug!(%error, "failed to apply generated thread title");
-                                }
-                            }
+                            self.save_automatic_thread_title(app_server, thread_id, title, auto_rename).await;
                         }
+                    }
+                    ThreadTitleDestination::ExplicitAutoRename => {
+                        Box::pin(self.apply_autorename_result(app_server, thread_id, result, max_title_chars, auto_rename)).await;
                     }
                     ThreadTitleDestination::RenameSuggestion { request_id } => {
                         let suggestion = result
                             .ok()
-                            .and_then(|response| super::thread_title::parse_thread_title(&response));
+                            .and_then(|response| super::thread_title::parse_thread_title(
+                                &response, max_title_chars,
+                            ));
 
                         self.chat_widget.apply_thread_name_suggestion(
                             thread_id,
@@ -3090,7 +3135,7 @@ impl App {
             #[cfg(any(unix, windows))]
             AppEvent::AgentsDaemonStarted { result } => match result {
                 Ok(()) => self.chat_widget.add_info_message(
-                    "Background server started. Run `codex agents` in another terminal; this session remains unchanged."
+                    "Background server started. Run `asm agents` in another terminal; this session remains unchanged."
                         .to_string(),
                     /*hint*/ None,
                 ),
@@ -3114,16 +3159,22 @@ impl App {
                 );
             }
             AppEvent::SelectAgentThread(thread_id) => {
-                self.select_agent_thread(tui, app_server, thread_id)
+                self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
                     .await?;
             }
             AppEvent::StartSide {
                 parent_thread_id,
                 user_message,
             } => {
-                return self
-                    .handle_start_side(tui, app_server, parent_thread_id, user_message)
-                    .await;
+                // Keep companion setup out of the event-dispatch future's inline storage.
+                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Side, user_message)).await;
+            }
+            AppEvent::SideConversationAction { action } => {
+                // Sync and Fork re-run companion fork setup; keep it boxed like Side startup.
+                Box::pin(self.apply_side_conversation_action(tui, app_server, action)).await?;
+            }
+            AppEvent::StartParallel { parent_thread_id, user_message } => {
+                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Parallel, user_message)).await;
             }
             AppEvent::OpenSkillsList => {
                 self.chat_widget.open_skills_list();
@@ -3868,15 +3919,16 @@ impl App {
                 .add_error_message("A thread must start before it can be archived.".to_string());
             return Ok(AppRunControl::Continue);
         };
-        if self.side_threads.contains_key(&thread_id) {
-            self.chat_widget.add_error_message(
-                "'/archive' is unavailable in side conversations. Press Ctrl+C to return to the main thread first."
-                    .to_string(),
-            );
+        if self
+            .side_threads
+            .get(&thread_id)
+            .is_some_and(|state| state.kind == CompanionKind::Side)
+        {
+            self.chat_widget.add_error_message("'/archive' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.".to_string());
             return Ok(AppRunControl::Continue);
         }
-
-        if self.app_server_target.supports_command_center() {
+        let side_parent_thread_id = self.active_side_parent_thread_id();
+        if side_parent_thread_id.is_none() && self.app_server_target.supports_command_center() {
             self.shutdown_side_threads(app_server).await;
             if !self.side_threads.is_empty() {
                 return Ok(AppRunControl::Continue);
@@ -3889,6 +3941,26 @@ impl App {
             app_server.thread_archive(thread_id).await
         }
         .await;
+        if result.is_ok()
+            && let Some(parent_thread_id) = side_parent_thread_id
+        {
+            self.track_agents_overview_notification(&ServerNotification::ThreadArchived(
+                codex_app_server_protocol::ThreadArchivedNotification {
+                    thread_id: thread_id.to_string(),
+                },
+            ));
+            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to save the closed side selection: {error}"
+                ));
+            }
+            self.discard_thread_local_state(thread_id).await;
+            self.agents_overview.input_states.remove(&thread_id);
+            self.agents_overview.dispatched_requests.remove(&thread_id);
+            self.select_agent_thread(tui, app_server, parent_thread_id)
+                .await?;
+            return Ok(AppRunControl::Continue);
+        }
         Ok(match result {
             Ok(()) if !self.app_server_target.supports_command_center() => {
                 AppRunControl::Exit(ExitReason::Archived(thread_id))
@@ -3936,15 +4008,16 @@ impl App {
                 .add_error_message("A thread must start before it can be deleted.".to_string());
             return Ok(AppRunControl::Continue);
         };
-        if self.side_threads.contains_key(&thread_id) {
-            self.chat_widget.add_error_message(
-                "'/delete' is unavailable in side conversations. Press Ctrl+C to return to the main thread first."
-                    .to_string(),
-            );
+        if self
+            .side_threads
+            .get(&thread_id)
+            .is_some_and(|state| state.kind == CompanionKind::Side)
+        {
+            self.chat_widget.add_error_message("'/delete' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.".to_string());
             return Ok(AppRunControl::Continue);
         }
-
-        if self.app_server_target.supports_command_center() {
+        let side_parent_thread_id = self.active_side_parent_thread_id();
+        if side_parent_thread_id.is_none() && self.app_server_target.supports_command_center() {
             self.shutdown_side_threads(app_server).await;
             if !self.side_threads.is_empty() {
                 return Ok(AppRunControl::Continue);
@@ -3957,6 +4030,26 @@ impl App {
             app_server.thread_delete(thread_id).await
         }
         .await;
+        if result.is_ok()
+            && let Some(parent_thread_id) = side_parent_thread_id
+        {
+            self.track_agents_overview_notification(&ServerNotification::ThreadDeleted(
+                codex_app_server_protocol::ThreadDeletedNotification {
+                    thread_id: thread_id.to_string(),
+                },
+            ));
+            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to save the closed side selection: {error}"
+                ));
+            }
+            self.discard_thread_local_state(thread_id).await;
+            self.agents_overview.input_states.remove(&thread_id);
+            self.agents_overview.dispatched_requests.remove(&thread_id);
+            self.select_agent_thread(tui, app_server, parent_thread_id)
+                .await?;
+            return Ok(AppRunControl::Continue);
+        }
         Ok(match result {
             Ok(()) if !self.app_server_target.supports_command_center() => {
                 AppRunControl::Exit(ExitReason::ThreadRemoved)

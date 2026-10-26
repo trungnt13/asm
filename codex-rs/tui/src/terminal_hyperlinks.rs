@@ -52,6 +52,7 @@ enum DestinationKind {
     Web,
     /// A generated visualization or a capability-validated spoken workspace artifact.
     TrustedFile,
+    MarkdownFile,
 }
 
 /// An existing, inert source file proven to remain inside its session workspace.
@@ -106,8 +107,8 @@ impl TerminalHyperlink {
     }
 
     pub(crate) fn retarget_to_trusted_file(&mut self, destination: &Url) {
-        // General Markdown never promotes file URLs. Only generated visualization links use this
-        // path; spoken workspace artifacts require a separately validated capability.
+        // Generated visualization links use this capability path, separate from ordinary Markdown.
+        // Spoken workspace artifacts still require their separately validated capability.
         debug_assert_eq!(destination.scheme(), "file");
         self.destination = destination.to_string();
         self.destination_kind = DestinationKind::TrustedFile;
@@ -135,6 +136,7 @@ impl TerminalHyperlink {
     pub(crate) fn terminal_destination(&self) -> Option<String> {
         match self.destination_kind {
             DestinationKind::Web => web_destination(&self.destination),
+            DestinationKind::MarkdownFile => markdown_file_destination(&self.destination),
             DestinationKind::TrustedFile => trusted_file_destination(&self.destination),
         }
     }
@@ -218,6 +220,26 @@ impl HyperlinkLine {
             span.style = style.patch(span.style);
         }
         self
+    }
+
+    pub(crate) fn push_markdown_span(&mut self, span: Span<'static>, destination: Option<&str>) {
+        if let Some(file) = destination.filter(|destination| destination.starts_with("file:"))
+            && let Some(file) = markdown_file_destination(file)
+        {
+            self.source = None;
+            let start = self.width();
+            let end = start + display_width(span.content.as_ref());
+            self.line.push_span(span);
+            if end > start {
+                self.hyperlinks.push(TerminalHyperlink {
+                    columns: start..end,
+                    destination: file,
+                    destination_kind: DestinationKind::MarkdownFile,
+                });
+            }
+        } else {
+            self.push_span(span, destination);
+        }
     }
 
     pub(crate) fn style(mut self, style: ratatui::style::Style) -> Self {
@@ -643,6 +665,21 @@ pub(crate) fn web_destination(destination: &str) -> Option<String> {
         .then(|| parsed.host_str())
         .flatten()?;
     Some(safe_destination)
+}
+
+pub(crate) fn markdown_destination(destination: &str) -> Option<String> {
+    web_destination(destination).or_else(|| markdown_file_destination(destination))
+}
+
+fn markdown_file_destination(destination: &str) -> Option<String> {
+    if destination.chars().any(char::is_control)
+        || destination.len() > MAX_HYPERLINK_DESTINATION_BYTES
+    {
+        return None;
+    }
+    let parsed = Url::parse(destination).ok()?;
+    codex_utils_path_uri::PathUri::parse(&parsed[..url::Position::AfterPath]).ok()?;
+    Some(destination.to_owned())
 }
 
 fn trusted_file_destination(destination: &str) -> Option<String> {

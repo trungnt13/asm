@@ -14,7 +14,7 @@ use crate::session::turn_context::TurnContext;
 
 impl Session {
     #[tracing::instrument(level = "trace", skip_all, fields(turn_id = %turn_context.sub_id, phase = ?phase))]
-    pub(super) async fn emit_turn_start_lifecycle(
+    pub(crate) async fn emit_turn_start_lifecycle(
         self: &Arc<Self>,
         turn_context: &TurnContext,
         token_usage_at_turn_start: Option<&TokenUsage>,

@@ -71,7 +71,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             app.chat_widget.thread_id().expect("fresh task"),
-            vec![App::side_boundary_prompt_item()],
+            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
         )
         .await?;
     let fresh_destination = tempfile::tempdir()?;
@@ -105,7 +105,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             saved.session.thread_id,
-            vec![App::side_boundary_prompt_item()],
+            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
         )
         .await?;
     tui.pause_events();
@@ -165,7 +165,9 @@ sandbox = "unelevated"
     })
     .await??;
     response.single_request();
-    let (next, _) = app.load_new_session_config(&server).await?;
+    let (next, _) = app
+        .load_new_session_config(&server, /*selected_model*/ None)
+        .await?;
     assert_eq!(
         next.permissions.permission_profile(),
         &PermissionProfile::workspace_write()
@@ -218,7 +220,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             app.chat_widget.thread_id().expect("new project task"),
-            vec![App::side_boundary_prompt_item()],
+            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
         )
         .await?;
     app.change_working_directory(&mut tui, &mut server, source.path().abs())

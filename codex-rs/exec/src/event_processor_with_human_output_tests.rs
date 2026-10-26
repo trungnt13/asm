@@ -319,6 +319,10 @@ async fn config_summary_entries_include_runtime_workspace_roots() {
         .expect("set permission profile");
 
     let session_configured_event = SessionConfiguredEvent {
+        system1_enabled: false,
+        system1_revision: 0,
+        system1_error: None,
+        system1_failure_episode: 0,
         session_id: SessionId::new(),
         thread_id: ThreadId::new(),
         forked_from_id: None,
@@ -424,6 +428,7 @@ fn turn_completed_recovers_final_message_from_turn_items() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -476,6 +481,7 @@ fn turn_completed_overwrites_stale_final_message_from_turn_items() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -529,6 +535,7 @@ fn turn_completed_preserves_streamed_final_message_when_turn_items_are_empty() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -575,6 +582,7 @@ fn turn_failed_clears_stale_final_message() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -622,6 +630,7 @@ fn turn_interrupted_clears_stale_final_message() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                token_usage: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,

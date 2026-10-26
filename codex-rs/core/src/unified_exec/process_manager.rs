@@ -49,7 +49,6 @@ use crate::tools::sandboxing::ToolError;
 use crate::unified_exec::ExecCommandRequest;
 use crate::unified_exec::MAX_UNIFIED_EXEC_PROCESSES;
 use crate::unified_exec::MAX_YIELD_TIME_MS;
-use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::unified_exec::MIN_YIELD_TIME_MS;
 use crate::unified_exec::ProcessEntry;
 use crate::unified_exec::ProcessStore;
@@ -670,6 +669,7 @@ impl UnifiedExecProcessManager {
             process.output_handles(),
             Some(context.session.subscribe_elicitation_pause_state()),
             deadline,
+            /*preempt*/ None,
         )
         .await;
         if let Some(completion) = completion.as_mut()
@@ -860,6 +860,7 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            wait_reminder: None,
             event_call_id: context.call_id.clone(),
             chunk_id,
             wall_time,
@@ -1048,17 +1049,25 @@ impl UnifiedExecProcessManager {
         let yield_time_ms = {
             // Empty polls use configurable background timeout bounds. Non-empty
             // writes keep a fixed max cap so interactive stdin remains responsive.
-            let time_ms = request.yield_time_ms.max(MIN_YIELD_TIME_MS);
+            let time_ms = request.yield_time_ms;
             if request.input.is_empty() {
-                time_ms.clamp(MIN_EMPTY_YIELD_TIME_MS, self.max_write_stdin_yield_time_ms)
+                time_ms.clamp(
+                    self.background_terminal_timeout_bounds.min_ms,
+                    self.background_terminal_timeout_bounds.max_ms,
+                )
             } else {
-                time_ms.min(MAX_YIELD_TIME_MS)
+                time_ms.clamp(MIN_YIELD_TIME_MS, MAX_YIELD_TIME_MS)
             }
         };
         let start = Instant::now();
         let deadline = start + Duration::from_millis(yield_time_ms);
+        let preempt = if request.input.is_empty() {
+            context.step_context.preempt.as_ref()
+        } else {
+            None
+        };
         let collected_output =
-            Self::collect_output_until_deadline(&output, pause_state, deadline).await;
+            Self::collect_output_until_deadline(&output, pause_state, deadline, preempt).await;
         let wall_time = Instant::now().saturating_duration_since(start);
 
         let original_token_count = usize::try_from(approx_tokens_from_byte_count(
@@ -1120,6 +1129,7 @@ impl UnifiedExecProcessManager {
         };
 
         let response = ExecCommandToolOutput {
+            wait_reminder: None,
             event_call_id,
             chunk_id,
             wall_time,
@@ -1626,10 +1636,12 @@ impl UnifiedExecProcessManager {
         output: &OutputHandles<MAX_BYTES>,
         mut pause_state: Option<watch::Receiver<bool>>,
         mut deadline: Instant,
+        preempt: Option<&CancellationToken>,
     ) -> HeadTailBuffer<MAX_BYTES> {
         const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(50);
 
         enum StopReason {
+            Steered,
             OutputClosed,
             Deadline,
             PostExitDeadline,
@@ -1646,13 +1658,23 @@ impl UnifiedExecProcessManager {
         let mut collected = HeadTailBuffer::default();
         let mut exit_signal_received = cancellation_token.is_cancelled();
         let mut post_exit_deadline: Option<Instant> = None;
+        let preempted = async {
+            match preempt {
+                Some(token) => token.cancelled().await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::pin!(preempted);
         let stop_reason = loop {
-            Self::extend_deadlines_while_paused(
-                &mut pause_state,
-                &mut deadline,
-                &mut post_exit_deadline,
-            )
-            .await;
+            tokio::select! {
+                biased;
+                _ = &mut preempted => {},
+                _ = Self::extend_deadlines_while_paused(
+                    &mut pause_state,
+                    &mut deadline,
+                    &mut post_exit_deadline,
+                ) => {}
+            }
             let drained_output: HeadTailBuffer<MAX_BYTES>;
             let has_drained_output: bool;
             let mut wait_for_output = None;
@@ -1667,6 +1689,9 @@ impl UnifiedExecProcessManager {
             }
 
             if !has_drained_output {
+                if preempt.is_some_and(CancellationToken::is_cancelled) {
+                    break StopReason::Steered;
+                }
                 exit_signal_received |= cancellation_token.is_cancelled();
                 if exit_signal_received && output_closed.load(Ordering::Acquire) {
                     break StopReason::OutputClosed;
@@ -1691,6 +1716,7 @@ impl UnifiedExecProcessManager {
                     tokio::select! {
                         _ = &mut notified => {}
                         _ = &mut closed => {}
+                        _ = &mut preempted => break StopReason::Steered,
                         _ = tokio::time::sleep(close_wait_remaining) => break StopReason::PostExitDeadline,
                         _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
                     }
@@ -1704,6 +1730,7 @@ impl UnifiedExecProcessManager {
                 tokio::select! {
                     _ = &mut notified => {}
                     _ = &mut exit_notified => exit_signal_received = true,
+                    _ = &mut preempted => break StopReason::Steered,
                     _ = tokio::time::sleep(remaining) => break StopReason::Deadline,
                     _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
                 }
@@ -1711,6 +1738,9 @@ impl UnifiedExecProcessManager {
             }
 
             collected.push_buffer(drained_output);
+            if preempt.is_some_and(CancellationToken::is_cancelled) {
+                break StopReason::Steered;
+            }
 
             exit_signal_received |= cancellation_token.is_cancelled();
             if Instant::now() >= deadline {
@@ -1722,6 +1752,7 @@ impl UnifiedExecProcessManager {
         span.record(
             "stop_reason",
             match stop_reason {
+                StopReason::Steered => "steered",
                 StopReason::OutputClosed => "output_closed",
                 StopReason::Deadline => "deadline",
                 StopReason::PostExitDeadline => "post_exit_deadline",

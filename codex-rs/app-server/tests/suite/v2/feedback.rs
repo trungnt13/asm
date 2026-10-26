@@ -188,7 +188,10 @@ async fn feedback_upload_recovers_persisted_evidence_and_reports_sqlite_failures
 
     let models = wiremock::MockServer::start().await;
     MockResponsesConfig::new(&models.uri())
-        .with_root_config(&format!("log_dir = {:?}", home.path().join("log")))
+        .with_root_config(&format!(
+            "diagnostic_log_capture = true\nlog_dir = {:?}",
+            home.path().join("log")
+        ))
         .write(home.path())?;
     let thread_id = codex_protocol::ThreadId::new();
     let sqlite = core_test_support::load_default_config_for_test(&home)

@@ -25,8 +25,20 @@ pub(crate) struct MessageHistoryMetadata {
     pub(crate) entry_count: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ThreadReasoningState {
+    pub(crate) captured_step: Option<codex_app_server_protocol::ReasoningEffortUpdatedNotification>,
+    pub(crate) suppressed_turn_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadSessionState {
+    pub(crate) system1_enabled: bool,
+    pub(crate) system1_revision: u64,
+    pub(crate) system1_error: Option<codex_protocol::protocol::System1Error>,
+    pub(crate) system1_failure_episode: u64,
+    pub(crate) agent_role: Option<String>,
+    pub(crate) thread_source: Option<codex_protocol::protocol::ThreadSource>,
     pub(crate) daybreak_enabled: bool,
     pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,
     pub(crate) thread_id: ThreadId,
@@ -58,6 +70,11 @@ pub(crate) struct ThreadSessionState {
 }
 
 impl ThreadSessionState {
+    pub(crate) fn is_user_fork(&self) -> bool {
+        self.forked_from_id.is_some()
+            && self.thread_source == Some(codex_protocol::protocol::ThreadSource::User)
+    }
+
     pub(crate) fn set_cwd_retargeting_implicit_runtime_workspace_root(
         &mut self,
         cwd: AbsolutePathBuf,

@@ -5858,7 +5858,7 @@ async fn post_tool_use_blocks_when_exec_session_completes_via_write_stdin() -> R
         "yield_time_ms": 250,
     });
     let poll_args = serde_json::json!({
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "chars": "",
         "yield_time_ms": 5_000,
     });

@@ -31,6 +31,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                             id: "turn".into(),
                             root_turn_id: None,
                             items_view: codex_app_server_protocol::TurnItemsView::Full,
+                            token_usage: None,
                             items: Vec::new(),
                             status: codex_app_server_protocol::TurnStatus::InProgress,
                             error: None,

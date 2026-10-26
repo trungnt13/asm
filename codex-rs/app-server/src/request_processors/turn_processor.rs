@@ -711,7 +711,9 @@ impl TurnRequestProcessor {
 
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
-            if config_snapshot.is_primary_environment_configured() {
+            if config_snapshot.is_primary_environment_configured()
+                && !codex_protocol::openai_models::is_native_runtime_model(&config_snapshot.model)
+            {
                 codex_memories_write::start_memories_startup_task(
                     Arc::clone(&self.thread_manager),
                     Arc::clone(&self.auth_manager),
@@ -728,6 +730,7 @@ impl TurnRequestProcessor {
             .record_request_turn_id(&request_id, &turn_id)
             .await;
         let turn = Turn {
+            token_usage: None,
             id: turn_id,
             root_turn_id: Some(root_turn_id),
             items: vec![],
@@ -926,6 +929,7 @@ impl TurnRequestProcessor {
         }
 
         Ok(codex_protocol::protocol::ThreadSettingsOverrides {
+            system1_enabled: None,
             disabled_plugin_ids,
             environments: environment_requests,
             runtime_workspace_roots,
@@ -962,7 +966,7 @@ impl TurnRequestProcessor {
                 /*environment_requests*/ None,
             )
             .await;
-        let thread_settings = self
+        let mut thread_settings = self
             .build_thread_settings_overrides(
                 thread.as_ref(),
                 ThreadSettingsBuildParams {
@@ -983,7 +987,13 @@ impl TurnRequestProcessor {
             )
             .await?;
 
-        if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
+        thread_settings.system1_enabled = params.system1_enabled;
+        if params.system1_enabled.is_some() {
+            thread
+                .update_thread_settings(thread_settings)
+                .await
+                .map_err(|error| invalid_request(error.to_string()))?;
+        } else if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
             self.submit_core_op(
                 request_id,
                 thread.as_ref(),
@@ -996,7 +1006,23 @@ impl TurnRequestProcessor {
             .map_err(|err| internal_error(format!("failed to update thread settings: {err}")))?;
         }
 
-        Ok(ThreadSettingsUpdateResponse {})
+        let system1 = if params.system1_enabled.is_some() {
+            let snapshot = thread.config_snapshot().await;
+            Some((
+                snapshot.system1_enabled,
+                snapshot.system1_revision,
+                snapshot.system1_error,
+                snapshot.system1_failure_episode,
+            ))
+        } else {
+            None
+        };
+        Ok(ThreadSettingsUpdateResponse {
+            system1_enabled: system1.map(|(enabled, _, _, _)| enabled),
+            system1_revision: system1.map(|(_, revision, _, _)| revision),
+            system1_error: system1.and_then(|(_, _, error, _)| error),
+            system1_failure_episode: system1.map(|(_, _, _, episode)| episode),
+        })
     }
 
     async fn thread_inject_items_response_inner(
@@ -1262,6 +1288,13 @@ impl TurnRequestProcessor {
         else {
             return Ok(None);
         };
+        if codex_protocol::openai_models::is_native_runtime_model(
+            &thread.config_snapshot().await.model,
+        ) {
+            return Err(invalid_request(
+                "Native runtimes do not support realtime conversations",
+            ));
+        }
         self.submit_core_op(
             request_id,
             thread.as_ref(),
@@ -1434,6 +1467,7 @@ impl TurnRequestProcessor {
         };
 
         Turn {
+            token_usage: None,
             id: turn_id,
             root_turn_id: None,
             items,
@@ -1593,6 +1627,13 @@ impl TurnRequestProcessor {
         let (_, parent_thread) = self.load_thread(&thread_id).await?;
         self.ensure_direct_input_allowed(request_id, parent_thread.as_ref())
             .await?;
+        if codex_protocol::openai_models::is_native_runtime_model(
+            &parent_thread.config_snapshot().await.model,
+        ) {
+            return Err(invalid_request(
+                "Native runtimes do not support native review mode",
+            ));
+        }
         self.config_manager
             .check_thread_model_provider(parent_thread.config().await.as_ref())
             .await

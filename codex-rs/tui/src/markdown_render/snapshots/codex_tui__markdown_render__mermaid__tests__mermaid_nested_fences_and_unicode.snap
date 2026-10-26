@@ -13,9 +13,7 @@ expression: "markdown_text(source, 60)"
 > │ Réponse │     │
 > │         ├◄────┘
 > └─────────┘
-
 • Diagram:
-
   ┌───┐  ┌───┐
   │ A │  │ B │
   └┬──┘  └┬──┘

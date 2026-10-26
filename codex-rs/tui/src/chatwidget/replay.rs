@@ -131,6 +131,7 @@ impl ChatWidget {
             let Turn {
                 id: turn_id,
                 root_turn_id,
+                token_usage,
                 items,
                 status,
                 mut error,
@@ -233,6 +234,7 @@ impl ChatWidget {
                             id: turn_id,
                             root_turn_id,
                             items_view: codex_app_server_protocol::TurnItemsView::NotLoaded,
+                            token_usage,
                             items: Vec::new(),
                             status,
                             error,
@@ -485,6 +487,19 @@ impl ChatWidget {
                 reasoning_effort,
                 agents_states,
             }),
+            item @ ThreadItemPayload::InterAgentMessage { .. } => {
+                if self.show_interagent_communication
+                    && let Some(cell) = multi_agents::communication_history_cell(
+                        &item,
+                        &self.config.cwd,
+                        self.thread_id
+                            .and_then(|id| self.collab_agent_metadata.get(&id))
+                            .and_then(|metadata| metadata.agent_role.as_deref()),
+                    )
+                {
+                    self.on_collab_event(cell);
+                }
+            }
             item @ ThreadItemPayload::SubAgentActivity { .. } => self.on_sub_agent_activity(item),
             item @ ThreadItemPayload::DynamicToolCall { .. } => self.on_dynamic_tool_item(item),
             ThreadItemPayload::Sleep(_) => {}

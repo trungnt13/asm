@@ -606,6 +606,17 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
     let output = output_with_tool_result_metadata(ToolResultMetadata::new(&json!({
         "private": { "resource": "raw-result-metadata" },
     })));
+    let mut attributed_output = output.clone();
+    let ResponseItem::FunctionCallOutput {
+        internal_chat_message_metadata_passthrough: Some(metadata),
+        ..
+    } = &mut attributed_output
+    else {
+        panic!("tool output should carry internal metadata");
+    };
+    metadata.content_item_metadata = Some(vec![codex_protocol::models::ContentItemMetadata::tool(
+        /*namespace*/ None,
+    )]);
     let without_raw_metadata = output_with_tool_result_metadata(ToolResultMetadata::default());
     let attribution = McpAttribution {
         status: McpAttributionStatus::Complete,
@@ -619,7 +630,7 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
         }],
     };
     let prompt = Prompt {
-        input: vec![output.clone(), omitted_output.clone()],
+        input: vec![attributed_output.clone(), omitted_output.clone()],
         ..Default::default()
     };
     let mut responses_metadata = test_responses_metadata_for_client(
@@ -711,7 +722,10 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
                     .get("mcp_attribution")
                     .is_none()
             );
-            assert_eq!(prompt.input, vec![output.clone(), omitted_output.clone()]);
+            assert_eq!(
+                prompt.input,
+                vec![attributed_output.clone(), omitted_output.clone()]
+            );
         }
     }
     responses_metadata.mcp_attribution = Some(McpAttribution {
@@ -1722,6 +1736,7 @@ async fn response_stream_records_last_model_feedback_ids() {
             response_id: "resp-123".to_string(),
             token_usage: None,
             usage_metadata: None,
+            request_duration_ms: Some(2_000),
             end_turn: Some(true),
         }),
     ]);
@@ -1733,7 +1748,17 @@ async fn response_stream_records_last_model_feedback_ids() {
         test_model_provider(),
     );
 
-    while stream.next().await.is_some() {}
+    let mut completed_duration_ms = None;
+    while let Some(event) = stream.next().await {
+        if let ResponseEvent::Completed {
+            request_duration_ms,
+            ..
+        } = event.unwrap()
+        {
+            completed_duration_ms = request_duration_ms;
+        }
+    }
+    assert_eq!(completed_duration_ms, Some(2_000));
 
     let tags = tags.lock().unwrap().clone();
     assert_eq!(
@@ -2240,6 +2265,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
             response_id: "response".into(),
             token_usage: None,
             usage_metadata: None,
+            request_duration_ms: None,
             end_turn: None,
         }))
         .await?;

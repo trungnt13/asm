@@ -1,4 +1,4 @@
-use super::WebLinkDisplay;
+use super::hide_link_destination;
 use crate::markdown_render::MarkdownStyles;
 use crate::markdown_render::render_markdown_lines_with_width_cwd_and_hidden_link_destinations;
 use crate::markdown_render::render_streaming_markdown_lines_with_width_and_cwd;
@@ -6,9 +6,6 @@ use crate::style::accent_color;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::TerminalHyperlink;
 use crate::terminal_hyperlinks::visible_lines;
-use codex_terminal_detection::Multiplexer;
-use codex_terminal_detection::TerminalInfo;
-use codex_terminal_detection::TerminalName;
 use insta::assert_debug_snapshot;
 use pretty_assertions::assert_eq;
 use ratatui::style::Style;
@@ -65,13 +62,15 @@ fn bare_urls_keep_link_style_when_wrapped_in_tables() {
     assert_debug_snapshot!(text);
 }
 
-fn terminal(name: TerminalName) -> TerminalInfo {
-    TerminalInfo {
-        name,
-        term_program: None,
-        version: None,
-        term: None,
-        multiplexer: None,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WebLinkDisplay {
+    LabelOnly,
+    WithDestination,
+}
+
+impl WebLinkDisplay {
+    fn hide_destination(self, destination: &str) -> bool {
+        self == Self::LabelOnly && hide_link_destination(destination)
     }
 }
 
@@ -86,106 +85,47 @@ fn render(markdown: &str, width: usize, display: WebLinkDisplay) -> Vec<Hyperlin
 
 #[test]
 fn supporting_terminals_render_only_the_styled_label_and_keep_its_target() {
-    for name in [
-        TerminalName::Ghostty,
-        TerminalName::Iterm2,
-        TerminalName::WezTerm,
-        TerminalName::Kitty,
-        TerminalName::VsCode,
-        TerminalName::Alacritty,
-        TerminalName::WindowsTerminal,
-        TerminalName::Konsole,
-        TerminalName::GnomeTerminal,
-        TerminalName::Vte,
-    ] {
-        let display = WebLinkDisplay::for_terminal(&terminal(name), /*term*/ None);
-        for (markdown, label) in [
-            (
-                "[label](https://example.com)",
-                Span::styled("label", MarkdownStyles::default().link),
-            ),
-            (
-                "[`label`](https://example.com)",
-                Span::styled("label", MarkdownStyles::default().link),
-            ),
-            (
-                "[**label**](https://example.com)",
-                Span::styled("label", MarkdownStyles::default().link).bold(),
-            ),
-            (
-                "[*label*](https://example.com)",
-                Span::styled("label", MarkdownStyles::default().link).italic(),
-            ),
-            (
-                "[<b>](https://example.com)",
-                Span::styled("<b>", MarkdownStyles::default().link),
-            ),
-            (
-                "[https://example.com](https://example.com)",
-                Span::styled("https://example.com", MarkdownStyles::default().link),
-            ),
-        ] {
-            let label_width = label.width();
-            assert_eq!(
-                render(markdown, /*width*/ 80, display),
-                vec![HyperlinkLine {
-                    source: None,
-                    line: Line::from(label),
-                    hyperlinks: vec![TerminalHyperlink::web(
-                        0..label_width,
-                        "https://example.com".into(),
-                    )],
-                }],
-                "terminal: {name:?}"
-            );
-        }
-    }
-}
-
-#[test]
-fn rex_renders_only_the_label() {
-    let mut rex = terminal(TerminalName::Unknown);
-    rex.term_program = Some("rex".to_string());
-    let markdown = "[label](https://example.com)";
-    assert_eq!(
-        render(
-            markdown,
-            /*width*/ 80,
-            WebLinkDisplay::for_terminal(&rex, /*term*/ None),
+    let display = WebLinkDisplay::LabelOnly;
+    for (markdown, label) in [
+        (
+            "[label](https://example.com)",
+            Span::styled("label", MarkdownStyles::default().link),
         ),
-        render(markdown, /*width*/ 80, WebLinkDisplay::LabelOnly),
-    );
-}
-
-#[test]
-fn unknown_terminals_and_multiplexers_keep_visible_destinations() {
-    let mut tmux = terminal(TerminalName::Ghostty);
-    tmux.multiplexer = Some(Multiplexer::Tmux { version: None });
-    let mut zellij = terminal(TerminalName::Ghostty);
-    zellij.multiplexer = Some(Multiplexer::Zellij { version: None });
-    let markdown = "[label](https://example.com)";
-    let expected = render(markdown, /*width*/ 80, WebLinkDisplay::WithDestination);
-    for (terminal, term) in [
-        (terminal(TerminalName::Unknown), None),
-        (terminal(TerminalName::AppleTerminal), None),
-        (terminal(TerminalName::Dumb), None),
-        (tmux, None),
-        (zellij, None),
-        (terminal(TerminalName::Ghostty), Some("screen-256color")),
-        (terminal(TerminalName::Ghostty), Some("tmux-256color")),
-        (terminal(TerminalName::Ghostty), Some("dumb")),
+        (
+            "[`label`](https://example.com)",
+            Span::styled("label", MarkdownStyles::default().link),
+        ),
+        (
+            "[**label**](https://example.com)",
+            Span::styled("label", MarkdownStyles::default().link).bold(),
+        ),
+        (
+            "[*label*](https://example.com)",
+            Span::styled("label", MarkdownStyles::default().link).italic(),
+        ),
+        (
+            "[<b>](https://example.com)",
+            Span::styled("<b>", MarkdownStyles::default().link),
+        ),
+        (
+            "[https://example.com](https://example.com)",
+            Span::styled("https://example.com", MarkdownStyles::default().link),
+        ),
     ] {
+        let label_width = label.width();
         assert_eq!(
-            render(
-                markdown,
-                /*width*/ 80,
-                WebLinkDisplay::for_terminal(&terminal, term),
-            ),
-            expected,
+            render(markdown, /*width*/ 80, display),
+            vec![HyperlinkLine {
+                source: None,
+                line: Line::from(label),
+                hyperlinks: vec![TerminalHyperlink::web(
+                    0..label_width,
+                    "https://example.com".into(),
+                )],
+            }],
         );
     }
 }
-
 #[test]
 fn label_only_policy_keeps_non_web_links_and_literal_urls_unchanged() {
     let markdown = "[file](./src/main.rs) [mail](mailto:a@example.com)\n\nhttps://example.com\n\n`https://example.com/code`";

@@ -34,6 +34,7 @@ struct WebSearchExtension {
 #[derive(Clone)]
 struct WebSearchExtensionConfig {
     available: bool,
+    include_copyright_compliance: bool,
     http_client_factory: HttpClientFactory,
     provider: ModelProviderInfo,
     settings: SearchSettings,
@@ -48,6 +49,7 @@ impl From<&Config> for WebSearchExtensionConfig {
                 || config.model_provider.uses_openai_actor_authorization()
                 || config.model_provider.supports_standalone_web_search)
                 && web_search_mode != WebSearchMode::Disabled,
+            include_copyright_compliance: config.include_web_search_copyright_compliance,
             http_client_factory: config.http_client_factory(),
             provider: config.model_provider.clone(),
             settings: search_settings(config, web_search_mode),
@@ -136,6 +138,7 @@ impl ToolContributor for WebSearchExtension {
 
         vec![Arc::new(WebSearchTool {
             session_id: session_store.level_id().to_string(),
+            include_copyright_compliance: config.include_copyright_compliance,
             http_client_factory: config.http_client_factory.clone(),
             provider: create_model_provider(
                 config.provider.clone(),
@@ -207,23 +210,61 @@ mod tests {
         let registry = builder.build();
         let session_store = ExtensionData::new("session");
         let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
-        thread_store.insert(WebSearchExtensionConfig {
-            available: true,
-            http_client_factory: HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            provider: ModelProviderInfo::create_openai_provider(/*base_url*/ None),
-            settings: Default::default(),
-        });
-
-        let tool_names = registry
-            .tool_contributors()
-            .iter()
-            .flat_map(|contributor| contributor.tools(&session_store, &thread_store))
-            .map(|tool| (tool.tool_name(), tool.supports_parallel_tool_calls()))
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            tool_names,
-            vec![(ToolName::namespaced(WEB_NAMESPACE, RUN_TOOL_NAME), true)]
-        );
+        let full_description = include_str!("../web_run_description.md");
+        let expected_omitted_description = full_description
+            .split_once("- **Copyright compliance:**\n")
+            .expect("copyright subsection is present")
+            .0;
+        let mut included_spec: Option<serde_json::Value> = None;
+        for mode in [
+            WebSearchMode::Cached,
+            WebSearchMode::Indexed,
+            WebSearchMode::Live,
+        ] {
+            for include_copyright_compliance in [true, false] {
+                thread_store.insert(WebSearchExtensionConfig {
+                    available: true,
+                    include_copyright_compliance,
+                    http_client_factory: HttpClientFactory::new(
+                        OutboundProxyPolicy::ReqwestDefault,
+                    ),
+                    provider: ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+                    settings: codex_api::SearchSettings {
+                        external_web_access: Some(external_web_access_for_mode(mode)),
+                        ..Default::default()
+                    },
+                });
+                let tools = registry
+                    .tool_contributors()
+                    .iter()
+                    .flat_map(|contributor| contributor.tools(&session_store, &thread_store))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    tools
+                        .iter()
+                        .map(|tool| (tool.tool_name(), tool.supports_parallel_tool_calls()))
+                        .collect::<Vec<_>>(),
+                    vec![(ToolName::namespaced(WEB_NAMESPACE, RUN_TOOL_NAME), true)]
+                );
+                let spec = serde_json::to_value(tools[0].spec()).expect("tool spec serializes");
+                let expected_description = if include_copyright_compliance {
+                    full_description
+                } else {
+                    expected_omitted_description
+                };
+                assert_eq!(
+                    spec.pointer("/tools/0/description"),
+                    Some(&serde_json::json!(expected_description))
+                );
+                if let Some(included_spec) = &included_spec {
+                    let mut expected_spec = included_spec.clone();
+                    expected_spec["tools"][0]["description"] =
+                        serde_json::json!(expected_description);
+                    assert_eq!(spec, expected_spec);
+                } else {
+                    included_spec = Some(spec);
+                }
+            }
+        }
     }
 }

@@ -504,6 +504,78 @@ async fn task_management_tools_use_existing_app_server_operations() -> color_eyr
         json!({"threadId": target, "title": "Renamed task"})
     );
 
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let event_tx = AppEventSender::new(event_tx);
+    let (_status_sender, status_receiver) = broadcast::channel(/*capacity*/ 8);
+    let same_name = execute(
+        server.request_handle(),
+        DynamicToolCallParams {
+            thread_id: source.clone(),
+            turn_id: "persisted-turn".to_string(),
+            call_id: "rename-same".to_string(),
+            namespace: Some(NAMESPACE.to_string()),
+            tool: "set_thread_title".to_string(),
+            arguments: json!({"threadId": target, "title": "Renamed task"}),
+        },
+        ThreadStartParams::default(),
+        Features::with_defaults(),
+        status_receiver,
+        Some(&event_tx),
+    );
+    let stop = async {
+        let event = event_rx.recv().await.expect("manual title intent");
+        let AppEvent::StopAutomaticThreadTitles { thread_id, stopped } = event else {
+            panic!("manual title intent expected");
+        };
+        assert_eq!(thread_id.to_string(), target);
+        stopped
+            .send(Ok(()))
+            .expect("title request waiting for acknowledgement");
+    };
+    let (renamed, ()) = tokio::join!(same_name, stop);
+    assert_eq!(
+        response_json(renamed),
+        json!({"threadId": target, "title": "Renamed task"})
+    );
+
+    let (_status_sender, status_receiver) = broadcast::channel(/*capacity*/ 8);
+    let blocked = execute(
+        server.request_handle(),
+        DynamicToolCallParams {
+            thread_id: source.clone(),
+            turn_id: "persisted-turn".to_string(),
+            call_id: "rename-blocked".to_string(),
+            namespace: Some(NAMESPACE.to_string()),
+            tool: "set_thread_title".to_string(),
+            arguments: json!({"threadId": target, "title": "Must not save"}),
+        },
+        ThreadStartParams::default(),
+        Features::with_defaults(),
+        status_receiver,
+        Some(&event_tx),
+    );
+    let reject = async {
+        let AppEvent::StopAutomaticThreadTitles { stopped, .. } = event_rx.recv().await.unwrap()
+        else {
+            panic!("manual title intent expected");
+        };
+        stopped
+            .send(Err("Could not save manual-name protection".to_string()))
+            .unwrap();
+    };
+    let (blocked, ()) = tokio::join!(blocked, reject);
+    assert!(!blocked.success);
+    assert_eq!(
+        blocked.content_items,
+        vec![DynamicToolCallOutputContentItem::InputText {
+            text: "Could not save manual-name protection".to_string(),
+        }]
+    );
+    let current = response_json(
+        call_tool(&server, &source, "read_thread", json!({"threadId": target})).await,
+    );
+    assert_eq!(current["thread"]["title"], "Renamed task");
+
     let forked = response_json(
         call_tool(&server, &source, "fork_thread", json!({"threadId": target})).await,
     );
@@ -621,7 +693,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
             &server,
             &source,
             "wait_threads",
-            json!({"targets": [{"threadId": target}, {"threadId": "missing-task"}], "timeoutMs": 0}),
+            json!({"reason": "", "targets": [{"threadId": target}, {"threadId": "missing-task"}], "timeoutMs": 0}),
         )
         .await,
     );
@@ -673,7 +745,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
             &server,
             &source,
             "wait_threads",
-            json!({"targets": [{"threadId": target, "afterCursor": cursor}], "timeoutMs": 0}),
+            json!({"reason": "", "targets": [{"threadId": target, "afterCursor": cursor}], "timeoutMs": 0}),
         )
         .await,
     );
@@ -686,7 +758,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
         &server,
         &source,
         "wait_threads",
-        json!({"targets": [{"threadId": source.to_uppercase()}], "timeoutMs": 0}),
+        json!({"reason": "", "targets": [{"threadId": source.to_uppercase()}], "timeoutMs": 0}),
     )
     .await;
     assert!(!self_wait.success);
@@ -695,7 +767,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
         &server,
         &source,
         "wait_threads",
-        json!({"targets": [{"threadId": target}, {"threadId": target.to_uppercase()}], "timeoutMs": 0}),
+        json!({"reason": "", "targets": [{"threadId": target}, {"threadId": target.to_uppercase()}], "timeoutMs": 0}),
     )
     .await;
     assert!(!duplicate_wait.success);

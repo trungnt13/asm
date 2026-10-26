@@ -45,8 +45,12 @@ impl ChatWidget {
             .copy_composer_selection_on_release(event, selection_copy, copy)
     }
 
-    pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
-        self.bottom_pane.handle_composer_mouse(event)
+    pub(crate) fn handle_composer_mouse(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        pending_quote: &mut Option<crate::bottom_pane::PendingQuote>,
+    ) -> bool {
+        self.bottom_pane.handle_composer_mouse(event, pending_quote)
     }
 
     /// Snapshot the paste target without changing pending submissions. Unlike mouse paste,

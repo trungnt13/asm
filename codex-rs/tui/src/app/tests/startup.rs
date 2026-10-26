@@ -1154,7 +1154,8 @@ async fn fresh_startup_thread_drains_buffered_approval_before_draft_handoff() ->
         app.primary_thread_id,
     ) {
         waiting_for_initial_session_configured = false;
-        app.drain_active_thread_events(&mut tui).await?;
+        app.drain_active_thread_events(&mut tui, &app_server)
+            .await?;
     }
 
     assert!(!waiting_for_initial_session_configured);
@@ -1452,7 +1453,7 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
     app.local_settings.tui.show_server_version_notice = true;
     app.refresh_server_version_overview_notice("2.1.0");
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-    assert!(rendered.contains("Service v2.0.0 < Codex CLI v2.1.0"));
+    assert!(rendered.contains("Service v2.0.0 < ASM CLI v2.1.0"));
     app.pending_server_version_notice =
         Some(crate::status::remote_connection::ServerVersionNotice {
             message: "Older service".to_string(),
@@ -1821,6 +1822,39 @@ async fn ignore_same_thread_resume_reports_noop_for_current_thread() {
         "Already viewing {}.",
         test_path_display("/tmp/project")
     )));
+
+    let child_id = ThreadId::new();
+    let child_session = test_thread_session(child_id, test_path_buf("/tmp/project"));
+    app.thread_event_channels.insert(
+        child_id,
+        ThreadEventChannel::new_with_session(
+            THREAD_EVENT_CHANNEL_CAPACITY,
+            child_session.clone(),
+            Vec::new(),
+        ),
+    );
+    app.primary_thread_id = Some(thread_id);
+    app.side_threads
+        .insert(child_id, SideThreadState::parallel(thread_id));
+    for current_id in [thread_id, child_id] {
+        if current_id == child_id {
+            app.clear_active_thread().await;
+            app.chat_widget.handle_thread_session(child_session.clone());
+            app.activate_thread_channel(child_id).await;
+        }
+        while app_event_rx.try_recv().is_ok() {}
+        assert!(
+            !app.ignore_same_thread_resume(&crate::resume_picker::SessionTarget {
+                backend_id: crate::backend_id::BackendId::new(),
+                path: Some(test_path_buf("/tmp/project")),
+                thread_id: current_id,
+                cwd: None,
+                history_mode: None,
+            }),
+            "resuming an open pair must exit parallel mode, even for the displayed session"
+        );
+        assert!(app_event_rx.try_recv().is_err());
+    }
 }
 
 #[tokio::test]
@@ -1874,11 +1908,15 @@ async fn ignore_same_thread_resume_allows_retrying_read_only_view() -> Result<()
         &app_server,
         thread_id,
         ThreadEventSnapshot {
+            output_tps: None,
+            inferred_session: false,
             delegated_turns: Vec::new(),
             session: Some(session),
             turns: vec![test_turn("running", TurnStatus::InProgress, Vec::new())],
             events: Vec::new(),
             active_reasoning_item: None,
+            reasoning_state: Default::default(),
+            latest_turn_id: None,
             input_state: None,
         },
         /*resume_restored_queue*/ false,

@@ -1,10 +1,15 @@
 pub mod cache;
 pub mod collaboration_mode_presets;
 pub(crate) mod config;
+mod external_models;
 pub mod manager;
 pub mod model_info;
 pub mod model_presets;
 mod originator;
+pub use external_models::canonical_model;
+pub use external_models::model_alias;
+pub use external_models::provider_for_model;
+pub use external_models::provider_has_model_bindings;
 pub mod test_support;
 
 pub use codex_protocol::auth::AuthMode;

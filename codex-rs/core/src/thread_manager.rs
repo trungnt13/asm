@@ -80,6 +80,7 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
 use codex_protocol::openai_models::ModelPreset;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InternalSessionSource;
@@ -460,7 +461,7 @@ pub(crate) struct ThreadManagerState {
     thread_id_generator: ThreadIdGenerator,
     agent_control_factory: Option<AgentControlFactory>,
     auth_manager: Arc<AuthManager>,
-    models_manager: SharedModelsManager,
+    pub(crate) models_manager: SharedModelsManager,
     git_root_discovery: Arc<GitRootDiscovery>,
     environment_manager: Arc<EnvironmentManager>,
     starting_mcp_runtimes: std::sync::Mutex<Vec<std::sync::Weak<AtomicBool>>>,
@@ -491,6 +492,7 @@ pub fn build_models_manager(
         config.codex_home.to_path_buf(),
         config.model_catalog.clone(),
     );
+    manager.set_load_external_models_json(config.load_external_models_json);
     manager.set_api_key_model_discovery_enabled(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
@@ -724,12 +726,14 @@ impl ThreadManager {
             Arc::new(
                 crate::code_mode_host::ProcessOwnedGrpcCodeModeSessionProvider::with_host_program(
                     host_program,
-                ),
+                )
+                .with_diagnostic_log_capture(config.diagnostic_log_capture),
             )
         } else {
-            Arc::new(ProcessOwnedCodeModeSessionProvider::with_host_program(
-                host_program,
-            ))
+            Arc::new(
+                ProcessOwnedCodeModeSessionProvider::with_host_program(host_program)
+                    .with_diagnostic_log_capture(config.diagnostic_log_capture),
+            )
         }
     }
 
@@ -1667,6 +1671,39 @@ impl ThreadManager {
             InitialHistory::Forked(_) => history.forked_from_id(),
             InitialHistory::New | InitialHistory::Cleared => None,
         };
+        // Native history is forked only by Claude itself, into a temporary unsaved side session.
+        let native_fork = match crate::session::history_native_runtime(&history) {
+            None => None,
+            Some(NativeRuntime::ClaudeCode)
+                if options.config.ephemeral && matches!(snapshot, ForkSnapshot::Interrupted) =>
+            {
+                let source = match source_thread_id {
+                    Some(source_thread_id) => self.get_thread(source_thread_id).await.ok(),
+                    None => None,
+                };
+                let Some(source) = source else {
+                    return Err(CodexErr::InvalidRequest(
+                        "Claude Code side conversations need the loaded main thread".to_string(),
+                    ));
+                };
+                // Closing a side unsubscribes it; unload at once so its native process ends too.
+                options.config.thread_unload_delay = std::time::Duration::ZERO;
+                Some(
+                    crate::claude_runtime::prepare_temporary_fork(
+                        &source.session,
+                        &options.config.codex_home,
+                        options.config.model.as_deref(),
+                        history.get_rollout_items(),
+                    )
+                    .await?,
+                )
+            }
+            Some(NativeRuntime::ClaudeCode | NativeRuntime::CursorAgent) => {
+                return Err(CodexErr::InvalidRequest(
+                    "Native runtime history can only be forked whole into a temporary Claude Code side conversation; start a fresh thread".to_string(),
+                ));
+            }
+        };
         // Capture the live source before later startup work can unload it. Keep
         // the fork's own providers, not the source's task-bound callback.
         let instructions = self
@@ -1702,7 +1739,11 @@ impl ThreadManager {
         request.forked_from_thread_id = source_thread_id;
         request.fork_persistence = fork_persistence;
         request.inherited_instructions = Some(instructions);
-        Box::pin(self.state.spawn_thread(request)).await
+        let new_thread = Box::pin(self.state.spawn_thread(request)).await?;
+        if let Some(seed) = native_fork {
+            new_thread.thread.session.claude_runtime.seed_fork(seed);
+        }
+        Ok(new_thread)
     }
 
     pub(crate) fn agent_control(&self) -> LocalAgentControl {
@@ -2342,6 +2383,25 @@ impl ThreadManagerState {
             instructions.user = supplied.instructions;
             instructions.user_provider = None;
             config.startup_warnings.extend(supplied.warnings);
+        }
+        // Resolve only the global contribution here, after host and inherited snapshots.
+        // Forked history keeps its baseline so normal context updates replace the active text.
+        if matches!(
+            session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            let path = config.codex_home.join("SUBAGENTS.md");
+            match tokio::fs::read(&path).await {
+                Ok(contents) => {
+                    instructions.user = Some(codex_extension_api::Instructions {
+                        text: String::from_utf8_lossy(&contents).trim().to_owned(),
+                        source: Some(path),
+                    });
+                    instructions.user_provider = None;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
         let (exec_policy, multi_agent_version) = match isolation {
             SessionIsolation::Isolated => (None, Some(MultiAgentVersion::Disabled)),

@@ -10,7 +10,7 @@ const SAFETY_BUFFERING_LEARN_MORE_URL: &str = "https://help.openai.com/en/articl
 
 const SAFETY_BUFFERING_HEADER: &str = "Giving this request a little extra thought";
 const SAFETY_BUFFERING_MESSAGE_WITH_RETRY: &str = "If you'd rather not wait, retry with a faster model. It may be less capable of handling complex requests.";
-const SAFETY_BUFFERING_FOOTER: &str = "No action is required. Codex will keep waiting, and this menu will close when the response is ready.";
+const SAFETY_BUFFERING_FOOTER: &str = "No action is required. ASM will keep waiting, and this menu will close when the response is ready.";
 
 struct SafetyBufferingHeader(Vec<Line<'static>>);
 
@@ -138,7 +138,7 @@ impl ChatWidget {
             return;
         }
 
-        let retry_turn = if self.side_conversation_active() {
+        let retry_turn = if self.side_conversation_active() || self.parallel_conversation_active() {
             None
         } else {
             self.safety_buffering

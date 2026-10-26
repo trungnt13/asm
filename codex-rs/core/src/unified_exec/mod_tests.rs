@@ -172,6 +172,7 @@ async fn exec_command_with_tty(
         process.output_handles(),
         Some(session.subscribe_elicitation_pause_state()),
         deadline,
+        /*preempt*/ None,
     )
     .await;
     let wall_time = Instant::now().saturating_duration_since(started_at);
@@ -202,6 +203,7 @@ async fn exec_command_with_tty(
     }
 
     Ok(ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: context.call_id,
         chunk_id: generate_chunk_id(),
         wall_time,
@@ -387,6 +389,44 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
     assert!(!session.terminate_background_terminal(process_id).await);
     assert!(session.list_background_terminals().await.is_empty());
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn empty_stdin_polls_use_configured_bounds_below_interactive_floor() -> anyhow::Result<()> {
+    skip_if_sandbox!(Ok(()));
+
+    let (mut session, turn) = test_session_and_turn().await;
+    Arc::get_mut(&mut session)
+        .expect("test session must be unshared")
+        .services
+        .unified_exec_manager = UnifiedExecProcessManager::new(BackgroundTerminalTimeoutBounds {
+        min_ms: 40,
+        max_ms: 80,
+    });
+    let opened = exec_command(
+        &session, &turn, "sleep 60", /*yield_time_ms*/ 250, /*workdir*/ None,
+    )
+    .await?;
+    let process_id = opened.process_id.expect("running terminal");
+
+    let lower = tokio::time::timeout(
+        Duration::from_secs(2),
+        write_stdin(&session, &turn, process_id, "", /*yield_time_ms*/ 1),
+    )
+    .await??;
+    let upper = tokio::time::timeout(
+        Duration::from_secs(2),
+        write_stdin(
+            &session, &turn, process_id, "", /*yield_time_ms*/ 1_000,
+        ),
+    )
+    .await??;
+    assert!(lower.wall_time >= Duration::from_millis(40));
+    assert!(upper.wall_time >= Duration::from_millis(80));
+    assert!(lower.wall_time < Duration::from_millis(200));
+    assert!(upper.wall_time < Duration::from_millis(200));
+    assert!(session.terminate_background_terminal(process_id).await);
     Ok(())
 }
 
@@ -863,6 +903,7 @@ async fn unified_exec_uses_remote_exec_server_when_configured() -> anyhow::Resul
         process.output_handles(),
         /*pause_state*/ None,
         Instant::now() + Duration::from_millis(2_500),
+        /*preempt*/ None,
     )
     .await
     .to_bytes_with_omission_marker();

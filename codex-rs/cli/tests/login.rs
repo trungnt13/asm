@@ -13,6 +13,8 @@ use codex_login::CLIENT_ID;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
 use codex_login::login_with_bedrock_access_keys;
+use codex_models_manager::bundled_models_response;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::shell_environment::OPENAI_FEDERATION_RULE_ID_ENV_VAR;
 use codex_protocol::shell_environment::OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR;
 use predicates::str::contains;
@@ -343,10 +345,10 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
         .and(header("chatgpt-account-id", "workspace-123"))
         .respond_with(move |_request: &wiremock::Request| {
             ResponseTemplate::new(200).set_body_json(json!({
-                "commit_attribution_enabled": request_count.fetch_add(1, Ordering::SeqCst) == 0,
+                "commit_attribution_enabled": request_count.fetch_add(1, Ordering::SeqCst) % 2 == 0,
             }))
         })
-        .expect(2)
+        .expect(4)
         .mount(&server)
         .await;
     let codex_home = TempDir::new()?;
@@ -364,22 +366,168 @@ async fn debug_prompt_input_follows_authenticated_attribution_setting() -> Resul
             .plan_type("enterprise"),
         AuthCredentialsStoreMode::File,
     )?;
-    for enabled in [true, false] {
-        let output = codex_command(codex_home.path())?
-            .env("NO_PROXY", "127.0.0.1,localhost")
+    let output_schema = json!({
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+        "additionalProperties": false,
+    });
+    let output_schema_path = codex_home.path().join("output-schema.json");
+    std::fs::write(&output_schema_path, serde_json::to_vec(&output_schema)?)?;
+    let mut model_catalog = bundled_models_response()?;
+    let model = model_catalog
+        .models
+        .iter_mut()
+        .find(|model| model.slug == "gpt-5.5")
+        .expect("bundled gpt-5.5 model");
+    model.use_responses_lite = true;
+    model.tool_mode = Some(ToolMode::Direct);
+    let model_catalog_path = codex_home.path().join("model-catalog.json");
+    std::fs::write(&model_catalog_path, serde_json::to_vec(&model_catalog)?)?;
+    for (command, attribution_enabled, incremental_tools) in [
+        ("prompt-input", true, false),
+        ("prompt-input", false, false),
+        ("prompt-request", true, false),
+        ("prompt-request", false, true),
+    ] {
+        let mut cmd = codex_command(codex_home.path())?;
+        cmd.env("NO_PROXY", "127.0.0.1,localhost")
             .env("no_proxy", "127.0.0.1,localhost")
             .env_remove("CODEX_ACCESS_TOKEN")
-            .env_remove("OPENAI_API_KEY")
-            .args(["debug", "prompt-input"])
-            .output()?;
+            .env_remove("OPENAI_API_KEY");
+        if command == "prompt-request" {
+            cmd.args([
+                "-m",
+                "gpt-5.5",
+                "-c",
+                "web_search=\"live\"",
+                "-c",
+                "features.goals=true",
+                "-c",
+            ])
+            .arg(format!(
+                "model_catalog_json={}",
+                serde_json::to_string(&model_catalog_path)?
+            ))
+            .arg("-c")
+            .arg(format!("features.incremental_tools={incremental_tools}"));
+        }
+        cmd.args(["debug", command]);
+        if command == "prompt-request" {
+            cmd.arg("--allow-session-state")
+                .arg("--output-schema")
+                .arg(&output_schema_path);
+        }
+        let output = cmd.output()?;
         assert!(output.status.success());
         let prompt = String::from_utf8(output.stdout)?;
         assert_eq!(
             prompt.contains("Co-authored-by: Codex <noreply@openai.com>"),
-            enabled
+            attribution_enabled
         );
         assert!(!prompt.contains("attribution is disabled for the current workspace"));
+        let prompt: Value = serde_json::from_str(&prompt)?;
+        if command == "prompt-input" {
+            assert!(prompt.is_array());
+        } else {
+            assert_eq!(prompt["schema_version"], 1);
+            assert_eq!(prompt["scope"], "standalone_debug_turn");
+            assert!(prompt["base_instructions"]["text"].is_string());
+            assert!(prompt["request"]["input"].is_array());
+            assert!(prompt["request"].get("tools").is_none());
+            assert!(prompt["request"].get("instructions").is_none());
+            let input = prompt["request"]["input"]
+                .as_array()
+                .expect("request input");
+            let (tools_index, instructions_index) = if incremental_tools { (1, 0) } else { (0, 1) };
+            assert_eq!(
+                input
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| item["type"] == "additional_tools")
+                    .map(|(index, _)| index)
+                    .collect::<Vec<_>>(),
+                vec![tools_index]
+            );
+            assert_eq!(input[tools_index]["role"], "developer");
+            assert_eq!(input[instructions_index]["role"], "developer");
+            assert_eq!(
+                input[instructions_index]["content"][0]["text"],
+                prompt["base_instructions"]["text"]
+            );
+            let tools = input[tools_index]["tools"]
+                .as_array()
+                .expect("request tool definitions");
+            let web_run = tools
+                .iter()
+                .find(|tool| tool["name"] == "web")
+                .and_then(|namespace| namespace["tools"].as_array())
+                .and_then(|tools| tools.iter().find(|tool| tool["name"] == "run"))
+                .expect("production web.run definition");
+            assert_eq!(web_run["type"], "function");
+            assert!(
+                web_run["description"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty())
+            );
+            assert!(web_run["parameters"].is_object());
+            for (name, required) in [
+                ("get_goal", json!([])),
+                ("create_goal", json!(["objective"])),
+                ("update_goal", json!(["status"])),
+            ] {
+                let goal_tool = tools
+                    .iter()
+                    .flat_map(|tool| {
+                        tool["tools"]
+                            .as_array()
+                            .map_or_else(|| std::slice::from_ref(tool), Vec::as_slice)
+                    })
+                    .find(|tool| tool["name"] == name)
+                    .expect("production goal tool definition");
+                assert_eq!(goal_tool["type"], "function");
+                assert!(
+                    goal_tool["description"]
+                        .as_str()
+                        .is_some_and(|text| !text.is_empty())
+                );
+                assert_eq!(goal_tool["parameters"]["type"], "object");
+                assert_eq!(goal_tool["parameters"]["required"], required);
+                assert_eq!(goal_tool["parameters"]["additionalProperties"], false);
+                let properties = &goal_tool["parameters"]["properties"];
+                match name {
+                    "get_goal" => assert_eq!(properties, &json!({})),
+                    "create_goal" => {
+                        assert_eq!(properties["objective"]["type"], "string");
+                        assert_eq!(properties["token_budget"]["type"], "integer");
+                    }
+                    "update_goal" => assert_eq!(
+                        properties["status"]["enum"],
+                        json!(["complete", "blocked", "paused"])
+                    ),
+                    _ => unreachable!("goal names are listed above"),
+                }
+            }
+            assert_eq!(
+                prompt["request"]["text"]["format"],
+                json!({
+                    "type": "json_schema",
+                    "name": "codex_output_schema",
+                    "strict": true,
+                    "schema": output_schema,
+                })
+            );
+        }
     }
+    assert!(
+        server
+            .received_requests()
+            .await
+            .expect("mock request recording is enabled")
+            .iter()
+            .all(|request| !(request.method.as_str() == "POST"
+                && request.url.path().ends_with("/responses")))
+    );
     server.verify().await;
     Ok(())
 }

@@ -27,6 +27,7 @@ fn turn(id: &str, items: Vec<ThreadItemPayload>) -> Turn {
         root_turn_id: None,
         items: items.into_iter().map(ThreadItem::untimed).collect(),
         items_view: TurnItemsView::Full,
+        token_usage: None,
         status: TurnStatus::Completed,
         error: None,
         started_at: None,
@@ -42,6 +43,8 @@ fn project(items: &[impl std::borrow::Borrow<ThreadItemPayload>]) -> TranscriptC
         items.iter().map(|entry| entry.borrow().clone()),
         RawReasoningVisibility::Hidden,
         /*config*/ None,
+        /*show_communication*/ false,
+        /*own_agent_role*/ None,
     )
 }
 

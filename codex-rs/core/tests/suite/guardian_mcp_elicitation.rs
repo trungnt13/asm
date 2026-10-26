@@ -1047,7 +1047,7 @@ async fn yielded_code_mode_elicitation_keeps_live_invocation_metadata() -> Resul
                 "wait-a",
                 "wait",
                 &json!({
-                    "cell_id": cell_id, "yield_time_ms": 60000,
+                    "reason":"", "cell_id": cell_id, "yield_time_ms": 60000,
                 })
                 .to_string(),
             ),

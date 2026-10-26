@@ -1030,7 +1030,7 @@ async fn unified_exec_emits_exec_command_end_event() -> Result<()> {
     let poll_call_id = "uexec-end-event-poll";
     let poll_args = json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 250,
     });
 
@@ -1841,7 +1841,7 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
     let poll_call_id = "uexec-poll-empty";
     let poll_args = json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 150,
     });
 
@@ -1934,6 +1934,70 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
     let end_event = &end_events[0];
     assert_eq!(end_event.call_id, open_call_id);
 
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_background_terminal_bounds_reach_tool_and_poll() -> Result<()> {
+    skip_if_target_windows!(Ok(()), "uses a POSIX sleep command");
+    skip_if_no_network!(Ok(()));
+    skip_if_sandbox!(Ok(()));
+
+    let server = start_mock_server().await;
+    let mut builder = test_codex().with_config(|config| {
+        config.background_terminal_min_timeout = 40;
+        config.background_terminal_max_timeout = 80;
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+
+    let open_args = json!({"cmd": "sleep 30", "yield_time_ms": 250});
+    let poll_args = json!({"reason": "", "session_id": 1000, "chars": "", "yield_time_ms": 1000});
+    let requests = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call("open", "exec_command", &serde_json::to_string(&open_args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call("poll", "write_stdin", &serde_json::to_string(&poll_args)?),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ],
+    )
+    .await;
+    submit_unified_exec_turn(
+        &test,
+        "poll the running command",
+        PermissionProfile::Disabled,
+    )
+    .await?;
+
+    let poll = wait_for_raw_unified_exec_output(&test, "poll").await?;
+    assert!(poll.wall_time_seconds >= 0.08);
+    assert!(poll.wall_time_seconds < 0.2);
+    let request = requests.requests()[0].body_json();
+    let tool = request["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .find(|tool| tool["name"] == "write_stdin")
+        .expect("write_stdin tool");
+    let description = tool["parameters"]["properties"]["yield_time_ms"]["description"]
+        .as_str()
+        .expect("yield time description");
+    assert!(description.contains("empty polls wait 40-80 ms"));
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert!(test.codex.terminate_background_terminal(1000).await);
     Ok(())
 }
 
@@ -3231,7 +3295,7 @@ PY
     let second_call_id = "uexec-lag-poll";
     let second_args = serde_json::json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 2_000,
     });
 
@@ -3322,7 +3386,7 @@ async fn unified_exec_timeout_and_followup_poll() -> Result<()> {
     let second_call_id = "uexec-poll";
     let second_args = serde_json::json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 800,
     });
 

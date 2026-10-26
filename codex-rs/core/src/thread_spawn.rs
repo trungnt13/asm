@@ -28,6 +28,7 @@ use codex_protocol::protocol::SubAgentSource;
 /// Child creation options; omitted overrides retain native MAv2 inheritance and role rules.
 pub(crate) struct ThreadSpawnRequest {
     pub task_name: String,
+    pub spawn_arguments: String,
     /// Explicit encoding: hosts normally provide plaintext; native tools can forward ciphertext.
     pub message: AgentMessage,
     /// `None` starts fresh; `FullHistory` uses native fork preparation.
@@ -60,7 +61,29 @@ pub(crate) async fn spawn(
     request: ThreadSpawnRequest,
 ) -> Result<ThreadSpawnResult, ThreadSpawnError> {
     let (request, task_name) = prepare(session, step_context, call_id, request).await?;
+    let communication_prompt = match &request.input {
+        AgentInput::Message {
+            message: AgentMessage::Plaintext(text),
+            ..
+        } => Some(text.clone()),
+        AgentInput::Message {
+            message: AgentMessage::Encrypted(_),
+            ..
+        }
+        | AgentInput::UserInput(_) => None,
+    };
     let (agent, config) = session.services.agent_control.spawn(request).await?;
+    if let Some(prompt) = communication_prompt {
+        crate::tools::handlers::multi_agents_v2::emit_inter_agent_communication(
+            session,
+            &step_context.turn,
+            call_id,
+            codex_protocol::items::CollabAgentTool::SpawnAgent,
+            agent.thread_id,
+            prompt,
+        )
+        .await;
+    }
     Ok(ThreadSpawnResult {
         agent,
         config,
@@ -78,6 +101,7 @@ pub(crate) async fn prepare(
     let turn = &step_context.turn;
     let ThreadSpawnRequest {
         task_name,
+        spawn_arguments,
         message,
         fork_mode,
         agent_type,
@@ -158,6 +182,7 @@ pub(crate) async fn prepare(
             },
             source: spawn_source,
             options: SpawnAgentOptions {
+                spawn_arguments: Some(spawn_arguments),
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.to_string()),
                 fork_mode,
                 parent_thread_id: Some(session.thread_id),

@@ -5,19 +5,19 @@ expression: "snapshots.join(\"\\n---\\n\")"
 resume lookup fallback:
 before:
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
   Resuming session…
-
+                                           Main
 › draft while loading
 
 
 after:
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › draft while loading
 
 
@@ -25,19 +25,19 @@ after:
 fork lookup fallback:
 before:
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
   Forking session…
-
+                                           Main
 › draft while loading
 
 
 after:
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
-
+                                           Main
 › draft while loading
 
 
@@ -47,11 +47,11 @@ before:
 hidden while picker owns input
 after:
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
-
-› Ask Codex to do anything
+                                           Main
+› Ask ASM to do anything
 
   ? for shortcuts
 ---
@@ -60,10 +60,10 @@ before:
 hidden while picker owns input
 after:
 
-  >_ OpenAI Codex (v<VERSION>)
+  >_ ASM (v<VERSION>)
      loading
 
-
-› Ask Codex to do anything
+                                           Main
+› Ask ASM to do anything
 
   ? for shortcuts

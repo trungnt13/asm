@@ -839,7 +839,9 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
 
     if let Some(active_agent_label) = props.active_agent_label.as_ref() {
         if let Some(existing) = line.as_mut() {
-            existing.spans.push(" · ".set_style(secondary_text_style()));
+            existing.spans.push(
+                super::status_line_style::STATUS_LINE_SEPARATOR.set_style(secondary_text_style()),
+            );
             existing
                 .spans
                 .push(active_agent_label.clone().set_style(secondary_text_style()));
@@ -852,7 +854,9 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
         && let Some(key) = props.key_hints.agents
         && let Some(line) = line.as_mut()
     {
-        line.push_span(" · ".set_style(secondary_text_style()));
+        line.push_span(
+            super::status_line_style::STATUS_LINE_SEPARATOR.set_style(secondary_text_style()),
+        );
         line.extend(key.spans());
         line.push_span(" for agents".set_style(secondary_text_style()));
     }
@@ -1671,7 +1675,7 @@ mod tests {
             status_line_value: None,
             status_line_enabled: false,
             key_hints: FooterKeyHints::default_bindings(),
-            active_agent_label: Some("Robie [explorer]".to_string()),
+            active_agent_label: Some("Robie[explorer]".to_string()),
         };
 
         snapshot_footer("footer_active_agent_label", props);
@@ -1687,7 +1691,7 @@ mod tests {
             status_line_value: Some(Line::from("Status line content".to_string())),
             status_line_enabled: true,
             key_hints: FooterKeyHints::default_bindings(),
-            active_agent_label: Some("Robie [explorer]".to_string()),
+            active_agent_label: Some("Robie[explorer]".to_string()),
         };
 
         snapshot_footer("footer_status_line_with_active_agent_label", props);

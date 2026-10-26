@@ -63,6 +63,7 @@ members = [
     "execpolicy",
     "ext/agent",
     "ext/agent-message-board",
+    "ext/claude-runtime",
     "ext/connectors",
     "ext/extension-api",
     "ext/multi-env-copy-file",
@@ -168,7 +169,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.0.0"
+version = "0.165.1-alpha.1.2"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -234,6 +235,7 @@ codex-exec-server = { path = "exec-server" }
 codex-exec-server-test-support = { path = "exec-server/tests/support" }
 codex-execpolicy = { path = "execpolicy" }
 codex-extension-api = { path = "ext/extension-api" }
+codex-claude-runtime = { path = "ext/claude-runtime" }
 codex-extension-items = { path = "ext/items" }
 codex-multi-env-copy-file = { path = "ext/multi-env-copy-file" }
 codex-goal-extension = { path = "ext/goal" }

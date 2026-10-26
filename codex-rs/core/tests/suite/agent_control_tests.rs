@@ -558,7 +558,7 @@ async fn host_mailbox_notifies_waiting_agent_and_delivers_once() -> anyhow::Resu
                 "wait-mail",
                 "collaboration",
                 "wait_agent",
-                r#"{"timeout_ms":10000}"#,
+                r#"{"reason":"","timeout_ms":10000}"#,
             ),
             responses::ev_completed("waiting"),
         ]),

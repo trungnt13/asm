@@ -38,11 +38,13 @@ pub use model::RolloutMigrationState;
 pub use nfs_migration::NfsDbMigration;
 pub use nfs_migration::NfsDbMigrationOutcome;
 pub use runtime::GuardianReviewRecord;
+pub use runtime::LogReader;
 pub use runtime::MAX_GUARDIAN_REVIEW_BYTES;
 pub use runtime::MAX_GUARDIAN_REVIEW_RECORDS;
 pub use runtime::MAX_GUARDIAN_REVIEW_RECORDS_PER_THREAD;
 /// Preferred entrypoint: owns configuration and metrics.
 pub use runtime::StateRuntime;
+pub use sqlite::DiagnosticLogCapture;
 pub use sqlite::SqliteConfig;
 pub use sqlite::SqlitePoolWriteExt;
 

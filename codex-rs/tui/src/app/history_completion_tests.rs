@@ -23,6 +23,7 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
             .map(ThreadItem::untimed)
             .collect(),
         items_view: TurnItemsView::Summary,
+        token_usage: None,
         status,
         error: None,
         started_at: None,

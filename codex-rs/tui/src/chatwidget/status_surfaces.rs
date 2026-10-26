@@ -14,6 +14,8 @@ use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
 use crate::status::format_tokens_compact;
 use crate::status::thread_cost_micros;
+use crate::status_line_labels::compact_model_name;
+use crate::status_line_labels::compact_reasoning_label;
 use crate::terminal_program_status::ProgramStatus;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
@@ -106,6 +108,14 @@ pub(super) struct CachedProjectRootName {
 }
 
 impl ChatWidget {
+    pub(crate) fn cache_output_tps(&mut self, thread_id: ThreadId, tps: f64) {
+        if self.thread_id == Some(thread_id) && tps.is_finite() && tps >= 0.0 {
+            // Use the existing token-usage refresh; caching must not request a frame.
+            let rounded_tps = tps.round();
+            self.output_tps = Some(format!("{rounded_tps}tps"));
+        }
+    }
+
     fn status_surface_selections(&self) -> StatusSurfaceSelections {
         let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
         let (terminal_title_items, invalid_terminal_title_items) =
@@ -728,9 +738,14 @@ impl ChatWidget {
     /// git metadata.
     pub(super) fn status_line_value_for_item(&mut self, item: StatusLineItem) -> Option<String> {
         match item {
-            StatusLineItem::ModelName => Some(self.model_display_name().to_string()),
-            StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name()),
-            StatusLineItem::Reasoning => Some(self.reasoning_display_name()),
+            StatusLineItem::ModelName => Some(compact_model_name(self.model_display_name())),
+            StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name(
+                &compact_model_name(self.model_display_name()),
+                &compact_reasoning_label(&self.reasoning_display_name()),
+            )),
+            StatusLineItem::Reasoning => {
+                Some(compact_reasoning_label(&self.reasoning_display_name()))
+            }
             StatusLineItem::CurrentDir => {
                 Some(format_directory_display(
                     self.status_line_cwd(),
@@ -770,10 +785,10 @@ impl ChatWidget {
             }
             StatusLineItem::ContextRemaining => self
                 .status_line_context_remaining_percent()
-                .map(|remaining| format!("Context {remaining}% left")),
+                .map(|remaining| format!("Ctx{remaining}%left")),
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
-                .map(|used| format!("Context {used}% used")),
+                .map(|used| format!("Ctx{used}%")),
             StatusLineItem::FiveHourLimit => {
                 let (window, is_secondary) = self
                     .rate_limit_snapshots_by_limit_id
@@ -793,19 +808,30 @@ impl ChatWidget {
             StatusLineItem::CodexVersion => Some(CODEX_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
-                .map(|cws| format!("{} window", format_tokens_compact(cws))),
+                .map(format_tokens_compact),
             StatusLineItem::TotalInputTokens => (!self.token_usage_pending).then(|| {
                 format!(
                     "{} in",
                     format_tokens_compact(self.status_line_total_usage().input_tokens)
                 )
             }),
+            StatusLineItem::CacheHitRate => {
+                let usage = &self.token_info.as_ref()?.last_token_usage;
+                if self.token_usage_pending || usage.input_tokens <= 0 {
+                    None
+                } else {
+                    let percent =
+                        usage.cached_input_tokens as f64 / usage.input_tokens as f64 * 100.0;
+                    Some(format!("Cch{percent:.1}%"))
+                }
+            }
             StatusLineItem::TotalOutputTokens => (!self.token_usage_pending).then(|| {
                 format!(
                     "{} out",
                     format_tokens_compact(self.status_line_total_usage().output_tokens)
                 )
             }),
+            StatusLineItem::OutputTps => self.output_tps.clone(),
             StatusLineItem::ThreadCredits => self
                 .estimated_thread_usage()
                 .filter(|_| self.plan_type != Some(PlanType::Ent26))
@@ -816,11 +842,23 @@ impl ChatWidget {
                 .and_then(|usage| thread_cost_micros(usage, self.plan_type))
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
-            StatusLineItem::FastMode => Some(
-                self.processing_tier_display_name()
-                    .unwrap_or("Standard")
-                    .to_string(),
-            ),
+            StatusLineItem::FastMode => self
+                .model_catalog
+                .try_list_models()
+                .ok()
+                .and_then(|models| {
+                    models
+                        .into_iter()
+                        .find(|preset| preset.model == self.current_model())
+                })
+                .is_none_or(|preset| preset.supports_fast_mode())
+                .then(|| {
+                    if self.current_service_tier() == Some(ServiceTier::Fast.request_value()) {
+                        "F:on".to_string()
+                    } else {
+                        "F:off".to_string()
+                    }
+                }),
             StatusLineItem::Daybreak => Some(
                 if self.daybreak_enabled && !self.side_conversation_active() {
                     "Daybreak on".to_string()
@@ -854,7 +892,7 @@ impl ChatWidget {
         item: StatusSurfacePreviewItem,
     ) -> Option<String> {
         let status_line_item = match item {
-            StatusSurfacePreviewItem::AppName => return Some("codex".to_string()),
+            StatusSurfacePreviewItem::AppName => return Some("ASM".to_string()),
             StatusSurfacePreviewItem::ProjectName => return self.terminal_title_project_name(),
             StatusSurfacePreviewItem::ProjectRoot => StatusLineItem::ProjectRoot,
             StatusSurfacePreviewItem::Status => return Some(self.run_state_status_text()),
@@ -876,7 +914,9 @@ impl ChatWidget {
             StatusSurfacePreviewItem::ContextWindowSize => StatusLineItem::ContextWindowSize,
             StatusSurfacePreviewItem::UsedTokens => StatusLineItem::UsedTokens,
             StatusSurfacePreviewItem::TotalInputTokens => StatusLineItem::TotalInputTokens,
+            StatusSurfacePreviewItem::CacheHitRate => StatusLineItem::CacheHitRate,
             StatusSurfacePreviewItem::TotalOutputTokens => StatusLineItem::TotalOutputTokens,
+            StatusSurfacePreviewItem::OutputTps => StatusLineItem::OutputTps,
             StatusSurfacePreviewItem::ThreadCredits => StatusLineItem::ThreadCredits,
             StatusSurfacePreviewItem::EstimatedThreadCost => StatusLineItem::EstimatedThreadCost,
             StatusSurfacePreviewItem::SessionId => StatusLineItem::SessionId,
@@ -900,7 +940,7 @@ impl ChatWidget {
         now: Instant,
     ) -> Option<String> {
         match item {
-            TerminalTitleItem::AppName => Some("codex".to_string()),
+            TerminalTitleItem::AppName => Some("ASM".to_string()),
             TerminalTitleItem::Project => self.terminal_title_project_name(),
             TerminalTitleItem::CurrentDir => Some(Self::truncate_terminal_title_part(
                 format_directory_display(self.status_line_cwd(), /*max_width*/ None),
@@ -964,7 +1004,10 @@ impl ChatWidget {
                 /*max_chars*/ 32,
             )),
             TerminalTitleItem::ModelWithReasoning => Some(Self::truncate_terminal_title_part(
-                self.model_with_reasoning_display_name(),
+                self.model_with_reasoning_display_name(
+                    self.model_display_name(),
+                    &self.reasoning_display_name(),
+                ),
                 /*max_chars*/ 32,
             )),
             TerminalTitleItem::Reasoning => Some(Self::truncate_terminal_title_part(
@@ -976,17 +1019,33 @@ impl ChatWidget {
     }
 
     fn reasoning_display_name(&self) -> String {
-        let effort = self.effective_reasoning_effort();
-        Self::status_line_reasoning_effort_label(effort.as_ref())
+        let effort = self
+            .status_state
+            .captured_step_reasoning
+            .as_ref()
+            .map(|step| step.reasoning_effort.clone())
+            .unwrap_or_else(|| self.effective_reasoning_effort());
+        let label = Self::status_line_reasoning_effort_label(effort.as_ref());
+        if self.system1_enabled() {
+            format!(
+                "{label}·{}",
+                if self.status_state.system1_error.is_some() {
+                    "err"
+                } else {
+                    "auto"
+                }
+            )
+        } else {
+            label
+        }
     }
 
-    fn model_with_reasoning_display_name(&self) -> String {
-        let label = self.reasoning_display_name();
+    fn model_with_reasoning_display_name(&self, model_name: &str, label: &str) -> String {
         let service_tier_label = self
             .processing_tier_display_name()
             .map(|tier| format!(" {tier}"))
             .unwrap_or_default();
-        format!("{} {label}{service_tier_label}", self.model_display_name())
+        format!("{model_name} {label}{service_tier_label}")
     }
 
     fn processing_tier_display_name(&self) -> Option<&str> {

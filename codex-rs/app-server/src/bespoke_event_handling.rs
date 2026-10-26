@@ -48,10 +48,12 @@ use codex_app_server_protocol::PermissionsRequestApprovalParams;
 use codex_app_server_protocol::PermissionsRequestApprovalResponse;
 use codex_app_server_protocol::RawResponseCompletedNotification;
 use codex_app_server_protocol::RawResponseItemCompletedNotification;
+use codex_app_server_protocol::ReasoningEffortUpdatedNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequestPayload;
 use codex_app_server_protocol::StrictReviewRequiredNotification;
+use codex_app_server_protocol::System1UpdatedNotification;
 use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemPayload;
@@ -169,6 +171,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 let state = thread_state.lock().await;
                 let turn = state.active_turn_metadata_snapshot().map(Turn::from);
                 turn.unwrap_or_else(|| Turn {
+                    token_usage: None,
                     id: payload.turn_id.clone(),
                     root_turn_id: payload.root_turn_id.clone(),
                     items: Vec::new(),
@@ -186,6 +189,32 @@ pub(crate) async fn apply_bespoke_event_handling(
             };
             outgoing
                 .send_server_notification(ServerNotification::TurnStarted(notification))
+                .await;
+        }
+        EventMsg::System1Updated(payload) => {
+            outgoing
+                .send_server_notification(ServerNotification::System1Updated(
+                    System1UpdatedNotification {
+                        warning: payload.warning,
+                        thread_id: conversation_id.to_string(),
+                        enabled: payload.enabled,
+                        system1_revision: payload.system1_revision,
+                        error: payload.error,
+                        failure_episode: payload.failure_episode,
+                    },
+                ))
+                .await;
+        }
+        EventMsg::ReasoningEffortUpdated(payload) => {
+            outgoing
+                .send_server_notification(ServerNotification::ReasoningEffortUpdated(
+                    ReasoningEffortUpdatedNotification {
+                        thread_id: conversation_id.to_string(),
+                        turn_id: payload.turn_id,
+                        reasoning_effort: payload.reasoning_effort,
+                        system1: payload.system1,
+                    },
+                ))
                 .await;
         }
         EventMsg::TurnComplete(turn_complete_event) => {
@@ -1194,6 +1223,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                         started_at: aborted.started_at,
                         completed_at: aborted.completed_at,
                         duration_ms: aborted.duration_ms,
+                        token_usage: None,
                     },
                     &outgoing,
                 )
@@ -1352,6 +1382,7 @@ async fn handle_turn_plan_update(
 }
 
 struct TurnCompletionMetadata {
+    token_usage: Option<codex_app_server_protocol::TokenUsageBreakdown>,
     status: TurnStatus,
     root_turn_id: Option<String>,
     error: Option<TurnError>,
@@ -1383,6 +1414,7 @@ async fn emit_turn_completed_with_status(
             started_at: turn_completion_metadata.started_at,
             completed_at: turn_completion_metadata.completed_at,
             duration_ms: turn_completion_metadata.duration_ms,
+            token_usage: turn_completion_metadata.token_usage,
         },
     };
     outgoing
@@ -1564,6 +1596,7 @@ async fn handle_turn_complete(
             started_at: turn_summary.started_at,
             completed_at: turn_complete_event.completed_at,
             duration_ms: turn_complete_event.duration_ms,
+            token_usage: turn_summary.token_usage.map(Into::into),
         },
         outgoing,
     )
@@ -1595,6 +1628,7 @@ async fn handle_turn_interrupted(
             started_at: turn_summary.started_at,
             completed_at: turn_aborted_event.completed_at,
             duration_ms: turn_aborted_event.duration_ms,
+            token_usage: turn_summary.token_usage.map(Into::into),
         },
         outgoing,
     )
@@ -1623,12 +1657,17 @@ async fn handle_token_count_event(
     token_count_event: TokenCountEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let TokenCountEvent { info, rate_limits } = token_count_event;
+    let TokenCountEvent {
+        info,
+        rate_limits,
+        output_tokens_per_second,
+    } = token_count_event;
     if let Some(token_usage) = info.map(ThreadTokenUsage::from) {
         let notification = ThreadTokenUsageUpdatedNotification {
             thread_id: conversation_id.to_string(),
             turn_id,
             token_usage,
+            output_tokens_per_second,
         };
         outgoing
             .send_server_notification(ServerNotification::ThreadTokenUsageUpdated(notification))
@@ -3200,6 +3239,94 @@ mod tests {
             other => bail!("unexpected message: {other:?}"),
         }
 
+        for (reasoning_effort, system1) in [
+            (
+                Some(codex_protocol::openai_models::ReasoningEffort::High),
+                true,
+            ),
+            (
+                Some(codex_protocol::openai_models::ReasoningEffort::Low),
+                false,
+            ),
+            (None, false),
+        ] {
+            apply_bespoke_event_handling(
+                Event {
+                    id: "turn-1".to_string(),
+                    msg: EventMsg::ReasoningEffortUpdated(
+                        codex_protocol::protocol::ReasoningEffortUpdatedEvent {
+                            turn_id: "turn-1".to_string(),
+                            reasoning_effort: reasoning_effort.clone(),
+                            system1,
+                        },
+                    ),
+                },
+                conversation_id,
+                Arc::clone(&conversation),
+                Arc::clone(&thread_manager),
+                outgoing.clone(),
+                Arc::clone(&thread_state),
+                thread_watch_manager.clone(),
+            )
+            .await;
+            let notification = recv_broadcast_notification(&mut rx).await?;
+            let ServerNotification::ReasoningEffortUpdated(update) = &notification else {
+                bail!("unexpected message: {notification:?}");
+            };
+            assert_eq!(
+                update,
+                &ReasoningEffortUpdatedNotification {
+                    thread_id: conversation_id.to_string(),
+                    turn_id: "turn-1".to_string(),
+                    reasoning_effort: reasoning_effort.clone(),
+                    system1,
+                }
+            );
+            let json = serde_json::to_value(notification)?;
+            assert_eq!(json["method"], "turn/reasoningEffortUpdated");
+            assert_eq!(
+                json["params"]["reasoningEffort"],
+                serde_json::to_value(reasoning_effort)?
+            );
+            assert_eq!(json["params"]["system1"], system1);
+            assert!(
+                json["params"]
+                    .as_object()
+                    .unwrap()
+                    .contains_key("reasoningEffort")
+            );
+        }
+
+        for enabled in [false, true] {
+            apply_bespoke_event_handling(
+                Event {
+                    id: "mode-update".to_string(),
+                    msg: EventMsg::System1Updated(codex_protocol::protocol::System1UpdatedEvent {
+                        warning: None,
+                        enabled,
+                        system1_revision: 0,
+                        error: Some(codex_protocol::protocol::System1Error::Http { status: 503 }),
+                        failure_episode: 1,
+                    }),
+                },
+                conversation_id,
+                Arc::clone(&conversation),
+                Arc::clone(&thread_manager),
+                outgoing.clone(),
+                Arc::clone(&thread_state),
+                thread_watch_manager.clone(),
+            )
+            .await;
+            let notification = recv_broadcast_notification(&mut rx).await?;
+            assert_eq!(
+                serde_json::to_value(notification)?,
+                serde_json::json!({
+                    "method": "thread/system1Updated",
+                    "params": {"threadId": conversation_id.to_string(), "enabled": enabled, "system1Revision": 0, "error": {"type": "http", "status": 503}, "failureEpisode": 1, "warning": null},
+                })
+            );
+        }
+
         for (phase, method, event) in [
             (
                 "started",
@@ -3500,6 +3627,22 @@ mod tests {
                     completed_at_ms: 42_400,
                 }),
             );
+            for (response_id, input_tokens) in [("response-1", 10), ("response-2", 25)] {
+                state.track_current_turn_event(
+                    &event_turn_id,
+                    &EventMsg::RawResponseCompleted(
+                        codex_protocol::protocol::RawResponseCompletedEvent {
+                            response_id: response_id.into(),
+                            token_usage: Some(codex_protocol::protocol::TokenUsage {
+                                input_tokens,
+                                total_tokens: input_tokens,
+                                ..Default::default()
+                            }),
+                            usage_metadata: None,
+                        },
+                    ),
+                );
+            }
             state.track_current_turn_event(&event_turn_id, &EventMsg::TurnComplete(event.clone()));
         }
 
@@ -3523,6 +3666,17 @@ mod tests {
                     [ThreadItem { payload: ThreadItemPayload::AgentMessage { id, text, .. }, started_at_ms: Some(42_123), completed_at_ms: Some(42_200) }]
                         if id == "msg-1" && text == "complete response"
                 ));
+                assert_eq!(
+                    n.turn.token_usage,
+                    Some(
+                        codex_protocol::protocol::TokenUsage {
+                            input_tokens: 35,
+                            total_tokens: 35,
+                            ..Default::default()
+                        }
+                        .into()
+                    )
+                );
                 assert_eq!(n.turn.error, None);
                 assert_eq!(n.turn.started_at, Some(42));
                 assert_eq!(n.turn.completed_at, Some(TEST_TURN_COMPLETED_AT));
@@ -3757,6 +3911,7 @@ mod tests {
             conversation_id,
             turn_id.clone(),
             TokenCountEvent {
+                output_tokens_per_second: Some(7.5),
                 info: Some(info),
                 rate_limits: Some(rate_limits),
             },
@@ -3769,6 +3924,7 @@ mod tests {
             ServerNotification::ThreadTokenUsageUpdated(payload) => {
                 assert_eq!(payload.thread_id, conversation_id.to_string());
                 assert_eq!(payload.turn_id, turn_id);
+                assert_eq!(payload.output_tokens_per_second, Some(7.5));
                 let usage = payload.token_usage;
                 assert_eq!(usage.total.total_tokens, 200);
                 assert_eq!(usage.total.cached_input_tokens, 25);
@@ -3810,6 +3966,7 @@ mod tests {
             conversation_id,
             turn_id.clone(),
             TokenCountEvent {
+                output_tokens_per_second: None,
                 info: None,
                 rate_limits: None,
             },

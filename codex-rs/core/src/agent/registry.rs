@@ -38,8 +38,19 @@ struct ActiveAgents {
     nickname_reset_count: usize,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct EvictedAgentRuntimeState {
+    pub(crate) environments: EvictedEnvironments,
+    pub(crate) system1_enabled: bool,
+    pub(crate) role_system1_disabled: bool,
+    pub(crate) web_search_disabled: bool,
+    pub(crate) system1_revision: u64,
+    pub(crate) system1_error: Option<codex_protocol::protocol::System1Error>,
+    pub(crate) system1_failure_episode: u64,
+}
+
 /// Thread defaults and executor bindings retained while a child's runtime is unloaded.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct EvictedEnvironments {
     pub(crate) selections: Vec<TurnEnvironmentSelection>,
     pub(crate) bindings: TurnEnvironmentSnapshot,
@@ -47,14 +58,14 @@ pub(crate) struct EvictedEnvironments {
 
 struct RegisteredAgent {
     path: String,
-    evicted_environments: Option<EvictedEnvironments>,
+    evicted_runtime_state: Option<EvictedAgentRuntimeState>,
 }
 
 impl RegisteredAgent {
     fn new(path: String) -> Self {
         Self {
             path,
-            evicted_environments: None,
+            evicted_runtime_state: None,
         }
     }
 }
@@ -179,21 +190,24 @@ impl AgentRegistry {
             .cloned()
     }
 
-    pub(crate) fn save_evicted_environments(
+    pub(crate) fn save_evicted_runtime_state(
         &self,
         thread_id: ThreadId,
-        environments: EvictedEnvironments,
+        runtime_state: EvictedAgentRuntimeState,
     ) {
         let mut active_agents = self
             .active_agents
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(agent) = active_agents.thread_paths.get_mut(&thread_id) {
-            agent.evicted_environments = Some(environments);
+            agent.evicted_runtime_state = Some(runtime_state);
         }
     }
 
-    pub(crate) fn evicted_environments(&self, thread_id: ThreadId) -> Option<EvictedEnvironments> {
+    pub(crate) fn evicted_runtime_state(
+        &self,
+        thread_id: ThreadId,
+    ) -> Option<EvictedAgentRuntimeState> {
         let active_agents = self
             .active_agents
             .lock()
@@ -201,16 +215,16 @@ impl AgentRegistry {
         active_agents
             .thread_paths
             .get(&thread_id)
-            .and_then(|agent| agent.evicted_environments.clone())
+            .and_then(|agent| agent.evicted_runtime_state.clone())
     }
 
-    pub(crate) fn clear_evicted_environments(&self, thread_id: ThreadId) {
+    pub(crate) fn clear_evicted_runtime_state(&self, thread_id: ThreadId) {
         let mut active_agents = self
             .active_agents
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(agent) = active_agents.thread_paths.get_mut(&thread_id) {
-            agent.evicted_environments = None;
+            agent.evicted_runtime_state = None;
         }
     }
 

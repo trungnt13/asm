@@ -1,5 +1,7 @@
 //! The chat composer is the bottom-pane text input state machine.
 //!
+//! The active destination appears in the top-right padding without changing input geometry.
+//! Companion labels use magenta; prompt markers and draft text keep their existing styling.
 //! It edits [`TextArea`] and attachments, routes popup keys, makes completed slash commands atomic,
 //! and handles Enter/newlines. It shows Luna Reserve's yellow arrow and detects unbracketed paste
 //! bursts, especially on Windows. Paste timing uses Tokio's clock so asynchronous flush deadlines
@@ -83,6 +85,7 @@
 //!
 //! Plain-text history recall strips images and their placeholders.
 //! When recalling a persistent entry, encoded task links restore atomic elements and bindings.
+//! Blockquote lines stay literal and never receive restored mention bindings.
 //! Recall moves the cursor to the end. Question editors copy primary history on recall/search;
 //! draft capture cancels previews, and restoration resets traversal.
 //! Ctrl+R searches history in the footer and previews matches in the composer.
@@ -127,7 +130,12 @@
 //! # Submission and Prompt Expansion
 //!
 //! Multiline pastes continue blockquote prefixes.
-//! `Enter` submits immediately. `Tab` requests queuing while a task is running; if no task is
+//! Plain Enter on an empty generated quote-comment line removes its prefix without submitting.
+//! `Enter` submits immediately by default. Opt-in `tui.multiline_enter` inserts a newline
+//! for multiline drafts (including expanded pending pastes), only when plain Enter is bound
+//! to both submit and editor newline. Active paste Enter handling runs first. Modified submit
+//! keys flush buffered pastes and send regardless of line count; popup actions stay unchanged.
+//! `Enter` otherwise submits immediately. `Tab` requests queuing while a task is running; if no task is
 //! running, `Tab` submits just like Enter so input is never dropped.
 //! Submit and queue bindings act only on fresh key presses; repeated events are consumed so a held
 //! key cannot dispatch a preserved draft after another input layer closes.
@@ -144,6 +152,14 @@
 //! - Treats a leading `!` revealed only by paste expansion as literal model input, not shell input.
 //! - Prunes local attached images so only placeholders that survive expansion are sent.
 //! - Preserves remote image URLs as separate attachments even when text is empty.
+//! - Prepends numbered frozen transcript quotes and rebases draft elements.
+//!   Generated comments append below the existing draft without numbering ordinary text.
+//!   Their prefixes retain quote identity through edits and draft restoration.
+//!   Submission drops empty generated comments and escapes numbered prefixes to keep their labels.
+//!   Quote-plus-comment submissions are rejected above 10,000 UTF-8 bytes without losing the draft.
+//!   Attached quotes keep slash and shell comments literal.
+//!   Each [×] removes its quote and generated prefix, preserving entered comment text.
+//!   Whole-draft restores install their quote before importing text; text-only edits keep the quote.
 //!
 //! When these paths clear the visible textarea after a successful submit or slash-command
 //! dispatch, they intentionally preserve the textarea kill buffer. That lets users `Ctrl+K` part
@@ -388,6 +404,8 @@ mod agents_navigation;
 mod attachment_state;
 mod completion_target;
 mod composer_layout;
+mod composer_mode;
+pub(crate) use composer_mode::ComposerMode;
 mod draft_state;
 mod footer_state;
 mod history_search;
@@ -396,6 +414,8 @@ mod mouse;
 pub(crate) use mouse::ClipboardPasteTarget;
 mod paste_input;
 mod popup_state;
+mod quote_attachment;
+mod quote_comments;
 mod reconnect;
 pub(crate) use reconnect::RestrictedInputMode;
 mod slash_input;
@@ -417,6 +437,8 @@ use self::history_search::HistorySearchSession;
 use self::popup_state::ActivePopup;
 use self::popup_state::DismissedToken;
 use self::popup_state::PopupState;
+pub(crate) use self::quote_attachment::PendingQuote;
+pub(crate) use self::quote_comments::QuoteComment;
 use self::slash_input::SlashInput;
 use self::slash_input::SlashValidation;
 use self::slash_input::SubmissionValidation;
@@ -513,6 +535,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::App
                 | SlashCommand::Side
                 | SlashCommand::Btw
+                | SlashCommand::Parallel
                 | SlashCommand::Agents
                 | SlashCommand::MultiAgents
                 | SlashCommand::Vim
@@ -525,6 +548,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::Exit
                 | SlashCommand::Logout
                 | SlashCommand::Copy
+                | SlashCommand::CopyId
                 | SlashCommand::Raw
                 | SlashCommand::Diff
                 | SlashCommand::Mention
@@ -570,6 +594,8 @@ enum PendingPasteHandling {
 pub(crate) struct ChatComposerConfig {
     /// Whether command/file/skill popups are allowed to appear.
     pub(crate) popups_enabled: bool,
+    /// Plain Enter edits multiline drafts; modified submit keys remain unconditional.
+    pub(crate) multiline_enter: bool,
     /// Whether `/...` input is parsed and dispatched as slash commands.
     pub(crate) slash_commands_enabled: bool,
     /// Whether a leading `!` switches the editor into shell mode.
@@ -587,6 +613,7 @@ impl Default for ChatComposerConfig {
     fn default() -> Self {
         Self {
             popups_enabled: true,
+            multiline_enter: false,
             slash_commands_enabled: true,
             shell_commands_enabled: true,
             image_paste_enabled: true,
@@ -602,6 +629,7 @@ impl ChatComposerConfig {
     pub(crate) const fn plain_text() -> Self {
         Self {
             popups_enabled: false,
+            multiline_enter: false,
             slash_commands_enabled: false,
             shell_commands_enabled: false,
             image_paste_enabled: false,
@@ -657,6 +685,7 @@ pub(crate) struct ChatComposer {
     worktrees_enabled: bool,
     windows_degraded_sandbox_active: bool,
     side_conversation_active: bool,
+    pub(super) mode: ComposerMode,
     history_search: Option<HistorySearchSession>,
     vim_history: VimHistory,
     submit_keys: Vec<KeyBinding>,
@@ -677,6 +706,8 @@ struct MentionCompletionTarget {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct ComposerDraft {
+    quote_comments: Vec<QuoteComment>,
+    quotes: Vec<String>,
     pub(super) text: String,
     text_elements: Vec<TextElement>,
     local_image_paths: Vec<PathBuf>,
@@ -688,6 +719,8 @@ pub(super) struct ComposerDraft {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ComposerDraftSnapshot {
+    pub(crate) quote_comments: Vec<QuoteComment>,
+    pub(crate) quotes: Vec<String>,
     pub(crate) text: String,
     pub(crate) cursor: usize,
     pub(crate) text_elements: Vec<TextElement>,
@@ -831,6 +864,7 @@ impl ChatComposer {
             worktrees_enabled: false,
             windows_degraded_sandbox_active: false,
             side_conversation_active: false,
+            mode: ComposerMode::Main,
             history_search: None,
             vim_history: VimHistory::default(),
             submit_keys: vec![key_hint::plain(KeyCode::Enter)],
@@ -1142,7 +1176,7 @@ impl ChatComposer {
     }
 
     fn slash_commands_enabled(&self) -> bool {
-        self.config.slash_commands_enabled
+        self.config.slash_commands_enabled && self.attachments.quotes.is_empty()
     }
 
     fn image_paste_enabled(&self) -> bool {
@@ -1282,6 +1316,14 @@ impl ChatComposer {
     /// are renumbered to `[Image #M+1]..[Image #N]` (where `M` is the number of
     /// remote images). Cursor is placed at the end after rebuilding elements.
     pub(crate) fn apply_external_edit(&mut self, text: String) {
+        if !self.quote_comments().is_empty()
+            && (text == self.current_text() || text == self.current_text_with_pending().trim_end())
+        {
+            self.draft.textarea_state.get_mut().follow_cursor();
+            self.move_cursor_to_end();
+            return;
+        }
+        self.draft.quote_comments.clear();
         self.note_sparkle_replaced_text(&text);
         self.vim_history = VimHistory::default();
         self.draft.pending_pastes.clear();
@@ -1577,6 +1619,7 @@ impl ChatComposer {
         self.draft.is_bash_mode = false;
         self.draft.pending_pastes.clear();
         self.draft.mention_bindings.clear();
+        self.draft.quote_comments.clear();
 
         let (text, text_elements) = self.imported_text_for_textarea(text, text_elements);
         self.draft
@@ -1645,6 +1688,8 @@ impl ChatComposer {
 
     pub(super) fn snapshot_draft(&self) -> ComposerDraft {
         ComposerDraft {
+            quote_comments: self.quote_comments(),
+            quotes: self.attachments.quotes.clone(),
             text: self.current_text(),
             text_elements: self.current_text_elements(),
             local_image_paths: self.attachments.local_image_paths(),
@@ -1657,6 +1702,8 @@ impl ChatComposer {
 
     pub(super) fn restore_draft(&mut self, draft: ComposerDraft) {
         let ComposerDraft {
+            quote_comments,
+            quotes,
             text,
             text_elements,
             local_image_paths,
@@ -1665,6 +1712,7 @@ impl ChatComposer {
             pending_pastes,
             cursor,
         } = draft;
+        self.attachments.quotes = quotes;
         self.set_remote_image_urls(remote_image_urls);
         self.set_text_content_with_mention_bindings(
             text,
@@ -1673,6 +1721,7 @@ impl ChatComposer {
             mention_bindings,
         );
         self.set_pending_pastes(pending_pastes);
+        self.set_quote_comments(quote_comments);
         self.set_current_cursor(cursor);
         self.sync_popups();
     }
@@ -1747,6 +1796,7 @@ impl ChatComposer {
         let mention_bindings = self.snapshot_mention_bindings();
         self.set_text_content(String::new(), Vec::new(), Vec::new());
         self.attachments.clear_remote_image_urls();
+        self.attachments.quotes.clear();
         self.history.reset_navigation();
         self.history.record_local_submission(HistoryEntry {
             text: previous.clone(),
@@ -1779,6 +1829,7 @@ impl ChatComposer {
             mention_bindings,
             pending_pastes,
         } = entry;
+        self.attachments.quotes.clear();
         self.set_remote_image_urls(remote_image_urls);
         self.set_text_content_with_mention_bindings(
             text,
@@ -2943,7 +2994,11 @@ impl ChatComposer {
                     .textarea
                     .text_element_snapshots()
                     .into_iter()
-                    .find(|element| element.range.start >= scan_from && element.text == token)
+                    .find(|element| {
+                        element.range.start >= scan_from
+                            && element.text == token
+                            && !crate::mention_codec::is_quoted_line(&text, element.range.start)
+                    })
                     .map(|element| element.range)
             } else {
                 find_next_mention_token_range(text.as_str(), token.as_str(), scan_from)
@@ -3012,11 +3067,14 @@ impl ChatComposer {
     ) -> Option<(String, Vec<TextElement>)> {
         let mut text = self.current_text();
         let original_input = text.clone();
+        let original_cursor = self.current_cursor();
+        let original_quote_comments = self.quote_comments();
         let original_text_elements = self.current_text_elements();
         let original_mention_bindings = self.snapshot_mention_bindings();
         let original_local_image_paths = self.attachments.local_image_paths();
         let original_pending_pastes = self.draft.pending_pastes.clone();
         let mut text_elements = original_text_elements.clone();
+        Self::prepare_quote_comments(&mut text, &mut text_elements, &original_quote_comments);
         let input_starts_with_space = original_input.starts_with(' ');
         self.draft.recent_submission_mention_bindings.clear();
         self.draft.textarea.set_text_clearing_elements("");
@@ -3038,7 +3096,8 @@ impl ChatComposer {
             text_elements = Self::trim_text_elements(&expanded_input, &text, text_elements);
         }
 
-        if slash_validation == SlashValidation::Immediate
+        let rejection = if self.attachments.quotes.is_empty()
+            && slash_validation == SlashValidation::Immediate
             && let SubmissionValidation::UnknownCommand(name) = self
                 .slash_input()
                 .validate_submission(&text, input_starts_with_space)
@@ -3046,47 +3105,53 @@ impl ChatComposer {
             let message = format!(
                 r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
             );
-            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_info_event(message, /*hint*/ None),
-            )));
-            self.set_text_content_with_mention_bindings(
-                original_input.clone(),
-                original_text_elements,
-                original_local_image_paths,
-                original_mention_bindings,
-            );
-            self.draft
-                .pending_pastes
-                .clone_from(&original_pending_pastes);
-            self.draft.textarea.set_cursor(original_input.len());
-            return None;
-        }
-
-        let actual_chars = text.chars().count();
-        if actual_chars > MAX_USER_INPUT_TEXT_CHARS {
-            let message = user_input_too_large_message(actual_chars);
-            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                history_cell::new_error_event(message),
-            )));
-            self.set_text_content_with_mention_bindings(
-                original_input.clone(),
-                original_text_elements,
-                original_local_image_paths,
-                original_mention_bindings,
-            );
-            self.draft
-                .pending_pastes
-                .clone_from(&original_pending_pastes);
-            self.draft.textarea.set_cursor(original_input.len());
-            // Embedded composers may cover the transcript that receives the full error.
-            if self.footer.hint_override.is_some() {
-                self.show_footer_flash(
+            Some((
+                Some(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::new_info_event(message, /*hint*/ None),
+                ))),
+                None,
+            ))
+        } else if !self.prepend_quote(&mut text, &mut text_elements) {
+            Some((
+                None,
+                Some(Line::from(
+                    "Quote and comment too long; limit 10,000 UTF-8 bytes".red(),
+                )),
+            ))
+        } else {
+            let actual_chars = text.chars().count();
+            (actual_chars > MAX_USER_INPUT_TEXT_CHARS).then(|| {
+                let message = user_input_too_large_message(actual_chars);
+                // Embedded composers may cover the transcript that receives the full error.
+                let footer = self.footer.hint_override.is_some().then(|| {
                     Line::from(
                         format!("Message too long; limit {MAX_USER_INPUT_TEXT_CHARS} characters")
                             .red(),
-                    ),
-                    Duration::from_secs(5),
-                );
+                    )
+                });
+                (
+                    Some(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_error_event(message),
+                    ))),
+                    footer,
+                )
+            })
+        };
+        if let Some((event, footer)) = rejection {
+            self.set_text_content_with_mention_bindings(
+                original_input,
+                original_text_elements,
+                original_local_image_paths,
+                original_mention_bindings,
+            );
+            self.draft.pending_pastes = original_pending_pastes;
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
+            if let Some(event) = event {
+                self.app_event_tx.send(event);
+            }
+            if let Some(footer) = footer {
+                self.show_footer_flash(footer, Duration::from_secs(5));
             }
             return None;
         }
@@ -3127,6 +3192,8 @@ impl ChatComposer {
             });
         }
         self.draft.pending_pastes.clear();
+        self.draft.quote_comments.clear();
+        self.attachments.quotes.clear();
         Some((text, text_elements))
     }
 
@@ -3247,6 +3314,8 @@ impl ChatComposer {
         }
 
         let original_input = self.current_text();
+        let original_cursor = self.current_cursor();
+        let original_quote_comments = self.quote_comments();
         let original_text_elements = self.current_text_elements();
         let original_mention_bindings = self.snapshot_mention_bindings();
         let original_local_image_paths = self.attachments.local_image_paths();
@@ -3295,6 +3364,8 @@ impl ChatComposer {
                 original_mention_bindings,
             );
             self.draft.pending_pastes = original_pending_pastes;
+            self.set_quote_comments(original_quote_comments);
+            self.set_current_cursor(original_cursor);
             self.footer.flash = flash;
             (InputResult::None, true)
         }
@@ -3502,6 +3573,7 @@ impl ChatComposer {
             return self.handle_input_basic(key_event);
         }
         if self.config.shell_commands_enabled
+            && self.attachments.quotes.is_empty()
             && self.draft.textarea.is_vim_normal_mode()
             && self.is_empty()
             && matches!(
@@ -3541,7 +3613,46 @@ impl ChatComposer {
             return self.handle_submission(self.is_task_running || self.queue_submissions);
         }
 
+        if key_event.code == KeyCode::Enter
+            && key_event.modifiers.is_empty()
+            && (self.submit_keys.is_pressed(key_event)
+                || self.editor_keymap.insert_newline.is_pressed(key_event))
+            && !self.blocks_direct_input
+            && !self.draft.textarea.is_vim_normal_mode()
+            && matches!(self.popups.active, ActivePopup::None)
+            && self.active_empty_quote_comment().is_some()
+        {
+            let now = tokio::time::Instant::now().into_std();
+            self.handle_paste_burst_flush(now);
+            if self.handle_paste_enter(now) {
+                return (InputResult::None, true);
+            }
+            if self.leave_empty_quote_comment() {
+                return (InputResult::None, true);
+            }
+        }
+
         if self.submit_keys.is_pressed(key_event) {
+            if self.config.multiline_enter {
+                if key_event.code == KeyCode::Enter
+                    && key_event.modifiers == KeyModifiers::NONE
+                    && self.editor_keymap.insert_newline.is_pressed(key_event)
+                {
+                    let now = tokio::time::Instant::now().into_std();
+                    self.handle_paste_burst_flush(now);
+                    if self.handle_paste_enter(now) {
+                        return (InputResult::None, true);
+                    }
+                    if self.current_text_with_pending().contains('\n') {
+                        return self.handle_input_basic(key_event);
+                    }
+                } else if !key_event.modifiers.is_empty() {
+                    if let Some(pasted) = self.draft.paste_burst.flush_before_modified_input() {
+                        self.apply_paste(pasted);
+                    }
+                    self.draft.paste_burst.clear_after_explicit_paste();
+                }
+            }
             return self.handle_submission(self.queue_submissions);
         }
 
@@ -3573,7 +3684,8 @@ impl ChatComposer {
             )
         };
         if history_up_pressed || history_down_pressed {
-            if self.draft.textarea.mouse_selection_range().is_none()
+            if self.attachments.quotes.is_empty()
+                && self.draft.textarea.mouse_selection_range().is_none()
                 && self.history.should_handle_navigation(
                     &self.current_text(),
                     self.history_navigation_cursor(),
@@ -3596,7 +3708,9 @@ impl ChatComposer {
     }
 
     fn is_bang_shell_command(&self) -> bool {
-        self.config.shell_commands_enabled && self.current_text().trim_start().starts_with('!')
+        self.config.shell_commands_enabled
+            && self.attachments.quotes.is_empty()
+            && self.current_text().trim_start().starts_with('!')
     }
 
     fn shell_mode_footer_line(&self) -> Option<Line<'static>> {
@@ -3791,6 +3905,7 @@ impl ChatComposer {
 
     fn sync_bash_mode_from_text(&mut self) {
         if self.config.shell_commands_enabled
+            && self.attachments.quotes.is_empty()
             && !self.draft.is_bash_mode
             && self.draft.textarea.text().starts_with('!')
         {
@@ -4482,7 +4597,10 @@ fn find_next_mention_token_range(text: &str, token: &str, from: usize) -> Option
             ends_plaintext_at_dollar_mention(bytes, end)
         };
 
-        if starts_plaintext_mention && ends_plaintext_mention {
+        if starts_plaintext_mention
+            && ends_plaintext_mention
+            && !crate::mention_codec::is_quoted_line(text, index)
+        {
             return Some(index..end);
         }
 
@@ -4861,22 +4979,7 @@ impl ChatComposer {
         }
         let style = user_message_style();
         Block::default().style(style).render(composer_rect, buf);
-        if !remote_images_rect.is_empty() {
-            let first = self
-                .attachments
-                .selected_remote_image_index
-                .unwrap_or_default()
-                .saturating_sub(usize::from(remote_images_rect.height) - 1);
-            Paragraph::new(
-                self.attachments
-                    .remote_image_lines()
-                    .into_iter()
-                    .skip(first)
-                    .collect::<Vec<_>>(),
-            )
-            .style(style)
-            .render(remote_images_rect, buf);
-        }
+        self.render_attachments(remote_images_rect, buf);
         if !textarea_rect.is_empty() {
             let prompt = if self.draft.input_enabled {
                 if self.draft.is_bash_mode {
@@ -4945,9 +5048,32 @@ impl ChatComposer {
                 }
             }
         }
+        let show_quote_hint = self.draft.input_enabled
+            && !self.blocks_direct_input
+            && self.placeholder_text == crate::chatwidget::PLACEHOLDER
+            && mask_char.is_none()
+            && matches!(self.popups.active, ActivePopup::None);
+        if show_quote_hint
+            && self.active_empty_quote_comment().is_some()
+            && let Some((x, y)) = self
+                .draft
+                .textarea
+                .cursor_pos_with_state(textarea_rect, *state)
+        {
+            buf.set_span(
+                x,
+                y,
+                &"Add an optional comment…".dim(),
+                textarea_rect.right().saturating_sub(x),
+            );
+        }
         if !self.draft.input_enabled || textarea_is_empty {
             let text = if self.draft.input_enabled {
-                self.placeholder_text.as_str().to_string()
+                if show_quote_hint && !self.attachments.quotes.is_empty() {
+                    "Add an optional comment…".to_string()
+                } else {
+                    self.placeholder_text.clone()
+                }
             } else {
                 self.draft
                     .input_disabled_placeholder
@@ -5009,6 +5135,7 @@ impl ChatComposer {
             self.cursor_pos_with_options(area, options),
             buf,
         );
+        self.mode.render(composer_rect, buf);
         if options.footer.is_some_and(|footer| footer.is_interactive) {
             buf.set_style(composer_rect, Style::default().dim());
         }
@@ -9117,6 +9244,33 @@ mod tests {
             _ => panic!("expected Submitted"),
         }
         assert!(composer.draft.pending_pastes.is_empty());
+
+        composer.config.multiline_enter = true;
+        let mut keymap = crate::keymap::RuntimeKeymap::defaults();
+        keymap
+            .composer
+            .submit
+            .push(crate::key_hint::ctrl(KeyCode::Enter));
+        composer.set_keymap_bindings(&keymap);
+        let multiline = format!("{large}\nsecond line");
+        composer.handle_paste(multiline.clone());
+        assert!(!composer.draft.textarea.text().contains('\n'));
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(InputResult::None, result);
+        assert_eq!(
+            format!("{multiline}\n"),
+            composer.current_text_with_pending()
+        );
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            InputResult::Submitted {
+                text: multiline,
+                text_elements: Vec::new()
+            },
+            result
+        );
     }
 
     #[test]
@@ -9800,6 +9954,105 @@ mod tests {
 
         assert_eq!(InputResult::None, result);
         assert_eq!("explain the change\n", composer.draft.textarea.text());
+
+        composer.config.multiline_enter = true;
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(InputResult::None, result);
+        assert_eq!("explain the change\n\n", composer.draft.textarea.text());
+
+        keymap.composer.submit = vec![
+            key_hint::plain(KeyCode::Enter),
+            key_hint::ctrl(KeyCode::Enter),
+        ];
+        composer.set_keymap_bindings(&keymap);
+        for (enabled, text, key, expected) in [
+            (
+                false,
+                "first\nsecond",
+                KeyModifiers::NONE,
+                Some("first\nsecond"),
+            ),
+            (true, "single line", KeyModifiers::NONE, Some("single line")),
+            (true, "first\nsecond", KeyModifiers::NONE, None),
+            (
+                true,
+                "first\nsecond",
+                KeyModifiers::CONTROL,
+                Some("first\nsecond"),
+            ),
+        ] {
+            composer.config.multiline_enter = enabled;
+            composer.draft.textarea.set_text_clearing_elements(text);
+            composer.draft.textarea.set_cursor(text.len());
+            let (result, _) = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, key));
+            assert_eq!(
+                expected.map_or(InputResult::None, |text| InputResult::Submitted {
+                    text: text.to_string(),
+                    text_elements: Vec::new(),
+                }),
+                result
+            );
+            if expected.is_none() {
+                assert_eq!(format!("{text}\n"), composer.draft.textarea.text());
+            }
+        }
+
+        // Explicit modified submit flushes an active non-bracketed paste burst.
+        composer
+            .draft
+            .textarea
+            .set_text_clearing_elements("first\nsecond");
+        composer.draft.textarea.set_cursor("first\nsecond".len());
+        composer
+            .draft
+            .paste_burst
+            .begin_with_retro_grabbed(" buffered".to_string(), Instant::now());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            InputResult::Submitted {
+                text: "first\nsecond buffered".to_string(),
+                text_elements: Vec::new()
+            },
+            result
+        );
+
+        // Plain Enter still belongs to an active burst, before multiline classification.
+        composer
+            .draft
+            .paste_burst
+            .begin_with_retro_grabbed("pasted".to_string(), Instant::now());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(InputResult::None, result);
+        assert_eq!("", composer.draft.textarea.text());
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(
+            InputResult::Submitted {
+                text: "pasted".to_string(),
+                text_elements: Vec::new()
+            },
+            result
+        );
+
+        // Removing editor Enter must not silently swallow the submit key.
+        Arc::make_mut(&mut keymap.editor).insert_newline = vec![key_hint::shift(KeyCode::Enter)];
+        composer.set_keymap_bindings(&keymap);
+        composer
+            .draft
+            .textarea
+            .set_text_clearing_elements("first\nsecond");
+        let (result, _) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            InputResult::Submitted {
+                text: "first\nsecond".to_string(),
+                text_elements: Vec::new()
+            },
+            result
+        );
     }
 
     #[test]

@@ -10,12 +10,15 @@ use crate::tools::registry::PostToolUsePayload;
 use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::sandboxing::ToolError;
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::WriteStdinInteractionEvent;
 use crate::unified_exec::WriteStdinRequest;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+use codex_tools::WaitReason;
+use codex_tools::WaitReminder;
 use serde::Deserialize;
 
 use super::super::shell_spec::create_write_stdin_tool;
@@ -23,6 +26,7 @@ use super::post_unified_exec_tool_use_payload;
 
 #[derive(Debug, Deserialize)]
 struct WriteStdinArgs {
+    reason: Option<String>,
     #[serde(default)]
     chars: String,
     #[serde(default = "super::default_write_stdin_yield_time_ms")]
@@ -42,7 +46,15 @@ impl WriteStdinArgs {
     }
 }
 
-pub struct WriteStdinHandler;
+pub struct WriteStdinHandler {
+    bounds: BackgroundTerminalTimeoutBounds,
+}
+
+impl WriteStdinHandler {
+    pub(crate) fn new(bounds: BackgroundTerminalTimeoutBounds) -> Self {
+        Self { bounds }
+    }
+}
 
 impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     fn tool_name(&self) -> ToolName {
@@ -50,7 +62,7 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        create_write_stdin_tool()
+        create_write_stdin_tool(self.bounds)
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -87,9 +99,20 @@ impl WriteStdinHandler {
             ));
         };
         let args = WriteStdinArgs::parse(&payload)?;
+        let reason = if args.chars.is_empty() {
+            let reason = args.reason.as_deref().ok_or_else(|| {
+                FunctionCallError::RespondToModel(
+                    "reason is required when polling without input".to_string(),
+                )
+            })?;
+            Some(WaitReason::new(reason).map_err(FunctionCallError::RespondToModel)?)
+        } else {
+            None
+        };
+        let preempt = step_context.preempt.clone();
         let context =
             UnifiedExecContext::new(session.clone(), step_context, cancellation_token, call_id);
-        let response = session
+        let mut response = session
             .services
             .unified_exec_manager
             .write_stdin(
@@ -125,6 +148,16 @@ impl WriteStdinHandler {
                 FunctionCallError::RespondToModel(message)
             })?;
 
+        if let Some(reason) = reason {
+            let outcome = if response.process_id.is_some()
+                && preempt.as_ref().is_some_and(|token| token.is_cancelled())
+            {
+                WaitReminder::Interrupted
+            } else {
+                WaitReminder::Returned
+            };
+            response.wait_reminder = reason.reminder(outcome);
+        }
         Ok(boxed_tool_output(response))
     }
 }

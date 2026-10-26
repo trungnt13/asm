@@ -407,12 +407,20 @@ impl Session {
             if model_overrides_available
                 && turn_context
                     .config
+                    .include_model_catalog_in_spawn_agent_list
+                && turn_context
+                    .config
                     .features
                     .enabled(Feature::ModelCatalogInContext)
             {
                 ModelCatalogState::new(
                     &turn_context.available_models,
                     turn_context.multi_agent_version,
+                    turn_context
+                        .config
+                        .multi_agent_v2
+                        .subagent_model_list
+                        .as_deref(),
                 )
             } else {
                 ModelCatalogState::default()

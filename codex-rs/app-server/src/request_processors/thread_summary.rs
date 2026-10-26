@@ -176,6 +176,10 @@ pub(crate) fn thread_settings_from_config_snapshot(
     config_snapshot: &ThreadConfigSnapshot,
 ) -> ThreadSettings {
     ThreadSettings {
+        system1_enabled: config_snapshot.system1_enabled,
+        system1_revision: config_snapshot.system1_revision,
+        system1_error: config_snapshot.system1_error,
+        system1_failure_episode: config_snapshot.system1_failure_episode,
         disabled_plugin_ids: config_snapshot.disabled_plugin_ids.clone(),
         cwd: config_snapshot.cwd().clone(),
         approval_policy: config_snapshot.approval_policy.into(),

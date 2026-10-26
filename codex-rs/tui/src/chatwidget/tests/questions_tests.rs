@@ -143,7 +143,7 @@ async fn ordinary_follow_up_clears_unanswered_questions_after_accepted_input() {
                 "questions_cleared_by_follow_up",
                 render_bottom_popup(&chat, /*width*/ 80)
                     .lines()
-                    .next()
+                    .find(|line| line.starts_with('›'))
                     .unwrap()
             );
         }
@@ -1028,6 +1028,8 @@ async fn desktop_async_answer_dismisses_only_its_question_and_preserves_the_othe
             [item],
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
+            /*show_communication*/ false,
+            /*own_agent_role*/ None,
         );
         crate::terminal_palette::with_test_default_colors(
             crate::terminal_probe::DefaultColors {
@@ -1126,7 +1128,7 @@ async fn distinct_async_question_replies_with_identical_text_both_render() {
 
 #[tokio::test]
 async fn retried_question_answers_keep_separate_envelopes_and_order() {
-    for interrupt in [false, true] {
+    for (interrupt, switch_pending) in [(false, false), (true, false), (true, true)] {
         let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = Some(ThreadId::new());
         chat.on_task_started();
@@ -1152,7 +1154,24 @@ async fn retried_question_answers_keep_separate_envelopes_and_order() {
         let mut retried = Vec::new();
         if interrupt {
             chat.input_queue.submit_pending_steers_after_interrupt = true;
+            chat.set_thread_switch_pending(switch_pending);
             chat.on_interrupted_turn(TurnAbortReason::Interrupted);
+            if switch_pending {
+                assert_no_submit_op(&mut ops);
+                assert!(chat.input_queue.pending_steers.is_empty());
+                assert_eq!(
+                    chat.input_queue
+                        .rejected_steers_queue
+                        .iter()
+                        .map(|message| message.text.clone())
+                        .collect::<Vec<_>>(),
+                    original
+                );
+                assert!(!chat.maybe_send_next_queued_input());
+                assert_no_submit_op(&mut ops);
+                chat.set_thread_switch_pending(/*pending*/ false);
+                assert!(chat.maybe_send_next_queued_input());
+            }
             let Op::UserTurn { items, .. } = ops.try_recv().unwrap() else {
                 panic!("user turn")
             };

@@ -137,6 +137,7 @@ fn finish_turn(
                 root_turn_id: None,
                 items: items.into_iter().map(ThreadItem::untimed).collect(),
                 items_view: TurnItemsView::Summary,
+                token_usage: None,
                 status,
                 error: None,
                 started_at: None,

@@ -189,6 +189,10 @@ fn sanitize_directory(lines: Vec<String>) -> Vec<String> {
     lines
         .into_iter()
         .map(|line| {
+            let line = line.replace(
+                &format!("ASM (v{})", crate::version::CODEX_CLI_VERSION),
+                "ASM (v<VERSION>)",
+            );
             if let Some((prefix, value)) = line.split_once("Directory:") {
                 let padding = &value[..value.len() - value.trim_start().len()];
                 format!("{prefix}Directory:{padding}[[workspace]]")
@@ -791,6 +795,7 @@ async fn status_uses_server_provider_id_and_auth_requirement() {
         &model_slug,
         /*collaboration_mode*/ None,
         /*reasoning_effort_override*/ None,
+        /*captured_reasoning_label*/ None,
         "<none>".to_string(),
         /*refreshing_rate_limits*/ false,
     );
@@ -822,6 +827,7 @@ async fn status_uses_server_provider_id_and_auth_requirement() {
         &model_slug,
         /*collaboration_mode*/ None,
         /*reasoning_effort_override*/ None,
+        /*captured_reasoning_label*/ None,
         "<none>".to_string(),
         /*refreshing_rate_limits*/ false,
     );
@@ -1512,6 +1518,7 @@ async fn status_wraps_long_paths_and_session_ids_without_losing_text() {
         "gpt-5.5",
         /*collaboration_mode*/ None,
         /*reasoning_effort_override*/ None,
+        /*captured_reasoning_label*/ None,
         "<none>".to_string(),
         /*refreshing_rate_limits*/ false,
     );
@@ -1751,6 +1758,7 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
             &model_slug,
             /*collaboration_mode*/ None,
             /*reasoning_effort_override*/ Some(Some(ReasoningEffort::Medium)),
+            /*captured_reasoning_label*/ None,
             "<none>".to_string(),
             /*refreshing_rate_limits*/ false,
         );
@@ -1863,6 +1871,7 @@ async fn transcript_overlay_remeasures_status_after_rate_limit_refresh() {
         &model_slug,
         /*collaboration_mode*/ None,
         /*reasoning_effort_override*/ None,
+        /*captured_reasoning_label*/ None,
         "<none>".to_string(),
         /*refreshing_rate_limits*/ true,
     );

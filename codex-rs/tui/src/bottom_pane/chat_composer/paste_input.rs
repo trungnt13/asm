@@ -44,6 +44,15 @@ impl ChatComposer {
         }
         let mut textarea = TextArea::new();
         textarea.set_text_with_elements(&snapshot.text, &snapshot.text_elements);
+        let comment_ids = snapshot
+            .quote_comments
+            .iter()
+            .filter_map(|comment| {
+                textarea
+                    .element_id_for_exact_range(comment.range.clone())
+                    .map(|id| (id, comment.quote_index))
+            })
+            .collect::<HashMap<_, _>>();
         match pending {
             FlushResult::Typed(ch) if self.draft.textarea.is_vim_replace_mode() => {
                 textarea.set_cursor(snapshot.cursor);
@@ -61,6 +70,18 @@ impl ChatComposer {
             FlushResult::Paste(pasted) => textarea.insert_str_at(snapshot.cursor, &pasted),
             FlushResult::None => {}
         }
+        snapshot.quote_comments = textarea
+            .text_element_snapshots()
+            .into_iter()
+            .filter_map(|element| {
+                comment_ids
+                    .get(&element.id)
+                    .map(|&quote_index| QuoteComment {
+                        quote_index,
+                        range: element.range,
+                    })
+            })
+            .collect();
         snapshot.text = textarea.text().to_owned();
         snapshot.text_elements = textarea.text_elements();
         snapshot

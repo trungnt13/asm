@@ -50,6 +50,7 @@ use crate::parse_turn_item;
 use crate::realtime_conversation::RealtimeConversationManager;
 use crate::realtime_history::RealtimeEventOrder;
 use crate::session::step_context::StepContext;
+use crate::session::step_settings::ModelInfoOverrides;
 use crate::session::step_settings::ResolvedStepSettings;
 use crate::session::step_settings::StepSettings;
 use crate::session::turn_context::TurnEnvironment;
@@ -258,6 +259,7 @@ mod reasoning_effort;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
+mod decision_log;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -276,6 +278,9 @@ pub(crate) mod startup_prewarm;
 mod step_activation;
 pub(crate) mod step_context;
 pub(crate) mod step_settings;
+mod system1;
+mod system1_evidence;
+mod system1_task;
 mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
@@ -562,6 +567,22 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 
+/// Returns the native runtime recorded in saved history, if any.
+pub(crate) fn history_native_runtime(
+    history: &InitialHistory,
+) -> Option<codex_protocol::openai_models::NativeRuntime> {
+    history.get_rollout_items().iter().find_map(|item| {
+        let model = match item {
+            RolloutItem::TurnContext(context) => &context.model,
+            RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) => {
+                &event.thread_settings.model
+            }
+            _ => return None,
+        };
+        codex_protocol::openai_models::NativeRuntime::for_model(model).map(|(runtime, _)| runtime)
+    })
+}
+
 impl Session {
     /// Spawn and initialize a new session.
     /// Hide the concrete startup future from callers while keeping initialization lazy.
@@ -599,7 +620,53 @@ impl Session {
         })
     }
 
-    async fn spawn_internal(args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
+    async fn spawn_internal(mut args: SessionSpawnArgs) -> CodexResult<(Arc<Self>, SessionIo)> {
+        let bound_model = args
+            .config
+            .model
+            .as_deref()
+            .and_then(codex_models_manager::provider_for_model)
+            .is_some();
+        if bound_model {
+            args.config.apply_external_model_provider()?;
+            args.models_manager = crate::thread_manager::build_models_manager(
+                &args.config,
+                args.auth_manager.clone(),
+            );
+        }
+        if matches!(
+            args.session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            args.config.validate_external_subagent_model()?;
+        }
+        let history = args.conversation_history.get_rollout_items();
+        let saved_bound_model = history.iter().any(|item| {
+            let model = if let RolloutItem::TurnContext(context) = item {
+                Some(context.model.as_str())
+            } else if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = item {
+                Some(event.thread_settings.model.as_str())
+            } else {
+                None
+            };
+            model
+                .and_then(codex_models_manager::provider_for_model)
+                .is_some()
+        });
+        if bound_model || saved_bound_model {
+            let saved_provider = history.iter().find_map(|item| {
+                if let RolloutItem::SessionMeta(meta) = item {
+                    meta.meta.model_provider.as_deref()
+                } else {
+                    None
+                }
+            });
+            if saved_provider.is_some_and(|provider| provider != args.config.model_provider_id) {
+                return Err(CodexErr::InvalidRequest(
+                    "Cross-provider history is not supported; start a fresh thread".to_string(),
+                ));
+            }
+        }
         args.config
             .config_layer_stack
             .ensure_config_server_applied()?;
@@ -734,29 +801,67 @@ impl Session {
         };
 
         let mut config = Arc::new(config);
-        let refresh_strategy = if session_source.is_non_root_agent() {
+        let native_runtime = config
+            .model
+            .as_deref()
+            .and_then(codex_protocol::openai_models::NativeRuntime::for_model)
+            .map(|(runtime, _)| runtime);
+        let uses_native_runtime = native_runtime.is_some();
+        if uses_native_runtime
+            && config
+                .service_tier
+                .as_deref()
+                .is_some_and(|tier| tier != "default")
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Native runtimes do not support service tiers; select the default tier".to_string(),
+            ));
+        }
+        // Compare concrete runtimes so Claude and Cursor sessions never resume each other.
+        // Claude history forks only into a temporary side, which Claude forks natively.
+        let temporary_claude_fork = config.ephemeral
+            && native_runtime == Some(codex_protocol::openai_models::NativeRuntime::ClaudeCode)
+            && history_native_runtime(&conversation_history) == native_runtime;
+        if (matches!(&conversation_history, InitialHistory::Forked(_))
+            && !temporary_claude_fork
+            && (uses_native_runtime || history_native_runtime(&conversation_history).is_some()))
+            || (matches!(&conversation_history, InitialHistory::Resumed(_))
+                && history_native_runtime(&conversation_history) != native_runtime)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "Native runtimes do not support history forks or cross-runtime resume; start a fresh thread".to_string(),
+            ));
+        }
+        let refresh_strategy = if uses_native_runtime || session_source.is_non_root_agent() {
             codex_models_manager::manager::RefreshStrategy::Offline
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        if config.model.is_none()
-            || !matches!(
-                refresh_strategy,
-                codex_models_manager::manager::RefreshStrategy::Offline
-            )
+        if !uses_native_runtime
+            && (config.model.is_none()
+                || !matches!(
+                    refresh_strategy,
+                    codex_models_manager::manager::RefreshStrategy::Offline
+                ))
         {
             let _ = models_manager
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = models_manager
-            .get_default_model(
-                &config.model,
-                allow_provider_model_fallback,
-                refresh_strategy,
-                config.http_client_factory(),
-            )
-            .await;
+        let model = if uses_native_runtime {
+            config.model.clone().ok_or_else(|| {
+                CodexErr::InvalidRequest("Native runtimes require an explicit model".to_owned())
+            })?
+        } else {
+            models_manager
+                .get_default_model(
+                    &config.model,
+                    allow_provider_model_fallback,
+                    refresh_strategy,
+                    config.http_client_factory(),
+                )
+                .await
+        };
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
@@ -764,6 +869,37 @@ impl Session {
         }
         let trusted_guardian_reviewer = crate::guardian::is_basic_session_source(&session_source)
             && !matches!(conversation_history, InitialHistory::Resumed(_));
+        if uses_native_runtime {
+            if crate::guardian::is_basic_session_source(&session_source)
+                || config
+                    .config_layer_stack
+                    .requirements()
+                    .auto_review_required_for_model(&model)
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "Native runtimes cannot perform required Guardian review; use an ASM-managed model"
+                        .to_string(),
+                ));
+            }
+            config
+                .config_layer_stack
+                .requirements()
+                .approvals_reviewer
+                .can_set(&ApprovalsReviewer::User)
+                .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            let config = Arc::make_mut(&mut config);
+            config.approvals_reviewer = ApprovalsReviewer::User;
+            for feature in [
+                Feature::GuardianApproval,
+                Feature::GuardianV2,
+                Feature::GuardianV2DecisionsComparison,
+            ] {
+                config
+                    .features
+                    .disable(feature)
+                    .map_err(|err| CodexErr::InvalidRequest(err.to_string()))?;
+            }
+        }
         if config
             .config_layer_stack
             .requirements()
@@ -808,12 +944,21 @@ impl Session {
             );
         }
 
+        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
+            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
+        });
+        let model_info_overrides =
+            ModelInfoOverrides::for_session(&config, &session_source, multi_agent_version);
+
         // Resolve base instructions for the session. Priority order:
         // 1. config.base_instructions override
         // 2. conversation history => session_meta.base_instructions
         // 3. rendered instructions_template for current model
         let model_info = models_manager
-            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .get_model_info(
+                model.as_str(),
+                &model_info_overrides.models_manager_config(&model, config.personality),
+            )
             .await;
         let auth = auth_manager.auth_cached();
         // Forked subagents keep their parent's activation with the copied history.
@@ -833,9 +978,6 @@ impl Session {
             token_budget::apply_model_defaults(Arc::make_mut(&mut config), &model_info);
         }
         let configured_config = Arc::clone(&config);
-        let multi_agent_version = config.multi_agent_version_override().or_else(|| {
-            resolve_multi_agent_version(&conversation_history, inherited_multi_agent_version)
-        });
         let history_mode = conversation_history.get_history_mode(
             requested_history_mode.unwrap_or_else(|| thread_store.default_history_mode()),
         );
@@ -933,7 +1075,7 @@ impl Session {
                 approvals_reviewer: config.approvals_reviewer,
             }),
             environments: environment_selections.clone(),
-            model_info_overrides: config.to_models_manager_config().into(),
+            model_info_overrides,
             developer_instructions: config.developer_instructions.clone(),
             base_instructions,
             permission_profile_state: session_permission_profile_state_from_config(&config)?,
@@ -1597,6 +1739,23 @@ impl Session {
         state.token_info()
     }
 
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn set_reported_context_usage(
+        &self,
+        usage: TokenUsage,
+        model_context_window: Option<i64>,
+    ) {
+        let mut state = self.state.lock().await;
+        let mut info = state.token_info().unwrap_or(TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            model_context_window: None,
+        });
+        info.last_token_usage = usage;
+        info.model_context_window = model_context_window;
+        state.set_token_info(Some(info));
+    }
+
     pub(crate) async fn get_estimated_token_count(
         &self,
         turn_context: &TurnContext,
@@ -1781,7 +1940,7 @@ impl Session {
                     ForkPersistence::Referenced {
                         inherited_item_count,
                         ..
-                    } => {
+                    } if self.ephemeral_rollout_items.is_none() => {
                         // Ancestor records remain behind history_base; only effective child
                         // settings and boundaries synthesized by snapshot processing are local.
                         rollout_items.drain(..*inherited_item_count);
@@ -1795,13 +1954,20 @@ impl Session {
                         rollout_items.clear();
                         rollout_items.push(thread_settings_applied);
                     }
-                    ForkPersistence::Copied | ForkPersistence::CopiedDeferred => {
+                    ForkPersistence::Copied
+                    | ForkPersistence::CopiedDeferred
+                    | ForkPersistence::Referenced { .. } => {
                         // Keep the copied prefix and effective child settings in one append so a
                         // cold resume cannot observe inherited settings as the latest value.
                         rollout_items.push(thread_settings_applied);
                     }
                 }
-                self.persist_rollout_items(&rollout_items).await;
+                if let Some(history) = &self.ephemeral_rollout_items {
+                    // Transfer the inherited prefix once; later writes append only their new items.
+                    *history.lock().await = rollout_items;
+                } else {
+                    self.persist_rollout_items(&rollout_items).await;
+                }
                 if self.preserve_parent_tool_declarations() {
                     let notice = DeveloperInstructions::new(
                         "<mcp_tools>\nMCP tools are unavailable for this request.\n</mcp_tools>",
@@ -2166,9 +2332,14 @@ impl Session {
     pub(crate) async fn resume_config_snapshot(&self) -> (ThreadConfigSnapshot, Option<String>) {
         let configuration = self.state.lock().await.session_configuration.clone();
         let selected_service_tier = configuration.step_settings.service_tier.clone();
-        let snapshot = self
+        let mut snapshot = self
             .effective_thread_config_snapshot(&configuration, configuration.environments.clone())
             .await;
+        let system1 = self.system1_state(snapshot.system1_enabled, snapshot.system1_revision);
+        snapshot.system1_enabled = system1.enabled;
+        snapshot.system1_revision = system1.revision;
+        snapshot.system1_error = system1.error;
+        snapshot.system1_failure_episode = system1.failure_episode;
         (snapshot, selected_service_tier)
     }
 
@@ -2496,13 +2667,21 @@ impl Session {
     }
 
     pub(crate) async fn emit_turn_started(&self, turn_context: &TurnContext, task_kind: TaskKind) {
+        let model_context_window =
+            if crate::claude_runtime::is_native_model(&turn_context.model_info().slug) {
+                self.token_usage_info()
+                    .await
+                    .and_then(|info| info.model_context_window)
+            } else {
+                turn_context.model_context_window()
+            };
         let event = TurnStartedEvent {
             turn_attribution: (task_kind == TaskKind::Regular).then(|| turn_context.attribution()),
             turn_id: turn_context.sub_id.clone(),
             root_turn_id: Some(turn_context.root_turn_id()),
             trace_id: turn_context.trace_id.clone(),
             started_at: turn_context.turn_timing_state.started_at_unix_secs().await,
-            model_context_window: turn_context.model_context_window(),
+            model_context_window,
             collaboration_mode_kind: turn_context.mode(),
         };
         self.send_event(turn_context, EventMsg::TurnStarted(event))
@@ -3870,6 +4049,17 @@ impl Session {
                         });
                 }
             }
+            if items.iter().any(|envelope| {
+                matches!(&envelope.item,
+                ResponseItem::Message { role, .. } if role == "assistant")
+                    || matches!(
+                        &envelope.item,
+                        ResponseItem::FunctionCallOutput { .. }
+                            | ResponseItem::CustomToolCallOutput { .. }
+                    )
+            }) {
+                self.invalidate_system1();
+            }
             state
                 .history
                 .record_annotated_items(&mut items, model_info.truncation_policy.into());
@@ -4011,7 +4201,7 @@ impl Session {
 
     /// Prepares a candidate step without replacing the active turn's retained context.
     /// The caller must retain it explicitly if it is selected for execution.
-    async fn capture_speculative_step_context(
+    pub(crate) async fn capture_speculative_step_context(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         cancellation_token: &CancellationToken,
@@ -4041,14 +4231,27 @@ impl Session {
         // Match apply_turn_settings and activate_turn_environments: active_turn before state.
         // Wait for executor startup below, after releasing both locks.
         let (mut settings, environments, inherited_environments) = {
+            // Serialize fallback with accepted manual baseline updates.
+            let _settings_guard = thread_settings::acquire_persistence_lock(self)
+                .or_cancel(cancellation_token)
+                .await?;
             let _active = self
                 .active_turn
                 .lock()
                 .or_cancel(cancellation_token)
                 .await?;
-            let _state = self.state.lock().or_cancel(cancellation_token).await?;
+            let state = self.state.lock().or_cancel(cancellation_token).await?;
+            let current = turn_context.next_step_settings.load_full();
+            let settings = self.system1_fallback_settings(
+                Arc::clone(&current),
+                &state.session_configuration,
+                &turn_context,
+            );
+            if !Arc::ptr_eq(&current, &settings) {
+                turn_context.next_step_settings.store(Arc::clone(&settings));
+            }
             (
-                turn_context.next_step_settings.load_full(),
+                settings,
                 self.services.turn_environments.snapshot(),
                 self.features
                     .enabled(Feature::SubagentThreadEnvironments)
@@ -4059,10 +4262,16 @@ impl Session {
             turn_context.session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
         ) {
-            let root_service_tier = self.services.agent_control.service_tier();
-            if settings.selected().service_tier != root_service_tier {
+            let child_service_tier = crate::agent::child_config::select_subagent_service_tier(
+                &turn_context.config,
+                &settings.model_info,
+                settings.effective_reasoning_effort().as_ref(),
+                self.services.agent_control.service_tier(),
+            )
+            .map_err(CodexErr::InvalidRequest)?;
+            if settings.selected().service_tier != child_service_tier {
                 let mut selected = settings.selected().clone();
-                selected.service_tier = root_service_tier;
+                selected.service_tier = child_service_tier;
                 let mut inherited_settings = ResolvedStepSettings::new(
                     Arc::new(selected),
                     Arc::clone(&settings.model_info),
@@ -4298,10 +4507,9 @@ impl Session {
                 self.pending_code_mode_message_recordings(),
             )
         };
-        response_item
-            .metadata
-            .get_or_insert_default()
-            .user_input_order = Some(order);
+        let metadata = response_item.metadata.get_or_insert_default();
+        metadata.user_input_order = Some(order);
+        metadata.spawn_arguments = communication.spawn_arguments.clone();
         for mut recording in pending {
             let _ = recording.changed().await;
         }
@@ -4324,7 +4532,16 @@ impl Session {
         ])
         .await;
         drop(boundary);
-        self.send_raw_response_items(turn_context, items).await;
+        for item in items {
+            self.send_event(
+                turn_context,
+                EventMsg::RawResponseItem(RawResponseItemEvent {
+                    item: item.clone(),
+                    spawn_arguments: communication.spawn_arguments.clone(),
+                }),
+            )
+            .await;
+        }
     }
 
     async fn maybe_warn_on_server_model_mismatch(
@@ -4641,7 +4858,10 @@ impl Session {
         for item in items {
             self.send_event(
                 turn_context,
-                EventMsg::RawResponseItem(RawResponseItemEvent { item: item.clone() }),
+                EventMsg::RawResponseItem(RawResponseItemEvent {
+                    item: item.clone(),
+                    spawn_arguments: None,
+                }),
             )
             .await;
         }
@@ -4961,6 +5181,9 @@ impl Session {
             error!("failed to record rollout items: {e:#}");
             return false;
         }
+        if let Some(history) = &self.ephemeral_rollout_items {
+            history.lock().await.extend_from_slice(items);
+        }
         true
     }
 
@@ -5231,7 +5454,8 @@ impl Session {
                 TokenUsageContext::Sampling,
             )
             .await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
         result
     }
 
@@ -5389,7 +5613,8 @@ impl Session {
             estimated_total_tokens,
         )
         .await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn update_rate_limits(
@@ -5398,7 +5623,8 @@ impl Session {
         new_rate_limits: RateLimitSnapshot,
     ) {
         self.record_rate_limits_info(new_rate_limits).await;
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
@@ -5426,12 +5652,20 @@ impl Session {
         state.set_server_reasoning_included(included);
     }
 
-    pub(crate) async fn send_token_count_event(&self, turn_context: &TurnContext) {
+    pub(crate) async fn send_token_count_event(
+        &self,
+        turn_context: &TurnContext,
+        output_tokens_per_second: Option<f64>,
+    ) {
         let (info, rate_limits) = {
             let state = self.state.lock().await;
             state.token_info_and_rate_limits()
         };
-        let event = EventMsg::TokenCount(TokenCountEvent { info, rate_limits });
+        let event = EventMsg::TokenCount(TokenCountEvent {
+            info,
+            rate_limits,
+            output_tokens_per_second,
+        });
         self.send_event(turn_context, event).await;
     }
 
@@ -5440,7 +5674,8 @@ impl Session {
             let mut state = self.state.lock().await;
             state.set_token_usage_full(context_window);
         }
-        self.send_token_count_event(turn_context).await;
+        self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
+            .await;
     }
 
     pub(crate) async fn record_response_item_and_emit_turn_item(
@@ -5691,6 +5926,13 @@ async fn build_hooks_config(
     environment: Option<&TurnEnvironment>,
     disabled_plugin_ids: &[String],
 ) -> HooksConfig {
+    if config
+        .model
+        .as_deref()
+        .is_some_and(crate::claude_runtime::is_native_model)
+    {
+        return HooksConfig::default();
+    }
     let (hook_shell_program, hook_shell_argv) = environment
         .and_then(|environment| environment.shell.as_ref())
         .map(|shell| {

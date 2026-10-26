@@ -277,11 +277,33 @@ impl McpHandler {
             .and_then(codex_mcp::PreparedMcpCall::output_token_limit)
             .map(TruncationPolicy::Tokens)
             .unwrap_or(step_context.settings.model_info.truncation_policy.into());
+        let owned_wait = self.definition.tool_info.server_name == "codex_tui"
+            && self.definition.tool_info.tool.name == "wait_threads"
+            && self
+                .definition
+                .tool_info
+                .tool
+                .meta
+                .as_ref()
+                .and_then(|meta| meta.0.get("asm/interruptibleWait"))
+                == Some(&Value::Bool(true));
+        let (reason, wait_input) = if owned_wait {
+            let args: Value = serde_json::from_str(&payload)
+                .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
+            (Some(super::tui_wait::reason(&args)?), args)
+        } else {
+            (None, Value::Null)
+        };
+        let observation_cancel = if reason.is_some() {
+            cancellation_token.child_token()
+        } else {
+            cancellation_token.clone()
+        };
         let started = Instant::now();
         let result = handle_mcp_tool_call(
             Arc::clone(&session),
             &step_context,
-            &cancellation_token,
+            &observation_cancel,
             call_id.clone(),
             originating_call,
             &self.definition.tool_info,
@@ -290,8 +312,38 @@ impl McpHandler {
             tool_name,
             &source,
             payload,
-        )
-        .await;
+        );
+        let result = if let Some(reason) = &reason {
+            match super::tui_wait::observe(
+                result,
+                step_context.preempt.as_ref(),
+                &observation_cancel,
+            )
+            .await
+            {
+                Some(result) => result,
+                None if !cancellation_token.is_cancelled() => {
+                    crate::mcp_tool_call::HandledMcpToolCall {
+                        result: codex_protocol::mcp::CallToolResult {
+                            content: vec![
+                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason).to_string()}),
+                            ],
+                            structured_content: None,
+                            is_error: Some(false),
+                            meta: None,
+                        },
+                        tool_input: wait_input,
+                    }
+                }
+                None => {
+                    return Err(FunctionCallError::RespondToModel(
+                        "wait_threads cancelled".to_string(),
+                    ));
+                }
+            }
+        } else {
+            result.await
+        };
 
         Ok(boxed_tool_output(McpToolOutput {
             result: result.result,

@@ -26,7 +26,10 @@ impl StateRuntime {
                 let Some(runtime) = runtime.upgrade() else {
                     break;
                 };
-                if runtime.logs_pool.is_closed() {
+                let Some(logs_pool) = &runtime.logs_pool else {
+                    break;
+                };
+                if logs_pool.is_closed() {
                     break;
                 }
                 // Older versions write logs in sqlite_home. Keep the same retention policy
@@ -38,8 +41,7 @@ impl StateRuntime {
                         None
                     }
                 };
-                for pool in std::iter::once(runtime.logs_pool.as_ref()).chain(legacy_pool.as_ref())
-                {
+                for pool in std::iter::once(logs_pool.as_ref()).chain(legacy_pool.as_ref()) {
                     if let Err(err) = prune_by_age_and_size(
                         pool,
                         Utc::now().timestamp(),

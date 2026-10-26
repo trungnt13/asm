@@ -4,8 +4,7 @@ use std::sync::Arc;
 use super::LocalThreadStore;
 use super::live_writer;
 use super::model_context;
-use super::thread_history::find_source_turn;
-use super::thread_history::find_visible_turn;
+use super::thread_history::find_materialized_turn;
 use crate::ForkBoundary;
 use crate::PrepareForkParams;
 use crate::PreparedFork;
@@ -111,10 +110,9 @@ pub(super) async fn history_base_at_boundary(
     let position = match boundary {
         ForkBoundary::Latest => latest_position,
         ForkBoundary::ThroughTurn(turn_id) => {
-            let visible = store
-                .resolve_rollout_lineage_for_history_page(thread_id)
-                .await?;
-            let row = find_visible_turn(pool, &visible, turn_id.as_str()).await?;
+            let row =
+                find_materialized_turn(pool, lineage.segments().iter().rev(), turn_id.as_str())
+                    .await?;
             if row.status == "inProgress" {
                 return Err(ThreadStoreError::InvalidRequest {
                     message: format!("lastTurnId '{turn_id}' identifies an in-progress turn"),
@@ -137,10 +135,8 @@ pub(super) async fn history_base_at_boundary(
             }
         }
         ForkBoundary::BeforeTurn(turn_id) => {
-            let visible = store
-                .resolve_rollout_lineage_for_history_page(thread_id)
-                .await?;
-            let row = find_source_turn(pool, &visible, turn_id.as_str()).await?;
+            let row =
+                find_materialized_turn(pool, lineage.segments().iter(), turn_id.as_str()).await?;
             if row.rollout_end_ordinal == Some(row.rollout_ordinal) {
                 return Err(ThreadStoreError::InvalidRequest {
                     message: format!("turn {turn_id} does not have a persisted start boundary"),

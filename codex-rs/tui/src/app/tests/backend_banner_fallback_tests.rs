@@ -129,7 +129,7 @@ async fn backend_banner_fallback_updates_task_settings_and_keeps_notice() -> Res
             })
             .collect::<Vec<_>>();
         assert_eq!(notices.len(), 1);
-        insta::assert_snapshot!("backend_banner_fallback_notice", notices[0]);
+        insta::assert_snapshot!("backend_banner_fallback_notice", notices.join("\n\n"));
         assert!(!queued.iter().any(|event| matches!(
             event,
             AppEvent::PersistModelSelection { .. } | AppEvent::CodexOp(_)

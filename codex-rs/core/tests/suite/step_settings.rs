@@ -2249,7 +2249,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
             "type": "object",
             "properties": {
                 "target": {"type": "string", "description": format!("Agent on {model}.")},
-                "message": {"type": "string", "encrypted": true},
+                "message": {"type": "string"},
             },
             "required": ["target"],
             "additionalProperties": false,
@@ -2414,7 +2414,14 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                 "multi_agent_messages": MULTI_AGENT_TOOLS
                     .map(|name| (name.to_string(), json!({
                         "description": format!("{name} description for {model}."),
-                        "parameters": parameters(model),
+                        "parameters": ({
+                            let mut schema = parameters(model);
+                            if name == "wait_agent" {
+                                schema["properties"]["reason"] = json!({"type":"string", "description":codex_tools::WAIT_REASON_DESCRIPTION});
+                                schema["required"] = json!(["target", "reason"]);
+                            }
+                            schema
+                        }),
                     })))
                     .into_iter()
                     .collect::<serde_json::Map<String, Value>>(),
@@ -2422,7 +2429,12 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                 "channel_post_required": ["text"],
                 "exec_description": format!("Exec description for {model}.\n\nSome deferred nested tools may be omitted from this description. They are still available on the global `tools` object and listed in `ALL_TOOLS`.\nTo find one, filter `ALL_TOOLS` by `name` and `description`.\n\nTool availability can change between calls."),
                 "wait_description": format!("Wait description for {model}."),
-                "wait_parameters": wait_parameters(model),
+                "wait_parameters": ({
+                    let mut schema = wait_parameters(model);
+                    schema["properties"]["reason"] = json!({"type":"string", "description":codex_tools::WAIT_REASON_DESCRIPTION});
+                    schema["required"] = json!(["cell_id", "reason"]);
+                    schema
+                }),
             }))
             .to_vec(),
     );

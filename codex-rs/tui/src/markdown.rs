@@ -45,7 +45,7 @@ pub(crate) fn render_markdown_for_viewport(input: &str, width: u16) -> Vec<Hyper
             input,
             Some(width),
             /*cwd*/ None,
-            &crate::markdown_render::hide_web_link_destination,
+            &crate::markdown_render::hide_link_destination,
         );
     let mut rows = Vec::with_capacity(lines.len());
     for line in lines {
@@ -111,7 +111,7 @@ pub(crate) fn render_markdown_agent_with_links_and_cwd(
         width,
         cwd,
         /*inline_visualization_context*/ None,
-        ListSpacing::AfterMultiline,
+        ListSpacing::Compact,
     )
 }
 
@@ -131,7 +131,7 @@ pub(crate) fn render_markdown_agent_with_list_spacing(
     };
     let is_hidden_link_destination = |destination: &str| {
         rewritten.trusted_file_links.contains_key(destination)
-            || crate::markdown_render::hide_web_link_destination(destination)
+            || crate::markdown_render::hide_link_destination(destination)
     };
     let mut lines = crate::markdown_render::render_with_copy_sources(
         &normalized,
@@ -166,7 +166,7 @@ pub(crate) fn render_streaming_markdown_agent_with_links_and_cwd(
         &normalized,
         width,
         cwd,
-        &crate::markdown_render::hide_web_link_destination,
+        &crate::markdown_render::hide_link_destination,
         list_spacing,
     );
     if normalized != markdown_source {
@@ -627,7 +627,7 @@ mod tests {
         let mut out = Vec::new();
         append_markdown(src, /*width*/ None, /*cwd*/ None, &mut out);
         let lines = lines_to_strings(&out);
-        assert_eq!(lines, vec!["Before", "", "    code 1", "", "After"]);
+        assert_eq!(lines, vec!["Before", "    code 1", "After"]);
     }
 
     #[test]

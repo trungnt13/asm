@@ -78,7 +78,7 @@ async fn mxc_replaces_store_powershell_before_launch() -> Result<()> {
                 harness.server(),
                 &call_id,
                 &json!({
-                    "session_id": session_id,
+                    "reason": "", "session_id": session_id,
                     "chars": "",
                     "yield_time_ms": 1_000,
                 })

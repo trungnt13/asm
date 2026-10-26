@@ -5,6 +5,7 @@ use crate::style::accent_color;
 use crate::terminal_hyperlinks::LineWrapPolicy;
 use crate::terminal_hyperlinks::remap_source_wrapped_line;
 use crate::wrapping::adaptive_wrap_line_to_width;
+use codex_protocol::ThreadId;
 
 #[cfg_attr(not(test), allow(dead_code))]
 const RECAP_HEADING: &str = "Conversation recap";
@@ -387,6 +388,7 @@ impl HistoryCell for ThreadRecapLoadingCell {
 pub(crate) struct ThreadRecapHistoryCell {
     recap: String,
     next_action: Option<String>,
+    session_id: Option<ThreadId>,
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -395,7 +397,13 @@ impl ThreadRecapHistoryCell {
         Self {
             recap,
             next_action: None,
+            session_id: None,
         }
+    }
+
+    pub(crate) fn with_session_id(mut self, session_id: ThreadId) -> Self {
+        self.session_id = Some(session_id);
+        self
     }
 
     pub(crate) fn with_next_action(mut self, next_action: Option<String>) -> Self {
@@ -422,6 +430,9 @@ impl HistoryCell for ThreadRecapHistoryCell {
                 "Next: ".bold().fg(accent_color()),
                 "".into(),
             ));
+        }
+        if let Some(session_id) = self.session_id {
+            body.push(Line::from(format!("Session: {session_id}")));
         }
         let mut body = body.into_iter().map(Line::italic).collect::<Vec<_>>();
         let prefix = Line::from(vec!["  ".into(), "↳ ".dim(), "Recap: ".bold()]).italic();
@@ -468,6 +479,9 @@ impl HistoryCell for ThreadRecapHistoryCell {
         lines.extend(raw_lines_from_source(&self.recap));
         if let Some(action) = &self.next_action {
             lines.extend(raw_lines_from_source(&format!("Next: {action}")));
+        }
+        if let Some(session_id) = self.session_id {
+            lines.push(Line::from(format!("Session: {session_id}")));
         }
         lines
     }

@@ -1,6 +1,7 @@
 use codex_protocol::ThreadId;
 use sqlx::Row;
 
+use super::super::LocalThreadStore;
 use super::super::rollout_lineage::RolloutLineage;
 use super::super::rollout_lineage::RolloutLineageSegment;
 use super::sqlite_integer;
@@ -19,22 +20,43 @@ pub(in crate::local) struct TurnRow {
 }
 
 pub(in crate::local) async fn find_source_turn(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     lineage: &RolloutLineage,
     turn_id: &str,
 ) -> ThreadStoreResult<TurnRow> {
-    find_turn(pool, lineage.segments().iter(), turn_id).await
+    find_turn(store, pool, lineage.segments().iter(), turn_id).await
 }
 
 pub(in crate::local) async fn find_visible_turn(
+    store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
     lineage: &RolloutLineage,
     turn_id: &str,
 ) -> ThreadStoreResult<TurnRow> {
-    find_turn(pool, lineage.segments().iter().rev(), turn_id).await
+    find_turn(store, pool, lineage.segments().iter().rev(), turn_id).await
 }
 
 async fn find_turn<'a>(
+    store: &LocalThreadStore,
+    pool: &sqlx::SqlitePool,
+    segments: impl Iterator<Item = &'a RolloutLineageSegment>,
+    turn_id: &str,
+) -> ThreadStoreResult<TurnRow> {
+    for segment in segments {
+        store.ensure_history_projection(segment).await?;
+        if let Some(row) = query_turn_row(pool, segment, turn_id).await? {
+            return Ok(row);
+        }
+    }
+    Err(ThreadStoreError::InvalidRequest {
+        message: format!("turn not found: {turn_id}"),
+    })
+}
+
+// Fork and revert capture boundaries under writer ownership after materializing the lineage.
+// Query those snapshots without trying to acquire the same writer lock again.
+pub(in crate::local) async fn find_materialized_turn<'a>(
     pool: &sqlx::SqlitePool,
     segments: impl Iterator<Item = &'a RolloutLineageSegment>,
     turn_id: &str,
@@ -49,7 +71,7 @@ async fn find_turn<'a>(
     })
 }
 
-async fn query_turn_row(
+pub(super) async fn query_turn_row(
     pool: &sqlx::SqlitePool,
     segment: &RolloutLineageSegment,
     turn_id: &str,

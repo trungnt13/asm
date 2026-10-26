@@ -1,10 +1,10 @@
 //! Local file-link destination parsing and display for Markdown transcripts.
 //!
-//! Local Markdown links preserve their labels. Since ordinary file destinations have no trusted
-//! navigation capability, the renderer also displays their target, shortening absolute paths
-//! relative to the session working directory when possible. This module only formats destinations;
-//! it does not resolve files or infer execution-host paths from the frontend filesystem.
+//! Terminal links use lexical file URLs without filesystem access.
+//! Text-only output retains destination text, shortened relative to the session working directory.
+//! Never infer execution-host paths from the frontend home or filesystem.
 
+use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use codex_utils_string::normalize_markdown_hash_location_suffix;
 use regex_lite::Regex;
@@ -27,7 +27,9 @@ static HASH_LOCATION_SUFFIX_RE: LazyLock<Regex> =
     });
 
 pub(super) fn is_local_path_like_link(dest_url: &str) -> bool {
-    dest_url.starts_with("file://")
+    dest_url
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
         || dest_url.starts_with('/')
         || dest_url.starts_with("~/")
         || dest_url.starts_with("./")
@@ -38,6 +40,52 @@ pub(super) fn is_local_path_like_link(dest_url: &str) -> bool {
             [drive, b':', separator, ..]
                 if drive.is_ascii_alphabetic() && matches!(separator, b'/' | b'\\')
         )
+}
+
+pub(super) fn is_markdown_file_link(destination: &str) -> bool {
+    is_local_path_like_link(destination)
+        || (!destination.is_empty()
+            && !destination.starts_with('#')
+            && (Url::parse(destination).is_err()
+                || extract_colon_location_suffix(destination).is_some_and(|suffix| {
+                    let basename = &destination[..destination.len() - suffix.len()];
+                    basename.contains('.') && Url::parse(basename).is_err()
+                })))
+}
+
+// Build URLs lexically: the session can use another OS, home, or filesystem.
+pub(super) fn local_link_destination(destination: &str, cwd: Option<&Path>) -> Option<String> {
+    if destination.chars().any(char::is_control) || destination.len() > 8 * 1024 {
+        return None;
+    }
+    let (mut path, location) = parse_local_link_target(destination)?;
+    if !is_absolute_local_link_path(&path) {
+        if path.starts_with("~/") {
+            return None;
+        }
+        let cwd = normalize_local_link_path_text(cwd?.to_str()?);
+        if !is_absolute_local_link_path(&cwd) {
+            return None;
+        }
+        path = format!("{}/{path}", cwd.trim_end_matches('/'));
+    }
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    let path = LegacyAppPathString::from_string(path).to_inferred_path_uri()?;
+    let mut url = Url::parse(&path.to_string()).ok()?;
+    // File URL fragments retain the reference, but line opening remains terminal-dependent.
+    let fragment = destination
+        .rsplit_once('#')
+        .map(|(_, fragment)| fragment)
+        .filter(|fragment| HASH_LOCATION_SUFFIX_RE.is_match(fragment))
+        .or_else(|| {
+            location
+                .as_deref()
+                .map(|location| location.trim_start_matches(':'))
+        });
+    url.set_fragment(fragment);
+    Some(url.to_string())
 }
 
 /// Parse a local link target into normalized path text plus an optional location suffix.
@@ -62,14 +110,23 @@ pub(super) fn render_local_link_target(dest_url: &str, cwd: Option<&Path>) -> Op
 /// Returns `None` only when the destination looks like a `file://` URL but cannot be parsed into a
 /// local path. Plain path-like inputs always return `Some(...)` even if they are relative.
 fn parse_local_link_target(dest_url: &str) -> Option<(String, Option<String>)> {
-    if dest_url.starts_with("file://") {
+    if dest_url
+        .get(..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"))
+    {
         let url = Url::parse(dest_url).ok()?;
         // Infer the path's OS from the URI, not the host running the TUI.
         let path = PathUri::parse(&url[..url::Position::AfterPath]).ok()?;
-        let path_text = normalize_local_link_path_text(&path.inferred_native_path_string());
-        let location_suffix = url
+        let mut path_text = normalize_local_link_path_text(&path.inferred_native_path_string());
+        let mut location_suffix = url
             .fragment()
             .and_then(normalize_hash_location_suffix_fragment);
+        if location_suffix.is_none()
+            && let Some(suffix) = extract_colon_location_suffix(url.path())
+        {
+            path_text.truncate(path_text.len() - suffix.len());
+            location_suffix = Some(suffix);
+        }
         return Some((path_text, location_suffix));
     }
 

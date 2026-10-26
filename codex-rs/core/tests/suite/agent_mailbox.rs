@@ -171,7 +171,7 @@ async fn idle_mail_survives_eviction_and_preserves_followup_order() -> Result<()
                 "wait-note",
                 MULTI_AGENT_V2_NAMESPACE,
                 "wait_agent",
-                r#"{"timeout_ms":1}"#,
+                r#"{"reason":"","timeout_ms":1}"#,
             ),
             ev_completed("worker-wait"),
         ]),

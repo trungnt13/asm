@@ -97,6 +97,7 @@ async fn only_a_confirmed_empty_new_task_shows_the_sparkle() -> Result<()> {
         let (mut app, _events, _ops) = make_test_app_with_channels().await;
         app.local_settings.tui.animations = true;
         app.local_settings.tui.effects.starfield = true;
+        let server = crate::start_embedded_app_server_for_picker(&app.config).await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let mut thread = started("gpt-6-astra");
         let presentation = if scenario == "empty_resume" {
@@ -120,6 +121,7 @@ async fn only_a_confirmed_empty_new_task_shows_the_sparkle() -> Result<()> {
             .flatten();
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &server,
             thread,
             presentation,
             initial_message,
@@ -132,6 +134,7 @@ async fn only_a_confirmed_empty_new_task_shows_the_sparkle() -> Result<()> {
             !visible(&app.chat_widget),
             "automatic model update: {scenario}"
         );
+        server.shutdown().await?;
     }
     Ok(())
 }
@@ -148,6 +151,7 @@ async fn disconnected_sparkle_input_routed_by_app_consumes_the_opportunity_witho
             let mut tui = crate::tui::test_support::make_test_tui()?;
             app.replace_chat_widget_with_app_server_thread(
                 &mut tui,
+                &server,
                 started(model),
                 ThreadAttachPresentation::Fresh,
                 /*initial_user_message*/ None,
@@ -204,6 +208,7 @@ async fn commands_can_precede_the_sparkle_but_inserted_or_typed_drafts_cannot() 
         let mut tui = crate::tui::test_support::make_test_tui()?;
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &server,
             started("gpt-5.5"),
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
@@ -287,6 +292,7 @@ async fn overlays_shortcuts_and_key_chords_leave_the_main_sparkle_untouched() ->
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &server,
         started("gpt-6-astra"),
         ThreadAttachPresentation::Fresh,
         /*initial_user_message*/ None,
@@ -387,6 +393,7 @@ async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()>
         let original_id = thread.session.thread_id;
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &server,
             thread,
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
@@ -446,6 +453,7 @@ async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()>
             "old_task" => {
                 app.replace_chat_widget_with_app_server_thread(
                     &mut tui,
+                    &server,
                     started("gpt-5.5"),
                     ThreadAttachPresentation::Fresh,
                     /*initial_user_message*/ None,
@@ -496,6 +504,7 @@ async fn astra_picker_confirms_the_model_at_application_after_an_automatic_updat
         let thread = server.start_thread(&app.config).await?;
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &server,
             thread,
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
@@ -562,7 +571,7 @@ async fn astra_picker_confirms_the_model_at_application_after_an_automatic_updat
             let lines = rendered.lines().collect::<Vec<_>>();
             let prompt = lines
                 .iter()
-                .position(|line| line.contains("Ask Codex to do anything"))
+                .position(|line| line.contains("Ask ASM to do anything"))
                 .expect("empty composer shows its placeholder");
             let composer = lines[prompt.saturating_sub(1)..=prompt + 1].join("\n");
             snapshots.push(format!("{picker}:\n{composer}"));
@@ -596,6 +605,7 @@ fn astra_picker_xhigh_applies_on_a_bounded_stack() -> Result<()> {
                 let thread = server.start_thread(&app.config).await?;
                 Box::pin(app.replace_chat_widget_with_app_server_thread(
                     &mut tui,
+                    &server,
                     thread,
                     ThreadAttachPresentation::Fresh,
                     /*initial_user_message*/ None,
@@ -666,6 +676,7 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
         assert_eq!(thread.session.model, "gpt-5.5");
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &server,
             thread,
             ThreadAttachPresentation::Fresh,
             /*initial_user_message*/ None,
@@ -697,7 +708,7 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
         let lines = rendered.lines().collect::<Vec<_>>();
         let prompt = lines
             .iter()
-            .position(|line| line.contains("Ask Codex to do anything"))
+            .position(|line| line.contains("Ask ASM to do anything"))
             .expect("empty composer shows its placeholder");
         let composer = lines[prompt.saturating_sub(1)..=prompt + 1].join("\n");
         assert_eq!(
@@ -742,9 +753,11 @@ async fn a_read_only_command_can_return_to_active_stars_but_mention_ends_them() 
     app.local_settings.tui.animations = true;
     app.local_settings.tui.effects.starfield = true;
     app.local_settings.tui.disable_paste_burst = Some(true);
+    let server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &server,
         started("gpt-6-astra"),
         ThreadAttachPresentation::Fresh,
         /*initial_user_message*/ None,
@@ -762,6 +775,7 @@ async fn a_read_only_command_can_return_to_active_stars_but_mention_ends_them() 
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
     assert!(!visible(&app.chat_widget));
+    server.shutdown().await?;
     Ok(())
 }
 
@@ -796,7 +810,7 @@ async fn early_input_and_real_work_consume_the_sparkle() -> Result<()> {
             )
             .await;
             let mut tui = crate::tui::test_support::make_test_tui()?;
-            app.drain_active_thread_events(&mut tui).await?;
+            app.drain_active_thread_events(&mut tui, &server).await?;
         } else if scenario == "review" {
             app.chat_widget.on_review_started();
         }

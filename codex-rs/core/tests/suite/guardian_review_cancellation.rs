@@ -198,7 +198,7 @@ async fn cancelling_tool_aborts_its_guardian_review(cancellation: Cancellation) 
                         "terminate-cell",
                         "wait",
                         &json!({
-                            "cell_id": cell_id,
+                            "reason":"", "cell_id": cell_id,
                             "terminate": true,
                         })
                         .to_string(),

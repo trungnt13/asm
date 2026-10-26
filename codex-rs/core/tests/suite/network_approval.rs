@@ -230,7 +230,7 @@ async fn guardian_network_approval_preserves_action_and_outcome_routing(
                         &response_id,
                         "write_stdin",
                         &json!({
-                            "session_id": session_id.parse::<i32>().expect("session id"),
+                            "reason": "", "session_id": session_id.parse::<i32>().expect("session id"),
                             "chars": "",
                             "yield_time_ms": 1_000,
                         })
@@ -387,7 +387,7 @@ async fn strict_auto_review_routes_network_approval_to_guardian_when_user_review
                             &response_id,
                             "write_stdin",
                             &json!({
-                                "session_id": session_id.parse::<i32>().expect("session id"),
+                                "reason": "", "session_id": session_id.parse::<i32>().expect("session id"),
                                 "chars": "",
                                 "yield_time_ms": 1_000,
                             })
@@ -620,7 +620,7 @@ PY"#
                 poll_call_id,
                 "write_stdin",
                 &json!({
-                    "session_id": 1000, "chars": "", "yield_time_ms": 10_000,
+                    "reason": "", "session_id": 1000, "chars": "", "yield_time_ms": 10_000,
                 })
                 .to_string(),
             ),
@@ -753,7 +753,7 @@ async fn timed_out_guardian_network_review_uses_timeout_outcome_without_user_fal
                 poll_call_id,
                 "write_stdin",
                 &serde_json::to_string(&json!({
-                    "session_id": 1000,
+                    "reason": "", "session_id": 1000,
                     "chars": "",
                     "yield_time_ms": 1_000,
                 }))?,
@@ -2360,7 +2360,7 @@ async fn guardian_receives_exact_trigger_for_single_network_request() -> Result<
                     &response_id,
                     "write_stdin",
                     &json!({
-                        "session_id": session_id.parse::<i32>().expect("session id"),
+                        "reason": "", "session_id": session_id.parse::<i32>().expect("session id"),
                         "chars": "",
                         "yield_time_ms": 1_000,
                     })

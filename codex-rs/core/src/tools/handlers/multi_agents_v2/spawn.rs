@@ -107,12 +107,17 @@ async fn handle_spawn_agent(
         step_context,
         payload,
         call_id,
-        source,
         ..
     } = invocation;
     let turn = &step_context.turn;
     let arguments = function_arguments(payload)?;
     let args: SpawnAgentArgs = parse_arguments(&arguments)?;
+    let mut spawn_arguments: serde_json::Value = parse_arguments(&arguments)?;
+    if let Some(arguments) = spawn_arguments.as_object_mut() {
+        arguments.remove("message");
+    }
+    let spawn_arguments = serde_json::to_string_pretty(&spawn_arguments)
+        .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
     let fork_mode = args.fork_mode()?;
     let message = message_content(args.message)?;
     let role_name = args
@@ -127,7 +132,8 @@ async fn handle_spawn_agent(
         &call_id,
         ThreadSpawnRequest {
             task_name: args.task_name,
-            message: agent_message_from_tool(message, &source),
+            spawn_arguments,
+            message: AgentMessage::Plaintext(message),
             fork_mode: fork_mode.clone(),
             agent_type: args.agent_type.clone(),
             model: args.model,

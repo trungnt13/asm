@@ -144,6 +144,7 @@ struct TitleArguments {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WaitArguments {
+    reason: String,
     targets: Vec<WaitTarget>,
     timeout_ms: Option<u64>,
 }
@@ -199,9 +200,10 @@ pub(crate) fn tool_specs() -> Vec<DynamicToolSpec> {
                         "required": ["threadId"]
                     }
                 },
+                "reason": {"type": "string", "description": codex_tools::WAIT_REASON_DESCRIPTION},
                 "timeoutMs": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT_TIMEOUT_MS}
             }),
-            vec!["targets"],
+            vec!["targets", "reason"],
         ),
         (
             "send_message_to_thread",
@@ -744,6 +746,16 @@ async fn execute_inner(
                 return Err("title must not be empty".to_string());
             }
             let thread_id = arguments.thread_id.unwrap_or(params.thread_id);
+            if let Some(app_event_tx) = app_event_tx {
+                let thread_id = codex_protocol::ThreadId::from_string(&thread_id)
+                    .map_err(|error| error.to_string())?;
+                let (stopped, receiver) = tokio::sync::oneshot::channel();
+                app_event_tx.send(AppEvent::StopAutomaticThreadTitles { thread_id, stopped });
+                tokio::time::timeout(Duration::from_secs(/*secs*/ 30), receiver)
+                    .await
+                    .map_err(|_| "TUI did not acknowledge manual title update".to_string())?
+                    .map_err(|_| "TUI closed before manual title update".to_string())??;
+            }
             let title = arguments.title;
             let _: ThreadSetNameResponse =
                 request(&handle, |request_id| ClientRequest::ThreadSetName {
@@ -787,6 +799,7 @@ async fn execute_inner(
         }
         "wait_threads" => {
             let arguments: WaitArguments = parse_arguments(params.arguments)?;
+            let reason = codex_tools::WaitReason::new(&arguments.reason)?;
             let timeout_ms = arguments.timeout_ms.unwrap_or(MAX_WAIT_TIMEOUT_MS);
             if arguments.targets.is_empty() || arguments.targets.len() > MAX_WAIT_TARGETS {
                 return Err(format!(
@@ -817,6 +830,9 @@ async fn execute_inner(
             let result =
                 |timed_out: bool, wake: Option<Value>, polls: Vec<Value>, errors: Vec<Value>| {
                     let mut result = json!({"timedOut": timed_out, "wake": wake, "polls": polls});
+                    if let Some(reminder) = reason.reminder(codex_tools::WaitReminder::Returned) {
+                        result["message"] = json!(reminder);
+                    }
                     if !errors.is_empty() {
                         result["errors"] = json!(errors);
                     }
@@ -1024,7 +1040,8 @@ async fn execute_inner(
                                         "id": item.id, "turnId": turn.id, "type": "webSearch",
                                         "name": "webSearch", "status": null
                                     })),
-                                    ThreadItemPayload::UserMessage { .. }
+                                    ThreadItemPayload::InterAgentMessage { .. }
+                                    | ThreadItemPayload::UserMessage { .. }
                                     | ThreadItemPayload::FunctionCallOutput { .. }
                                     | ThreadItemPayload::HookPrompt { .. }
                                     | ThreadItemPayload::AgentMessage { .. }
@@ -1523,6 +1540,9 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
                 "status": status, "senderThreadId": sender_thread_id,
                 "receiverThreadIds": receiver_thread_ids, "prompt": prompt,
                 "model": model, "reasoningEffort": reasoning_effort
+            }),
+            ThreadItemPayload::InterAgentMessage { id, .. } => json!({
+                "type": "interAgentMessage", "id": id
             }),
             ThreadItemPayload::SubAgentActivity {
                 id,

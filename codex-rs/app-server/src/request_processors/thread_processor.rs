@@ -4,6 +4,9 @@ mod daemon_continuation;
 #[path = "daemon_snapshot.rs"]
 mod daemon_snapshot;
 
+#[path = "system1_stats.rs"]
+mod system1_stats;
+
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_owned_thread_settings;
 use super::persisted_resume_settings::latest_persisted_model_settings;
@@ -1699,6 +1702,10 @@ impl ThreadRequestProcessor {
         let thread_originator = config_snapshot.originator.clone();
 
         let response = ThreadStartResponse {
+            system1_enabled: config_snapshot.system1_enabled,
+            system1_revision: config_snapshot.system1_revision,
+            system1_error: config_snapshot.system1_error,
+            system1_failure_episode: config_snapshot.system1_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model,
@@ -2236,6 +2243,11 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
+        if codex_protocol::openai_models::is_native_runtime_model(&config_snapshot.model) {
+            return Err(invalid_request(
+                "Native runtime history cannot be reverted; start a fresh thread",
+            ));
+        }
         let mut config = thread.config().await.as_ref().clone();
         // Give the replacement its own pending lifetime before removal revokes the old runtime.
         let ema_cancellation = config
@@ -2551,6 +2563,13 @@ impl ThreadRequestProcessor {
 
         let (_, thread) = self.load_thread(&thread_id).await?;
         ensure_direct_input_allowed(thread.as_ref()).await?;
+        if codex_protocol::openai_models::is_native_runtime_model(
+            &thread.config_snapshot().await.model,
+        ) {
+            return Err(invalid_request(
+                "Native runtimes do not support manual compaction; start a fresh thread instead",
+            ));
+        }
         self.config_manager
             .check_thread_model_provider(thread.config().await.as_ref())
             .await
@@ -4219,6 +4238,27 @@ impl ThreadRequestProcessor {
                 runtime_workspace_roots = Some(resolve_runtime_workspace_roots(restored_roots));
             }
         }
+        // A persisted fork snapshots its selected tier, unlike new-thread catalog defaults.
+        // Do not recover a parent's settings from the inherited prefix or replace a caller override.
+        let service_tier = service_tier.or_else(|| {
+            if request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key("service_tier"))
+            {
+                return None;
+            }
+            if let InitialHistory::Resumed(resumed) = &thread_history
+                && let Some(RolloutItem::SessionMeta(meta)) = resumed.history.first()
+                && meta.meta.id == resumed.conversation_id
+                && meta.meta.forked_from_id.is_some()
+                && meta.meta.thread_source == Some(codex_protocol::protocol::ThreadSource::User)
+            {
+                // Older snapshots omit the tier; only restore a recorded selection.
+                history_settings.and_then(|settings| settings.service_tier.clone().map(Some))
+            } else {
+                None
+            }
+        });
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,
@@ -4525,6 +4565,10 @@ impl ThreadRequestProcessor {
 
                 let thread_originator = config_snapshot.originator.clone();
                 let response = ThreadResumeResponse {
+                    system1_enabled: config_snapshot.system1_enabled,
+                    system1_revision: config_snapshot.system1_revision,
+                    system1_error: config_snapshot.system1_error,
+                    system1_failure_episode: config_snapshot.system1_failure_episode,
                     thread,
                     disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
                     model: session_configured.model,
@@ -5319,13 +5363,75 @@ impl ThreadRequestProcessor {
                 "`experimentalPredictionMode` requires a thread id without a path or turn cutoff",
             ));
         }
-        let source_thread = self
-            .read_stored_thread_for_resume(
+        let temporary_source = if path.is_none() && !ephemeral && !experimental_prediction_mode {
+            let id = ThreadId::from_string(&thread_id)
+                .map_err(|err| invalid_request(format!("invalid session id: {err}")))?;
+            if let Ok(parent) = self.thread_manager.get_thread(id).await {
+                parent
+                    .ephemeral_fork_history()
+                    .await
+                    .map_err(|err| invalid_request(err.to_string()))?
+                    .map(|items| (id, parent, items))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let temporary_source_history = temporary_source.is_some();
+        let mut source_thread = if let Some((source_id, parent, items)) = temporary_source {
+            let snapshot = parent.config_snapshot().await;
+            let source_state = self.thread_state_manager.thread_state(source_id).await;
+            let project_id = source_state.lock().await.ephemeral_project_id.clone();
+            let now = chrono::Utc::now();
+            StoredThread {
+                originator: Some(snapshot.originator),
+                thread_id: source_id,
+                extra_config: None,
+                rollout_path: None,
+                forked_from_id: snapshot.forked_from_thread_id,
+                parent_thread_id: None,
+                preview: preview_from_rollout_items(&items),
+                name: None,
+                model_provider: snapshot.model_provider_id,
+                model: Some(snapshot.model),
+                reasoning_effort: snapshot.reasoning_effort,
+                created_at: now,
+                updated_at: now,
+                recency_at: now,
+                archived_at: None,
+                section: None,
+                section_position: None,
+                section_entered_at: None,
+                project_id,
+                daybreak_enabled: None,
+                cwd: snapshot.environments.legacy_fallback_cwd.to_path_buf(),
+                cli_version: String::new(),
+                source: snapshot.session_source,
+                history_mode: snapshot.history_mode,
+                thread_source: snapshot.thread_source,
+                agent_nickname: None,
+                agent_role: None,
+                agent_path: None,
+                git_info: None,
+                approval_mode: snapshot.approval_policy,
+                permission_profile: snapshot.permission_profile,
+                token_usage: None,
+                first_user_message: None,
+                history: Some(codex_thread_store::StoredThreadHistory {
+                    thread_id: source_id,
+                    items,
+                    revision: None,
+                }),
+            }
+        } else {
+            self.read_stored_thread_for_resume(
                 &thread_id,
                 path.as_ref(),
                 /*include_history*/ false,
             )
-            .await?;
+            .await?
+        };
         let loaded_parent = self
             .thread_manager
             .get_thread(source_thread.thread_id)
@@ -5425,7 +5531,7 @@ impl ThreadRequestProcessor {
             .name
             .as_deref()
             .and_then(codex_core::util::normalize_thread_name);
-        let mut prepared_fork = if paginated_source {
+        let mut prepared_fork = if paginated_source && !temporary_source_history {
             let boundary = match (last_turn_id.as_deref(), before_turn_id.as_deref()) {
                 (Some(turn_id), None) => {
                     codex_thread_store::ForkBoundary::ThroughTurn(turn_id.to_string())
@@ -5459,6 +5565,14 @@ impl ThreadRequestProcessor {
         };
         let source_history_items = if let Some(prepared_fork) = prepared_fork.as_ref() {
             Arc::clone(&prepared_fork.model_context)
+        } else if temporary_source_history {
+            Arc::new(
+                source_thread
+                    .history
+                    .take()
+                    .ok_or_else(|| internal_error("temporary replay history is unavailable"))?
+                    .items,
+            )
         } else {
             let mut source_thread = self
                 .read_stored_thread_for_resume(
@@ -5751,6 +5865,7 @@ impl ThreadRequestProcessor {
                 .map_err(|err| core_thread_write_error("inherit source thread name", err))?;
         }
         let inherited_goal = if defer_goal_continuation
+            && !temporary_source_history
             && session_configured.rollout_path.is_some()
             && goals_enabled
         {
@@ -5860,6 +5975,8 @@ impl ThreadRequestProcessor {
         apply_live_thread_settings(&mut thread, &config_snapshot);
         if thread.path.is_none() {
             thread.project_id = inherited_project_id.clone();
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            thread_state.lock().await.ephemeral_project_id = inherited_project_id;
         }
 
         self.thread_watch_manager
@@ -5877,6 +5994,10 @@ impl ThreadRequestProcessor {
             thread_response_active_permission_profile(config_snapshot.active_permission_profile);
         let thread_originator = config_snapshot.originator.clone();
         let response = ThreadForkResponse {
+            system1_enabled: config_snapshot.system1_enabled,
+            system1_revision: config_snapshot.system1_revision,
+            system1_error: config_snapshot.system1_error,
+            system1_failure_episode: config_snapshot.system1_failure_episode,
             thread: thread.clone(),
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model.clone(),
@@ -6418,6 +6539,7 @@ fn stored_turn_to_api_turn(
         .map(stored_thread_item_to_api_item)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Turn {
+        token_usage: None,
         id: turn.turn_id,
         root_turn_id: turn.root_turn_id,
         items,

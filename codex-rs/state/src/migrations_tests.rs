@@ -573,7 +573,7 @@ INSERT INTO thread_items (thread_id, turn_id, item_id, rollout_ordinal, created_
     .fetch_all(&pool)
     .await
     .expect("old-writer items should load");
-    assert_eq!(ordinals, vec![(11, 11), (12, 12), (13, 0), (14, 0)]);
+    assert_eq!(ordinals, vec![(13, 0), (14, 0)]);
 
     pool.close().await;
 }
@@ -644,10 +644,15 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     let checkpoint = sqlx::query_as::<_, (i64, i64)>(
         "SELECT next_rollout_byte_offset, next_rollout_ordinal FROM thread_history_projection_state WHERE thread_id = 'thread-1'",
     )
-    .fetch_one(&pool)
+    .fetch_optional(&pool)
     .await
-    .expect("existing projection checkpoint survives migration");
-    assert_eq!(checkpoint, (42, 3));
+    .expect("derived projection checkpoint is invalidated for replay");
+    assert_eq!(checkpoint, None);
+    // Restore the older-writer checkpoint fixture after the derived cache reset.
+    sqlx::query("INSERT INTO thread_history_projection_state (thread_id, next_rollout_byte_offset, next_rollout_ordinal) VALUES ('thread-1', 42, 3)")
+        .execute(&pool)
+        .await
+        .expect("restore the checkpoint for older-writer cleanup");
 
     let older_pool = sqlite
         .open_thread_history_db(&older_migrator, /*telemetry_override*/ None)
@@ -669,7 +674,7 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .fetch_all(&older_pool)
     .await
     .expect("old turns and older writers leave causal roots unknown");
-    assert_eq!(roots, vec![None, None]);
+    assert_eq!(roots, vec![None]);
     let ordinary_items = sqlx::query_as::<_, (String, String)>(
         "SELECT item_id, turn_id FROM thread_items WHERE thread_id = ? ORDER BY rollout_ordinal",
     )
@@ -679,10 +684,7 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .expect("older binaries should never observe turnless realtime items");
     assert_eq!(
         ordinary_items,
-        vec![
-            ("existing-item".to_string(), "turn-1".to_string()),
-            ("older-writer-item".to_string(), "turn-1".to_string()),
-        ]
+        vec![("older-writer-item".to_string(), "turn-1".to_string())]
     );
     let lifecycle_timestamps = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
         "SELECT started_at_ms, completed_at_ms FROM thread_items ORDER BY rollout_ordinal",
@@ -690,7 +692,7 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .fetch_all(&older_pool)
     .await
     .expect("old rows and older writers leave lifecycle timestamps unknown");
-    assert_eq!(lifecycle_timestamps, vec![(None, None), (None, None)]);
+    assert_eq!(lifecycle_timestamps, vec![(None, None)]);
     sqlx::query("DELETE FROM thread_history_projection_state WHERE thread_id = ?")
         .bind("thread-1")
         .execute(&older_pool)

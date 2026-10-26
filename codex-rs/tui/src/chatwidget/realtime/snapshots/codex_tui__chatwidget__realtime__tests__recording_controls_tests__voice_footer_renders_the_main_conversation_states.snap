@@ -3,48 +3,54 @@ source: tui/src/chatwidget/realtime/recording_controls_tests.rs
 expression: "states.join(\"\\n\\n\")"
 ---
 connecting:
+                                                                           Main
  voice ◌ connecting                                                 /voice stop
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   status line stays visible
 
 listening:
+                                                                           Main
  voice ● listening                                      f9 mute     /voice stop
    mic ▁▁▁▁▁▁  codex ▁▁▁▁▁▁
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   status line stays visible
 
 speaking:
+                                                                           Main
  voice ● speaking                                       f9 mute     /voice stop
    mic ▁▁▇▇▇▇  codex ▁▁████
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   status line stays visible
 
 muted:
+                                                                           Main
  voice ◌ muted                                          f9 unmute   /voice stop
    mic ▁▁▁▁▁▁  codex ▁▁▇▇▇▇
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   status line stays visible
 
 transcript:
+                                                                           Main
  voice ● speaking                                       f9 mute     /voice stop
    mic ▁▁▄▄▄▄  codex ▁▁▄▄▄▄
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   status line stays visible
 
 interrupted:
+                                                                           Main
  voice ● heard                                          f9 mute     /voice stop
    mic ▁▁▄▄▄▄  codex ▁▁▄▄▄▄
 
-› Ask Codex to do anything
+› Ask ASM to do anything
 
   status line stays visible

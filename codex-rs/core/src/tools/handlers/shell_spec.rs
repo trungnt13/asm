@@ -1,3 +1,4 @@
+use crate::unified_exec::BackgroundTerminalTimeoutBounds;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
@@ -107,8 +108,12 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
     })
 }
 
-pub fn create_write_stdin_tool() -> ToolSpec {
+pub(crate) fn create_write_stdin_tool(bounds: BackgroundTerminalTimeoutBounds) -> ToolSpec {
     let properties = BTreeMap::from([
+        (
+            "reason".to_string(),
+            JsonSchema::string(Some("Required when polling without input. Describe what you are waiting for and what work you should resume after an interruption. At most 500 characters; use an empty string for no reminder.".to_string())),
+        ),
         (
             "session_id".to_string(),
             JsonSchema::number(Some(
@@ -124,7 +129,7 @@ pub fn create_write_stdin_tool() -> ToolSpec {
         (
             "yield_time_ms".to_string(),
             JsonSchema::number(Some(
-                "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.".to_string(),
+                format!("Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait {}-{} ms. A completed process returns sooner.", bounds.min_ms, bounds.max_ms),
             )),
         ),
         (
@@ -211,6 +216,10 @@ fn unified_exec_output_schema() -> Value {
             "original_token_count": {
                 "type": "number",
                 "description": "Approximate token count before output truncation."
+            },
+            "wait_reminder": {
+                "type": "string",
+                "description": "Pending-work context, separate from command output."
             },
             "output": {
                 "type": "string",

@@ -222,17 +222,84 @@ impl Session {
     /// of task kind. Publication does not propagate to child sessions or require
     /// the task to sample; consumers using initial settings remain unchanged.
     ///
-    /// Callers must serialize updates through completion, including model
-    /// resolution, so each sparse patch sees the preceding publication.
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "the final managed-policy check and active settings publication must remain atomic"
-    )]
+    /// Updates share the persistent-settings permit through publication.
+    #[tracing::instrument(skip_all)]
     pub(super) async fn apply_turn_settings(
         &self,
         turn_id: &str,
         update: TurnSettingsUpdate,
     ) -> TurnSettingsUpdateOutcome {
+        let _guard = super::thread_settings::acquire_persistence_lock(self).await;
+        self.apply_turn_settings_locked(
+            turn_id, update, /*expected_task_done*/ None, /*system1_guard*/ None,
+        )
+        .await
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn apply_system1_turn_settings(
+        &self,
+        turn: &TurnContext,
+        expected: &Arc<ResolvedStepSettings>,
+        expected_task_done: &Arc<tokio::sync::Notify>,
+        guard: &super::system1_task::System1DecisionGuard,
+        effort: codex_protocol::openai_models::ReasoningEffort,
+    ) -> TurnSettingsUpdateOutcome {
+        let Ok(_settings_guard) = self.thread_settings_persistence.try_acquire() else {
+            return TurnSettingsUpdateOutcome::TargetUnavailable;
+        };
+        if self.system1_paused()
+            || guard.freshness.is_cancelled()
+            || tokio::time::Instant::now() >= guard.deadline
+            || !Arc::ptr_eq(&turn.next_step_settings.load_full(), expected)
+        {
+            return TurnSettingsUpdateOutcome::TargetUnavailable;
+        }
+        let unchanged = expected.effective_reasoning_effort().as_ref() == Some(&effort);
+        let outcome = tokio::time::timeout_at(
+            guard.deadline,
+            self.apply_turn_settings_locked(
+                &turn.sub_id,
+                if unchanged {
+                    TurnSettingsUpdate::default()
+                } else {
+                    TurnSettingsUpdate {
+                        effort: Some(Some(effort)),
+                        ..Default::default()
+                    }
+                },
+                Some(expected_task_done),
+                Some(guard),
+            ),
+        )
+        .await
+        .unwrap_or(TurnSettingsUpdateOutcome::TargetUnavailable);
+        if outcome == TurnSettingsUpdateOutcome::Applied {
+            self.accept_system1_decision(turn);
+            self.publish_system1_error(
+                super::system1::health::System1HealthUpdate::Decision(/*error*/ None),
+                /*generation*/ None,
+                /*guard*/ None,
+            )
+            .await;
+        }
+        outcome
+    }
+
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the final managed-policy check and active settings publication must remain atomic"
+    )]
+    #[tracing::instrument(skip_all)]
+    async fn apply_turn_settings_locked(
+        &self,
+        turn_id: &str,
+        update: TurnSettingsUpdate,
+        expected_task_done: Option<&Arc<tokio::sync::Notify>>,
+        system1_guard: Option<&super::system1_task::System1DecisionGuard>,
+    ) -> TurnSettingsUpdateOutcome {
+        let manual_model = system1_guard.is_none() && update.model.is_some();
+        let updates_system1_baseline = system1_guard.is_none() && update.effort.is_some();
         let updates_model_settings = update.model.is_some()
             || update.effort.is_some()
             || update.summary.is_some()
@@ -252,20 +319,30 @@ impl Session {
             let active = self.active_turn.lock().await;
             active.as_ref().and_then(|active| {
                 active.task.as_ref().and_then(|task| {
-                    (task.turn_context.sub_id == turn_id && !task.cancellation_token.is_cancelled())
-                        .then(|| {
-                            (
-                                Arc::clone(&task.turn_context),
-                                Arc::clone(&task.done),
-                                task.turn_context.next_step_settings.load_full(),
-                            )
-                        })
+                    (task.turn_context.sub_id == turn_id
+                        && !task.cancellation_token.is_cancelled()
+                        && expected_task_done
+                            .is_none_or(|expected| Arc::ptr_eq(&task.done, expected)))
+                    .then(|| {
+                        (
+                            Arc::clone(&task.turn_context),
+                            Arc::clone(&task.done),
+                            task.turn_context.next_step_settings.load_full(),
+                        )
+                    })
                 })
             })
         };
         let Some((turn_context, task_done, current)) = target else {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
+        if crate::claude_runtime::is_native_model(&current.model_info.slug)
+            && update.environments.is_some()
+        {
+            return TurnSettingsUpdateOutcome::Rejected {
+                reason: "Native runtime environments cannot change during a turn".to_string(),
+            };
+        }
         let TurnSettingsUpdate {
             approvals_reviewer,
             environments: environment_requests,
@@ -334,6 +411,13 @@ impl Session {
         // safety checks together with applying the update under state and active_turn; no model
         // lookup or other preparation runs under these locks.
         let state = self.state.lock().await;
+        if system1_guard.is_some_and(|guard| {
+            state.shutting_down
+                || guard.freshness.is_cancelled()
+                || tokio::time::Instant::now() >= guard.deadline
+        }) {
+            return TurnSettingsUpdateOutcome::TargetUnavailable;
+        }
         // Environment configuration can arrive before its executor connects. If this update
         // omits environments, use what the running turn's manager knows now.
         let current_environments = self.services.turn_environments.selections();
@@ -376,6 +460,16 @@ impl Session {
         // Save changed settings first. The manager then installs any new environment list before
         // waking waiting work. The next step cannot read either until we release this lock.
         if let Some(settings) = updated_settings {
+            if manual_model || updates_system1_baseline {
+                self.invalidate_system1();
+            }
+            if updates_system1_baseline {
+                task.turn_context
+                    .extension_data
+                    .insert(super::system1::System1Baseline(
+                        settings.reasoning_effort().cloned(),
+                    ));
+            }
             task.turn_context
                 .next_step_settings
                 .store(Arc::new(settings));

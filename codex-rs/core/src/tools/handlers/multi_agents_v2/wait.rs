@@ -50,6 +50,8 @@ impl Handler {
         } = invocation;
         let arguments = function_arguments(payload)?;
         let args: WaitArgs = parse_arguments(&arguments)?;
+        let reason = codex_tools::WaitReason::new(&args.reason)
+            .map_err(FunctionCallError::RespondToModel)?;
         let min_timeout_ms = turn.config.multi_agent_v2.min_wait_timeout_ms;
         let max_timeout_ms = turn.config.multi_agent_v2.max_wait_timeout_ms;
         let default_timeout_ms = turn.config.multi_agent_v2.default_wait_timeout_ms;
@@ -108,7 +110,17 @@ impl Handler {
                 },
             )],
         );
-        let result = WaitAgentResult::from_outcome(outcome, requested_timeout_ms, timeout_ms);
+        let mut result = WaitAgentResult::from_outcome(outcome, requested_timeout_ms, timeout_ms);
+        let reminder = match outcome {
+            WaitOutcome::Steered => codex_tools::WaitReminder::Interrupted,
+            WaitOutcome::MailboxActivity | WaitOutcome::TimedOut => {
+                codex_tools::WaitReminder::Returned
+            }
+        };
+        if let Some(reminder) = reason.reminder(reminder) {
+            result.message.push(' ');
+            result.message.push_str(&reminder);
+        }
 
         session
             .emit_turn_item_completed(
@@ -141,6 +153,7 @@ impl CoreToolRuntime for Handler {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WaitArgs {
+    reason: String,
     timeout_ms: Option<i64>,
 }
 

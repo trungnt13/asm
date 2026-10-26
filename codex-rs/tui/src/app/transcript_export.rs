@@ -130,6 +130,11 @@ pub(super) async fn load_export_transcript(
                 [item],
                 visibility,
                 config,
+                matches!(
+                    thread.source,
+                    codex_app_server_protocol::SessionSource::SubAgent(_)
+                ),
+                thread.agent_role.as_deref(),
             ));
         }
     }

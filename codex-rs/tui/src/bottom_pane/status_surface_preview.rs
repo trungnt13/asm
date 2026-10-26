@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use crate::status_line_labels::compact_model_name;
+use crate::status_line_labels::compact_reasoning_label;
 use codex_protocol::ThreadId;
 use ratatui::text::Line;
 
@@ -29,7 +31,9 @@ pub(crate) enum StatusSurfacePreviewItem {
     ContextWindowSize,
     UsedTokens,
     TotalInputTokens,
+    CacheHitRate,
     TotalOutputTokens,
+    OutputTps,
     ThreadCredits,
     EstimatedThreadCost,
     SessionId,
@@ -46,7 +50,7 @@ pub(crate) enum StatusSurfacePreviewItem {
 impl StatusSurfacePreviewItem {
     fn placeholder(self) -> &'static str {
         match self {
-            StatusSurfacePreviewItem::AppName => "codex",
+            StatusSurfacePreviewItem::AppName => "ASM",
             StatusSurfacePreviewItem::ProjectName => "my-project",
             StatusSurfacePreviewItem::ProjectRoot => "my-project",
             StatusSurfacePreviewItem::CurrentDir => "~/my-project/subdir",
@@ -59,19 +63,21 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::BranchChanges => "+12 -3",
             StatusSurfacePreviewItem::Permissions => "Workspace",
             StatusSurfacePreviewItem::ApprovalMode => "on-request",
-            StatusSurfacePreviewItem::ContextRemaining => "Context 0% left",
-            StatusSurfacePreviewItem::ContextUsed => "Context 0% used",
+            StatusSurfacePreviewItem::ContextRemaining => "Ctx0%left",
+            StatusSurfacePreviewItem::ContextUsed => "Ctx0%",
             StatusSurfacePreviewItem::FiveHourLimit => "primary 0%",
             StatusSurfacePreviewItem::WeeklyLimit => "secondary 0%",
             StatusSurfacePreviewItem::CodexVersion => "0.0.0",
-            StatusSurfacePreviewItem::ContextWindowSize => "0 window",
+            StatusSurfacePreviewItem::ContextWindowSize => "0",
             StatusSurfacePreviewItem::UsedTokens => "0 used",
             StatusSurfacePreviewItem::TotalInputTokens => "0 in",
+            StatusSurfacePreviewItem::CacheHitRate => "Cch89.6%",
             StatusSurfacePreviewItem::TotalOutputTokens => "0 out",
+            StatusSurfacePreviewItem::OutputTps => "50tps",
             StatusSurfacePreviewItem::ThreadCredits => "5.2 credits",
             StatusSurfacePreviewItem::EstimatedThreadCost => "~$1.82",
             StatusSurfacePreviewItem::SessionId => "550e8400-e29b-41d4",
-            StatusSurfacePreviewItem::FastMode => "Fast",
+            StatusSurfacePreviewItem::FastMode => "F:on",
             StatusSurfacePreviewItem::Daybreak => "Daybreak off",
             StatusSurfacePreviewItem::RawOutput => "raw output",
             StatusSurfacePreviewItem::WorkspaceHeadline => "Workspace headline",
@@ -105,7 +111,9 @@ impl StatusSurfacePreviewItem {
             Self::ContextWindowSize,
             Self::UsedTokens,
             Self::TotalInputTokens,
+            Self::CacheHitRate,
             Self::TotalOutputTokens,
+            Self::OutputTps,
             Self::ThreadCredits,
             Self::EstimatedThreadCost,
             Self::SessionId,
@@ -245,8 +253,22 @@ impl StatusSurfacePreviewData {
         I: IntoIterator<Item = StatusLineItem>,
     {
         let segments = items.into_iter().filter_map(|item| {
-            self.value_for(item.preview_item())
-                .map(|value| (item, value.to_string()))
+            let value = self.values.get(&item.preview_item())?;
+            let text = match item {
+                StatusLineItem::ModelName if value.is_placeholder => {
+                    compact_model_name(&value.text)
+                }
+                StatusLineItem::ModelWithReasoning if value.is_placeholder => format!(
+                    "{} {}",
+                    compact_model_name(StatusSurfacePreviewItem::Model.placeholder()),
+                    compact_reasoning_label(StatusSurfacePreviewItem::Reasoning.placeholder()),
+                ),
+                StatusLineItem::Reasoning if value.is_placeholder => {
+                    compact_reasoning_label(&value.text)
+                }
+                _ => value.text.clone(),
+            };
+            Some((item, text))
         });
         status_line_from_segments(segments, use_theme_colors, self.thread_id)
     }

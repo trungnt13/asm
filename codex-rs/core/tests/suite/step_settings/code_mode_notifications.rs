@@ -83,7 +83,7 @@ async fn yielded_notifications_keep_originating_budgets_after_model_switch() -> 
                     "call-wait-a",
                     "wait",
                     &json!({
-                        "cell_id": cell_id, "yield_time_ms": 60000,
+                        "reason":"", "cell_id": cell_id, "yield_time_ms": 60000,
                     })
                     .to_string(),
                 ),

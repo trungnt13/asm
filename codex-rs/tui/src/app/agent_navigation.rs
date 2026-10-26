@@ -21,10 +21,10 @@
 
 use crate::multi_agents::AgentPickerThreadEntry;
 use crate::multi_agents::SubAgentActivityDisplay;
-use crate::multi_agents::format_agent_picker_item_name;
 use crate::multi_agents::next_agent_shortcut;
 use crate::multi_agents::previous_agent_shortcut;
 use codex_protocol::ThreadId;
+use codex_protocol::openai_models::ReasoningEffort;
 use ratatui::text::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -43,6 +43,8 @@ use uuid::Uuid;
 pub(crate) struct AgentNavigationState {
     /// Latest picker metadata for each tracked thread id.
     threads: HashMap<ThreadId, AgentPickerThreadEntry>,
+    /// Configured model choices received for picker threads, independent of their display names.
+    model_settings: HashMap<ThreadId, AgentPickerModelSettings>,
     /// Stable first-seen traversal order for picker rows and keyboard cycling.
     order: Vec<ThreadId>,
     /// Threads with observed terminal liveness that must not be revived by delayed activity.
@@ -52,6 +54,12 @@ pub(crate) struct AgentNavigationState {
     picker_excluded_threads: HashSet<ThreadId>,
     /// Coalesces root refreshes while rejecting replies from a previous session.
     pub(super) picker_refresh: Option<AgentPickerRefreshState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AgentPickerModelSettings {
+    pub(crate) model: String,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// Direction of keyboard traversal through the stable picker order.
@@ -130,6 +138,27 @@ impl AgentNavigationState {
     /// this stays optional.
     pub(crate) fn get(&self, thread_id: &ThreadId) -> Option<&AgentPickerThreadEntry> {
         self.threads.get(thread_id)
+    }
+
+    pub(crate) fn model_settings(&self, thread_id: &ThreadId) -> Option<&AgentPickerModelSettings> {
+        self.model_settings.get(thread_id)
+    }
+
+    pub(crate) fn set_model_settings(
+        &mut self,
+        thread_id: ThreadId,
+        model: Option<String>,
+        reasoning_effort: Option<ReasoningEffort>,
+    ) {
+        if let Some(model) = model.filter(|model| !model.is_empty()) {
+            self.model_settings.insert(
+                thread_id,
+                AgentPickerModelSettings {
+                    model,
+                    reasoning_effort,
+                },
+            );
+        }
     }
 
     pub(crate) fn is_parent_owned(&self, thread_id: ThreadId) -> bool {
@@ -264,6 +293,7 @@ impl AgentNavigationState {
     /// to a pristine single-session state.
     pub(crate) fn clear(&mut self) {
         self.threads.clear();
+        self.model_settings.clear();
         self.order.clear();
         self.stopped_threads.clear();
         self.parent_owned_threads.clear();
@@ -278,6 +308,7 @@ impl AgentNavigationState {
     /// would leave ghost rows in `/subagents`.
     pub(crate) fn remove(&mut self, thread_id: ThreadId) {
         self.threads.remove(&thread_id);
+        self.model_settings.remove(&thread_id);
         self.order.retain(|candidate| *candidate != thread_id);
         self.stopped_threads.remove(&thread_id);
         self.parent_owned_threads.remove(&thread_id);
@@ -407,31 +438,35 @@ impl AgentNavigationState {
         }
 
         let thread_id = current_displayed_thread_id?;
-        let is_primary = primary_thread_id == Some(thread_id);
-        Some(
-            self.threads
-                .get(&thread_id)
-                .map(|entry| {
-                    if !is_primary
-                        && let Some(agent_path) = entry
-                            .agent_path
-                            .as_deref()
-                            .filter(|agent_path| !agent_path.trim().is_empty())
-                    {
-                        return format!("`{agent_path}`");
-                    }
-                    format_agent_picker_item_name(
-                        entry.agent_nickname.as_deref(),
-                        entry.agent_role.as_deref(),
-                        is_primary,
-                    )
-                })
-                .unwrap_or_else(|| {
-                    format_agent_picker_item_name(
-                        /*agent_nickname*/ None, /*agent_role*/ None, is_primary,
-                    )
-                }),
-        )
+        if primary_thread_id == Some(thread_id) {
+            return Some("Main[default]".to_string());
+        }
+        let Some(entry) = self.threads.get(&thread_id) else {
+            return Some("Agent".to_string());
+        };
+        if let Some(agent_path) = entry
+            .agent_path
+            .as_deref()
+            .filter(|agent_path| !agent_path.trim().is_empty())
+        {
+            return Some(format!("`{agent_path}`"));
+        }
+        let nickname = entry
+            .agent_nickname
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        let role = entry
+            .agent_role
+            .as_deref()
+            .map(str::trim)
+            .filter(|role| !role.is_empty());
+        Some(match (nickname, role) {
+            (Some(nickname), Some(role)) => format!("{nickname}[{role}]"),
+            (Some(nickname), None) => nickname.to_string(),
+            (None, Some(role)) => format!("[{role}]"),
+            (None, None) => "Agent".to_string(),
+        })
     }
 
     /// Builds the `/subagents` picker subtitle from the same canonical bindings used by key handling.
@@ -598,11 +633,11 @@ mod tests {
 
         assert_eq!(
             state.active_agent_label(Some(first_agent_id), Some(main_thread_id)),
-            Some("Robie [explorer]".to_string())
+            Some("Robie[explorer]".to_string())
         );
         assert_eq!(
             state.active_agent_label(Some(main_thread_id), Some(main_thread_id)),
-            Some("Main [default]".to_string())
+            Some("Main[default]".to_string())
         );
     }
 }

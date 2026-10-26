@@ -210,6 +210,7 @@ mod session_resume;
 mod session_start;
 mod session_state;
 mod shortcut_help;
+mod side_conversations;
 mod skills_helpers;
 mod slash_command;
 mod startup_draft;
@@ -221,6 +222,7 @@ mod startup_presentation;
 mod startup_recovery;
 mod status;
 mod status_indicator_widget;
+mod status_line_labels;
 mod streaming;
 mod style;
 mod subscription;
@@ -667,7 +669,11 @@ pub(crate) async fn start_app_server_for_picker(
         loader_overrides,
         /*strict_config*/ false,
         CloudConfigBundleLoader::default(),
-        codex_feedback::CodexFeedback::new(),
+        if config.diagnostic_log_capture {
+            codex_feedback::CodexFeedback::new()
+        } else {
+            codex_feedback::CodexFeedback::disabled()
+        },
         /*log_db*/ None,
         &mut state_db,
         environment_manager,
@@ -676,7 +682,8 @@ pub(crate) async fn start_app_server_for_picker(
     .await?;
     Ok(
         AppServerSession::new(backend_id, app_server, target.thread_params_mode())
-            .with_local_codex_home(&config.codex_home),
+            .with_local_codex_home(&config.codex_home)
+            .with_side_conversations(&config.codex_home, &target),
     )
 }
 
@@ -707,7 +714,8 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         app_server,
         target.thread_params_mode(),
     )
-    .with_local_codex_home(&config.codex_home))
+    .with_local_codex_home(&config.codex_home)
+    .with_side_conversations(&config.codex_home, &target))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1281,7 +1289,8 @@ async fn run_ratatui_app(
             app_server,
             app_server_target.thread_params_mode(),
         )
-        .with_local_codex_home(&initial_config.codex_home),
+        .with_local_codex_home(&initial_config.codex_home)
+        .with_side_conversations(&initial_config.codex_home, &app_server_target),
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
@@ -1349,9 +1358,14 @@ async fn run_ratatui_app(
         }
     };
     // Workload identity bypasses interactive login; every other provider uses account/read.
-    let requires_openai_auth = startup_account
-        .as_ref()
-        .is_some_and(|account| account.requires_openai_auth);
+    let uses_claude_runtime = initial_config
+        .model
+        .as_deref()
+        .is_some_and(codex_protocol::openai_models::is_native_runtime_model);
+    let requires_openai_auth = !uses_claude_runtime
+        && startup_account
+            .as_ref()
+            .is_some_and(|account| account.requires_openai_auth);
     let should_show_onboarding = should_show_onboarding(
         login_status,
         requires_openai_auth,
@@ -1615,21 +1629,50 @@ async fn run_ratatui_app(
             unreachable!("app server should be initialized for --resume <id>");
         };
         let lookup = startup_draft
-            .run_until(
-                &mut tui,
-                lookup_session_target_with_app_server(startup_app_server, &config, id_str),
-            )
+            .run_until(&mut tui, async {
+                if Uuid::parse_str(id_str).is_ok() {
+                    return Ok(lookup_session_target_with_app_server(
+                        startup_app_server,
+                        &config,
+                        id_str,
+                    )
+                    .await?
+                    .into_iter()
+                    .collect::<Vec<_>>());
+                }
+                let model_provider = startup_app_server.history_model_provider(&config).await?;
+                Ok::<_, color_eyre::Report>(
+                    named_session_lookup::find_matches(
+                        startup_app_server,
+                        config.codex_home.as_path(),
+                        id_str,
+                        &[named_session_lookup::SessionCollection::Active],
+                        &[resume_source_kinds(cli.resume_include_non_interactive)],
+                        model_provider.as_deref(),
+                        named_session_lookup::SessionMatch::Partial,
+                    )
+                    .await?
+                    .into_iter()
+                    .filter_map(|thread| {
+                        session_target_from_app_server_thread(
+                            startup_app_server.backend_id(),
+                            thread,
+                        )
+                    })
+                    .collect(),
+                )
+            })
             .await;
-        let target_session = match lookup {
+        let mut targets = match lookup {
             Ok(result) => result?,
             Err(err) => {
                 shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
                 return Err(err.into());
             }
         };
-        match target_session {
-            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
-            None => {
+        match targets.len() {
+            1 => resume_picker::SessionSelection::Resume(targets.pop().expect("one match")),
+            0 => {
                 shutdown_app_server_if_present(app_server.take()).await;
                 return missing_session_exit(
                     id_str,
@@ -1637,6 +1680,39 @@ async fn run_ratatui_app(
                     &mut tui,
                     &mut terminal_restore_guard,
                 );
+            }
+            _ => {
+                if let Err(err) = startup_draft.flush_pending_events(&mut tui).await {
+                    shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+                    return Err(err.into());
+                }
+                let matching_ids = targets.into_iter().map(|target| target.thread_id).collect();
+                let picker_local_settings =
+                    crate::local_settings::LocalSettings::for_tui(&config, &tui);
+                let selection = resume_picker::run_resume_picker_with_app_server(
+                    uses_remote_workspace_or_environment(&app_server_target, &environment_manager),
+                    &mut tui,
+                    &config,
+                    &picker_local_settings,
+                    /*show_all*/ true,
+                    cli.resume_include_non_interactive,
+                    app_server.take().expect("startup app server"),
+                    Some(matching_ids),
+                )
+                .await?;
+                if matches!(selection, resume_picker::SessionSelection::Exit) {
+                    terminal_restore_guard.restore_silently();
+                    session_log::log_session_end();
+                    return Ok(AppExitInfo {
+                        token_usage: crate::token_usage::TokenUsage::default(),
+                        thread_id: None,
+                        resume_hint: None,
+                        disconnect_info: None,
+                        update_action: None,
+                        exit_reason: ExitReason::UserRequested,
+                    });
+                }
+                selection
             }
         }
     } else if cli.resume_last {
@@ -1688,6 +1764,7 @@ async fn run_ratatui_app(
             cli.resume_show_all,
             cli.resume_include_non_interactive,
             app_server,
+            /*matching_ids*/ None,
         )
         .await?
         {
@@ -1864,6 +1941,7 @@ async fn run_ratatui_app(
                     app_server_target.thread_params_mode(),
                 )
                 .with_local_codex_home(&config.codex_home)
+                .with_side_conversations(&config.codex_home, &app_server_target)
                 .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -1979,7 +2057,8 @@ async fn run_ratatui_app(
                     client,
                     app_server_target.thread_params_mode(),
                 )
-                .with_local_codex_home(&config.codex_home);
+                .with_local_codex_home(&config.codex_home)
+                .with_side_conversations(&config.codex_home, &app_server_target);
             }
             #[cfg(target_os = "windows")]
             {
