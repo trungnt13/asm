@@ -3,7 +3,7 @@
 use super::messages::sanitize_user_text;
 use crate::async_question_reply::AsyncQuestionReply;
 use crate::line_truncation::truncate_line_to_width;
-use crate::markdown_render::hide_web_link_destination;
+use crate::markdown_render::hide_link_destination;
 use crate::markdown_render::render_markdown_lines_with_width_cwd_and_hidden_link_destinations;
 use crate::style::accent_color_on;
 use crate::style::history_prompt_style;
@@ -29,7 +29,7 @@ pub(super) fn render(
             text,
             width,
             Some(cwd),
-            &hide_web_link_destination,
+            &hide_link_destination,
         )
     };
     let mut lines = Vec::new();
