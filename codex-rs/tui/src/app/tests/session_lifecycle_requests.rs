@@ -3115,6 +3115,7 @@ async fn remote_legacy_history_start_negotiates_once_for_resume_and_fork() -> Re
             namespace: Some(crate::dynamic_tools::NAMESPACE.to_string()),
             tool: "wait_threads".to_string(),
             arguments: serde_json::json!({
+                "reason": "",
                 "targets": [{"threadId": legacy_thread_id}],
                 "timeoutMs": 0
             }),

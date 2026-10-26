@@ -364,6 +364,7 @@ impl ExecCommandHandler {
         .await;
         if let Some(output) = intercepted_patch? {
             return Ok(boxed_tool_output(ExecCommandToolOutput {
+                wait_reminder: None,
                 event_call_id: String::new(),
                 chunk_id: String::new(),
                 wall_time: std::time::Duration::ZERO,
@@ -431,6 +432,7 @@ impl ExecCommandHandler {
                 let original_token_count =
                     original_token_count.unwrap_or_else(|| approx_token_count(&output_text));
                 Ok(boxed_tool_output(ExecCommandToolOutput {
+                    wait_reminder: None,
                     event_call_id: context.call_id.clone(),
                     chunk_id: generate_chunk_id(),
                     wall_time: output.duration,

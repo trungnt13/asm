@@ -369,6 +369,7 @@ elif event == 'PreToolUse' and {mode:?} == 'rewrite':
                     "write_stdin",
                     &json!({
                         "session_id": 1000, "chars": if mode == "stdin" { "go\n" } else { "" }, "yield_time_ms": 5000,
+                        "reason": "",
                     })
                     .to_string(),
                 ),

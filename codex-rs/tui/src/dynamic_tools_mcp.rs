@@ -292,6 +292,12 @@ impl ServerHandler for DynamicToolMcpHandler {
                         | "list_worktrees"
                         | "get_worktree_creation_status"
                 )));
+                if tool.name == "wait_threads" {
+                    tool.meta = Some(rmcp::model::MetaObject(serde_json::Map::from_iter([(
+                        "asm/interruptibleWait".to_string(),
+                        serde_json::Value::Bool(true),
+                    )])));
+                }
                 tools.push(tool);
             }
         }

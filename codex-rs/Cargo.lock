@@ -5003,6 +5003,7 @@ dependencies = [
  "codex-shell-command",
  "codex-state",
  "codex-terminal-detection",
+ "codex-tools",
  "codex-uds",
  "codex-utils-absolute-path",
  "codex-utils-approval-presets",

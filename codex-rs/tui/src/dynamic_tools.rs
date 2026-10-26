@@ -144,6 +144,7 @@ struct TitleArguments {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WaitArguments {
+    reason: String,
     targets: Vec<WaitTarget>,
     timeout_ms: Option<u64>,
 }
@@ -199,9 +200,10 @@ pub(crate) fn tool_specs() -> Vec<DynamicToolSpec> {
                         "required": ["threadId"]
                     }
                 },
+                "reason": {"type": "string", "description": codex_tools::WAIT_REASON_DESCRIPTION},
                 "timeoutMs": {"type": "integer", "minimum": 0, "maximum": MAX_WAIT_TIMEOUT_MS}
             }),
-            vec!["targets"],
+            vec!["targets", "reason"],
         ),
         (
             "send_message_to_thread",
@@ -797,6 +799,7 @@ async fn execute_inner(
         }
         "wait_threads" => {
             let arguments: WaitArguments = parse_arguments(params.arguments)?;
+            let reason = codex_tools::WaitReason::new(&arguments.reason)?;
             let timeout_ms = arguments.timeout_ms.unwrap_or(MAX_WAIT_TIMEOUT_MS);
             if arguments.targets.is_empty() || arguments.targets.len() > MAX_WAIT_TARGETS {
                 return Err(format!(
@@ -827,6 +830,9 @@ async fn execute_inner(
             let result =
                 |timed_out: bool, wake: Option<Value>, polls: Vec<Value>, errors: Vec<Value>| {
                     let mut result = json!({"timedOut": timed_out, "wake": wake, "polls": polls});
+                    if let Some(reminder) = reason.reminder(codex_tools::WaitReminder::Returned) {
+                        result["message"] = json!(reminder);
+                    }
                     if !errors.is_empty() {
                         result["errors"] = json!(errors);
                     }

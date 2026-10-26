@@ -433,7 +433,10 @@ fn wait_agent_tool_v2_uses_timeout_only_summary_output() {
             .and_then(|schema| schema.description.as_deref()),
         Some("Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000.")
     );
-    assert_eq!(parameters.required.as_ref(), None);
+    assert_eq!(
+        parameters.required.as_deref(),
+        Some(["reason".to_string()].as_slice())
+    );
     assert_eq!(
         output_schema.expect("wait output schema").to_value()["properties"]["message"]["description"],
         json!(

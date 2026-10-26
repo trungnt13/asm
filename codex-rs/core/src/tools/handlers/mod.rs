@@ -31,6 +31,7 @@ mod test_sync;
 pub(crate) mod test_sync_spec;
 mod tool_search;
 pub(crate) mod tool_search_spec;
+mod tui_wait;
 pub(crate) mod unified_exec;
 mod view_image;
 pub(crate) mod view_image_spec;

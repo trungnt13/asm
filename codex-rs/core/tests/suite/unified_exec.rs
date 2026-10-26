@@ -1030,7 +1030,7 @@ async fn unified_exec_emits_exec_command_end_event() -> Result<()> {
     let poll_call_id = "uexec-end-event-poll";
     let poll_args = json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 250,
     });
 
@@ -1841,7 +1841,7 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
     let poll_call_id = "uexec-poll-empty";
     let poll_args = json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 150,
     });
 
@@ -1951,7 +1951,7 @@ async fn configured_background_terminal_bounds_reach_tool_and_poll() -> Result<(
     let test = builder.build_with_auto_env(&server).await?;
 
     let open_args = json!({"cmd": "sleep 30", "yield_time_ms": 250});
-    let poll_args = json!({"session_id": 1000, "chars": "", "yield_time_ms": 1000});
+    let poll_args = json!({"reason": "", "session_id": 1000, "chars": "", "yield_time_ms": 1000});
     let requests = mount_sse_sequence(
         &server,
         vec![
@@ -3295,7 +3295,7 @@ PY
     let second_call_id = "uexec-lag-poll";
     let second_args = serde_json::json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 2_000,
     });
 
@@ -3386,7 +3386,7 @@ async fn unified_exec_timeout_and_followup_poll() -> Result<()> {
     let second_call_id = "uexec-poll";
     let second_args = serde_json::json!({
         "chars": "",
-        "session_id": 1000,
+        "reason": "", "session_id": 1000,
         "yield_time_ms": 800,
     });
 

@@ -1848,7 +1848,7 @@ async fn astra_reads_code_mode_call_timing() -> Result<()> {
                     "wait-call",
                     "functions",
                     "wait",
-                    r#"{"cell_id":"missing"}"#,
+                    r#"{"reason":"","cell_id":"missing"}"#,
                 ),
                 ev_completed("wait-response"),
             ]),
@@ -2059,7 +2059,7 @@ async fn astra_continues_after_input_yields_a_code_mode_cell() -> Result<()> {
                     "wait-call",
                     "functions",
                     "wait",
-                    r#"{"cell_id":"1","yield_time_ms":60000}"#,
+                    r#"{"reason":"","cell_id":"1","yield_time_ms":60000}"#,
                 ),
                 ev_completed("wait-response"),
             ]),
@@ -2193,9 +2193,9 @@ text('started'); yield_control(); text('finished');"#
                 "functions",
                 "wait",
                 if ranked_search {
-                    r#"{"cell_id":"2"}"#
+                    r#"{"reason":"","cell_id":"2"}"#
                 } else {
-                    r#"{"cell_id":"1"}"#
+                    r#"{"reason":"","cell_id":"1"}"#
                 },
             ),
             ev_completed("wait-response"),

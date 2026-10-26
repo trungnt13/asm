@@ -32,7 +32,7 @@ pub(crate) fn create_wait_tool(
         ),
     ]);
 
-    ToolSpec::Function(ResponsesApiTool {
+    let mut spec = ToolSpec::Function(ResponsesApiTool {
         name: codex_code_mode::WAIT_TOOL_NAME.to_string(),
         description: description_override.map(str::to_owned).unwrap_or_else(|| {
             format!(
@@ -65,7 +65,11 @@ pub(crate) fn create_wait_tool(
             }),
         output_schema: None,
         defer_loading: None,
-    })
+    });
+    if let ToolSpec::Function(tool) = &mut spec {
+        codex_tools::require_wait_reason(&mut tool.parameters);
+    }
+    spec
 }
 
 #[cfg(test)]
@@ -87,7 +91,7 @@ mod tests {
                 strict: false,
                 defer_loading: None,
                 parameters: JsonSchema::object(
-                    BTreeMap::from([
+                    BTreeMap::from([( "reason".to_string(), JsonSchema::string(Some(codex_tools::WAIT_REASON_DESCRIPTION.to_string()))),
                         (
                             "cell_id".to_string(),
                             JsonSchema::string(Some(
@@ -116,7 +120,7 @@ mod tests {
                             )),
                         ),
                     ]),
-                    Some(vec!["cell_id".to_string()]),
+                    Some(vec!["cell_id".to_string(), "reason".to_string()]),
                     Some(false.into()),
                 ),
                 output_schema: None,

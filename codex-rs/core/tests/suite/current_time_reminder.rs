@@ -941,7 +941,7 @@ async fn sleep_tool_uses_configured_time_provider() -> Result<()> {
     assert!(
         requests[1]
             .function_call_output_text(CALL_ID)
-            .is_some_and(|output| output.ends_with("Sleep completed. Check the pending work after waking.\nReason for waiting (quoted context): \"Waiting for pending work\""))
+            .is_some_and(|output| output.ends_with("Sleep completed. Check the pending work after waiting; continue unless canceled, paused, replaced, or blocked.\nReason for waiting (quoted context): \"Waiting for pending work\""))
     );
 
     Ok(())

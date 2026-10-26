@@ -76,6 +76,9 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
             }
             if let Some(parameters) = &self.parameters_override {
                 tool.parameters.clone_from(parameters);
+                if tool.name == "wait_agent" {
+                    codex_tools::require_wait_reason(&mut tool.parameters);
+                }
             }
         }
         match (&self.namespace, spec) {

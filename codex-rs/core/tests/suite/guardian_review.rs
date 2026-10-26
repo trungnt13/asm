@@ -2947,7 +2947,7 @@ for (let index = 0; index < 6; index++) {{
                 "wait-a",
                 "wait",
                 &json!({
-                    "cell_id": cell_id, "yield_time_ms": 60000,
+                    "reason":"", "cell_id": cell_id, "yield_time_ms": 60000,
                 })
                 .to_string(),
             ),
@@ -3052,7 +3052,11 @@ text(await tools.exec_command({
         vec![chunk(
             /*gate*/ None,
             vec![
-                ev_function_call("wait-a", "wait", r#"{"cell_id":"1","yield_time_ms":60000}"#),
+                ev_function_call(
+                    "wait-a",
+                    "wait",
+                    r#"{"reason":"","cell_id":"1","yield_time_ms":60000}"#,
+                ),
                 ev_completed("b"),
             ],
         )],

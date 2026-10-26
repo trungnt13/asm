@@ -693,7 +693,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
             &server,
             &source,
             "wait_threads",
-            json!({"targets": [{"threadId": target}, {"threadId": "missing-task"}], "timeoutMs": 0}),
+            json!({"reason": "", "targets": [{"threadId": target}, {"threadId": "missing-task"}], "timeoutMs": 0}),
         )
         .await,
     );
@@ -745,7 +745,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
             &server,
             &source,
             "wait_threads",
-            json!({"targets": [{"threadId": target, "afterCursor": cursor}], "timeoutMs": 0}),
+            json!({"reason": "", "targets": [{"threadId": target, "afterCursor": cursor}], "timeoutMs": 0}),
         )
         .await,
     );
@@ -758,7 +758,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
         &server,
         &source,
         "wait_threads",
-        json!({"targets": [{"threadId": source.to_uppercase()}], "timeoutMs": 0}),
+        json!({"reason": "", "targets": [{"threadId": source.to_uppercase()}], "timeoutMs": 0}),
     )
     .await;
     assert!(!self_wait.success);
@@ -767,7 +767,7 @@ async fn wait_threads_preserves_snapshots_and_rejects_self_wait() -> color_eyre:
         &server,
         &source,
         "wait_threads",
-        json!({"targets": [{"threadId": target}, {"threadId": target.to_uppercase()}], "timeoutMs": 0}),
+        json!({"reason": "", "targets": [{"threadId": target}, {"threadId": target.to_uppercase()}], "timeoutMs": 0}),
     )
     .await;
     assert!(!duplicate_wait.success);

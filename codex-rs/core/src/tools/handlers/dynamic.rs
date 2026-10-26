@@ -130,6 +130,7 @@ impl DynamicToolHandler {
             call_id,
             payload,
             cancellation_token,
+            step_context,
             ..
         } = invocation;
 
@@ -143,15 +144,43 @@ impl DynamicToolHandler {
         };
 
         let args: Value = parse_arguments(&arguments)?;
+        let reason = (self.tool_name.namespace.as_deref() == Some("codex_tui")
+            && self.tool_name.name == "wait_threads")
+            .then(|| super::tui_wait::reason(&args))
+            .transpose()?;
+        let observation_cancel = if reason.is_some() {
+            cancellation_token.child_token()
+        } else {
+            cancellation_token.clone()
+        };
         let response = request_dynamic_tool(
             &session,
             turn.as_ref(),
             call_id,
             self.tool_name.clone(),
             args,
-            cancellation_token,
-        )
-        .await
+            observation_cancel.clone(),
+        );
+        let response = if let Some(reason) = &reason {
+            match super::tui_wait::observe(
+                response,
+                step_context.preempt.as_ref(),
+                &observation_cancel,
+            )
+            .await
+            {
+                Some(response) => response,
+                None if !cancellation_token.is_cancelled() => {
+                    return Ok(boxed_tool_output(FunctionToolOutput::from_text(
+                        super::tui_wait::interrupted(reason).to_string(),
+                        /*success*/ Some(true),
+                    )));
+                }
+                None => None,
+            }
+        } else {
+            response.await
+        }
         .ok_or_else(|| {
             FunctionCallError::RespondToModel(
                 "dynamic tool call was cancelled before receiving a response".to_string(),

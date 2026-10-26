@@ -17,6 +17,12 @@ pub(super) struct CodeModeToolOutput {
 }
 
 impl CodeModeToolOutput {
+    pub(super) fn append_wait_reminder(&mut self, reminder: String) {
+        self.output
+            .body
+            .push(FunctionCallOutputContentItem::InputText { text: reminder });
+    }
+
     pub(super) fn new(
         mut output: FunctionToolOutput,
         status: String,

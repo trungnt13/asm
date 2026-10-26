@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=94348ab8527021ff):
-        - namespace/functions; hash=124fee69a69ed6b2
+00:additional_tools/developer (3; hash=354fe4a344840a31):
+        - namespace/functions; hash=7efafac024641cee
           - function/exec_command
           - function/write_stdin
           - function/list_mcp_resources
@@ -26,7 +26,7 @@ Settings:
           - function/request_user_input
           - custom/apply_patch
           - function/view_image
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=2327142bda177c50
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=3b5588e9a99ae198
           - function/close_agent
           - function/resume_agent
           - function/send_input
@@ -60,8 +60,8 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 05)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (3; hash=94348ab8527021ff):
-        - namespace/functions; hash=124fee69a69ed6b2
+00:additional_tools/developer (3; hash=354fe4a344840a31):
+        - namespace/functions; hash=7efafac024641cee
           - function/exec_command
           - function/write_stdin
           - function/list_mcp_resources
@@ -70,7 +70,7 @@ Settings: same as window 1
           - function/request_user_input
           - custom/apply_patch
           - function/view_image
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=2327142bda177c50
+        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=3b5588e9a99ae198
           - function/close_agent
           - function/resume_agent
           - function/send_input

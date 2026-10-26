@@ -253,7 +253,7 @@ async fn terminated_cell_persists_failure_and_excludes_late_reply_from_context()
                 ev_function_call(
                     "terminate",
                     "wait",
-                    &json!({"cell_id": cell_id, "terminate": true}).to_string(),
+                    &json!({"reason":"", "cell_id": cell_id, "terminate": true}).to_string(),
                 ),
                 ev_completed("terminate"),
             ]),

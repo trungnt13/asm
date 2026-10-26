@@ -419,6 +419,7 @@ impl ToolOutput for AbortedToolOutput {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExecCommandToolOutput {
+    pub wait_reminder: Option<String>,
     pub event_call_id: String,
     pub chunk_id: String,
     pub wall_time: Duration,
@@ -500,9 +501,12 @@ impl ToolOutput for ExecCommandToolOutput {
             #[serde(skip_serializing_if = "Option::is_none")]
             original_token_count: Option<usize>,
             output: String,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            wait_reminder: Option<String>,
         }
 
         let result = UnifiedExecCodeModeResult {
+            wait_reminder: self.wait_reminder.clone(),
             chunk_id: (!self.chunk_id.is_empty()).then(|| self.chunk_id.clone()),
             wall_time_seconds: self.wall_time.as_secs_f64(),
             exit_code: self.exit_code,
@@ -561,6 +565,9 @@ impl ExecCommandToolOutput {
             sections.push(format!("Original token count: {original_token_count}"));
         }
 
+        if let Some(reminder) = &self.wait_reminder {
+            sections.push(reminder.clone());
+        }
         sections.push("Output:".to_string());
         sections.join("\n")
     }

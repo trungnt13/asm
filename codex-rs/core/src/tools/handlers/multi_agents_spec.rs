@@ -957,7 +957,9 @@ fn wait_agent_tool_parameters_v2(options: WaitAgentTimeoutOptions) -> JsonSchema
         ))),
     )]);
 
-    JsonSchema::object(properties, /*required*/ None, Some(false.into()))
+    let mut parameters = JsonSchema::object(properties, /*required*/ None, Some(false.into()));
+    codex_tools::require_wait_reason(&mut parameters);
+    parameters
 }
 
 #[cfg(test)]
