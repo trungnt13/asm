@@ -5485,9 +5485,23 @@ class InterAgentMessageThreadItem(BaseModel):
         populate_by_name=True,
     )
     author: str
+    completed_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="completedAtMs",
+            description="Unix timestamp in milliseconds when the item completed, if recorded.",
+        ),
+    ] = None
     id: str
     recipient: str
     spawn_arguments: Annotated[str | None, Field(alias="spawnArguments")] = None
+    started_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="startedAtMs",
+            description="Unix timestamp in milliseconds when the item started, if recorded.",
+        ),
+    ] = None
     text: str
     type: Annotated[Literal["interAgentMessage"], Field(title="InterAgentMessageThreadItemType")]
 
