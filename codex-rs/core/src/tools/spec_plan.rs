@@ -1460,6 +1460,36 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
 fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
     let turn_context = context.turn_context;
     if collab_tools_enabled(turn_context, context.model_info) {
+        let external_model_aliases = if turn_context.config.load_external_models_json {
+            turn_context
+                .available_models
+                .iter()
+                .filter(|model| model.show_in_picker)
+                .filter(|model| {
+                    crate::agent::child_config::model_supports_multi_agent_backend(
+                        model,
+                        turn_context.multi_agent_version,
+                    )
+                })
+                .filter(|model| {
+                    crate::claude_runtime::is_native_model(&model.model)
+                        || codex_models_manager::provider_for_model(&model.model).is_some_and(
+                            |provider| {
+                                turn_context.config.model_providers.contains_key(provider)
+                                    && turn_context
+                                        .config
+                                        .config_layer_stack
+                                        .required_model_provider()
+                                        .is_none_or(|required| required == provider)
+                            },
+                        )
+                })
+                .filter_map(|model| codex_models_manager::model_alias(&model.model))
+                .map(str::to_owned)
+                .collect()
+        } else {
+            Vec::new()
+        };
         if multi_agent_v2_enabled(turn_context) {
             let model_messages = ResolvedModelMessages::from_model(context.model_info);
             let spawn_agent_description =
@@ -1479,6 +1509,15 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     SpawnAgentHandlerV2::new(
                         SpawnAgentToolOptions {
                             available_models: turn_context.available_models.clone(),
+                            external_model_aliases: if turn_context
+                                .config
+                                .multi_agent_v2
+                                .expose_spawn_agent_model_overrides
+                            {
+                                external_model_aliases
+                            } else {
+                                Vec::new()
+                            },
                             multi_agent_version: turn_context.multi_agent_version,
                             include_model_catalog_in_spawn_agent_list: turn_context
                                 .config
@@ -1527,6 +1566,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
             registry.add_with_exposure(
                 SpawnAgentHandler::new(SpawnAgentToolOptions {
                     available_models: turn_context.available_models.clone(),
+                    external_model_aliases,
                     multi_agent_version: turn_context.multi_agent_version,
                     include_model_catalog_in_spawn_agent_list: turn_context
                         .config

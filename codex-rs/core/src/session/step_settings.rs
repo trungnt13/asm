@@ -297,6 +297,10 @@ impl StepSettings {
                 /*developer_instructions*/ None,
             )
         });
+        if let Some(model) = codex_models_manager::canonical_model(next.collaboration_mode.model())
+        {
+            next.collaboration_mode.settings.model = model.to_owned();
+        }
         if let Some(summary) = update.reasoning_summary {
             next.reasoning_summary = Some(summary);
         }

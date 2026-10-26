@@ -2,6 +2,7 @@
   "models": [
     {
       "slug": "claude-code/sonnet-5-5",
+      "alias": "claude/sonnet-5.5",
       "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · CC",
       "description": "Runs through Claude Code with native tools, instructions, and subscription.",
@@ -50,6 +51,7 @@
     },
     {
       "slug": "claude-code/opus-5-5",
+      "alias": "claude/opus-5.5",
       "tool_mode": "direct",
       "display_name": "Opus 5.5 · CC",
       "description": "Runs through Claude Code with native tools, instructions, and subscription.",
@@ -98,6 +100,7 @@
     },
     {
       "slug": "cursor-agent/claude-opus-5-5",
+      "alias": "cursor/opus-5.5",
       "tool_mode": "direct",
       "display_name": "Opus 5.5 · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
@@ -151,6 +154,7 @@
     },
     {
       "slug": "cursor-agent/claude-sonnet-5-5",
+      "alias": "cursor/sonnet-5.5",
       "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
@@ -204,6 +208,7 @@
     },
     {
       "slug": "cursor-agent/claude-haiku-5-5",
+      "alias": "cursor/haiku-5.5",
       "tool_mode": "direct",
       "display_name": "Haiku 5.5 · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
@@ -257,6 +262,7 @@
     },
     {
       "slug": "cursor-agent/auto-smart",
+      "alias": "cursor/auto-smart",
       "tool_mode": "direct",
       "display_name": "Auto · Cursor",
       "description": "Runs through Cursor Agent with native tools, instructions, and subscription.",
@@ -288,6 +294,7 @@
     },
     {
       "slug": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "alias": "fireworks/deepseek-v4.1-flash",
       "display_name": "DeepSeek V4.1 Flash 1017 · Fireworks",
       "description": "Uses the configured Fireworks provider with ASM tools.",
       "default_reasoning_level": "high",

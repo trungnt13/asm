@@ -10,6 +10,7 @@ struct Catalog {
 #[derive(Deserialize)]
 struct Entry {
     model_provider: Option<String>,
+    alias: Option<String>,
     #[serde(flatten)]
     model: ModelInfo,
 }
@@ -23,6 +24,29 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
                 instructions_template: Some(crate::model_info::BASE_INSTRUCTIONS.to_owned()),
                 ..Default::default()
             });
+        }
+    }
+    for entry in &catalog.models {
+        if let Some(alias) = entry.alias.as_deref() {
+            assert!(
+                entry.model_provider.is_some()
+                    || codex_protocol::openai_models::is_native_runtime_model(&entry.model.slug),
+                "model aliases require a provider binding or native runtime"
+            );
+            assert!(!alias.is_empty(), "model aliases must not be empty");
+            assert!(
+                !catalog.models.iter().any(|other| other.model.slug == alias),
+                "model alias collides with a model ID"
+            );
+            assert_eq!(
+                catalog
+                    .models
+                    .iter()
+                    .filter(|other| other.alias.as_deref() == Some(alias))
+                    .count(),
+                1,
+                "duplicate model alias"
+            );
         }
     }
     catalog
@@ -45,4 +69,20 @@ pub fn provider_has_model_bindings(provider: &str) -> bool {
 
 pub(crate) fn models() -> impl Iterator<Item = &'static ModelInfo> {
     CATALOG.models.iter().map(|entry| &entry.model)
+}
+
+pub fn canonical_model(model: &str) -> Option<&'static str> {
+    CATALOG
+        .models
+        .iter()
+        .find(|entry| entry.alias.as_deref() == Some(model))
+        .map(|entry| entry.model.slug.as_str())
+}
+
+pub fn model_alias(model: &str) -> Option<&'static str> {
+    CATALOG
+        .models
+        .iter()
+        .find(|entry| entry.model.slug == model)
+        .and_then(|entry| entry.alias.as_deref())
 }
