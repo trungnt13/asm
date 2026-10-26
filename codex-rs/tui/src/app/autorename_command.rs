@@ -51,7 +51,11 @@ impl App {
                 .filter_map(user_message_text)
                 .find(|text| !text.trim().is_empty()),
             AutoRenameContext::RecentConversation => {
-                recent_conversation_messages(items, Some(settings), /*previous_title*/ None)
+                recent_conversation_messages(
+                    items.map(|item| &item.payload),
+                    Some(settings),
+                    /*previous_title*/ None,
+                )
             }
         };
         let Some(source) = source else {

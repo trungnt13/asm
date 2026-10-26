@@ -90,6 +90,8 @@ use codex_mcp::McpPluginAttribution;
 use codex_mcp::McpProtocolMode;
 use codex_mcp::McpServerRegistration;
 use codex_mcp::ResolvedMcpCatalog;
+use codex_model_provider::ChatgptBaseUrl;
+use codex_model_provider::DEFAULT_CHATGPT_BASE_URL;
 use codex_model_provider::ProviderCapabilities;
 use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
@@ -1110,6 +1112,9 @@ pub struct Config {
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: String,
 
+    /// Whether configuration or managed requirements explicitly selected the ChatGPT base URL.
+    pub chatgpt_base_url_is_explicit: bool,
+
     /// Whether Codex-owned clients should respect host system proxy settings.
     pub respect_system_proxy: bool,
 
@@ -1398,6 +1403,7 @@ impl Default for TokenBudgetConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RolloutBudgetConfig {
+    pub enforce_limit: bool,
     pub limit_tokens: i64,
     pub reminder_at_remaining_tokens: Vec<i64>,
     pub sampling_token_weight: f64,
@@ -1813,6 +1819,15 @@ impl Config {
         }
     }
 
+    /// Returns backend routing that can resolve defaults against the request's auth snapshot.
+    pub fn chatgpt_backend_url(&self) -> ChatgptBaseUrl {
+        if !self.chatgpt_base_url_is_explicit && self.chatgpt_base_url == DEFAULT_CHATGPT_BASE_URL {
+            ChatgptBaseUrl::Default
+        } else {
+            ChatgptBaseUrl::Configured(self.chatgpt_base_url.clone())
+        }
+    }
+
     /// Returns auth routing resolved from the effective feature configuration.
     pub fn auth_route_config(&self) -> AuthRouteConfig {
         self.application_auth_route_config
@@ -1997,6 +2012,7 @@ impl Config {
                 Vec::new()
             },
             protocol_mode: self.mcp_protocol_mode(),
+            discover_local_stdio: self.features.enabled(Feature::McpConnectionSharing),
             host_owned_apps_protocol_mode: if self.features.enabled(Feature::CodexAppsMcp20260728) {
                 McpProtocolMode::V20260728
             } else {
@@ -3087,6 +3103,7 @@ fn resolve_rollout_budget_config(
         }
     }
     Ok(Some(RolloutBudgetConfig {
+        enforce_limit: config.enforce_limit.unwrap_or(true),
         limit_tokens,
         reminder_at_remaining_tokens,
         sampling_token_weight,
@@ -3461,6 +3478,15 @@ impl Config {
             config_layer_stack.requirements(),
             &mut startup_warnings,
         );
+        // Packaged defaults supply a URL even when no override was configured.
+        let chatgpt_base_url_is_explicit =
+            config_layer_stack.requirements().chatgpt_base_url.is_some()
+                || config_layer_stack
+                    .layers_high_to_low()
+                    .find(|layer| layer.config.get("chatgpt_base_url").is_some())
+                    .map_or(cfg.chatgpt_base_url.is_some(), |layer| {
+                        !matches!(layer.name, ConfigLayerSource::PackagedDefaults { .. })
+                    });
         // Destructure every field to ensure ConfigRequirements additions are
         // either applied above or handled while constructing the final Config.
         let ConfigRequirements {
@@ -4746,9 +4772,10 @@ impl Config {
             model_catalog,
             load_external_models_json: cfg.load_external_models_json.unwrap_or(true),
             model_verbosity: cfg.model_verbosity,
+            chatgpt_base_url_is_explicit,
             chatgpt_base_url: cfg
                 .chatgpt_base_url
-                .unwrap_or("https://chatgpt.com/backend-api/".to_string()),
+                .unwrap_or_else(|| DEFAULT_CHATGPT_BASE_URL.to_string()),
             respect_system_proxy,
             apps_mcp_product_sku: cfg.apps_mcp_product_sku.clone(),
             responses_api_metadata: cfg.responses_api_metadata.unwrap_or_default(),

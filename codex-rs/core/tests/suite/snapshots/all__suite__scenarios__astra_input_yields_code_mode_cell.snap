@@ -6,15 +6,15 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=69c8f596545517aa):
-        - namespace/functions; hash=13a36c9bc9ada856
+00:additional_tools/developer (3; hash=59c5d79e85fc6be7):
+        - namespace/functions; hash=ccbe7c65aba34e71
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=f402e8c5e9b5e317
+        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=2c8d6295978dbe63
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -114,7 +114,7 @@ Scenario: Astra continues after new user input yields a running code cell, then 
 10:message/user:
     Please also highlight the customer impact.
 -- request 3 (turn) --
-11:function_call/functions.wait:{"cell_id":"<CELL_ID>","yield_time_ms":60000}
+11:function_call/functions.wait:{"cell_id":"<CELL_ID>","reason":"","yield_time_ms":60000}
 12:function_call_output:Script completed
     Wall time <DURATION> seconds
     Output:

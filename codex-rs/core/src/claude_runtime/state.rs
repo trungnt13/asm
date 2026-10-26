@@ -32,7 +32,6 @@ impl Checkpoint {
     pub(super) fn validate(
         &self,
         model: &str,
-        effort: &Option<String>,
         auto_compact_window: Option<i64>,
         cwd: &std::path::Path,
         messaging: bool,
@@ -48,11 +47,10 @@ impl Checkpoint {
         );
         anyhow::ensure!(
             self.model == model
-                && &self.effort == effort
                 && self.auto_compact_window == auto_compact_window
                 && self.cwd == cwd
                 && self.messaging == messaging,
-            "saved native model, effort, compaction window, directory, or messaging configuration changed; start a new chat"
+            "saved native model, compaction window, directory, or messaging configuration changed; start a new chat"
         );
         anyhow::ensure!(
             self.input_count <= messages.len()

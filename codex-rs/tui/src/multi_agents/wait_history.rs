@@ -20,10 +20,10 @@ pub(crate) struct AgentWaitHistory {
 impl AgentWaitHistory {
     pub(crate) fn cell(
         &mut self,
-        item: &ThreadItem,
+        item: &ThreadItemPayload,
         agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
     ) -> Option<AgentWaitHistoryCell> {
-        let ThreadItem::CollabAgentToolCall {
+        let ThreadItemPayload::CollabAgentToolCall {
             id,
             tool: CollabAgentTool::Wait,
             status,

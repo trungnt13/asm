@@ -128,6 +128,7 @@ fn resolve_model_command(chat: &ChatWidget, args: &str) -> Result<ModelCommand, 
         .model
         .clone()
         .unwrap_or_else(|| chat.current_model().to_owned());
+    let model_name = codex_models_manager::canonical_model(&model_name).unwrap_or(&model_name);
     let Some(model) =
         chat.model_catalog.models.iter().find(|model| {
             model.model == model_name && (args.model.is_none() || model.show_in_picker)
@@ -158,11 +159,8 @@ impl ChatWidget {
             effort,
             service_tier,
         } = command;
-        if self.model_selection_needs_new_session(&model, Some(effort.clone())) {
+        if self.model_selection_needs_new_session(&model) {
             self.confirm_model_session(model, Some(effort));
-            return;
-        }
-        if codex_protocol::openai_models::is_native_runtime_model(&model) {
             return;
         }
         let warning = self.ultra_reasoning_concurrency_warning(&effort);

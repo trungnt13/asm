@@ -8,6 +8,7 @@ use crate::multi_agents::sub_agent_activity_display;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::Turn;
 use codex_protocol::ThreadId;
@@ -47,12 +48,12 @@ impl TurnAgentCounts {
         item: &ThreadItem,
         live: bool,
     ) {
-        if let ThreadItem::McpToolCall {
+        if let ThreadItemPayload::McpToolCall {
             server,
             tool,
             arguments,
             ..
-        } = item
+        } = &item.payload
             && let Some(task_id) = match server.split('/').next() {
                 Some("claude-code")
                     if matches!(
@@ -150,7 +151,7 @@ impl App {
             _ => None,
         }
         .and_then(|(turn_id, item)| {
-            sub_agent_activity_display(item).map(|activity| (turn_id, activity))
+            sub_agent_activity_display(&item.payload).map(|activity| (turn_id, activity))
         });
         if let Some((turn_id, activity)) = activity {
             let agent_id = activity.thread_id;

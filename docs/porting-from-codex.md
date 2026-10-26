@@ -121,11 +121,21 @@ Use PRs for implementation, documentation, and syncs. The lead owns delegated wo
 
 ## Upstream sync
 
+### Live backend model catalog
+
+Every upstream rebase/sync must also fetch the live authenticated backend model catalog. Source searches and cached or bundled catalogs cannot establish current model availability; the backend can expose new models without a source update.
+
+- Use the configured backend and existing authorized sign-in. Follow the client’s catalog request path (`models?client_version=<client version>`), authentication, account routing, and discovery settings; never send credentials to an unverified endpoint. This is a read-only catalog request, not an inference call.
+- Save the successful raw JSON response as a timestamped, private task-owned `models.json` outside tracked source. Validate its model-list shape and record the fetch time, backend URL, client version, and returned model IDs. Never include credentials or authentication headers in evidence, logs, or commits.
+- Compare the live catalog with the bundled catalog and report newly exposed models, including their visibility and relevant capabilities. Link the saved JSON in the rebase report. Do not claim model execution works based on catalog presence alone, or change model/config defaults automatically.
+- If authentication, connectivity, or discovery policy prevents a fresh fetch, report the check as blocked with its reason; do not substitute cached data or claim live availability was checked.
+
+
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `970111f6cb62cc02fe36a82ea7d71b37a2889c97`.
-- Date: 2026-10-23.
-- Subject: Allow configuring GCP project and location in provider settings (#56560).
+- Last incorporated commit: `dd5521406a801212f7742432bcacb06e91823b01`.
+- Date: 2026-10-26.
+- Subject: Enable zstd compression for code-mode gRPC responses (#57212).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
@@ -285,12 +295,20 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 When `load_external_models_json` is true, merge bundled external models into custom
 `model_catalog_json` catalogs in memory; exact custom IDs retain all their metadata overrides.
-When false, keep the custom catalog alone. Provider routing remains bundled and exact-ID-only.
+When false, keep the custom catalog alone. Provider routing remains bundled and exact-match-only.
 
 Bundled `external_models.json` entries may select an existing named `model_provider`.
-Resolve exact IDs only; remote catalogs cannot supply routing. Keep endpoints and
+Accept the bundled entry’s optional provider- or runtime-qualified `alias` as well as its canonical slug.
+Normalize aliases before validation and requests; persist the canonical model/provider pair so
+alias changes cannot reroute resumed chats. Preserve custom canonical-ID metadata overrides,
+existing full IDs, and managed provider requirements. Do not infer routing from slash-separated
+names or accept routing metadata from remote catalogs. Keep endpoints and
 credentials in user provider configuration and enforce managed provider requirements.
-DeepSeek V4.1 Flash 1017 selects `fireworks`; no custom agent role is required.
+DeepSeek V4.1 Flash 1017 selects `fireworks`; its alias is
+`fireworks/deepseek-v4.1-flash`. No profile or custom agent role is required.
+Show aliases in picker entries while retaining canonical selection identity. Native-runtime entries use
+`claude/…` and `cursor/…` aliases for their existing `claude-code/…` and `cursor-agent/…` IDs;
+do not add HTTP provider bindings or change native model/runtime selection.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
 Provider changes in the picker start fresh sessions and preserve the old chat.
@@ -325,8 +343,17 @@ Claude Code owns native model access and effort acceptance; metadata grants no a
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
 marking them API-supported. Preserve ordinary model defaults.
 The model picker starts a fresh session after confirmation when entering/leaving this
-runtime or changing its fixed model/effort. Keep the original history; never replay it
+runtime or changing its model. Keep the original history; never replay it
 into the new native conversation or change saved defaults as part of this action.
+Same-model/provider effort changes stay in the current conversation and leave saved
+model defaults untouched. Apply the native control at the next idle turn boundary,
+require confirmation, then save the new effort before submitting input. Preserve the
+native process, session ID and history; never rebuild context for an effort change.
+Cold resume restores saved effort before applying a requested change. Unsupported
+changes fail before prompting without fallback. Native caching remains provider-owned;
+preserve cache-relevant context, but do not promise an identical cache key or fixed hit
+rate. Claude Code gates cache-prefix preservation on its native
+`per_turn_effort_active` feature flag, which the native server can disable.
 ASM child selections use catalog defaults and supported efforts when present; native
 model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
 Keep the V2 spawn tool description explicit: `claude-code/*` requires
@@ -497,12 +524,14 @@ copy, backend hierarchy or event vocabulary; branch only where the protocols dif
 codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 ```
 
-- `<model>` must be one value from Cursor's ACP model list, or a base name matching exactly
-  one listed variant after filtering by the user's selected effort. Match the native
-  `effort`, `reasoning_effort` or `reasoning` parameter exactly and require ACP to confirm
-  the selected variant; unsupported efforts and unlisted bracket overrides fail before
-  the first prompt. Omitted effort retains native defaults. Auto has no adjustable effort.
-  The shared external model catalog exposes only supported native effort choices.
+- Bundle Cursor model and effort metadata in `external_models.json`, like Claude Code.
+  Catalog loading and startup must not launch or authenticate either native CLI.
+  Negotiate ACP `parameterizedModelPicker` only when starting a Cursor session. Validate
+  the requested model and effort against that session's advertised choices, apply the
+  actual parameter ID from the `thought_level` category, and require confirmation before
+  prompting. Unavailable choices fail without fallback. Saved bracket-encoded model IDs
+  retain their native parameters; an explicit effort replaces that parameter. Custom
+  catalogs remain authoritative; bundled metadata grants no native model access.
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
@@ -875,6 +904,13 @@ Top-level `include_model_catalog_in_spawn_agent_list`, default `true`:
 - False removes generated model/effort/tier lists from V1/V2 spawn descriptions and `<model_catalog>`, plus guidance pointing there.
 - Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists stop applying.
 - Inclusion is independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` argument exposure.
+
+Compact external-model alias discovery follows `load_external_models_json`:
+
+- When true (the default), include a compact exact-alias list in V1/V2 spawn descriptions, independently of the full catalog visibility setting and context placement. When false, omit this list.
+- List only picker-visible, backend-compatible catalog entries with bundled aliases: native runtimes or configured API providers permitted by managed requirements. Discovery does not prove runtime, credentials, or service availability.
+- Keep the list hidden when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: V1 `fork_context=false`, V2 `fork_turns="none"`.
+- Do not change personal configuration automatically. Unknown-model errors identify truncated model previews as partial.
 
 ### MCP resource tools
 

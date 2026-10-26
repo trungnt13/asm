@@ -50,16 +50,12 @@ impl AstraModelPickerAction {
 }
 
 impl ChatWidget {
-    pub(super) fn model_selection_needs_new_session(
-        &self,
-        model: &str,
-        effort: Option<ReasoningEffortConfig>,
-    ) -> bool {
+    pub(super) fn model_selection_needs_new_session(&self, model: &str) -> bool {
         (codex_models_manager::provider_for_model(self.current_model())
             != codex_models_manager::provider_for_model(model))
             || (codex_protocol::openai_models::is_native_runtime_model(self.current_model())
                 || codex_protocol::openai_models::is_native_runtime_model(&model))
-                && (self.current_model() != model || self.current_reasoning_effort() != effort)
+                && self.current_model() != model
     }
 
     pub(crate) fn confirm_model_session(
@@ -92,7 +88,7 @@ impl ChatWidget {
         effort: Option<ReasoningEffortConfig>,
     ) -> Option<SelectionSecondaryAction> {
         if codex_protocol::openai_models::is_native_runtime_model(&model)
-            || self.model_selection_needs_new_session(&model, effort.clone())
+            || self.model_selection_needs_new_session(&model)
         {
             return None;
         }

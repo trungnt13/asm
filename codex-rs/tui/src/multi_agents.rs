@@ -15,7 +15,7 @@ use codex_app_server_protocol::CollabAgentStatus;
 use codex_app_server_protocol::CollabAgentTool;
 use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::SubAgentActivityKind;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::ThreadId;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use crossterm::event::KeyCode;
@@ -194,9 +194,9 @@ fn next_agent_word_motion_fallback(
     false
 }
 
-pub(crate) fn spawn_request_summary(item: &ThreadItem) -> Option<SpawnRequestSummary> {
+pub(crate) fn spawn_request_summary(item: &ThreadItemPayload) -> Option<SpawnRequestSummary> {
     match item {
-        ThreadItem::CollabAgentToolCall {
+        ThreadItemPayload::CollabAgentToolCall {
             tool: CollabAgentTool::SpawnAgent,
             model: Some(model),
             reasoning_effort: Some(reasoning_effort),
@@ -210,11 +210,11 @@ pub(crate) fn spawn_request_summary(item: &ThreadItem) -> Option<SpawnRequestSum
 }
 
 pub(crate) fn tool_call_history_cell(
-    item: &ThreadItem,
+    item: &ThreadItemPayload,
     cached_spawn_request: Option<&SpawnRequestSummary>,
     mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
 ) -> Option<PlainHistoryCell> {
-    let ThreadItem::CollabAgentToolCall {
+    let ThreadItemPayload::CollabAgentToolCall {
         id,
         tool,
         status,
@@ -299,8 +299,10 @@ pub(crate) fn tool_call_history_cell(
     }
 }
 
-pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentActivityDisplay> {
-    let ThreadItem::SubAgentActivity {
+pub(crate) fn sub_agent_activity_display(
+    item: &ThreadItemPayload,
+) -> Option<SubAgentActivityDisplay> {
+    let ThreadItemPayload::SubAgentActivity {
         kind,
         agent_thread_id,
         agent_path,
@@ -371,9 +373,9 @@ impl HistoryCell for SubAgentActivityHistoryCell {
 }
 
 pub(crate) fn sub_agent_activity_history_cell(
-    item: &ThreadItem,
+    item: &ThreadItemPayload,
 ) -> Option<SubAgentActivityHistoryCell> {
-    let ThreadItem::SubAgentActivity {
+    let ThreadItemPayload::SubAgentActivity {
         id,
         kind,
         agent_path,
@@ -751,7 +753,7 @@ mod tests {
 
     #[test]
     fn interacted_sub_agent_activity_does_not_change_liveness() {
-        let item = ThreadItem::SubAgentActivity {
+        let item = ThreadItemPayload::SubAgentActivity {
             model: None,
             reasoning_effort: None,
             id: "activity-1".to_string(),
@@ -766,7 +768,7 @@ mod tests {
     #[test]
     fn completed_sub_agent_activity_stops_running_liveness() {
         let thread_id = ThreadId::new();
-        let item = ThreadItem::SubAgentActivity {
+        let item = ThreadItemPayload::SubAgentActivity {
             model: None,
             reasoning_effort: None,
             id: "activity-1".to_string(),
@@ -795,7 +797,7 @@ mod tests {
             .expect("valid bob thread id");
 
         let spawn = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-spawn".to_string(),
                 tool: CollabAgentTool::SpawnAgent,
                 status: CollabAgentToolCallStatus::Completed,
@@ -815,7 +817,7 @@ mod tests {
         .expect("spawn item renders");
 
         let send = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-send".to_string(),
                 tool: CollabAgentTool::SendInput,
                 status: CollabAgentToolCallStatus::Completed,
@@ -835,7 +837,7 @@ mod tests {
         .expect("send-input item renders");
 
         let waiting = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-wait".to_string(),
                 tool: CollabAgentTool::Wait,
                 status: CollabAgentToolCallStatus::InProgress,
@@ -852,7 +854,7 @@ mod tests {
         .expect("wait begin item renders");
 
         let finished = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-wait".to_string(),
                 tool: CollabAgentTool::Wait,
                 status: CollabAgentToolCallStatus::Completed,
@@ -878,7 +880,7 @@ mod tests {
         .expect("wait end item renders");
 
         let close = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-close".to_string(),
                 tool: CollabAgentTool::CloseAgent,
                 status: CollabAgentToolCallStatus::Completed,
@@ -962,7 +964,7 @@ mod tests {
         let robie_id = ThreadId::from_string("00000000-0000-0000-0000-000000000002")
             .expect("valid robie thread id");
         let cell = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-spawn".to_string(),
                 tool: CollabAgentTool::SpawnAgent,
                 status: CollabAgentToolCallStatus::Completed,
@@ -1001,7 +1003,7 @@ mod tests {
             .expect("valid robie thread id");
 
         let cell = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
+            &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-resume".to_string(),
                 tool: CollabAgentTool::ResumeAgent,
                 status: CollabAgentToolCallStatus::Completed,

@@ -17,7 +17,7 @@ use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::legacy_core::config::Config;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::items::UserMessageItem;
@@ -107,7 +107,7 @@ pub(crate) fn thread_to_transcript_cells(
             thread_items_to_transcript_cells(
                 thread_id,
                 &cwd,
-                turn.items,
+                turn.items.into_iter().map(|entry| entry.payload),
                 raw_reasoning_visibility,
                 config,
                 matches!(
@@ -129,7 +129,7 @@ pub(crate) fn thread_to_transcript_cells(
 pub(crate) fn thread_items_to_transcript_cells(
     thread_id: Option<ThreadId>,
     cwd: &AbsolutePathBuf,
-    items: impl IntoIterator<Item = ThreadItem>,
+    items: impl IntoIterator<Item = ThreadItemPayload>,
     raw_reasoning_visibility: RawReasoningVisibility,
     config: Option<&Config>,
     show_communication: bool,
@@ -150,7 +150,7 @@ pub(crate) fn thread_items_to_transcript_cells(
             continue;
         }
 
-        if matches!(item, ThreadItem::Reasoning { .. })
+        if matches!(item, ThreadItemPayload::Reasoning { .. })
             && let Some(group) = &mut pending
         {
             for cell in item_to_cells(
@@ -172,7 +172,7 @@ pub(crate) fn thread_items_to_transcript_cells(
             continue;
         }
         match item {
-            item @ ThreadItem::McpToolCall { .. } => {
+            item @ ThreadItemPayload::McpToolCall { .. } => {
                 let Some(call) = tools::McpHistory::from_item(item) else {
                     PendingActivity::flush(&mut pending, &mut cells);
                     continue;
@@ -195,7 +195,7 @@ pub(crate) fn thread_items_to_transcript_cells(
                     cells.push(Arc::new(cell));
                 }
             }
-            item @ ThreadItem::CommandExecution { .. } => {
+            item @ ThreadItemPayload::CommandExecution { .. } => {
                 if matches!(pending, Some(PendingActivity::Computer(_))) {
                     PendingActivity::flush(&mut pending, &mut cells);
                 }
@@ -236,14 +236,14 @@ pub(crate) fn thread_items_to_transcript_cells(
 
 /// Project one item without changing the active widget or its turn lifecycle.
 fn item_to_cells(
-    item: ThreadItem,
+    item: ThreadItemPayload,
     cwd: &AbsolutePathBuf,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
 ) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
-        ThreadItem::UserMessage {
+        ThreadItemPayload::UserMessage {
             id,
             client_id,
             content,
@@ -282,7 +282,7 @@ fn item_to_cells(
                 remote_image_urls: item.image_urls(),
             }));
         }
-        ThreadItem::AgentMessage { text, .. } => {
+        ThreadItemPayload::AgentMessage { text, .. } => {
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
                 cells.push(Arc::new(AgentMarkdownCell::new_with_inline_visualizations(
@@ -292,7 +292,7 @@ fn item_to_cells(
                 )));
             }
         }
-        ThreadItem::FunctionCallOutput {
+        ThreadItemPayload::FunctionCallOutput {
             name,
             namespace,
             output,
@@ -312,7 +312,7 @@ fn item_to_cells(
                 )));
             }
         }
-        ThreadItem::Plan { text, .. } => {
+        ThreadItemPayload::Plan { text, .. } => {
             if !text.trim().is_empty() {
                 cells.push(Arc::new(crate::history_cell::new_proposed_plan(
                     text,
@@ -320,7 +320,7 @@ fn item_to_cells(
                 )));
             }
         }
-        ThreadItem::Reasoning {
+        ThreadItemPayload::Reasoning {
             id,
             summary,
             content,
@@ -345,7 +345,7 @@ fn item_to_cells(
                 cells.push(Arc::new(cell));
             }
         }
-        item @ ThreadItem::CommandExecution { .. } => {
+        item @ ThreadItemPayload::CommandExecution { .. } => {
             if let Some(command) = tools::CommandHistory::from_item(item) {
                 cells.push(Arc::new(command.into_cell()));
             }

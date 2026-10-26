@@ -15,8 +15,9 @@ use crate::temporary_structured_request::run_temporary_structured_turn;
 use crate::temporary_structured_request::start_temporary_thread;
 use crate::temporary_structured_request::unsubscribe_temporary_thread;
 use codex_app_server_protocol::ServerNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadSource;
+use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::UserInput;
 use codex_config::AutoRenameConfig;
 use codex_protocol::ThreadId;
@@ -286,7 +287,7 @@ impl App {
                 store
                     .turns
                     .iter()
-                    .flat_map(|turn| turn.items.iter())
+                    .flat_map(Turn::item_payloads)
                     .chain(store.buffer.iter().filter_map(|event| {
                         let ThreadBufferedEvent::Notification(notification) = event else {
                             return None;
@@ -297,7 +298,7 @@ impl App {
                             return None;
                         };
 
-                        Some(&notification.item)
+                        Some(&notification.item.payload)
                     }))
                     .filter(|item| seen.insert(item.id().to_string())),
                 /*settings*/ None,
@@ -388,14 +389,14 @@ pub(super) fn recent_conversation_messages<'a, I>(
     previous_title: Option<&str>,
 ) -> Option<String>
 where
-    I: IntoIterator<Item = &'a ThreadItem>,
+    I: IntoIterator<Item = &'a ThreadItemPayload>,
     I::IntoIter: DoubleEndedIterator,
 {
     let message_limit = settings
         .and_then(|settings| settings.recent_message_limit)
         .unwrap_or(THREAD_TITLE_RECENT_MESSAGES);
-    let extract_message = |item: &ThreadItem| match item {
-        ThreadItem::UserMessage { content, .. } => {
+    let extract_message = |item: &ThreadItemPayload| match item {
+        ThreadItemPayload::UserMessage { content, .. } => {
             let text = content
                 .iter()
                 .filter_map(|input| match input {
@@ -408,7 +409,7 @@ where
                 .join("\n");
             (!text.trim().is_empty()).then_some(("user", text))
         }
-        ThreadItem::AgentMessage { text, phase, .. }
+        ThreadItemPayload::AgentMessage { text, phase, .. }
             if !matches!(phase, Some(MessagePhase::Commentary)) && !text.trim().is_empty() =>
         {
             Some(("assistant", text.clone()))
@@ -418,7 +419,7 @@ where
     let mut items = items.into_iter();
     let first_user_message = settings.and_then(|_| {
         items.by_ref().find_map(|item| {
-            matches!(item, ThreadItem::UserMessage { .. })
+            matches!(item, ThreadItemPayload::UserMessage { .. })
                 .then(|| extract_message(item))
                 .flatten()
         })

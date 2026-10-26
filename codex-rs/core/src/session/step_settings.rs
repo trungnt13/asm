@@ -297,6 +297,10 @@ impl StepSettings {
                 /*developer_instructions*/ None,
             )
         });
+        if let Some(model) = codex_models_manager::canonical_model(next.collaboration_mode.model())
+        {
+            next.collaboration_mode.settings.model = model.to_owned();
+        }
         if let Some(summary) = update.reasoning_summary {
             next.reasoning_summary = Some(summary);
         }
@@ -349,16 +353,14 @@ impl StepSettings {
         }
         let current_claude =
             crate::claude_runtime::is_native_model(self.collaboration_mode.model());
-        let claude_settings_changed = current_claude
-            && (self.collaboration_mode.model() != next.collaboration_mode.model()
-                || self.collaboration_mode.reasoning_effort()
-                    != next.collaboration_mode.reasoning_effort());
-        if claude_settings_changed
+        let claude_model_changed =
+            current_claude && self.collaboration_mode.model() != next.collaboration_mode.model();
+        if claude_model_changed
             || (!current_claude
                 && crate::claude_runtime::is_native_model(next.collaboration_mode.model()))
         {
             return Err(ConstraintError::InvalidValue {
-                field_name: "Native runtime settings (start a fresh thread to change)",
+                field_name: "Native runtime model (start a fresh thread to change)",
                 candidate: next.collaboration_mode.model().to_string(),
                 allowed: self.collaboration_mode.model().to_string(),
                 requirement_source: codex_config::RequirementSource::Unknown,

@@ -48,16 +48,16 @@ impl HistoryCell for InterAgentCommunicationCell {
 }
 
 pub(crate) fn communication_history_cell(
-    item: &codex_app_server_protocol::ThreadItem,
+    item: &codex_app_server_protocol::ThreadItemPayload,
     cwd: &std::path::Path,
     own_agent_role: Option<&str>,
 ) -> Option<impl HistoryCell + 'static> {
     use codex_app_server_protocol::CollabAgentTool;
     use codex_app_server_protocol::CollabAgentToolCallStatus;
-    use codex_app_server_protocol::ThreadItem;
+    use codex_app_server_protocol::ThreadItemPayload;
 
     let (title, text) = match item {
-        ThreadItem::InterAgentMessage {
+        ThreadItemPayload::InterAgentMessage {
             author,
             recipient,
             text,
@@ -72,7 +72,7 @@ pub(crate) fn communication_history_cell(
                 text.clone(),
             )
         }
-        ThreadItem::CollabAgentToolCall {
+        ThreadItemPayload::CollabAgentToolCall {
             tool,
             status,
             prompt: Some(text),
@@ -101,7 +101,7 @@ pub(crate) fn communication_history_cell(
         _ => return None,
     };
     let spawn_arguments = match item {
-        ThreadItem::InterAgentMessage {
+        ThreadItemPayload::InterAgentMessage {
             spawn_arguments, ..
         } => spawn_arguments.as_deref(),
         _ => None,
