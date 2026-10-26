@@ -285,12 +285,18 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 When `load_external_models_json` is true, merge bundled external models into custom
 `model_catalog_json` catalogs in memory; exact custom IDs retain all their metadata overrides.
-When false, keep the custom catalog alone. Provider routing remains bundled and exact-ID-only.
+When false, keep the custom catalog alone. Provider routing remains bundled and exact-match-only.
 
 Bundled `external_models.json` entries may select an existing named `model_provider`.
-Resolve exact IDs only; remote catalogs cannot supply routing. Keep endpoints and
+Accept the bundled entry’s optional provider-qualified `alias` as well as its canonical slug.
+Normalize aliases before validation and requests; persist the canonical model/provider pair so
+alias changes cannot reroute resumed chats. Preserve custom canonical-ID metadata overrides,
+existing full IDs, and managed provider requirements. Do not infer routing from slash-separated
+names or accept routing metadata from remote catalogs. Keep endpoints and
 credentials in user provider configuration and enforce managed provider requirements.
-DeepSeek V4.1 Flash 1017 selects `fireworks`; no custom agent role is required.
+DeepSeek V4.1 Flash 1017 selects `fireworks`; its alias is
+`fireworks/deepseek-v4.1-flash`. No profile or custom agent role is required.
+Show the alias in its picker entry while retaining canonical selection identity.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
 Provider changes in the picker start fresh sessions and preserve the old chat.
@@ -875,6 +881,13 @@ Top-level `include_model_catalog_in_spawn_agent_list`, default `true`:
 - False removes generated model/effort/tier lists from V1/V2 spawn descriptions and `<model_catalog>`, plus guidance pointing there.
 - Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists stop applying.
 - Inclusion is independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` argument exposure.
+
+Top-level `include_external_model_aliases_in_spawn_agent_list`, default `false`:
+
+- Opt in to a compact exact-alias list in V1/V2 spawn descriptions, independently of the full catalog setting and context placement.
+- List only picker-visible, backend-compatible catalog entries with bundled aliases and configured providers permitted by managed requirements; configuration does not prove credentials or service availability.
+- Keep the list hidden when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: V1 `fork_context=false`, V2 `fork_turns="none"`.
+- Do not change personal configuration automatically. Unknown-model errors identify truncated model previews as partial.
 
 ### MCP resource tools
 

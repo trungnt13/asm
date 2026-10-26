@@ -240,6 +240,7 @@
     },
     {
       "slug": "accounts/fireworks/models/deepseek-v4p1-flash-1017",
+      "alias": "fireworks/deepseek-v4.1-flash",
       "display_name": "DeepSeek V4.1 Flash 1017 · Fireworks",
       "description": "Uses the configured Fireworks provider with ASM tools.",
       "default_reasoning_level": "high",

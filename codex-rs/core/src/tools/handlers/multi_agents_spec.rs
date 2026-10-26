@@ -25,6 +25,7 @@ const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 #[derive(Debug, Clone)]
 pub struct SpawnAgentToolOptions {
     pub available_models: Vec<ModelPreset>,
+    pub external_model_aliases: Vec<String>,
     pub agent_type_description: String,
     pub expose_agent_type: bool,
     pub hide_agent_type_model_reasoning: bool,
@@ -39,6 +40,7 @@ impl Default for SpawnAgentToolOptions {
     fn default() -> Self {
         Self {
             available_models: Vec::new(),
+            external_model_aliases: Vec::new(),
             agent_type_description: String::new(),
             expose_agent_type: true,
             hide_agent_type_model_reasoning: false,
@@ -92,13 +94,17 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
         description: MULTI_AGENT_V1_NAMESPACE_DESCRIPTION.to_string(),
         tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
             name: "spawn_agent".to_string(),
-            description: spawn_agent_tool_description(
-                available_models_description.as_deref(),
-                options.include_model_catalog_in_spawn_agent_list
-                    && options.model_catalog_in_context,
-                inherited_model_guidance,
-                return_value_description,
-                options.usage_hint_text,
+            description: append_external_model_aliases(
+                spawn_agent_tool_description(
+                    available_models_description.as_deref(),
+                    options.include_model_catalog_in_spawn_agent_list
+                        && options.model_catalog_in_context,
+                    inherited_model_guidance,
+                    return_value_description,
+                    options.usage_hint_text,
+                ),
+                &options.external_model_aliases,
+                "fork_context=false",
             ),
             strict: false,
             defer_loading: None,
@@ -144,15 +150,20 @@ pub fn create_spawn_agent_tool_v2(
 
     ToolSpec::Function(ResponsesApiTool {
         name: "spawn_agent".to_string(),
-        description: spawn_agent_tool_description_v2(
-            available_models_description.as_deref(),
-            options.include_model_catalog_in_spawn_agent_list && options.model_catalog_in_context,
-            options
-                .expose_spawn_agent_model_overrides
-                .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
-            inherited_model_guidance,
-            options.usage_hint_text,
-            description_override,
+        description: append_external_model_aliases(
+            spawn_agent_tool_description_v2(
+                available_models_description.as_deref(),
+                options.include_model_catalog_in_spawn_agent_list
+                    && options.model_catalog_in_context,
+                options
+                    .expose_spawn_agent_model_overrides
+                    .then_some(SPAWN_AGENT_MODEL_CATALOG_GUIDANCE),
+                inherited_model_guidance,
+                options.usage_hint_text,
+                description_override,
+            ),
+            &options.external_model_aliases,
+            "fork_turns=\"none\"",
         ),
         strict: false,
         defer_loading: None,
@@ -688,6 +699,19 @@ fn hide_spawn_agent_metadata_options(properties: &mut BTreeMap<String, JsonSchem
     properties.remove("agent_type");
     properties.remove("model");
     properties.remove("reasoning_effort");
+}
+
+fn append_external_model_aliases(
+    mut description: String,
+    aliases: &[String],
+    fork_argument: &str,
+) -> String {
+    if !aliases.is_empty() {
+        description.push_str("\nThird-party models with configured providers (service availability is not verified):\n- ");
+        description.push_str(&aliases.join("\n- "));
+        description.push_str(&format!("\nUse these exact model aliases. Cross-provider spawns require `{fork_argument}`; include all needed context in `message`."));
+    }
+    description
 }
 
 fn spawn_agent_tool_description(

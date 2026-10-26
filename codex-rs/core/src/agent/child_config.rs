@@ -93,6 +93,13 @@ pub(crate) async fn prepare_agent_spawn_config(
     if let Some(model) = explicit_model {
         config.model = Some(model);
     }
+    if let Some(model) = config
+        .model
+        .as_deref()
+        .and_then(codex_models_manager::canonical_model)
+    {
+        config.model = Some(model.to_owned());
+    }
     validate_spawn_agent_config_effort(session, &config).await?;
     config
         .apply_external_model_provider()
@@ -251,6 +258,8 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(requested_model) = requested_model {
+        let requested_model =
+            codex_models_manager::canonical_model(requested_model).unwrap_or(requested_model);
         let native_model = crate::claude_runtime::is_native_model(requested_model);
         let catalog_bound_model = config.model_catalog.is_none()
             && config.model_provider.model_catalog_url.is_none()
@@ -436,7 +445,7 @@ fn find_spawn_agent_model_name(
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
-                "Unknown model `{requested_model}` for spawn_agent. Available models: {available}"
+                "Unknown model `{requested_model}` for spawn_agent. Available models (up to {MAX_SPAWN_AGENT_MODEL_OVERRIDES} shown; list may be incomplete): {available}"
             )
         })
 }

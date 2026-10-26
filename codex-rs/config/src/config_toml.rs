@@ -273,6 +273,10 @@ pub struct ConfigToml {
     /// Disabling it preserves model and reasoning-effort arguments.
     pub include_model_catalog_in_spawn_agent_list: Option<bool>,
 
+    /// Include compact configured-provider aliases in spawn-tool descriptions.
+    /// Defaults to false.
+    pub include_external_model_aliases_in_spawn_agent_list: Option<bool>,
+
     /// Include the Copyright compliance subsection in the local `web.run` description.
     /// Defaults to true.
     /// Other quotation and word limits remain unchanged.

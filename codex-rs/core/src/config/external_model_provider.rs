@@ -19,6 +19,13 @@ impl Config {
     }
 
     pub fn apply_external_model_provider(&mut self) -> io::Result<()> {
+        if let Some(model) = self
+            .model
+            .as_deref()
+            .and_then(codex_models_manager::canonical_model)
+        {
+            self.model = Some(model.to_owned());
+        }
         let Some(provider_id) = self
             .model
             .as_deref()
