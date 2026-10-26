@@ -891,22 +891,9 @@ fn spawn_agent_models_description(
             } else {
                 format!(" Reasoning efforts: {efforts}.")
             };
-            let service_tiers = model
-                .service_tiers
-                .iter()
-                .map(|tier| tier.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let service_tiers_suffix = if service_tiers.is_empty() {
-                String::new()
-            } else {
-                format!(" Service tiers: {service_tiers}.")
-            };
             let model_slug = &model.model;
             let description = &model.description;
-            format!(
-                "- `{model_slug}`: {description}{reasoning_efforts_suffix}{service_tiers_suffix}"
-            )
+            format!("- `{model_slug}`: {description}{reasoning_efforts_suffix}")
         })
         .collect::<Vec<_>>()
         .join("\n");
