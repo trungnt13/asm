@@ -140,7 +140,7 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
     );
 
     let writes = mount_sse_sequence(harness.server(), vec![
-        tool_response("poll", "write_stdin", json!({"session_id":1000, "chars":"", "yield_time_ms":1000})),
+        tool_response("poll", "write_stdin", json!({"reason": "", "session_id":1000, "chars":"", "yield_time_ms":1000})),
         tool_response("denied", "write_stdin", json!({"session_id":1000, "chars":"REJECTED=1\n"})),
         tool_response("allowed", "write_stdin", json!({"session_id":1000, "chars":"test -z \"${REJECTED-}\" && printf allowed > allowed/result; exit\n"})),
         sse(vec![ev_completed("done")]),
@@ -371,7 +371,7 @@ async fn strict_stdin_review_reaches_guardian_with_sandbox_prompts_disabled() ->
     };
     let writes = mount_sse_sequence(harness.server(), vec![
         tool_response("strict", "request_permissions", json!({"reason":"review later input", "permissions":{"network":{"enabled":true}}})),
-        tool_response("poll", "write_stdin", json!({"session_id":1000, "chars":"", "yield_time_ms":1000})),
+        tool_response("poll", "write_stdin", json!({"reason": "", "session_id":1000, "chars":"", "yield_time_ms":1000})),
         tool_response("denied", "write_stdin", json!({"session_id":1000, "chars":"REJECTED=1\n"})),
         decision("deny"),
         tool_response("allowed", "write_stdin", json!({"session_id":1000, "chars":"test \"${INITIAL-}\" = 1 && test -z \"${REJECTED-}\" && printf 'STDIN_%s_OK\\n' REVIEW; exit\n"})),

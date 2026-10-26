@@ -1039,7 +1039,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
                 ev_function_call(
                     call_id,
                     "write_stdin",
-                    &json!({ "session_id": 1000, "chars": "", "yield_time_ms": 1_000 }).to_string(),
+                    &json!({ "reason": "", "session_id": 1000, "chars": "", "yield_time_ms": 1_000 }).to_string(),
                 ),
                 ev_completed(call_id),
             ]));

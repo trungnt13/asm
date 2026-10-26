@@ -28,6 +28,7 @@ pub struct CodeModeWaitHandler {
 
 #[derive(Debug, Deserialize)]
 struct ExecWaitArgs {
+    reason: String,
     cell_id: String,
     #[serde(default = "default_wait_yield_time_ms")]
     yield_time_ms: u64,
@@ -122,6 +123,8 @@ impl CodeModeWaitHandler {
                 let args: ExecWaitArgs = parse_arguments(&arguments).inspect_err(|_error| {
                     telemetry.finish(/*success*/ false);
                 })?;
+                let reason = codex_tools::WaitReason::new(&args.reason)
+                    .map_err(FunctionCallError::RespondToModel)?;
                 let exec = ExecContext { session, turn };
                 let started_at = std::time::Instant::now();
                 telemetry.cell_id = Some(args.cell_id.clone());
@@ -203,13 +206,27 @@ impl CodeModeWaitHandler {
                 let wall_time = wait_response
                     .code_mode_host_duration()
                     .unwrap_or_else(|| started_at.elapsed());
-                Ok(boxed_tool_output(handle_runtime_response(
+                let completed_or_yielded = matches!(
+                    &wait_response,
+                    codex_code_mode::WaitOutcome::LiveCell(
+                        RuntimeResponse::Yielded { .. } | RuntimeResponse::Result { .. }
+                    )
+                );
+                let mut output = handle_runtime_response(
                     &step_context.settings.model_info,
                     wait_response.into(),
                     args.max_tokens,
                     wall_time,
                     exec.turn.config.code_mode.experimental_show_cell_overhead,
-                )))
+                );
+                if !args.terminate
+                    && completed_or_yielded
+                    && output.success_for_logging()
+                    && let Some(reminder) = reason.reminder(codex_tools::WaitReminder::Returned)
+                {
+                    output.append_wait_reminder(reminder);
+                }
+                Ok(boxed_tool_output(output))
             }
             _ => Err(FunctionCallError::RespondToModel(format!(
                 "{WAIT_TOOL_NAME} expects JSON arguments"

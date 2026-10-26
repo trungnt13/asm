@@ -1088,15 +1088,29 @@ children. Keep project instructions, host thread instructions, and root/internal
 worker behavior unchanged. Full-history children retain history and receive the
 replacement through normal incremental context updates, not history rewriting.
 
-### Sleep intent reminders
+### Wait and sleep intent reminders
 
-`clock.sleep` requires a duration and a reason field of at most 500 characters
-after trimming whitespace. An empty reason returns only the original sleep status,
-without a reminder or reason line. Otherwise, return the reason as JSON-quoted context on completion
-and interruption. When new input interrupts sleep, remind the model to handle it
-and resume pending work unless canceled, paused, replaced, or blocked. This is
-model guidance, not guaranteed continuation or automatic resumption of the wait.
-Keep the existing sleep lifecycle items and app-server API unchanged.
+`clock.sleep` accepts an optional `reason`. V2 `agents.wait_agent`, Code Mode
+`wait`, ASM TUI `wait_threads` (including its MCP exposure), and empty-input
+`write_stdin` polls require it. Nonempty terminal input stays unchanged.
+Trim reasons and reject more than 500 characters. An empty reason, or an omitted
+sleep reason, produces no reminder. Return nonempty reasons as JSON-quoted tool
+context, separate from command/script output and its truncation budget.
+
+When new input interrupts a wait, remind the model to handle it and resume pending
+work unless canceled, paused, replaced, or blocked. Use neutral guidance when a
+return does not identify interruption. Preserve running children, cells, processes,
+and collected terminal output. Explicit stop and cell termination must not prompt
+resumption. Reminders are guidance, not guaranteed continuation or automatic waits.
+Code Mode, terminal polling, and TUI waits use the existing `instant_interrupt`
+steering signal; disabling that feature preserves their normal wait behavior.
+An interrupted TUI wait returns `interrupted: true` with no target snapshots;
+it cancels only the observation, not the target chats. Limit MCP early cancellation
+to the marked `codex_tui.wait_threads` tool and preserve its MCP result envelope.
+Do not rewrite user messages, add persistent reminder state, or change app-server
+schemas. Amend effective tool schemas after catalog overrides. Legacy V1 waits,
+environment readiness, desktop-owned tools, and initial command execution are
+outside this change.
 
 ### Test-only dependencies
 

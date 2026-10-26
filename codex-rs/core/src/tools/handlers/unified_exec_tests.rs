@@ -522,6 +522,7 @@ async fn exec_command_post_tool_use_payload_uses_output_for_noninteractive_one_s
         arguments: serde_json::json!({ "cmd": "echo three", "tty": false }).to_string(),
     };
     let output = ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: "call-43".to_string(),
         chunk_id: "chunk-1".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -553,6 +554,7 @@ async fn exec_command_post_tool_use_payload_uses_output_for_interactive_completi
         arguments: serde_json::json!({ "cmd": "echo three", "tty": true }).to_string(),
     };
     let output = ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: "call-44".to_string(),
         chunk_id: "chunk-1".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -585,6 +587,7 @@ async fn exec_command_post_tool_use_payload_skips_running_sessions() {
         arguments: serde_json::json!({ "cmd": "echo three", "tty": false }).to_string(),
     };
     let output = ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: "event-45".to_string(),
         chunk_id: "chunk-1".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -612,6 +615,7 @@ async fn write_stdin_post_tool_use_payload_uses_original_exec_call_id_and_comman
         .to_string(),
     };
     let output = ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: "exec-call-45".to_string(),
         chunk_id: "chunk-2".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -644,6 +648,7 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         arguments: serde_json::json!({ "session_id": 45, "chars": "" }).to_string(),
     };
     let output_a = ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: "exec-call-a".to_string(),
         chunk_id: "chunk-a".to_string(),
         wall_time: std::time::Duration::from_millis(498),
@@ -657,6 +662,7 @@ async fn write_stdin_post_tool_use_payload_keeps_parallel_session_metadata_separ
         hook_command: Some("sleep 2; echo alpha".to_string()),
     };
     let output_b = ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: "exec-call-b".to_string(),
         chunk_id: "chunk-b".to_string(),
         wall_time: std::time::Duration::from_millis(498),

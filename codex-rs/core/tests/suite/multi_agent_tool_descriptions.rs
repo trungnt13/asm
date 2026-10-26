@@ -244,13 +244,25 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 && tool_messages["multi_agent"][name]["parameters"].is_string()
             {
                 expected_tool["parameters"] = serde_json::from_str(parameters)?;
+                if name == "wait_agent" {
+                    expected_tool["parameters"]["properties"]["reason"] = json!({"type":"string", "description":codex_tools::WAIT_REASON_DESCRIPTION});
+                    expected_tool["parameters"]["required"] = json!(["catalog_limit", "reason"]);
+                }
                 if matches!(exposure, Exposure::CodeMode) {
                     let description = expected_tool["description"].as_str().expect("description");
                     let (prefix, signature) =
                         description.rsplit_once("(args: ").expect("arguments");
                     let (_, result) = signature.split_once("): Promise").expect("result type");
+                    let reason = if name == "wait_agent" {
+                        format!(
+                            "  // {}\n  reason: string;\n",
+                            codex_tools::WAIT_REASON_DESCRIPTION
+                        )
+                    } else {
+                        String::new()
+                    };
                     expected_tool["description"] = json!(format!(
-                        "{prefix}(args: {{\n  // Catalog limit.\n  catalog_limit: number;\n  // Catalog message.\n  message?: string;\n}}): Promise{result}"
+                        "{prefix}(args: {{\n  // Catalog limit.\n  catalog_limit: number;\n  // Catalog message.\n  message?: string;\n{reason}}}): Promise{result}"
                     ));
                 }
             }

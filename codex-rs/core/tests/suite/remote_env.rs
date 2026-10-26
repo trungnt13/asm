@@ -2006,7 +2006,11 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
         vec![
             sse(vec![
                 ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
-                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                ev_function_call(
+                    STDIN_CALL_ID,
+                    "write_stdin",
+                    r#"{"session_id":1,"reason":""}"#,
+                ),
                 ev_function_call(
                     UNKNOWN_ENV_CALL_ID,
                     "request_permissions",
@@ -2025,7 +2029,11 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
                     "exec_command",
                     &json!({ "cmd": "pwd" }).to_string(),
                 ),
-                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                ev_function_call(
+                    STDIN_CALL_ID,
+                    "write_stdin",
+                    r#"{"session_id":1,"reason":""}"#,
+                ),
                 ev_function_call(
                     UNKNOWN_ENV_CALL_ID,
                     "request_permissions",
@@ -2066,7 +2074,11 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
             ]),
             sse(vec![
                 ev_function_call(EXEC_CALL_ID, "exec_command", r#"{"cmd":"pwd"}"#),
-                ev_function_call(STDIN_CALL_ID, "write_stdin", r#"{"session_id":1}"#),
+                ev_function_call(
+                    STDIN_CALL_ID,
+                    "write_stdin",
+                    r#"{"session_id":1,"reason":""}"#,
+                ),
                 ev_function_call(
                     UNKNOWN_ENV_CALL_ID,
                     "request_permissions",

@@ -23,6 +23,7 @@ mod tool_output;
 mod tool_payload;
 mod tool_search;
 mod tool_spec;
+mod wait_reason;
 
 pub use catalog_tool_message::with_catalog_tool_message;
 pub use code_mode::augment_tool_spec_for_code_mode;
@@ -113,3 +114,8 @@ pub use tool_spec::ToolSpec;
 pub use tool_spec::create_tools_json_for_responses_api;
 pub use tool_spec::create_tools_json_for_responses_lite;
 pub use tool_spec::create_tools_raw_json_for_responses_api;
+
+pub use wait_reason::WAIT_REASON_DESCRIPTION;
+pub use wait_reason::WaitReason;
+pub use wait_reason::WaitReminder;
+pub use wait_reason::require_wait_reason;

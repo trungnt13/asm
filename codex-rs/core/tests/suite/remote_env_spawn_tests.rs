@@ -131,6 +131,8 @@ pub(crate) async fn pending_subagent_scenario(
                         let output: Value =
                             serde_json::from_str(output).expect("spawn result JSON");
                         args["targets"] = json!([output["agent_id"]]);
+                    } else {
+                        args["reason"] = json!("");
                     }
                     tool(WAIT_CHILD, namespace, "wait_agent", args)
                 }

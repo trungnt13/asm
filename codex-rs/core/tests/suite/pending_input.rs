@@ -724,7 +724,7 @@ async fn input_interrupts_wait_agent_and_is_sent_in_follow_up_request(input: Wai
                     WAIT_CALL_ID,
                     MULTI_AGENT_V2_NAMESPACE,
                     "wait_agent",
-                    r#"{"timeout_ms":10000}"#,
+                    r#"{"reason":"","timeout_ms":10000}"#,
                 ),
                 ev_completed("resp-1"),
             ],
@@ -1663,7 +1663,8 @@ async fn steers_yield_exec_and_wait_without_stopping_the_cell(instant_interrupt:
                         ev_function_call(
                             call_id,
                             "wait",
-                            &json!({"cell_id": id, "yield_time_ms": 60000}).to_string(),
+                            &json!({"reason":"", "cell_id": id, "yield_time_ms": 60000})
+                                .to_string(),
                         ),
                         ev_completed(response_id),
                     ]))

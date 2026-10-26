@@ -315,7 +315,7 @@ async fn root_service_tier_change_updates_existing_subagent(
                 PAUSE_CALL_ID,
                 "collaboration",
                 "wait_agent",
-                &json!({ "timeout_ms": 30_000 }).to_string(),
+                &json!({ "reason":"", "timeout_ms": 30_000 }).to_string(),
             ),
             ev_completed("child-paused"),
         ]),

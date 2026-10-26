@@ -1531,7 +1531,7 @@ async fn code_mode_terminated_empty_cell_has_complete_tool_inventory() -> Result
     let wait = responses::mount_function_call_agent_response(
         &server,
         "call-2",
-        &serde_json::json!({"cell_id": cell_id, "terminate": true}).to_string(),
+        &serde_json::json!({"reason":"", "cell_id": cell_id, "terminate": true}).to_string(),
         "wait",
     )
     .await;
@@ -1657,7 +1657,7 @@ await new Promise(() => {});
                 &server,
                 "call-2",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id,
+                    "reason": "", "cell_id": cell_id,
                     "terminate": true,
                 }))?,
                 "wait",
@@ -1815,7 +1815,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     let yielded = responses::mount_function_call_agent_response(
         &server,
         "call-wait",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 1}).to_string(),
+        &serde_json::json!({"reason":"", "cell_id": cell_id, "yield_time_ms": 1}).to_string(),
         "wait",
     )
     .await;
@@ -1855,7 +1855,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     let terminal = responses::mount_function_call_agent_response(
         &server,
         terminal_call_id,
-        &serde_json::json!({"cell_id": cell_id, "terminate": true}).to_string(),
+        &serde_json::json!({"reason":"", "cell_id": cell_id, "terminate": true}).to_string(),
         "wait",
     )
     .await;
@@ -2107,7 +2107,7 @@ text("done");"#,
     let resumed = responses::mount_function_call_agent_response(
         &server,
         "call-wait",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 10_000}).to_string(),
+        &serde_json::json!({"reason":"", "cell_id": cell_id, "yield_time_ms": 10_000}).to_string(),
         "wait",
     )
     .await;
@@ -2896,7 +2896,7 @@ async fn code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_re
         &server,
         "call-2",
         &serde_json::to_string(&serde_json::json!({
-            "cell_id": cell_id,
+            "reason": "", "cell_id": cell_id,
             "yield_time_ms": 1,
         }))?,
         "wait",
@@ -2941,7 +2941,7 @@ async fn code_mode_result_metadata_keeps_prepared_call_binding_across_runtime_re
         &server,
         "call-3",
         &serde_json::to_string(&serde_json::json!({
-            "cell_id": cell_id,
+            "reason": "", "cell_id": cell_id,
             "yield_time_ms": 10_000,
         }))?,
         "wait",
@@ -3050,7 +3050,7 @@ async fn code_mode_late_result_metadata_with_large_arguments_survives_waits() ->
     let held = responses::mount_function_call_agent_response(
         &server,
         "call-2",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 1}).to_string(),
+        &serde_json::json!({"reason":"", "cell_id": cell_id, "yield_time_ms": 1}).to_string(),
         "wait",
     )
     .await;
@@ -3077,7 +3077,7 @@ async fn code_mode_late_result_metadata_with_large_arguments_survives_waits() ->
     let resumed = responses::mount_function_call_agent_response(
         &server,
         "call-3",
-        &serde_json::json!({"cell_id": cell_id, "yield_time_ms": 10_000}).to_string(),
+        &serde_json::json!({"reason":"", "cell_id": cell_id, "yield_time_ms": 10_000}).to_string(),
         "wait",
     )
     .await;
@@ -3131,7 +3131,8 @@ async fn code_mode_late_result_metadata_with_large_arguments_survives_waits() ->
             let terminal = responses::mount_function_call_agent_response(
                 &server,
                 "call-4",
-                &serde_json::json!({"cell_id": cell_id, "terminate": true}).to_string(),
+                &serde_json::json!({"reason":"", "cell_id": cell_id, "terminate": true})
+                    .to_string(),
                 "wait",
             )
             .await;
@@ -3234,7 +3235,7 @@ async fn code_mode_resumed_wait_does_not_certify_a_reused_runtime_cell() -> Resu
                 responses::ev_function_call(
                     "call-stale-wait",
                     "wait",
-                    &serde_json::json!({"cell_id": old_cell_id, "yield_time_ms": 10_000})
+                    &serde_json::json!({"reason":"", "cell_id": old_cell_id, "yield_time_ms": 10_000})
                         .to_string(),
                 ),
                 ev_completed("resp-wait"),
@@ -3477,7 +3478,7 @@ text("pressure ready");"#,
                     responses::ev_function_call(
                         "call-wait",
                         "wait",
-                        r#"{"cell_id":"1","terminate":true}"#,
+                        r#"{"reason":"","cell_id":"1","terminate":true}"#,
                     ),
                     ev_completed("resp-pressure"),
                 ]),
@@ -4754,7 +4755,7 @@ async fn code_mode_wait_timeout_reconnects_on_next_exec() -> Result<()> {
         &server,
         "call-2",
         &serde_json::to_string(&serde_json::json!({
-            "cell_id": cell_id,
+            "reason": "", "cell_id": cell_id,
             "yield_time_ms": 60_000,
         }))?,
         "wait",
@@ -4941,7 +4942,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
                 "call-2",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
+                    "reason": "", "cell_id": cell_id.clone(),
                     "yield_time_ms": 10_000,
                 }))?,
             ),
@@ -4988,7 +4989,7 @@ text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
                 "call-3",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
+                    "reason": "", "cell_id": cell_id.clone(),
                     "yield_time_ms": 10_000,
                 }))?,
             ),
@@ -5124,7 +5125,7 @@ for (let index = 0; index < 256; index++) {{
                 "call-2",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
+                    "reason": "", "cell_id": cell_id.clone(),
                     "terminate": true,
                 }))?,
             ),
@@ -5254,7 +5255,7 @@ text("session b done");
                 "call-3",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": session_a_id.clone(),
+                    "reason": "", "cell_id": session_a_id.clone(),
                     "yield_time_ms": 5_000,
                 }))?,
             ),
@@ -5294,7 +5295,7 @@ text("session b done");
                 "call-4",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": session_b_id.clone(),
+                    "reason": "", "cell_id": session_b_id.clone(),
                     "yield_time_ms": 5_000,
                 }))?,
             ),
@@ -5466,7 +5467,7 @@ yield_control();
                 "call-wait",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": first_cell_id,
+                    "reason": "", "cell_id": first_cell_id,
                     "yield_time_ms": 1_000,
                 }))?,
             ),
@@ -5575,7 +5576,7 @@ text("phase 2");
                 "call-2",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
+                    "reason": "", "cell_id": cell_id.clone(),
                     "terminate": true,
                 }))?,
             ),
@@ -5664,7 +5665,7 @@ async fn code_mode_wait_returns_error_for_unknown_session() -> Result<()> {
                 "call-1",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": "999999",
+                    "reason": "", "cell_id": "999999",
                     "yield_time_ms": 1_000,
                 }))?,
             ),
@@ -5805,7 +5806,7 @@ text("session b done");
                 "call-3",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": session_b_id.clone(),
+                    "reason": "", "cell_id": session_b_id.clone(),
                     "yield_time_ms": 1_000,
                 }))?,
             ),
@@ -5855,7 +5856,7 @@ text("session b done");
                 "call-4",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": session_a_id.clone(),
+                    "reason": "", "cell_id": session_a_id.clone(),
                     "terminate": true,
                 }))?,
             ),
@@ -6147,7 +6148,7 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
                     "call-wait-background",
                     "wait",
                     &serde_json::to_string(&serde_json::json!({
-                        "cell_id": background_cell_id,
+                        "reason": "", "cell_id": background_cell_id,
                         "yield_time_ms": 1,
                     }))?,
                 ),
@@ -6159,7 +6160,7 @@ async fn code_mode_interrupt_terminates_active_cells_and_nested_tools() -> Resul
                     "call-wait-active",
                     "wait",
                     &serde_json::to_string(&serde_json::json!({
-                        "cell_id": active_cell_id,
+                        "reason": "", "cell_id": active_cell_id,
                         "yield_time_ms": 1,
                     }))?,
                 ),
@@ -6249,7 +6250,7 @@ text("token one token two token three token four token five token six token seve
                 "call-2",
                 "wait",
                 &serde_json::to_string(&serde_json::json!({
-                    "cell_id": cell_id.clone(),
+                    "reason": "", "cell_id": cell_id.clone(),
                     "yield_time_ms": 1_000,
                     "max_tokens": 6,
                 }))?,
@@ -7836,7 +7837,7 @@ async fn yielded_code_mode_tool_callbacks_keep_their_originating_step() -> Resul
                 "call-wait-a",
                 "wait",
                 &serde_json::json!({
-                    "cell_id": cell_id, "yield_time_ms": 60000,
+                    "reason": "", "cell_id": cell_id, "yield_time_ms": 60000,
                 })
                 .to_string(),
             ),
@@ -9480,8 +9481,11 @@ await new Promise(() => {});
 "#;
     let mut exec = ev_custom_tool_call("exec-a", "exec", code);
     exec["item"]["id"] = serde_json::json!("ctc_exec_a");
-    let mut wait =
-        responses::ev_function_call("wait-a", "wait", r#"{"cell_id":"1","terminate":true}"#);
+    let mut wait = responses::ev_function_call(
+        "wait-a",
+        "wait",
+        r#"{"reason":"","cell_id":"1","terminate":true}"#,
+    );
     wait["item"]["id"] = serde_json::json!("fc_wait_a");
     let server = responses::start_websocket_server(vec![vec![
         warmup(),

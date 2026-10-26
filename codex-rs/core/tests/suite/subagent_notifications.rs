@@ -2784,7 +2784,7 @@ async fn plaintext_multi_agent_v2_completion_sends_agent_message(
                 "wait-agent-call",
                 MULTI_AGENT_V2_NAMESPACE,
                 "wait_agent",
-                "{}",
+                r#"{"reason":""}"#,
             ),
             ev_completed("resp-parent-3"),
         ]),

@@ -172,6 +172,7 @@ async fn exec_command_with_tty(
         process.output_handles(),
         Some(session.subscribe_elicitation_pause_state()),
         deadline,
+        /*preempt*/ None,
     )
     .await;
     let wall_time = Instant::now().saturating_duration_since(started_at);
@@ -203,6 +204,7 @@ async fn exec_command_with_tty(
     }
 
     Ok(ExecCommandToolOutput {
+        wait_reminder: None,
         event_call_id: context.call_id,
         chunk_id: generate_chunk_id(),
         wall_time,
@@ -897,6 +899,7 @@ async fn unified_exec_uses_remote_exec_server_when_configured() -> anyhow::Resul
         process.output_handles(),
         /*pause_state*/ None,
         Instant::now() + Duration::from_millis(2_500),
+        /*preempt*/ None,
     )
     .await
     .to_bytes_with_omission_marker();

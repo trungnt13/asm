@@ -363,6 +363,7 @@ async fn output_collection_stays_bounded_across_repeated_drains() {
         &output,
         /*pause_state*/ None,
         Instant::now() + Duration::from_secs(5),
+        /*preempt*/ None,
     );
     let produce = async {
         for chunk in chunks {
@@ -423,6 +424,7 @@ async fn output_collection_preserves_omissions_from_drained_buffer() {
         &output,
         /*pause_state*/ None,
         Instant::now() + Duration::from_secs(1),
+        /*preempt*/ None,
     )
     .await;
 

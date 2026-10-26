@@ -111,6 +111,10 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
 pub(crate) fn create_write_stdin_tool(bounds: BackgroundTerminalTimeoutBounds) -> ToolSpec {
     let properties = BTreeMap::from([
         (
+            "reason".to_string(),
+            JsonSchema::string(Some("Required when polling without input: pending work to resume. At most 500 characters; use an empty string for no reminder.".to_string())),
+        ),
+        (
             "session_id".to_string(),
             JsonSchema::number(Some(
                 "Identifier of the running unified exec session.".to_string(),
@@ -212,6 +216,10 @@ fn unified_exec_output_schema() -> Value {
             "original_token_count": {
                 "type": "number",
                 "description": "Approximate token count before output truncation."
+            },
+            "wait_reminder": {
+                "type": "string",
+                "description": "Pending-work context, separate from command output."
             },
             "output": {
                 "type": "string",
