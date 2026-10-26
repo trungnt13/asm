@@ -4198,6 +4198,7 @@ name = "codex-models-manager"
 version = "0.164.1-alpha.12"
 dependencies = [
  "chrono",
+ "codex-claude-runtime",
  "codex-http-client",
  "codex-login",
  "codex-otel",

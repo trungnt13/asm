@@ -313,6 +313,7 @@ pub struct OpenAiModelsManager {
     catalog_source: CatalogSource,
     api_key_model_discovery_enabled: Arc<AtomicBool>,
     load_external_models_json: Arc<AtomicBool>,
+    cursor_catalog: Arc<tokio::sync::OnceCell<serde_json::Value>>,
     auth_manager: Option<Arc<AuthManager>>,
 }
 
@@ -378,6 +379,7 @@ impl OpenAiModelsManager {
             cache,
             api_key_model_discovery_enabled: Arc::new(AtomicBool::new(false)),
             load_external_models_json: Arc::new(AtomicBool::new(true)),
+            cursor_catalog: Arc::new(tokio::sync::OnceCell::new()),
             endpoint_client,
             catalog_source: CatalogSource::Default,
             auth_manager,
@@ -425,6 +427,7 @@ impl ModelsManager for OpenAiModelsManager {
         }
         manager.api_key_model_discovery_enabled = Arc::clone(&self.api_key_model_discovery_enabled);
         manager.load_external_models_json = Arc::clone(&self.load_external_models_json);
+        manager.cursor_catalog = Arc::clone(&self.cursor_catalog);
         let manager: SharedModelsManager = Arc::new(manager);
         managers.insert(originator, Arc::clone(&manager));
         Some(manager)
@@ -484,6 +487,17 @@ impl ModelsManager for OpenAiModelsManager {
 
     fn get_remote_models(&self) -> ModelsManagerFuture<'_, Vec<ModelInfo>> {
         Box::pin(async move {
+            if matches!(self.catalog_source, CatalogSource::Default)
+                && self.load_external_models_json.load(Ordering::SeqCst)
+            {
+                if let Err(error) = self
+                    .cursor_catalog
+                    .get_or_try_init(codex_claude_runtime::CursorRuntime::available_models)
+                    .await
+                {
+                    tracing::warn!("Cursor model discovery unavailable: {error}");
+                }
+            }
             let entry = self.remote_models.read().await;
             self.models_for_entry(&entry).into_owned()
         })
@@ -505,6 +519,9 @@ impl ModelsManager for OpenAiModelsManager {
         config: &'a ModelsManagerConfig,
     ) -> ModelsManagerFuture<'a, ModelInfo> {
         Box::pin(async move {
+            if model.starts_with("cursor-agent/") {
+                self.get_remote_models().await;
+            }
             let remote = {
                 let entry = self.remote_models.read().await;
                 let models = self.models_for_entry(&entry);
@@ -564,6 +581,52 @@ impl OpenAiModelsManager {
                     .any(|external| external.slug == model.slug)
             });
             models.extend(EXTERNAL_MODELS.models.iter().cloned());
+            if let Some(catalog) = self
+                .cursor_catalog
+                .get()
+                .filter(|catalog| !catalog.is_null())
+            {
+                for model in models
+                    .iter_mut()
+                    .filter(|model| model.slug.starts_with("cursor-agent/"))
+                {
+                    let native = model.slug.trim_start_matches("cursor-agent/");
+                    if let Some(advertised) = catalog["models"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .find(|entry| entry["value"] == native)
+                    {
+                        let effort = advertised["configOptions"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .find(|option| {
+                                option["category"] == "thought_level"
+                                    && option["options"].as_array().into_iter().flatten().any(
+                                        |value| {
+                                            value["value"].as_str().is_some_and(|value| {
+                                                value != "true" && value != "false"
+                                            })
+                                        },
+                                    )
+                            });
+                        model.supported_reasoning_levels = effort
+                            .into_iter()
+                            .flat_map(|option| option["options"].as_array().into_iter().flatten())
+                            .filter_map(|option| {
+                                serde_json::from_value(serde_json::json!({
+                                    "effort": option["value"], "description": option["name"]
+                                }))
+                                .ok()
+                            })
+                            .collect();
+                        model.default_reasoning_level = effort.and_then(|option| {
+                            serde_json::from_value(option["currentValue"].clone()).ok()
+                        });
+                    }
+                }
+            }
         }
         models
     }
