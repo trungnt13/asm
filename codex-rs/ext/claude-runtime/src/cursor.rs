@@ -50,6 +50,7 @@ pub struct CursorRuntime {
     process: NativeProcess,
     session_id: String,
     next_request_id: u64,
+    config_options: Value,
     usable: bool,
     failure_result: Option<Value>,
     bridge_instructions: Option<String>,
@@ -79,6 +80,7 @@ impl CursorRuntime {
             process: NativeProcess::spawn(command).context("starting official Cursor agent")?,
             session_id: String::new(),
             next_request_id: 0,
+            config_options: Value::Null,
             usable: false,
             failure_result: None,
             bridge_instructions: options.bridge_directory.as_ref().map(|_| "ASM communication: use native shell to run \"$ASM_NATIVE_EXE\" --asm-native-tools list for available tools and JSON schemas. Call a listed tool with JSON arguments on stdin: printf '%s' '<JSON>' | \"$ASM_NATIVE_EXE\" --asm-native-tools call <name>. Do not print the private descriptor or retry side-effecting calls automatically. Long calls may background; await their completion.".to_owned()),
@@ -230,8 +232,44 @@ impl CursorRuntime {
                 "Cursor did not confirm `{id}={value}`"
             );
         }
+        self.config_options = selected["configOptions"].clone();
         self.usable = true;
         Ok(())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn set_effort(&mut self, effort: Option<&str>) -> Result<()> {
+        anyhow::ensure!(self.usable, "Cursor session requires recovery before changing effort");
+        let effort = effort.context("Cursor requires an explicit effort when changing it")?;
+        let id = self.config_options.as_array().into_iter().flatten()
+            .find(|option| option["category"] == "thought_level"
+                && option["options"].as_array().into_iter().flatten()
+                    .any(|value| value["value"] == effort))
+            .and_then(|option| option["id"].as_str())
+            .context("Cursor does not advertise the requested effort")?.to_owned();
+        self.usable = false;
+        let mut guard = TurnGuard {
+            pid: self.process.child.id(),
+            armed: true,
+            kill: kill_tree,
+        };
+        let result = async {
+            let selected = self.request("session/set_config_option", json!({
+                "sessionId": self.session_id, "configId": id, "value": effort
+            })).await?;
+            anyhow::ensure!(selected["configOptions"].as_array().into_iter().flatten()
+                .any(|option| option["id"] == id && option["currentValue"] == effort),
+                "Cursor did not confirm requested effort");
+            self.config_options = selected["configOptions"].clone();
+            Ok(())
+        }.await;
+        if result.is_ok() {
+            self.usable = true;
+        } else {
+            self.process.kill(kill_tree).await;
+        }
+        guard.armed = false;
+        result
     }
 
     pub fn session_id(&self) -> &str {

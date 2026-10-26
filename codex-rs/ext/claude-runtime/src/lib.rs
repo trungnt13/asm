@@ -84,6 +84,7 @@ pub struct ClaudeRuntime {
     background_work: bool,
     // Last top-level assistant message of the latest turn, for pinned native forks.
     last_assistant_uuid: Option<String>,
+    per_turn_effort_active: Option<bool>,
 }
 
 /// Native CLI process leading its own process group, with framed stdout and a bounded stderr tail.
@@ -228,6 +229,7 @@ impl ClaudeRuntime {
             mid_turn_delivery: watch::channel(false).0,
             background_work: false,
             last_assistant_uuid: None,
+            per_turn_effort_active: None,
         })
     }
 
@@ -248,7 +250,72 @@ impl ClaudeRuntime {
     /// These bounded diagnostics can contain private information.
     /// Save them only when private diagnostic capture is enabled.
     pub fn diagnostic_snapshot(&self) -> Value {
-        self.process.diagnostic_snapshot(&self.failure_result)
+        let mut snapshot = self.process.diagnostic_snapshot(&self.failure_result);
+        snapshot["per_turn_effort_active"] = json!(self.per_turn_effort_active);
+        snapshot
+    }
+
+    /// Change effort without replacing the native process or conversation.
+    #[tracing::instrument(skip_all)]
+    pub async fn set_effort(&mut self, effort: Option<&str>) -> Result<()> {
+        anyhow::ensure!(
+            self.usable && !self.background_work,
+            "Claude effort can change only after a clean idle turn"
+        );
+        self.usable = false;
+        let mut guard = TurnGuard {
+            pid: self.process.child.id(),
+            armed: true,
+            kill: kill_group,
+        };
+        let result = timeout(Duration::from_secs(/*secs*/ 15), async {
+            for request in [
+                json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": effort}}),
+                json!({"subtype": "get_settings"}),
+            ] {
+                let confirm = request["subtype"] == "get_settings";
+                let id = Uuid::new_v4().to_string();
+                self.process
+                    .write_frame(json!({
+                        "type": "control_request", "request_id": id, "request": request,
+                    }))
+                    .await?;
+                let frame = self
+                    .process
+                    .frames
+                    .recv()
+                    .await
+                    .context("Claude closed during effort change")??;
+                self.failure_result = Some(frame.clone());
+                anyhow::ensure!(
+                    frame["type"] == "control_response" && frame["response"]["request_id"] == id,
+                    "Claude emitted unexpected activity during effort change"
+                );
+                anyhow::ensure!(
+                    frame["response"]["subtype"] == "success",
+                    "Claude rejected effort change: {}",
+                    frame["response"]["error"]
+                );
+                if confirm && let Some(effort) = effort {
+                    anyhow::ensure!(
+                        frame["response"]["response"]["applied"]["effort"] == effort,
+                        "Claude did not confirm requested effort `{effort}`"
+                    );
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .context("Claude effort change timed out")
+        .and_then(std::convert::identity);
+        if result.is_ok() {
+            self.usable = true;
+            self.failure_result = None;
+        } else {
+            self.process.kill(kill_group).await;
+        }
+        guard.armed = false;
+        result
     }
 
     #[tracing::instrument(skip_all)]
@@ -380,6 +447,15 @@ impl ClaudeRuntime {
                 && id != self.session_id
             {
                 bail!("Claude returned a different session ID than requested");
+            }
+            if frame["type"] == "system"
+                && matches!(
+                    frame["subtype"].as_str(),
+                    Some("init" | "per_turn_effort_changed")
+                )
+                && let Some(active) = frame["per_turn_effort_active"].as_bool()
+            {
+                self.per_turn_effort_active = Some(active);
             }
             if frame.get("type").and_then(Value::as_str) == Some("system")
                 && frame.get("subtype").and_then(Value::as_str) == Some("init")

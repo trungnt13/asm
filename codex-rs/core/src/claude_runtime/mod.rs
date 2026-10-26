@@ -381,7 +381,6 @@ async fn run_conversation(
             };
             checkpoint.validate(
                 &settings.model_info.slug,
-                &effort,
                 auto_compact_window,
                 &cwd,
                 messaging,
@@ -469,12 +468,21 @@ async fn run_conversation(
             .context("native session was not initialized")?;
         runtime.checkpoint.validate(
             &settings.model_info.slug,
-            &effort,
             auto_compact_window,
             &cwd,
             messaging,
             &messages,
         )?;
+        if runtime.checkpoint.effort != effort {
+            match &mut runtime.runtime {
+                RuntimeProcess::Claude(process) => process.set_effort(effort.as_deref()).await?,
+                RuntimeProcess::Cursor(process) => process.set_effort(effort.as_deref()).await?,
+            }
+            runtime.checkpoint.effort = effort.clone();
+            runtime
+                .linkage
+                .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+        }
         let mut prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
         if prompt.trim().is_empty() {
             return Ok(last_message);

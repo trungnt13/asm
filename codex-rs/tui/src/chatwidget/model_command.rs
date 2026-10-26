@@ -158,11 +158,8 @@ impl ChatWidget {
             effort,
             service_tier,
         } = command;
-        if self.model_selection_needs_new_session(&model, Some(effort.clone())) {
+        if self.model_selection_needs_new_session(&model) {
             self.confirm_model_session(model, Some(effort));
-            return;
-        }
-        if codex_protocol::openai_models::is_native_runtime_model(&model) {
             return;
         }
         let warning = self.ultra_reasoning_concurrency_warning(&effort);

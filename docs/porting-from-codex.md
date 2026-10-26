@@ -325,8 +325,17 @@ Claude Code owns native model access and effort acceptance; metadata grants no a
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
 marking them API-supported. Preserve ordinary model defaults.
 The model picker starts a fresh session after confirmation when entering/leaving this
-runtime or changing its fixed model/effort. Keep the original history; never replay it
+runtime or changing its model. Keep the original history; never replay it
 into the new native conversation or change saved defaults as part of this action.
+Same-model/provider effort changes stay in the current conversation and leave saved
+model defaults untouched. Apply the native control at the next idle turn boundary,
+require confirmation, then save the new effort before submitting input. Preserve the
+native process, session ID and history; never rebuild context for an effort change.
+Cold resume restores saved effort before applying a requested change. Unsupported
+changes fail before prompting without fallback. Native caching remains provider-owned;
+preserve cache-relevant context, but do not promise an identical cache key or fixed hit
+rate. Claude Code gates cache-prefix preservation on its native
+`per_turn_effort_active` feature flag, which the native server can disable.
 ASM child selections use catalog defaults and supported efforts when present; native
 model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
 Keep the V2 spawn tool description explicit: `claude-code/*` requires
