@@ -1460,10 +1460,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
 fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistry) {
     let turn_context = context.turn_context;
     if collab_tools_enabled(turn_context, context.model_info) {
-        let external_model_aliases = if turn_context
-            .config
-            .include_external_model_aliases_in_spawn_agent_list
-        {
+        let external_model_aliases = if turn_context.config.load_external_models_json {
             turn_context
                 .available_models
                 .iter()

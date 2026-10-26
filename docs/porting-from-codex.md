@@ -882,9 +882,9 @@ Top-level `include_model_catalog_in_spawn_agent_list`, default `true`:
 - Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists stop applying.
 - Inclusion is independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` argument exposure.
 
-Top-level `include_external_model_aliases_in_spawn_agent_list`, default `false`:
+Compact external-model alias discovery follows `load_external_models_json`:
 
-- Opt in to a compact exact-alias list in V1/V2 spawn descriptions, independently of the full catalog setting and context placement.
+- When true (the default), include a compact exact-alias list in V1/V2 spawn descriptions, independently of the full catalog visibility setting and context placement. When false, omit this list.
 - List only picker-visible, backend-compatible catalog entries with bundled aliases and configured providers permitted by managed requirements; configuration does not prove credentials or service availability.
 - Keep the list hidden when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: V1 `fork_context=false`, V2 `fork_turns="none"`.
 - Do not change personal configuration automatically. Unknown-model errors identify truncated model previews as partial.
