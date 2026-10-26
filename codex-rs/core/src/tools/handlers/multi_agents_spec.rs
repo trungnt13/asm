@@ -707,9 +707,9 @@ fn append_external_model_aliases(
     fork_argument: &str,
 ) -> String {
     if !aliases.is_empty() {
-        description.push_str("\nThird-party models with configured providers (service availability is not verified):\n- ");
+        description.push_str("\nExternal models (native runtimes or configured providers; runtime/service availability is not verified):\n- ");
         description.push_str(&aliases.join("\n- "));
-        description.push_str(&format!("\nUse these exact model aliases. Cross-provider spawns require `{fork_argument}`; include all needed context in `message`."));
+        description.push_str(&format!("\nUse these exact model aliases. Cross-provider spawns require `{fork_argument}`; native-runtime spawns also require fresh history; include all needed context in `message`."));
     }
     description
 }

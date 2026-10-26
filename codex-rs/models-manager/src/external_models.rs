@@ -29,8 +29,9 @@ static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
     for entry in &catalog.models {
         if let Some(alias) = entry.alias.as_deref() {
             assert!(
-                entry.model_provider.is_some(),
-                "model aliases require a provider"
+                entry.model_provider.is_some()
+                    || codex_protocol::openai_models::is_native_runtime_model(&entry.model.slug),
+                "model aliases require a provider binding or native runtime"
             );
             assert!(!alias.is_empty(), "model aliases must not be empty");
             assert!(
