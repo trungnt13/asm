@@ -90,51 +90,6 @@ impl CursorRuntime {
         setup.map(|()| runtime)
     }
 
-    /// Query native model metadata without creating a session or submitting a prompt.
-    #[tracing::instrument(skip_all)]
-    pub async fn available_models() -> Result<Value> {
-        let directory = tempfile::tempdir()?;
-        copy_user_config(directory.path())?;
-        let mut command = Command::new("agent");
-        command
-            .env_remove("CURSOR_API_KEY")
-            .env("CURSOR_CONFIG_DIR", directory.path())
-            .args(["--force", "acp"]);
-        let mut runtime = Self {
-            process: NativeProcess::spawn(command)?,
-            session_id: String::new(),
-            next_request_id: 0,
-            usable: false,
-            failure_result: None,
-            bridge_instructions: None,
-        };
-        let result = timeout(Duration::from_secs(/*secs*/ 15), async {
-            runtime
-                .request(
-                    "initialize",
-                    json!({"protocolVersion": 1,
-                "clientCapabilities": {"_meta": {"parameterizedModelPicker": true}}}),
-                )
-                .await?;
-            runtime
-                .request("authenticate", json!({"methodId": "cursor_login"}))
-                .await?;
-            runtime
-                .request("cursor/list_available_models", json!({}))
-                .await
-        })
-        .await;
-        runtime.process.kill(kill_tree).await;
-        let catalog = result.context("Cursor model discovery timed out")??;
-        anyhow::ensure!(
-            catalog["models"]
-                .as_array()
-                .is_some_and(|models| !models.is_empty()),
-            "Cursor returned no available models"
-        );
-        Ok(catalog)
-    }
-
     async fn start_session(&mut self, options: CursorOptions) -> Result<()> {
         let initialized = self
             .request(

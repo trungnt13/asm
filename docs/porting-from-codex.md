@@ -497,14 +497,14 @@ copy, backend hierarchy or event vocabulary; branch only where the protocols dif
 codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 ```
 
-- Negotiate ACP `parameterizedModelPicker` and discover the native parameterized catalog.
-  Populate bundled Cursor models' effort choices from their advertised `thought_level`
-  category; use each option's actual parameter ID, never assume that category is its ID.
-  Apply model and parameter choices separately, and require Cursor to confirm each before
-  prompting. Reject unsupported values without silently falling back. Saved bracket-encoded
-  model IDs retain their native parameters; an explicit effort replaces that parameter.
-  Discovery uses private temporary configuration and no inference request. Custom catalogs
-  remain authoritative; native model access is never granted by catalog metadata.
+- Bundle Cursor model and effort metadata in `external_models.json`, like Claude Code.
+  Catalog loading and startup must not launch or authenticate either native CLI.
+  Negotiate ACP `parameterizedModelPicker` only when starting a Cursor session. Validate
+  the requested model and effort against that session's advertised choices, apply the
+  actual parameter ID from the `thought_level` category, and require confirmation before
+  prompting. Unavailable choices fail without fallback. Saved bracket-encoded model IDs
+  retain their native parameters; an explicit effort replaces that parameter. Custom
+  catalogs remain authoritative; bundled metadata grants no native model access.
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
