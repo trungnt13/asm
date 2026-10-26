@@ -3344,6 +3344,13 @@
           "description": "Overrides inherited developer instructions for subagents without role-specific instructions.",
           "type": "string"
         },
+        "subagent_model_list": {
+          "description": "Selects advertised subagent models in the given order without restricting spawning. Omission uses picker-visible models. An empty list advertises none.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "subagent_usage_hint_text": {
           "type": "string"
         },

@@ -7,8 +7,6 @@ use super::SectionTransition;
 use super::WorldStateHash;
 use super::WorldStateSection;
 use super::WorldStateUpdate;
-use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
-use crate::agent::child_config::model_supports_multi_agent_backend;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::push_xml_escaped_text;
 use codex_protocol::models::ContentItem;
@@ -32,18 +30,36 @@ pub(crate) struct ModelCatalogState {
 }
 
 impl ModelCatalogState {
-    pub(crate) fn new(models: &[ModelPreset], multi_agent_version: MultiAgentVersion) -> Self {
+    pub(crate) fn new(
+        models: &[ModelPreset],
+        multi_agent_version: MultiAgentVersion,
+        configured: Option<&[String]>,
+    ) -> Self {
         let mut catalog = String::new();
-        let mut models = models
-            .iter()
-            .filter(|model| model.show_in_picker)
-            .filter(|model| model_supports_multi_agent_backend(model, multi_agent_version))
-            .take(MAX_SPAWN_AGENT_MODEL_OVERRIDES)
-            .collect::<Vec<_>>();
-        // Stabilize the selected choices independently of their picker ordering.
-        models.sort_by(|left, right| left.model.cmp(&right.model));
+        let mut models = match crate::agent::model_catalog::advertised_models(
+            models,
+            multi_agent_version,
+            configured,
+        ) {
+            Ok(models) => models,
+            Err(error) => {
+                push_xml_escaped_text(&mut catalog, &error);
+                return Self {
+                    catalog,
+                    namespace: None,
+                };
+            }
+        };
+        if multi_agent_version != MultiAgentVersion::V2 || configured.is_none() {
+            // Preserve stable automatic ordering without reordering explicit choices.
+            models.sort_by(|left, right| left.model.cmp(&right.model));
+        }
         if models.is_empty() {
-            catalog.push_str("No picker-visible model overrides are currently loaded.\n");
+            if multi_agent_version == MultiAgentVersion::V2 && configured.is_some() {
+                catalog.push_str("No model overrides are advertised by features.multi_agent_v2.subagent_model_list.\n");
+            } else {
+                catalog.push_str("No picker-visible model overrides are currently loaded.\n");
+            }
         }
         let (open, close) = Self::type_markers();
         let body_budget = MAX_RENDERED_BYTES - open.len() - close.len() - 2;

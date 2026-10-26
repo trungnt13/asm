@@ -1,5 +1,3 @@
-use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
-use crate::agent::child_config::model_supports_multi_agent_backend;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::JsonSchema;
@@ -25,6 +23,7 @@ const MAX_REASONING_EFFORT_CHARS_IN_SPAWN_AGENT_DESCRIPTION: usize = 64;
 #[derive(Debug, Clone)]
 pub struct SpawnAgentToolOptions {
     pub available_models: Vec<ModelPreset>,
+    pub subagent_model_list: Option<Vec<String>>,
     pub external_model_aliases: Vec<String>,
     pub agent_type_description: String,
     pub expose_agent_type: bool,
@@ -40,6 +39,7 @@ impl Default for SpawnAgentToolOptions {
     fn default() -> Self {
         Self {
             available_models: Vec::new(),
+            subagent_model_list: None,
             external_model_aliases: Vec::new(),
             agent_type_description: String::new(),
             expose_agent_type: true,
@@ -75,7 +75,11 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
         && !options.model_catalog_in_context
         && !options.hide_agent_type_model_reasoning)
         .then(|| {
-            spawn_agent_models_description(&options.available_models, options.multi_agent_version)
+            spawn_agent_models_description(
+                &options.available_models,
+                options.multi_agent_version,
+                options.subagent_model_list.as_deref(),
+            )
         });
     let inherited_model_guidance =
         (!options.hide_agent_type_model_reasoning).then_some(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE);
@@ -122,7 +126,11 @@ pub fn create_spawn_agent_tool_v2(
         && !options.model_catalog_in_context
         && options.expose_spawn_agent_model_overrides)
         .then(|| {
-            spawn_agent_models_description(&options.available_models, options.multi_agent_version)
+            spawn_agent_models_description(
+                &options.available_models,
+                options.multi_agent_version,
+                options.subagent_model_list.as_deref(),
+            )
         });
     let inherited_model_guidance = if options.model_catalog_in_context {
         options
@@ -851,13 +859,23 @@ Note that passing `fork_turns="none"` will not pass any surrounding context to t
 fn spawn_agent_models_description(
     models: &[ModelPreset],
     multi_agent_version: MultiAgentVersion,
+    configured: Option<&[String]>,
 ) -> String {
-    let visible_models: Vec<&ModelPreset> = models
-        .iter()
-        .filter(|model| model.show_in_picker)
-        .filter(|model| model_supports_multi_agent_backend(model, multi_agent_version))
-        .take(MAX_SPAWN_AGENT_MODEL_OVERRIDES)
-        .collect();
+    let visible_models = match crate::agent::model_catalog::advertised_models(
+        models,
+        multi_agent_version,
+        configured,
+    ) {
+        Ok(models) => models,
+        Err(error) => return error,
+    };
+    if visible_models.is_empty()
+        && multi_agent_version == MultiAgentVersion::V2
+        && configured.is_some()
+    {
+        return "No model overrides are advertised by features.multi_agent_v2.subagent_model_list."
+            .to_string();
+    }
     if visible_models.is_empty() {
         return "No picker-visible model overrides are currently loaded.".to_string();
     }

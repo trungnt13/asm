@@ -414,6 +414,11 @@ impl Session {
                 ModelCatalogState::new(
                     &turn_context.available_models,
                     turn_context.multi_agent_version,
+                    turn_context
+                        .config
+                        .multi_agent_v2
+                        .subagent_model_list
+                        .as_deref(),
                 )
             } else {
                 ModelCatalogState::default()
