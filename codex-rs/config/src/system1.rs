@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -80,10 +81,10 @@ impl Default for System1Config {
             max_context_bytes: 8192,
             update_on: vec![System1Trigger::TurnStart, System1Trigger::ToolResult],
             low_effort_description: "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use.".to_string(),
-            medium_effort_description: "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding.".to_string(),
-            high_effort_description: "Deep reasoning for difficult debugging, interacting constraints, substantial uncertainty, and complex decisions.".to_string(),
+            medium_effort_description: "Ordinary substantive work, including moderately complex coding.".to_string(),
+            high_effort_description: "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.".to_string(),
             xhigh_effort_description: "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.".to_string(),
-            max_effort_description: "Maximum reasoning budget for the most demanding problems supported by the model.".to_string(),
+            max_effort_description: "Exceptionally difficult problems requiring the maximum supported reasoning budget.".to_string(),
             rubric_instructions: None,
         }
     }
@@ -104,6 +105,68 @@ impl System1Config {
             ReasoningEffort::High => Some(&self.high_effort_description),
             ReasoningEffort::XHigh => Some(&self.xhigh_effort_description),
             ReasoningEffort::Max => Some(&self.max_effort_description),
+            ReasoningEffort::Ultra | ReasoningEffort::Persistent | ReasoningEffort::Custom(_) => {
+                None
+            }
+        }
+    }
+
+    /// Calibrates shared difficulty guidance against the model's default effort.
+    /// A maximum default uses the preceding supported ordinary effort as its reference.
+    /// Configured bounds do not shift this reference.
+    pub fn calibrated_effort_description(
+        &self,
+        effort: &ReasoningEffort,
+        model: &ModelInfo,
+    ) -> Option<&str> {
+        let ordinary = [
+            ReasoningEffort::None,
+            ReasoningEffort::Minimal,
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max,
+        ];
+        let supported: Vec<_> = ordinary
+            .iter()
+            .filter(|effort| {
+                model
+                    .supported_reasoning_levels
+                    .iter()
+                    .any(|preset| &preset.effort == *effort)
+            })
+            .collect();
+        let Some(index) = supported
+            .iter()
+            .position(|effort| Some(*effort) == model.default_reasoning_level.as_ref())
+            .filter(|_| !model.used_fallback_model_metadata)
+        else {
+            return self.effort_description(effort);
+        };
+        let reference = if model.default_reasoning_level == Some(ReasoningEffort::Max) {
+            index.saturating_sub(/*rhs*/ 1)
+        } else {
+            index
+        };
+        let position = supported
+            .iter()
+            .position(|supported| *supported == effort)?;
+        match effort {
+            ReasoningEffort::None | ReasoningEffort::Minimal => self.effort_description(effort),
+            ReasoningEffort::Max => Some(&self.max_effort_description),
+            ReasoningEffort::Low
+            | ReasoningEffort::Medium
+            | ReasoningEffort::High
+            | ReasoningEffort::XHigh => Some(if position < reference {
+                &self.low_effort_description
+            } else if position == reference {
+                &self.medium_effort_description
+            } else if position == reference + 1 {
+                &self.high_effort_description
+            } else {
+                &self.xhigh_effort_description
+            }),
             ReasoningEffort::Ultra | ReasoningEffort::Persistent | ReasoningEffort::Custom(_) => {
                 None
             }

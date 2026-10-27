@@ -707,7 +707,7 @@ impl Session {
                                     })
                                     .unwrap_or("unavailable");
                                 let guidance = config
-                                    .effort_description(effort)
+                                    .calibrated_effort_description(effort, &expected.model_info)
                                     .expect("System1 choices are ordinary efforts");
                                 (
                                     effort.to_string(),
