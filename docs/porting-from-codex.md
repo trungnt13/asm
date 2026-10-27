@@ -933,7 +933,7 @@ For all three visibility/tool settings above, do not update setup-managed profil
 
 ### Saved forks, upstream sides, and parallel conversations
 
-- Stack-budget exception to async instrumentation: leave `start_companion_conversation` and `select_agent_thread_and_discard_side` uninstrumented. Their tracing wrappers duplicate large futures in unoptimized poll frames and exhaust the unchanged 16 MiB UI stack. Keep companion event-dispatch futures boxed; do not increase stack limits.
+- Stack-budget exception to async instrumentation: leave `start_companion_conversation` and `select_agent_thread_and_discard_side` uninstrumented. Their tracing wrappers duplicate large futures in unoptimized poll frames and exhaust the unchanged 16 MiB UI stack. Keep companion event-dispatch futures and the side-switch helper’s nested agent-selection future boxed; do not increase stack limits.
 
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
 - Optional top-level `side_model` and `side_reasoning_effort` independently override parent settings for temporary `/side` and `/btw` forks, including `/sync`. Unset values inherit current parent settings. Do not apply them to `/parallel` or saved forks. Preserve native-runtime fork admission restrictions, including Claude’s same-model requirement.

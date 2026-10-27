@@ -856,7 +856,7 @@ impl App {
         thread_id: ThreadId,
     ) -> Result<()> {
         let side_thread_to_discard = self.side_thread_to_discard_after_switch(thread_id);
-        self.select_agent_thread(tui, app_server, thread_id).await?;
+        Box::pin(self.select_agent_thread(tui, app_server, thread_id)).await?;
         if self.active_thread_id == Some(thread_id)
             && let Some(side_thread_id) = side_thread_to_discard
         {
