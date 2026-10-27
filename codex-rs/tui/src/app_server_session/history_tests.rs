@@ -214,7 +214,7 @@ async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_bounda
             &mut turns,
         )
         .await?;
-    assert_eq!(items, vec![visible.clone()]);
+    assert_eq!(items, vec![visible.payload.clone()]);
     assert_eq!(turns[0].items, vec![visible]);
     assert_eq!(state.next_item_cursor, None);
     server.shutdown().await?;

@@ -1097,6 +1097,8 @@ async fn async_question_markdown_matches_loaded_history() {
                 [item],
                 crate::thread_transcript::RawReasoningVisibility::Hidden,
                 /*config*/ None,
+                /*show_communication*/ false,
+                /*own_agent_role*/ None,
             );
             assert_eq!(cells, [paged[0].transcript_lines(/*width*/ 80)]);
             insta::assert_debug_snapshot!("async_question_transcript", cells[0]);

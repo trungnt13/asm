@@ -149,6 +149,7 @@ async fn cloud_conversations_skip_tui_generated_titles() {
         thread_id,
         ThreadTitleDestination::Automatic,
         thread_title_prompt("Fix the login timeout"),
+        crate::app_event::AutoRenameRequest::default(),
     );
 
     assert!(app.pending_thread_titles.is_empty());
@@ -333,7 +334,7 @@ async fn title_completion_event(
         let notification = ServerNotification::ItemCompleted(ItemCompletedNotification {
             thread_id: thread_id.to_string(),
             turn_id: turn_id.to_string(),
-            item: title_user_message(&format!("{turn_id}-user"), text),
+            item: ThreadItem::untimed(title_user_message(&format!("{turn_id}-user"), text)),
             completed_at_ms: 0,
         });
         app.enqueue_thread_notification(thread_id, notification.clone())
@@ -357,11 +358,11 @@ async fn title_completion_event(
             turn: Turn {
                 id: turn_id.to_string(),
                 root_turn_id: None,
-                items: vec![title_agent_message(
+                items: vec![ThreadItem::untimed(title_agent_message(
                     turn_id,
                     "Finished task",
                     Some(MessagePhase::FinalAnswer),
-                )],
+                ))],
                 items_view: Default::default(),
                 token_usage: None,
                 status,

@@ -23,9 +23,6 @@ expression: "cells[0]"
         Span::from("? ").fg(Color::Rgb(99, 168, 248)),
         Span::from("See the ").fg(Color::Rgb(99, 168, 248)),
         Span::from("guide").fg(Color::Rgb(137, 180, 250)).underlined(),
-        Span::from(" (").fg(Color::Rgb(99, 168, 248)),
-        Span::from("https://example.test/guide").fg(Color::Rgb(137, 180, 250)).underlined(),
-        Span::from(")").fg(Color::Rgb(99, 168, 248)),
         Span::from("?").fg(Color::Rgb(99, 168, 248)),
     ]),
 ]
