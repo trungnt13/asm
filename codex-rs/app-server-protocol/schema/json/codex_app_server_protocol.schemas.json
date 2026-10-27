@@ -6869,6 +6869,13 @@
                 ],
                 "title": "ChatgptAccountType",
                 "type": "string"
+              },
+              "workspaceName": {
+                "description": "Display name of the selected ChatGPT workspace, when available.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -6973,6 +6980,103 @@
           "NO_CONSTRAINT",
           "us",
           "us_cr"
+        ],
+        "type": "string"
+      },
+      "AccountSession": {
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "lastUsedAt": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "selectedWorkspaceAccountId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaces": {
+            "items": {
+              "$ref": "#/definitions/v2/AccountSessionWorkspace"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "isActive",
+          "lastUsedAt",
+          "sessionId",
+          "workspaces"
+        ],
+        "type": "object"
+      },
+      "AccountSessionWorkspace": {
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AccountSessionWorkspaceKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "type": "object"
+      },
+      "AccountSessionWorkspaceKind": {
+        "enum": [
+          "personal",
+          "workspace"
         ],
         "type": "string"
       },
@@ -8651,6 +8755,7 @@
               "flexUnavailable",
               "serverOverloaded",
               "modelNotFound",
+              "policyCapacityUnavailable",
               "cyberPolicy",
               "misalignmentPolicyViolation",
               "tooManyDenials",
@@ -18076,6 +18181,13 @@
             "format": "int32",
             "type": "integer"
           },
+          "outputDrainTimedOut": {
+            "description": "Whether output collection hit its post-exit deadline before seeing EOF or reaching the requested byte cap on either stream. Older servers omit this field.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "processHandle": {
             "description": "Client-supplied, connection-scoped `processHandle` from `process/spawn`.",
             "type": "string"
@@ -23617,6 +23729,14 @@
                   }
                 ],
                 "default": null
+              },
+              "generationId": {
+                "default": null,
+                "description": "Image generation identifier for the generated image, when provided by the image backend.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "id": {
                 "type": "string"

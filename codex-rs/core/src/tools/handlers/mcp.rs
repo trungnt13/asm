@@ -90,8 +90,7 @@ impl McpHandlerDefinition {
 
 pub struct McpHandler {
     definition: Arc<McpHandlerDefinition>,
-    code_mode_tool_definitions:
-        OnceLock<(Option<usize>, bool, Vec<codex_code_mode::ToolDefinition>)>,
+    code_mode_tool_definitions: OnceLock<(Option<usize>, Vec<codex_code_mode::ToolDefinition>)>,
 }
 
 #[cfg(test)]
@@ -300,7 +299,8 @@ impl McpHandler {
             cancellation_token.clone()
         };
         let started = Instant::now();
-        let result = handle_mcp_tool_call(
+        // Bound the compiler's async-layout query depth for approval and dispatch.
+        let result = Box::pin(handle_mcp_tool_call(
             Arc::clone(&session),
             &step_context,
             &observation_cancel,
@@ -312,7 +312,7 @@ impl McpHandler {
             tool_name,
             &source,
             payload,
-        );
+        ));
         let result = if let Some(reason) = &reason {
             match super::tui_wait::observe(
                 result,
@@ -381,29 +381,19 @@ impl CoreToolRuntime for McpHandler {
     fn cached_code_mode_definitions(
         &self,
         code_mode_input_schema_max_bytes: Option<usize>,
-        tool_description_first: bool,
     ) -> Option<&[codex_code_mode::ToolDefinition]> {
-        let (cached_budget, cached_tool_description_first, definitions) =
-            self.code_mode_tool_definitions.get_or_init(|| {
-                let mut definitions = codex_tools::collect_code_mode_tool_definitions(
-                    std::iter::once(self.definition.spec.as_ref()),
-                    code_mode_input_schema_max_bytes,
-                    tool_description_first,
-                );
-                for definition in &mut definitions {
-                    definition.input_schema = None;
-                    definition.output_schema = None;
-                }
-                (
-                    code_mode_input_schema_max_bytes,
-                    tool_description_first,
-                    definitions,
-                )
-            });
-        // Reuse definitions only when both rendering inputs match.
-        (*cached_budget == code_mode_input_schema_max_bytes
-            && *cached_tool_description_first == tool_description_first)
-            .then_some(definitions.as_slice())
+        let (cached_budget, definitions) = self.code_mode_tool_definitions.get_or_init(|| {
+            let mut definitions = codex_tools::collect_code_mode_tool_definitions(
+                std::iter::once(self.definition.spec.as_ref()),
+                code_mode_input_schema_max_bytes,
+            );
+            for definition in &mut definitions {
+                definition.input_schema = None;
+                definition.output_schema = None;
+            }
+            (code_mode_input_schema_max_bytes, definitions)
+        });
+        (*cached_budget == code_mode_input_schema_max_bytes).then_some(definitions.as_slice())
     }
 
     fn wait_until_ready<'a>(&'a self, session: &'a Arc<Session>) -> Option<BoxFuture<'a, ()>> {
@@ -956,36 +946,17 @@ mod tests {
         ));
 
         let first = handler
-            .cached_code_mode_definitions(
-                /*code_mode_input_schema_max_bytes*/ None,
-                /*tool_description_first*/ false,
-            )
+            .cached_code_mode_definitions(/*code_mode_input_schema_max_bytes*/ None)
             .expect("MCP definitions should be cached");
         assert_eq!(first.len(), 1);
         assert!(first[0].input_schema.is_none());
         assert!(first[0].output_schema.is_none());
 
-        assert!(
-            handler
-                .cached_code_mode_definitions(
-                    /*code_mode_input_schema_max_bytes*/ None,
-                    /*tool_description_first*/ true,
-                )
-                .is_none()
-        );
-
         let second = handler
-            .cached_code_mode_definitions(
-                /*code_mode_input_schema_max_bytes*/ None,
-                /*tool_description_first*/ false,
-            )
+            .cached_code_mode_definitions(/*code_mode_input_schema_max_bytes*/ None)
             .expect("MCP definitions should be cached");
         assert!(std::ptr::eq(first, second));
-        assert!(
-            handler
-                .cached_code_mode_definitions(Some(32_000), /*tool_description_first*/ false)
-                .is_none()
-        );
+        assert!(handler.cached_code_mode_definitions(Some(32_000)).is_none());
     }
 
     #[test]

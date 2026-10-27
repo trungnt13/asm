@@ -379,6 +379,7 @@ extract_model = "gpt-5-mini"
 consolidation_model = "gpt-5.2"
 extract_reasoning_effort = "max"
 consolidation_reasoning_effort = "high"
+consolidation_service_tier = "fast"
 "#;
     let memories_cfg =
         toml::from_str::<ConfigToml>(memories).expect("TOML deserialization should succeed");
@@ -400,6 +401,7 @@ consolidation_reasoning_effort = "high"
             consolidation_model: Some("gpt-5.2".to_string()),
             extract_reasoning_effort: Some(ReasoningEffort::Max),
             consolidation_reasoning_effort: Some(ReasoningEffort::High),
+            consolidation_service_tier: Some("fast".to_string()),
         }),
         memories_cfg.memories
     );
@@ -430,6 +432,7 @@ consolidation_reasoning_effort = "high"
             consolidation_model: Some("gpt-5.2".to_string()),
             extract_reasoning_effort: Some(ReasoningEffort::Max),
             consolidation_reasoning_effort: Some(ReasoningEffort::High),
+            consolidation_service_tier: "priority".to_string(),
         }
     );
 

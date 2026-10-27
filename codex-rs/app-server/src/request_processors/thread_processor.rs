@@ -6,6 +6,7 @@ mod daemon_snapshot;
 
 #[path = "system1_stats.rs"]
 mod system1_stats;
+mod workspace_switching;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_owned_thread_settings;

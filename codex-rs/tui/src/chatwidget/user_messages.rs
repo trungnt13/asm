@@ -66,6 +66,7 @@ pub(super) enum ShellEscapePolicy {
 pub(super) enum UserMessageSource {
     Prompt,
     QuestionAnswer,
+    SafetyRecourse,
 }
 
 /// Whether a recovered message can be submitted without risking a duplicate.
@@ -78,6 +79,7 @@ pub(super) enum MessageDelivery {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct QueuedUserMessage {
     pub(super) user_message: UserMessage,
+    pub(super) prepared_images: Option<Vec<UserInput>>,
     pub(super) action: QueuedInputAction,
     pub(super) delivery: MessageDelivery,
     pub(super) pending_pastes: Vec<(String, String)>,
@@ -88,6 +90,7 @@ impl QueuedUserMessage {
     pub(super) fn new(user_message: UserMessage, action: QueuedInputAction) -> Self {
         Self {
             user_message,
+            prepared_images: None,
             action,
             delivery: MessageDelivery::Unsent,
             pending_pastes: Vec::new(),

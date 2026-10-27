@@ -24,6 +24,8 @@ use codex_protocol::ThreadId;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelServiceTier;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::EventMsg;
@@ -48,6 +50,7 @@ use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_codex::TestCodex;
+use core_test_support::test_codex::TestCodexBuilder;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -86,7 +89,9 @@ async fn dual_write_prepares_both_roots_without_importing_old_notes() -> anyhow:
     tokio::fs::write(old_notes.join("old.md"), "old memory").await?;
     let mut memories = startup_test_memories_config();
     memories.dual_write = true;
-    let test = build_test_codex_with_memories_config(&server, Arc::clone(&home), memories).await?;
+    let test = memory_test_codex(Arc::clone(&home), memories)
+        .build(&server)
+        .await?;
     trigger_memories_startup(&test).await;
     wait_for_dir(&home.path().join("memories/extensions/ad_hoc")).await?;
     wait_for_dir(&home.path().join("memories_v2/extensions/ad_hoc")).await?;
@@ -813,6 +818,7 @@ async fn memories_startup_phase2_provider_default_drives_request_model() -> anyh
             Some(MOCK_PROVIDER_PHASE_TWO_MODEL)
         );
         assert_eq!(request.body_json()["reasoning"]["effort"], "medium");
+        assert_eq!(request.body_json().get("service_tier"), None);
     }
 
     Ok(())
@@ -874,7 +880,9 @@ async fn run_memory_phase_one_model_request_test(
     memories: MemoriesConfig,
 ) -> anyhow::Result<ResponsesRequest> {
     let version = memories.version;
-    let test = build_test_codex_with_memories_config(server, Arc::clone(&home), memories).await?;
+    let test = memory_test_codex(Arc::clone(&home), memories)
+        .build(server)
+        .await?;
     let provider = Arc::new(MockMemoryModelProvider::new(
         test.config.model_provider.clone(),
         Some(test.thread_manager.auth_manager()),
@@ -1086,7 +1094,27 @@ async fn run_memory_phase_two_model_request_test(
     memories: MemoriesConfig,
 ) -> anyhow::Result<ResponsesRequest> {
     let version = memories.version;
-    let test = build_test_codex_with_memories_config(server, home.clone(), memories).await?;
+    // Both models support Ultrafast so an inherited tier would reach the wire.
+    let advertise_ultrafast = |model: &mut ModelInfo| {
+        model.service_tiers.push(ModelServiceTier {
+            id: "ultrafast".to_string(),
+            name: "Ultrafast".to_string(),
+            description: String::new(),
+        });
+        model.default_service_tier = Some("ultrafast".to_string());
+    };
+    let test = memory_test_codex(Arc::clone(&home), memories)
+        .with_model_info_override(MOCK_PROVIDER_PHASE_TWO_MODEL, advertise_ultrafast)
+        .with_model_info_override("mock.interactive", advertise_ultrafast)
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::UltrafastMode)
+                .expect("enable Ultrafast");
+            config.service_tier = Some("ultrafast".to_string());
+        })
+        .build_with_auto_env(server)
+        .await?;
     let provider = Arc::new(MockMemoryModelProvider::new(
         test.config.model_provider.clone(),
         Some(test.thread_manager.auth_manager()),
@@ -1196,25 +1224,19 @@ async fn build_test_codex(
     server: &wiremock::MockServer,
     home: Arc<TempDir>,
 ) -> anyhow::Result<TestCodex> {
-    build_test_codex_with_memories_config(server, home, startup_test_memories_config()).await
-}
-
-async fn build_test_codex_with_memories_config(
-    server: &wiremock::MockServer,
-    home: Arc<TempDir>,
-    memories: MemoriesConfig,
-) -> anyhow::Result<TestCodex> {
-    test_codex()
-        .with_home(home)
-        .with_config(move |config| {
-            config
-                .features
-                .enable(Feature::Sqlite)
-                .expect("test config should allow feature update");
-            config.memories = memories;
-        })
+    memory_test_codex(home, startup_test_memories_config())
         .build(server)
         .await
+}
+
+fn memory_test_codex(home: Arc<TempDir>, memories: MemoriesConfig) -> TestCodexBuilder {
+    test_codex().with_home(home).with_config(move |config| {
+        config
+            .features
+            .enable(Feature::Sqlite)
+            .expect("test config should allow feature update");
+        config.memories = memories;
+    })
 }
 
 async fn init_state_db(home: &Arc<TempDir>) -> anyhow::Result<Arc<codex_state::StateRuntime>> {
@@ -1644,6 +1666,8 @@ async fn memories_startup_phase2_v2_consolidates_without_a_handbook() -> anyhow:
     let home = Arc::new(TempDir::new()?);
     let mut memories = startup_test_memories_config();
     memories.version = codex_protocol::MemoryVersion::V2;
-    run_memory_phase_two_model_request_test(&server, home, memories).await?;
+    memories.consolidation_service_tier = "flex".to_string();
+    let request = run_memory_phase_two_model_request_test(&server, home, memories).await?;
+    assert_eq!(request.body_json()["service_tier"], "flex");
     Ok(())
 }

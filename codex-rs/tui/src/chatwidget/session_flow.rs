@@ -135,6 +135,7 @@ impl ChatWidget {
         self.turn_lifecycle.reset_thread();
         self.status_state.captured_step_reasoning = None;
         self.status_state.suppressed_system1_turn_id = None;
+        self.safety_recourse = None;
         self.clear_safety_buffering();
         self.status_state.system1_enabled = session.system1_enabled;
         self.status_state.system1_revision = session.system1_revision;

@@ -102,6 +102,9 @@ use tokio::sync::oneshot;
 
 const ONE_PIXEL_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
 
+#[path = "scenarios_dynamic_tools.rs"]
+mod dynamic_tools;
+
 #[path = "scenarios_retained_tool_outputs.rs"]
 mod retained_tool_outputs;
 
@@ -112,6 +115,9 @@ mod incremental_tools_resume;
 
 #[path = "scenarios_model_instructions.rs"]
 mod model_instructions;
+
+#[path = "scenarios_catalog_approval_instructions_tests.rs"]
+mod catalog_approval_instructions;
 
 #[path = "scenarios_context_management_tools.rs"]
 mod context_management_tools;
@@ -181,6 +187,9 @@ mod credential_masking;
 #[path = "scenarios_provider_capabilities.rs"]
 mod provider_capabilities;
 
+#[path = "scenarios_web_search.rs"]
+mod web_search;
+
 #[path = "scenarios_shared_instructions.rs"]
 mod shared_instructions;
 
@@ -207,6 +216,9 @@ fn skills_extensions() -> Arc<ExtensionRegistry<Config>> {
     install(&mut extensions, |config: &Config| SkillsExtensionConfig {
         include_instructions: config.include_skill_instructions,
         catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+        omit_descriptions: config
+            .features
+            .enabled(codex_features::Feature::OmitSkillDescriptions),
         max_context_tokens: config.skill_max_context_tokens,
         bundled_skills_enabled: config.bundled_skills_enabled(),
         cloud_skill_enabled: config.cloud_skill_enabled,
@@ -317,6 +329,62 @@ fn configure_scenario_catalog(config: &mut Config) {
     .with_cloud_config_binding(stack.cloud_config_binding().cloned());
     config.model_catalog = Some(bundled_models_response().expect("bundled model catalog"));
     config.cloud_skill_enabled = false;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn admitted_prompt_id_reaches_responses() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let test = test_codex()
+        .with_config(|config| {
+            configure_scenario_catalog(config);
+            config.include_environment_context = false;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![ev_completed("first")]),
+            sse(vec![ev_completed("second")]),
+        ],
+    )
+    .await;
+    let uuid = uuid::Uuid::new_v4();
+    for id in [Some(uuid), None] {
+        let mut request = TurnInputRequest::user_input(vec![text("Repeat this input.")]);
+        request.user_item_uuid = id;
+        test.codex.start_or_steer_turn(request).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+    }
+
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    let reserved = codex_protocol::ResponseItemId::for_admitted_user_input(uuid);
+    for (index, request) in requests.iter().enumerate() {
+        let input = request.input();
+        let prompts: Vec<_> = input
+            .iter()
+            .filter(|item| {
+                item["role"] == "user" && item["content"][0]["text"] == "Repeat this input."
+            })
+            .collect();
+        assert_eq!(prompts.len(), index + 1);
+        assert_eq!(prompts[0]["id"], reserved.as_str());
+        if let Some(legacy) = prompts.get(1) {
+            let id = legacy["id"].as_str().expect("legacy message id");
+            assert!(id.starts_with("msg_") && !id.starts_with("msg_input_"));
+        }
+    }
+    insta::assert_snapshot!(context_snapshot::format_request_history_snapshot(
+        "An admitted prompt and an ordinary prompt with identical text reach Responses on successive turns.",
+        &requests,
+        &ContextSnapshotOptions::default().rewrite_known_segments(),
+    ));
+    Ok(())
 }
 
 #[test_case::test_case(false; "messages")]
@@ -937,8 +1005,10 @@ async fn astra_kickoff_with_skills_plugins_and_remote_compaction() -> Result<()>
     Ok(())
 }
 
+#[test_case::test_case(false; "descriptions")]
+#[test_case::test_case(true; "omit_descriptions")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn astra_plugin_policy_limits_visible_skills() -> Result<()> {
+async fn astra_plugin_policy_limits_visible_skills(omit_descriptions: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -996,6 +1066,10 @@ enabled = true
         .with_extensions(skills_extensions())
         .with_config(move |config| {
             configure_scenario_catalog(config);
+            config
+                .features
+                .set_enabled(Feature::OmitSkillDescriptions, omit_descriptions)
+                .expect("set omit_skill_descriptions feature");
             config.chatgpt_base_url = chatgpt_base_url;
             config.workspace_roots = vec![config.cwd.clone()];
         })
@@ -1011,7 +1085,11 @@ enabled = true
 
     let requests = mock.requests();
     insta::assert_snapshot!(
-        "astra_plugin_policy_limits_visible_skills",
+        if omit_descriptions {
+            "astra_plugin_policy_without_skill_descriptions"
+        } else {
+            "astra_plugin_policy_limits_visible_skills"
+        },
         context_snapshot::format_request_history_snapshot(
             "Astra sees the permitted calendar plugin and standalone skills, but not the unlisted notes plugin.",
             &requests,
@@ -1122,6 +1200,9 @@ async fn astra_omits_disabled_executor_and_plugin_skills_from_model_context(
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
             catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+            omit_descriptions: config
+                .features
+                .enabled(codex_features::Feature::OmitSkillDescriptions),
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: false,
@@ -1610,6 +1691,9 @@ async fn skill_read_recovers_omitted_installation_and_reads_selected_environment
         |config: &Config| SkillsExtensionConfig {
             include_instructions: config.include_skill_instructions,
             catalog_deltas_enabled: config.features.enabled(Feature::SkillCatalogDeltas),
+            omit_descriptions: config
+                .features
+                .enabled(codex_features::Feature::OmitSkillDescriptions),
             max_context_tokens: config.skill_max_context_tokens,
             bundled_skills_enabled: false,
             cloud_skill_enabled: true,
@@ -2394,15 +2478,21 @@ text(result.tools[0].description);"#,
     Ok(())
 }
 
+#[test_case::test_case(false; "simplified_selection_hints_off")]
+#[test_case::test_case(true; "simplified_selection_hints_on")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn astra_refreshes_plugin_tools_and_skills_in_an_existing_thread() -> Result<()> {
+async fn astra_refreshes_plugin_tools_and_skills_in_an_existing_thread(
+    simplified_selection_hints: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
     core_test_support::skip_if_remote!(Ok(()), "plugin and MCP fixtures use host-local paths");
 
     let server = start_mock_server().await;
     let home = Arc::new(TempDir::new()?);
-    let config = "[features]\nplugins = true\n\n[skills.bundled]\nenabled = false\n";
-    fs::write(home.path().join("config.toml"), config)?;
+    let config = format!(
+        "[features]\nplugins = true\nsimplified_selection_hints = {simplified_selection_hints}\n\n[skills.bundled]\nenabled = false\n"
+    );
+    fs::write(home.path().join("config.toml"), &config)?;
     let lookup = r#"text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));"#;
     let mock = mount_sse_sequence(
         &server,
@@ -2498,8 +2588,13 @@ async fn astra_refreshes_plugin_tools_and_skills_in_an_existing_thread() -> Resu
     test.submit_text_turn("Use the Notes tool again to check that the kickoff is Friday.")
         .await?;
 
+    let snapshot_name = if simplified_selection_hints {
+        "astra_plugin_refresh_simplified_selection_hints_on"
+    } else {
+        "astra_plugin_refresh_simplified_selection_hints_off"
+    };
     insta::assert_snapshot!(
-        "astra_plugin_refresh",
+        snapshot_name,
         context_snapshot::format_request_history_snapshot(
             "Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.",
             &mock.requests(),
@@ -3122,7 +3217,7 @@ async fn astra_async_compaction_keeps_work_added_after_its_snapshot(
     )
     .await?;
     assert_eq!(compaction_events.len(), if over_budget { 4 } else { 2 });
-    for pair in compaction_events.as_chunks::<2>().0 {
+    for pair in compaction_events.chunks_exact(2) {
         assert_eq!((pair[0].0, pair[1].0), ("started", "completed"));
         assert_eq!(pair[0].1, pair[1].1);
     }
@@ -3496,5 +3591,21 @@ async fn async_compaction_reuses_pending_work(
         .map(|item| &item["encrypted_content"])
         .collect();
     assert_eq!(summaries, [&json!(if succeeds { "ASYNC" } else { "SYNC" })]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn unshared_apps_catalog_across_turns() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let requests =
+        super::mcp_tool_cache::apps_requests_during_peer_discovery(/*share*/ false).await?;
+    let snapshot = context_snapshot::format_request_history_snapshot(
+        "A peer finishes Apps discovery during submit. The thread uses its own catalog on its first and second model requests.",
+        &requests,
+        &ContextSnapshotOptions::default()
+            .rewrite_known_segments()
+            .include_request_settings(),
+    );
+    insta::assert_snapshot!("unshared_apps_catalog_across_turns", snapshot);
     Ok(())
 }

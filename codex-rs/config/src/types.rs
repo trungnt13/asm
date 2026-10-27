@@ -21,6 +21,7 @@ pub use codex_protocol::config_types::AltScreenMode;
 pub use codex_protocol::config_types::ApprovalsReviewer;
 pub use codex_protocol::config_types::ModeKind;
 pub use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 pub use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::ToolExposureSurface;
 pub use codex_protocol::config_types::WebSearchMode;
@@ -358,6 +359,8 @@ pub struct MemoriesToml {
     pub consolidation_model: Option<String>,
     /// Overrides consolidation reasoning effort; defaults to `medium` when omitted.
     pub consolidation_reasoning_effort: Option<ReasoningEffort>,
+    /// Service tier for memory consolidation. Defaults to Standard (`"default"`).
+    pub consolidation_service_tier: Option<String>,
 }
 
 /// Effective memories settings after defaults are applied.
@@ -379,6 +382,7 @@ pub struct MemoriesConfig {
     pub extract_reasoning_effort: Option<ReasoningEffort>,
     pub consolidation_model: Option<String>,
     pub consolidation_reasoning_effort: Option<ReasoningEffort>,
+    pub consolidation_service_tier: String,
 }
 
 impl Default for MemoriesConfig {
@@ -400,6 +404,7 @@ impl Default for MemoriesConfig {
             extract_reasoning_effort: None,
             consolidation_model: None,
             consolidation_reasoning_effort: None,
+            consolidation_service_tier: SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string(),
         }
     }
 }
@@ -450,6 +455,13 @@ impl From<MemoriesToml> for MemoriesConfig {
             extract_reasoning_effort: toml.extract_reasoning_effort,
             consolidation_model: toml.consolidation_model,
             consolidation_reasoning_effort: toml.consolidation_reasoning_effort,
+            consolidation_service_tier: toml
+                .consolidation_service_tier
+                .map(|tier| {
+                    ServiceTier::from_request_value(&tier)
+                        .map_or(tier, |tier| tier.request_value().to_string())
+                })
+                .unwrap_or(defaults.consolidation_service_tier),
         }
     }
 }

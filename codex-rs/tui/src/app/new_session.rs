@@ -84,7 +84,7 @@ impl App {
             overrides.model = Some(model.to_owned());
         }
         let (mut config, local_settings) = match self
-            .rebuild_config_for_cwd_with_overrides(cwd, overrides)
+            .rebuild_config_for_cwd_with_overrides(&self.config, cwd, overrides)
             .await
         {
             Ok(config) => {

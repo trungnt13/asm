@@ -42,35 +42,56 @@ def just_formatter_group(*, check: bool) -> FormatterGroup:
 
 
 def rust_formatter_group(*, check: bool, files: tuple[str, ...] = ()) -> FormatterGroup:
+    rust_workspace = REPO_ROOT / "codex-rs"
     if files:
-        cargo_toml = (REPO_ROOT / "codex-rs/Cargo.toml").read_text()
-        package = re.search(
-            r"(?ms)^\[workspace\.package\]\s*\n(.*?)(?=^\[|\Z)", cargo_toml
-        )
-        edition = (
-            re.search(r'^edition\s*=\s*"(2015|2018|2021|2024)"', package[1], re.M)
-            if package
-            else None
-        )
-        if edition is None:
-            raise ValueError("Cannot determine the Rust workspace edition")
-        args = [
-            "rustfmt",
-            "--edition",
-            edition[1],
-            "--config-path",
-            str(REPO_ROOT / "codex-rs/rustfmt.toml"),
-            "--config",
-            "imports_granularity=Item,skip_children=true",
-        ]
+        rust_files = list(files)
     else:
-        args = ["cargo", "fmt", "--", "--config", "imports_granularity=Item"]
+        repository_files = subprocess.check_output(
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                "*.rs",
+            ],
+            cwd=REPO_ROOT,
+        ).split(b"\0")
+        rust_files = sorted(
+            os.path.relpath(REPO_ROOT / os.fsdecode(encoded_path), rust_workspace)
+            for encoded_path in repository_files
+            if encoded_path and (REPO_ROOT / os.fsdecode(encoded_path)).is_file()
+        )
+    # Git supplies every source file, including files Cargo cannot discover.
+    # Do not recursively format child modules again or include ignored files.
+    cargo_toml = (REPO_ROOT / "codex-rs/Cargo.toml").read_text()
+    package = re.search(r"(?ms)^\[workspace\.package\]\s*\n(.*?)(?=^\[|\Z)", cargo_toml)
+    edition = (
+        re.search(r'^edition\s*=\s*"(2015|2018|2021|2024)"', package[1], re.M)
+        if package
+        else None
+    )
+    if edition is None:
+        raise ValueError("Cannot determine the Rust workspace edition")
+    args = [
+        "rustfmt",
+        "--edition",
+        edition[1],
+        "--config-path",
+        str(rust_workspace / "rustfmt.toml"),
+        "--config",
+        "imports_granularity=Item,skip_children=true",
+    ]
     if check:
         args.append("--check")
-    if files:
-        args.extend(("--", *files))
-    command = Command(tuple(args), REPO_ROOT / "codex-rs")
-    return FormatterGroup("Rust", (command,))
+    # Batch relative paths to stay below Windows command-line limits.
+    commands = tuple(
+        Command(tuple(args + ["--", *rust_files[start : start + 64]]), rust_workspace)
+        for start in range(0, len(rust_files), 64)
+    )
+    return FormatterGroup("Rust", commands)
 
 
 def is_buildifier_file(path: Path) -> bool:

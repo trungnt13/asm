@@ -23,7 +23,9 @@ use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchMode;
+use codex_protocol::openai_models::ModelInfo;
 
+use crate::schema::LITERATURE_SEARCH_QUERY;
 use crate::tool::WebSearchTool;
 
 #[derive(Clone)]
@@ -122,10 +124,11 @@ impl ConfigContributor<Config> for WebSearchExtension {
 }
 
 impl ToolContributor for WebSearchExtension {
-    fn tools(
+    fn tools_for_step(
         &self,
         session_store: &ExtensionData,
         thread_store: &ExtensionData,
+        step_store: &ExtensionData,
     ) -> Vec<
         Arc<dyn for<'call> codex_extension_api::ToolExecutor<codex_extension_api::ToolCall<'call>>>,
     > {
@@ -145,6 +148,12 @@ impl ToolContributor for WebSearchExtension {
                 Some(self.auth_manager.clone()),
             ),
             settings: config.settings.clone(),
+            supports_literature_search: step_store.get::<ModelInfo>().is_some_and(|model| {
+                model
+                    .experimental_supported_tools
+                    .iter()
+                    .any(|tool| tool == LITERATURE_SEARCH_QUERY)
+            }),
             originator: thread_store
                 .get::<ThreadOriginator>()
                 .map(|originator| originator.0.clone()),
@@ -210,6 +219,7 @@ mod tests {
         let registry = builder.build();
         let session_store = ExtensionData::new("session");
         let thread_store = ExtensionData::new("11111111-1111-4111-8111-111111111111");
+        let step_store = ExtensionData::new("step");
         let full_description = include_str!("../web_run_description.md");
         let expected_omitted_description = full_description
             .split_once("- **Copyright compliance:**\n")
@@ -237,7 +247,9 @@ mod tests {
                 let tools = registry
                     .tool_contributors()
                     .iter()
-                    .flat_map(|contributor| contributor.tools(&session_store, &thread_store))
+                    .flat_map(|contributor| {
+                        contributor.tools_for_step(&session_store, &thread_store, &step_store)
+                    })
                     .collect::<Vec<_>>();
                 assert_eq!(
                     tools

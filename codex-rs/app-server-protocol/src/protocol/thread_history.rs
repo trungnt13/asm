@@ -522,6 +522,7 @@ impl ThreadHistoryBuilder {
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
             | RolloutItem::SecurityRiskScore(_)
+            | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::SessionMeta(_) => {}
         }
     }
@@ -1091,7 +1092,7 @@ impl ThreadHistoryBuilder {
             saved_path: payload.saved_path.clone(),
             input_images: payload.input_images.clone(),
             imagegen_request_id: None,
-            generation_id: None,
+            generation_id: payload.generation_id.clone(),
         });
         self.upsert_item_in_current_turn(item);
     }
@@ -2981,6 +2982,7 @@ mod tests {
                     path: test_path_buf("/tmp/reference.png").abs(),
                     sha256: "ab".repeat(32),
                 }],
+                generation_id: None,
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
                 root_turn_id: None,
@@ -4765,7 +4767,7 @@ mod tests {
                 error: Some(ErrorEvent {
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),
-                    codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
+                    codex_error_info: Some(CodexErrorInfo::PolicyCapacityUnavailable),
                 }),
                 completed_at: Some(20),
                 duration_ms: Some(10_000),
@@ -4800,7 +4802,7 @@ mod tests {
                         message: "Selected model is at capacity. Please try a different model."
                             .into(),
                         codex_error_info: Some(
-                            crate::protocol::v2::CodexErrorInfo::ServerOverloaded,
+                            crate::protocol::v2::CodexErrorInfo::PolicyCapacityUnavailable,
                         ),
                         additional_details: None,
                     }),
