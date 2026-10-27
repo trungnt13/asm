@@ -4297,6 +4297,8 @@ mod tests {
                 source_thread_id,
             )
             .await?;
+        ephemeral_config.model = Some("gpt-5.5".to_string());
+        ephemeral_config.model_reasoning_effort = Some(ReasoningEffort::Low);
         let side_fork = app_server
             .fork_side_thread(
                 &LocalSettings::from(&ephemeral_config),
@@ -4311,6 +4313,13 @@ mod tests {
             Some("Source thread")
         );
         assert_eq!(side_fork.session.fork_parent_title, None);
+        assert_eq!(
+            (
+                side_fork.session.model.as_str(),
+                side_fork.session.reasoning_effort
+            ),
+            ("gpt-5.5", Some(ReasoningEffort::Low))
+        );
         app_server.shutdown().await?;
         Ok(())
     }

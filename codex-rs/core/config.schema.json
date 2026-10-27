@@ -8812,6 +8812,12 @@
       "description": "When set to `true`, `AgentReasoningRawContentEvent` events will be shown in the UI/output. Defaults to `false`.",
       "type": "boolean"
     },
+    "side_model": {
+      "type": "string"
+    },
+    "side_reasoning_effort": {
+      "$ref": "#/definitions/ReasoningEffort"
+    },
     "skills": {
       "allOf": [
         {
