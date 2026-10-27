@@ -50,8 +50,9 @@ const ORDINARY_EFFORTS: [ReasoningEffort; 7] = [
 pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
 const RUBRIC: &str = "Choose the lowest effort sufficient for the next step. \
-Treat task_baseline_effort as informed task-difficulty guidance, not a floor or ceiling. \
-Use model_default_effort only when task_baseline_effort is unspecified. \
+Consider model_default_effort and task_baseline_effort together whenever available. \
+Treat model_default_effort as the model’s normal operating point and task_baseline_effort as informed task-difficulty guidance. \
+Neither is a floor or ceiling; judge the next step using both alongside concrete evidence. \
 The current_effort field records the active setting, not independent evidence of task difficulty. \
 For the same reasoning demands, favor lower effort for more capable models and higher effort for less capable models. \
 Judge the next step—not role, message length, or task duration. \
