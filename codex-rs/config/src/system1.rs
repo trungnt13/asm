@@ -60,6 +60,7 @@ pub struct System1Config {
     pub medium_effort_description: String,
     pub high_effort_description: String,
     pub xhigh_effort_description: String,
+    pub max_effort_description: String,
     pub rubric_instructions: Option<String>,
 }
 
@@ -82,6 +83,7 @@ impl Default for System1Config {
             medium_effort_description: "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding.".to_string(),
             high_effort_description: "Deep reasoning for difficult debugging, interacting constraints, substantial uncertainty, and complex decisions.".to_string(),
             xhigh_effort_description: "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.".to_string(),
+            max_effort_description: "Maximum reasoning budget for the most demanding problems supported by the model.".to_string(),
             rubric_instructions: None,
         }
     }
@@ -101,9 +103,7 @@ impl System1Config {
             ReasoningEffort::Medium => Some(&self.medium_effort_description),
             ReasoningEffort::High => Some(&self.high_effort_description),
             ReasoningEffort::XHigh => Some(&self.xhigh_effort_description),
-            ReasoningEffort::Max => Some(
-                "Maximum reasoning budget for the most demanding problems supported by the model.",
-            ),
+            ReasoningEffort::Max => Some(&self.max_effort_description),
             ReasoningEffort::Ultra | ReasoningEffort::Persistent | ReasoningEffort::Custom(_) => {
                 None
             }
@@ -180,6 +180,7 @@ impl System1Config {
             ("medium_effort_description", &self.medium_effort_description),
             ("high_effort_description", &self.high_effort_description),
             ("xhigh_effort_description", &self.xhigh_effort_description),
+            ("max_effort_description", &self.max_effort_description),
         ] {
             if description.trim().is_empty() {
                 return Err(format!("system1.{name} must not be blank"));

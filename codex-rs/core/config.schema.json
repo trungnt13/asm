@@ -4980,6 +4980,10 @@
           ],
           "default": "max"
         },
+        "max_effort_description": {
+          "default": "Maximum reasoning budget for the most demanding problems supported by the model.",
+          "type": "string"
+        },
         "medium_effort_description": {
           "default": "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding.",
           "type": "string"
