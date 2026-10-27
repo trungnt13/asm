@@ -129,7 +129,7 @@ impl DecisionsClient {
             || choices.iter().any(|(choice, description)| {
                 choice.trim().is_empty()
                     || description.trim().is_empty()
-                    || description.len() > 4096
+                    || description.len() > 8192
             })
             || choices.iter().enumerate().any(|(index, (choice, _))| {
                 choices[..index]

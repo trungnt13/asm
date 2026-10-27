@@ -4980,11 +4980,11 @@
           "type": "boolean"
         },
         "high_effort_description": {
-          "default": "Deep reasoning for difficult debugging, interacting constraints, substantial uncertainty, and complex decisions.",
+          "default": "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.",
           "type": "string"
         },
         "low_effort_description": {
-          "default": "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use.",
+          "default": "Straightforward coding, focused searches, and bounded analysis.",
           "type": "string"
         },
         "max_context_bytes": {
@@ -5002,8 +5002,12 @@
           ],
           "default": "max"
         },
+        "max_effort_description": {
+          "default": "Exceptionally difficult problems requiring the maximum supported reasoning budget.",
+          "type": "string"
+        },
         "medium_effort_description": {
-          "default": "Balanced reasoning for planning, judgment, bounded research, and moderately complex coding.",
+          "default": "Ordinary substantive work, including moderately complex coding.",
           "type": "string"
         },
         "min_effort": {
