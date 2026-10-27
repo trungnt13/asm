@@ -5339,6 +5339,30 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
             ApprovalsReviewer::AutoReview,
         )
     );
+    for (model, effort) in [
+        (Some("side-model"), None),
+        (None, Some(ReasoningEffortConfig::Low)),
+        (Some("side-model"), Some(ReasoningEffortConfig::Low)),
+    ] {
+        app.config.side_model = model.map(str::to_owned);
+        app.config.side_reasoning_effort = effort.clone();
+        let side = app.side_fork_config(CompanionKind::Side);
+        assert_eq!(
+            (side.model.as_deref(), side.model_reasoning_effort),
+            (
+                model.or(Some("parent-thread-model")),
+                effort.or(Some(ReasoningEffortConfig::High))
+            )
+        );
+        let parallel = app.side_fork_config(CompanionKind::Parallel);
+        assert_eq!(
+            (parallel.model.as_deref(), parallel.model_reasoning_effort),
+            (
+                Some("parent-thread-model"),
+                Some(ReasoningEffortConfig::High)
+            )
+        );
+    }
 }
 
 #[tokio::test]

@@ -761,6 +761,12 @@ impl App {
         let mut fork_config = self.current_thread_fork_config();
         fork_config.ephemeral = kind == CompanionKind::Side;
         if kind == CompanionKind::Side {
+            if let Some(model) = &self.config.side_model {
+                fork_config.model = Some(model.clone());
+            }
+            if let Some(effort) = &self.config.side_reasoning_effort {
+                fork_config.model_reasoning_effort = Some(effort.clone());
+            }
             fork_config.daybreak_enabled = false;
         }
         fork_config.developer_instructions = Some(Self::side_developer_instructions(
