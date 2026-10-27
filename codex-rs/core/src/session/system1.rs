@@ -693,28 +693,27 @@ impl Session {
                         choices: allowed
                             .iter()
                             .map(|effort| {
+                                let meaning = expected
+                                    .model_info
+                                    .supported_reasoning_levels
+                                    .iter()
+                                    .find(|preset| &preset.effort == effort)
+                                    .filter(|_| !expected.model_info.used_fallback_model_metadata)
+                                    .map(|preset| preset.description.trim())
+                                    .filter(|description| !description.is_empty())
+                                    .map(|description| {
+                                        &description
+                                            [..description.floor_char_boundary(/*index*/ 1024)]
+                                    })
+                                    .unwrap_or("unavailable");
+                                let guidance = config
+                                    .effort_description(effort)
+                                    .expect("System1 choices are ordinary efforts");
                                 (
                                     effort.to_string(),
-                                    expected
-                                        .model_info
-                                        .supported_reasoning_levels
-                                        .iter()
-                                        .find(|preset| &preset.effort == effort)
-                                        .filter(|_| {
-                                            !expected.model_info.used_fallback_model_metadata
-                                        })
-                                        .map(|preset| preset.description.trim())
-                                        .filter(|description| !description.is_empty())
-                                        .map(|description| {
-                                            &description[..description
-                                                .floor_char_boundary(/*index*/ 1024)]
-                                        })
-                                        .unwrap_or_else(|| {
-                                            config
-                                                .effort_description(effort)
-                                                .expect("System1 choices are ordinary efforts")
-                                        })
-                                        .to_string(),
+                                    format!(
+                                        "Model meaning: {meaning}\nSelection guidance: {guidance}"
+                                    ),
                                 )
                             })
                             .collect(),
