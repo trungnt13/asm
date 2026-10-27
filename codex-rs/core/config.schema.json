@@ -3353,13 +3353,6 @@
           "description": "Overrides inherited developer instructions for subagents without role-specific instructions.",
           "type": "string"
         },
-        "subagent_model_list": {
-          "description": "Selects advertised subagent models in the given order without restricting spawning. Omission uses picker-visible models. An empty list advertises none.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
         "subagent_usage_hint_text": {
           "type": "string"
         },
@@ -8844,6 +8837,13 @@
       "default": {},
       "description": "Model-specific context windows for V2 spawned children, in tokens.",
       "type": "object"
+    },
+    "subagent_model_list": {
+      "description": "Selects advertised multi-agent v2 subagent models in the given order without restricting spawning. Omission uses picker-visible models. An empty list advertises none.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "subagent_service_tiers": {
       "additionalProperties": {

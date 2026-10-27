@@ -56,7 +56,7 @@ impl ModelCatalogState {
         }
         if models.is_empty() {
             if multi_agent_version == MultiAgentVersion::V2 && configured.is_some() {
-                catalog.push_str("No model overrides are advertised by features.multi_agent_v2.subagent_model_list.\n");
+                catalog.push_str("No model overrides are advertised by subagent_model_list.\n");
             } else {
                 catalog.push_str("No picker-visible model overrides are currently loaded.\n");
             }

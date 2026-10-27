@@ -170,6 +170,9 @@ pub struct ConfigToml {
     pub model: Option<String>,
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak: Option<bool>,
+    /// Selects advertised multi-agent v2 subagent models in the given order without
+    /// restricting spawning. Omission uses picker-visible models. An empty list advertises none.
+    pub subagent_model_list: Option<Vec<String>>,
     /// Review model override used by the `/review` feature.
     pub review_model: Option<String>,
 

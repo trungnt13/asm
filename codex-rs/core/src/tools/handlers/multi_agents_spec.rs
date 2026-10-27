@@ -873,8 +873,7 @@ fn spawn_agent_models_description(
         && multi_agent_version == MultiAgentVersion::V2
         && configured.is_some()
     {
-        return "No model overrides are advertised by features.multi_agent_v2.subagent_model_list."
-            .to_string();
+        return "No model overrides are advertised by subagent_model_list.".to_string();
     }
     if visible_models.is_empty() {
         return "No picker-visible model overrides are currently loaded.".to_string();
