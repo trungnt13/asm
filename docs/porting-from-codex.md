@@ -330,6 +330,10 @@ for main threads and ASM-managed children. Versioned `sonnet-` and `opus-` suffi
 are expanded to native `claude-` model names at CLI launch; other native suffixes pass
 through unchanged. Saved session model IDs remain unchanged for safe resume.
 Other models retain upstream inference.
+Native sessions keep their original executor and working directory. Allow ASM-only
+workspace-root, configuration, and capability metadata updates without treating them
+as a native environment switch; genuine executor or directory changes still require
+a fresh thread.
 Keep upstream `models.json` unchanged. Bundle Claude Code entries separately in
 [`external_models.json`](../codex-rs/models-manager/external_models.json).
 Top-level `load_external_models_json` defaults to `true`; set it to `false` to

@@ -577,9 +577,17 @@ impl SessionConfiguration {
             &updates.step_settings,
             &next_configuration.step_settings_constraints(next_environments),
         )?);
+        // Native sessions bind to an executor and cwd, not ASM workspace roots or config.
         if crate::claude_runtime::is_native_model(self.step_settings.collaboration_mode.model())
             && (next_configuration.cwd() != self.cwd()
-                || next_configuration.environments != self.environments)
+                || next_configuration.environments.len() != self.environments.len()
+                || next_configuration
+                    .environments
+                    .iter()
+                    .zip(&self.environments)
+                    .any(|(next, current)| {
+                        next.environment_id != current.environment_id || next.cwd != current.cwd
+                    }))
         {
             return Err(crate::config::ConstraintError::InvalidValue {
                 field_name: "Native runtime environment (start a fresh thread to change)",
