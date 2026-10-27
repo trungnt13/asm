@@ -96,7 +96,8 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
         RolloutItem::InterAgentCommunication(communication) => {
             project_inter_agent_message(line, &communication.to_model_input_item(), None)
         }
-        RolloutItem::SessionMeta(_)
+        RolloutItem::DynamicToolsUpdated { .. }
+        | RolloutItem::SessionMeta(_)
         | RolloutItem::InterAgentCommunicationMetadata { .. }
         | RolloutItem::Compacted(_)
         | RolloutItem::TurnContext(_)

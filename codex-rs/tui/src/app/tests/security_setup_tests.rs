@@ -130,6 +130,7 @@ async fn security_setup_disabled_preserves_account_email_and_backend_banners() -
             AppEvent::AccountEmailLoaded {
                 request_id: uuid::Uuid::new_v4(),
                 email: Some("stale@example.com".into()),
+                workspace: Some("stale-account".into()),
             },
         )
         .await?;
@@ -138,6 +139,7 @@ async fn security_setup_disabled_preserves_account_email_and_backend_banners() -
             Some(&StatusAccountDisplay::ChatGpt {
                 email: Some("user@example.com".into()),
                 plan: None,
+                workspace: Some("account".to_string()),
             })
         );
         app.handle_event(

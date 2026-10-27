@@ -781,6 +781,13 @@ pub enum Op {
         reply: Option<oneshot::Sender<CodexResult<()>>>,
     },
 
+    /// Replace the dynamic tool catalog without starting a turn.
+    #[debug("ReplaceDynamicTools")]
+    ReplaceDynamicTools {
+        tools: Vec<DynamicToolSpec>,
+        reply: oneshot::Sender<CodexResult<()>>,
+    },
+
     /// Update only the named running turn, without changing future settings.
     /// The reply reports the actual publication or why it did not occur.
     #[debug("TurnSettings {{ turn_id: {turn_id:?}, requested_approvals_reviewer: {:?} }}", update.approvals_reviewer)]
@@ -1107,6 +1114,7 @@ impl Op {
             Self::RecoverTurn { .. } => "recover_turn",
             Self::SuspendTurnAndShutdown { .. } => "suspend_turn_and_shutdown",
             Self::ThreadSettings { .. } => "thread_settings",
+            Self::ReplaceDynamicTools { .. } => "replace_dynamic_tools",
             Self::TurnSettings { .. } => "turn_settings",
             Self::InterAgentCommunication { .. } => "inter_agent_communication",
             Self::ExecApproval { .. } => "exec_approval",
@@ -2067,6 +2075,8 @@ pub enum CodexErrorInfo {
     FlexUnavailable,
     ServerOverloaded,
     ModelNotFound,
+    /// Capacity is unavailable on a route restricted by server policy.
+    PolicyCapacityUnavailable,
     CyberPolicy,
     BioPolicy,
     MisalignmentPolicyViolation,
@@ -2113,6 +2123,7 @@ impl CodexErrorInfo {
             | Self::FlexUnavailable
             | Self::ServerOverloaded
             | Self::ModelNotFound
+            | Self::PolicyCapacityUnavailable
             | Self::CyberPolicy
             | Self::BioPolicy
             | Self::MisalignmentPolicyViolation
@@ -3167,6 +3178,9 @@ pub struct ImageGenerationEndEvent {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(as = "Option<_>", optional)]
     pub input_images: Vec<ImageGenerationInputImage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub generation_id: Option<String>,
 }
 
 // Conversation kept for backward compatibility.

@@ -371,6 +371,7 @@ mod agent {
                 .clone()
                 .unwrap_or(crate::stage_two::REASONING_EFFORT),
         );
+        agent_config.service_tier = Some(config.memories.consolidation_service_tier.clone());
 
         Some(agent_config)
     }

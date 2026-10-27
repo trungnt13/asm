@@ -268,11 +268,11 @@ pub(crate) use chat_composer::ClipboardPasteTarget;
 pub(crate) use chat_composer::ComposerDraftSnapshot;
 pub(crate) use chat_composer::InputResult;
 pub(crate) use chat_composer::PendingQuote;
+pub(crate) use chat_composer::KillBufferSnapshot;
 pub(crate) use chat_composer::QueuedInputAction;
 pub(crate) use chat_composer::QuoteComment;
 pub(crate) use chat_composer::RestrictedInputMode;
 pub(crate) use chat_composer_history::HistoryEntry;
-pub(crate) use textarea::KillBufferSnapshot;
 
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 use crate::status_indicator_widget::StatusIndicatorWidget;

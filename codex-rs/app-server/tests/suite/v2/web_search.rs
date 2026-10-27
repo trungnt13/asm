@@ -22,6 +22,7 @@ use codex_app_server_protocol::WebSearchAction;
 use codex_app_server_protocol::WebSearchItem;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_features::Feature;
+use codex_models_manager::model_info::model_info_from_slug;
 use core_test_support::responses;
 use core_test_support::responses::strip_response_item_ids_from_json;
 use pretty_assertions::assert_eq;
@@ -52,6 +53,11 @@ async fn standalone_web_search_round_trips_output_for_custom_provider() -> Resul
     assert_standalone_web_search_copyright_settings(WebSearchProvider::CustomResponses).await
 }
 
+#[tokio::test]
+async fn standalone_literature_search_round_trips_for_an_opted_in_turn_model() -> Result<()> {
+    assert_standalone_web_search_round_trips_output(WebSearchProvider::ChatGpt, "", /*literature_search*/ true).await.map(|_| ())
+}
+
 #[derive(Clone, Copy)]
 enum WebSearchProvider {
     ChatGpt,
@@ -68,7 +74,7 @@ async fn assert_standalone_web_search_copyright_settings(
         "include_web_search_copyright_compliance = false",
     ] {
         let web_run =
-            assert_standalone_web_search_round_trips_output(provider, copyright_config).await?;
+            assert_standalone_web_search_round_trips_output(provider, copyright_config, /*literature_search*/ false).await?;
         let description = web_run["description"]
             .as_str()
             .context("web.run description should be present")?;
@@ -98,13 +104,27 @@ async fn assert_standalone_web_search_copyright_settings(
 async fn assert_standalone_web_search_round_trips_output(
     provider: WebSearchProvider,
     copyright_config: &str,
+    literature_search: bool,
 ) -> Result<Value> {
     let call_id = "web-run-1";
+    let (model, query, commands) = if literature_search {
+        (
+            "paper-model",
+            "plasma biomarkers",
+            json!({"literature_search_query": [{"q": "plasma biomarkers", "recency": 30, "domains": ["pubmed.ncbi.nlm.nih.gov"]}]}),
+        )
+    } else {
+        (
+            "mock-model",
+            "standalone web search",
+            json!({"search_query": [{"q": "standalone web search"}]}),
+        )
+    };
     let expected_model_id = "model-id-from-search-context";
     let search_context = json!({
         "telemetry_attributes": {
             "model_id": expected_model_id,
-            "model_slug": "mock-model",
+            "model_slug": model,
         }
     })
     .to_string();
@@ -128,10 +148,7 @@ async fn assert_standalone_web_search_round_trips_output(
                     call_id,
                     "web",
                     "run",
-                    &json!({
-                        "search_query": [{"q": "standalone web search"}],
-                    })
-                    .to_string(),
+                    &commands.to_string(),
                 ),
                 responses::ev_completed("resp-1"),
             ]),
@@ -149,6 +166,23 @@ async fn assert_standalone_web_search_round_trips_output(
         .with_root_config(copyright_config)
         .enable_feature(Feature::StandaloneWebSearch)
         .with_provider_config("supports_websockets = false");
+    let config = if literature_search {
+        let mut paper_model = model_info_from_slug(model);
+        paper_model.experimental_supported_tools = vec!["literature_search_query".to_string()];
+        let catalog_path = codex_home.path().join("models.json");
+        std::fs::write(
+            &catalog_path,
+            serde_json::to_vec(
+                &json!({"models": [model_info_from_slug("mock-model"), paper_model]}),
+            )?,
+        )?;
+        config.with_root_config(&format!(
+            "model_catalog_json = {}",
+            serde_json::to_string(&catalog_path)?
+        ))
+    } else {
+        config
+    };
     let config = match provider {
         WebSearchProvider::ChatGpt => config
             .with_model_provider("openai-custom")
@@ -203,6 +237,7 @@ async fn assert_standalone_web_search_round_trips_output(
         .send_turn_start_request(TurnStartParams {
             thread_id: thread_id.clone(),
             client_user_message_id: None,
+            model: literature_search.then(|| model.to_string()),
             input: vec![V2UserInput::Text {
                 text: "Search the web".to_string(),
                 text_elements: Vec::new(),
@@ -237,6 +272,12 @@ async fn assert_standalone_web_search_round_trips_output(
     assert_eq!(
         web_run.pointer("/parameters/properties/time/description"),
         Some(&json!("Get time for the given UTC offsets."))
+    );
+    assert_eq!(
+        web_run
+            .pointer("/parameters/properties/literature_search_query")
+            .is_some(),
+        literature_search
     );
     assert!(
         !has_hosted_web_search(&first_response),
@@ -281,13 +322,8 @@ async fn assert_standalone_web_search_round_trips_output(
         search_body.get("result_fields").is_none(),
         "standalone search should use the endpoint's default result projection"
     );
-    assert_eq!(search_body["model"], json!("mock-model"));
-    assert_eq!(
-        search_body["commands"],
-        json!({
-            "search_query": [{"q": "standalone web search"}],
-        })
-    );
+    assert_eq!(search_body["model"], json!(model));
+    assert_eq!(search_body["commands"], commands);
     assert_eq!(
         search_body["settings"]["allowed_callers"],
         json!(["direct"])
@@ -354,9 +390,9 @@ async fn assert_standalone_web_search_round_trips_output(
     );
     let expected_completed_item = ThreadItemPayload::WebSearch(WebSearchItem {
         id: call_id.to_string(),
-        query: "standalone web search".to_string(),
+        query: query.to_string(),
         action: Some(WebSearchAction::Search {
-            query: Some("standalone web search".to_string()),
+            query: Some(query.to_string()),
             queries: None,
         }),
         results: Some(vec![json!({

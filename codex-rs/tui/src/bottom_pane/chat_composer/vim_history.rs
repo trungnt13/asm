@@ -31,6 +31,7 @@ impl ComposerDraft {
             + self.text.len()
             + self.text_elements.len()
                 * std::mem::size_of::<codex_protocol::user_input::TextElement>();
+        bytes += self.mention_ranges.len() * std::mem::size_of::<std::ops::Range<usize>>();
         for path in &self.local_image_paths {
             bytes += path.as_os_str().len();
         }
@@ -201,14 +202,12 @@ impl ChatComposer {
         let Some(snapshot) = self.vim_history.pending.take() else {
             return;
         };
-        if snapshot.text == self.current_text()
-            && snapshot.text_elements == self.current_text_elements()
-            && snapshot.pending_pastes == self.draft.pending_pastes
-            && snapshot.local_image_paths == self.attachments.local_image_paths()
-            && snapshot.remote_image_urls == self.attachments.remote_image_urls()
-            && snapshot.mention_bindings == self.snapshot_mention_bindings()
-        {
-            return;
+        if snapshot.text == self.current_text() {
+            let mut current = self.snapshot_draft();
+            current.cursor = snapshot.cursor;
+            if snapshot == current {
+                return;
+            }
         }
 
         self.vim_history.redo.clear();
