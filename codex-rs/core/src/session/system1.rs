@@ -50,7 +50,9 @@ const ORDINARY_EFFORTS: [ReasoningEffort; 7] = [
 pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
 const RUBRIC: &str = "Choose the lowest effort sufficient for the next step. \
-Treat the configured baseline as informed task-difficulty guidance, not a ceiling. \
+Treat task_baseline_effort as informed task-difficulty guidance, not a floor or ceiling. \
+Use model_default_effort only when task_baseline_effort is unspecified. \
+The current_effort field records the active setting, not independent evidence of task difficulty. \
 For the same reasoning demands, favor lower effort for more capable models and higher effort for less capable models. \
 Judge the next step—not role, message length, or task duration. \
 Consider interacting constraints, uncertainty, and consequences of mistakes. \
@@ -655,7 +657,16 @@ impl Session {
                                     || turn.reasoning_effort().cloned(),
                                     |value| value.0.clone(),
                                 )
-                                .or_else(|| expected.model_info.default_reasoning_level.clone())
+                                .map(|effort| effort.to_string())
+                                .unwrap_or_else(|| "unspecified".to_string());
+                            let model_default_effort = expected
+                                .model_info
+                                .default_reasoning_level
+                                .as_ref()
+                                .map(ToString::to_string)
+                                .unwrap_or_else(|| "unspecified".to_string());
+                            let current_effort = expected
+                                .effective_reasoning_effort()
                                 .map(|effort| effort.to_string())
                                 .unwrap_or_else(|| "unspecified".to_string());
                             let rubric = config.rubric_instructions.as_deref().unwrap_or(RUBRIC);
@@ -675,7 +686,7 @@ impl Session {
                                     [..description.floor_char_boundary(/*index*/ 1024)]
                             );
                             format!(
-                                "Current model: {current_model}\nModel description: {description}\nConfigured reasoning baseline: {baseline}.\n\n{rubric}"
+                                "Current model: {current_model}\nModel description: {description}\nmodel_default_effort: {model_default_effort}\ntask_baseline_effort: {baseline}\ncurrent_effort: {current_effort}\n\n{rubric}"
                             )
                         },
                         choices: allowed
@@ -683,9 +694,25 @@ impl Session {
                             .map(|effort| {
                                 (
                                     effort.to_string(),
-                                    config
-                                        .effort_description(effort)
-                                        .expect("System1 choices are ordinary efforts")
+                                    expected
+                                        .model_info
+                                        .supported_reasoning_levels
+                                        .iter()
+                                        .find(|preset| &preset.effort == effort)
+                                        .filter(|_| {
+                                            !expected.model_info.used_fallback_model_metadata
+                                        })
+                                        .map(|preset| preset.description.trim())
+                                        .filter(|description| !description.is_empty())
+                                        .map(|description| {
+                                            &description[..description
+                                                .floor_char_boundary(/*index*/ 1024)]
+                                        })
+                                        .unwrap_or_else(|| {
+                                            config
+                                                .effort_description(effort)
+                                                .expect("System1 choices are ordinary efforts")
+                                        })
                                         .to_string(),
                                 )
                             })
