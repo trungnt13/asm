@@ -15,6 +15,14 @@ use crate::session_start::SessionStartOutcome;
 use crate::session_start::cancel_session_start;
 use crate::session_start::complete_session_start;
 use crate::unarchive_prompt::run_unarchive_prompt;
+use std::future::Future;
+use std::pin::Pin;
+
+// Keep construction temporaries out of the run-loop poll frame; the allocation already exists.
+#[inline(never)]
+fn box_future<F: Future>(create: impl FnOnce() -> F) -> Pin<Box<F>> {
+    Box::pin(create())
+}
 
 fn spawn_startup_thread_start(
     app_server: &AppServerSession,
@@ -1261,14 +1269,16 @@ See the Codex keymap documentation for supported actions and examples."
 
         #[cfg(not(debug_assertions))]
         let pre_loop_exit_reason = if let Some(latest_version) = upgrade_version {
-            let control = Box::pin(app.handle_event(
-                tui,
-                &mut app_server,
-                AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                    latest_version,
-                    crate::update_action::get_update_action(),
-                ))),
-            ))
+            let control = box_future(|| {
+                app.handle_event(
+                    tui,
+                    &mut app_server,
+                    AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
+                        latest_version,
+                        crate::update_action::get_update_action(),
+                    ))),
+                )
+            })
             .await;
             match startup_try!(control) {
                 AppRunControl::Continue => None,
@@ -1311,9 +1321,9 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 if app.pending_open_resume_picker {
                     app.pending_open_resume_picker = false;
-                    match Box::pin(
-                        app.open_resume_picker(tui, backends.session_at_mut(displayed_session)),
-                    )
+                    match box_future(|| {
+                        app.open_resume_picker(tui, backends.session_at_mut(displayed_session))
+                    })
                     .await
                     {
                         Ok(AppRunControl::Continue) => {}
@@ -1324,39 +1334,47 @@ See the Codex keymap documentation for supported actions and examples."
                     continue;
                 }
                 if let Some(pending) = app.pending_working_directory_change.take() {
-                    Box::pin(app.finish_working_directory_change(
-                        tui,
-                        backends.session_at_mut(displayed_session),
-                        pending,
-                    ))
+                    box_future(|| {
+                        app.finish_working_directory_change(
+                            tui,
+                            backends.session_at_mut(displayed_session),
+                            pending,
+                        )
+                    })
                     .await;
                     continue;
                 }
                 if let Some((mode, name)) = app.pending_start_managed_worktree.take() {
-                    Box::pin(app.start_managed_worktree(
-                        backends.session_at_mut(displayed_session),
-                        mode,
-                        name,
-                    ))
+                    box_future(|| {
+                        app.start_managed_worktree(
+                            backends.session_at_mut(displayed_session),
+                            mode,
+                            name,
+                        )
+                    })
                     .await;
                     continue;
                 }
                 // Complete the fork and widget attachment on separate fresh loop iterations.
                 if let Some(attach) = app.pending_managed_worktree_attach.take() {
-                    Box::pin(app.attach_working_directory(
-                        tui,
-                        backends.session_at_mut(displayed_session),
-                        *attach,
-                    ))
+                    box_future(|| {
+                        app.attach_working_directory(
+                            tui,
+                            backends.session_at_mut(displayed_session),
+                            *attach,
+                        )
+                    })
                     .await;
                     continue;
                 }
                 if let Some(transition) = app.pending_managed_worktree_transition.take() {
-                    if let Err(error) = Box::pin(app.switch_to_managed_worktree(
-                        tui,
-                        backends.session_at_mut(displayed_session),
-                        *transition,
-                    ))
+                    if let Err(error) = box_future(|| {
+                        app.switch_to_managed_worktree(
+                            tui,
+                            backends.session_at_mut(displayed_session),
+                            *transition,
+                        )
+                    })
                     .await
                     {
                         app.chat_widget.add_error_message(error.to_string());
@@ -1364,7 +1382,7 @@ See the Codex keymap documentation for supported actions and examples."
                     continue;
                 }
                 if let Some(created) = app.pending_managed_worktree_created.take() {
-                    Box::pin(app.finish_managed_worktree(*created)).await;
+                    box_future(|| app.finish_managed_worktree(*created)).await;
                     continue;
                 }
                 if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
@@ -1386,7 +1404,7 @@ See the Codex keymap documentation for supported actions and examples."
                             .thread_tool_transport(),
                         presentation,
                     );
-                    reconnect = Some(Box::pin(async move {
+                    reconnect = Some(box_future(|| async move {
                         if let reconnect::ReconnectPresentation::Startup(deadline) = presentation
                             && wait_for_drain
                         {
@@ -1452,7 +1470,7 @@ See the Codex keymap documentation for supported actions and examples."
                                 if cell.as_any().is::<history_cell::SessionInfoCell>()
                         );
                         let had_active_modal = app.chat_widget.has_active_modal();
-                        match Box::pin(app.handle_event(tui, backends.session_at_mut(displayed_session), event)).await {
+                        match box_future(|| app.handle_event(tui, backends.session_at_mut(displayed_session), event)).await {
                             Ok(AppRunControl::Continue) => {
                                 if is_initial_session_header {
                                     waiting_for_initial_session_header = false;
