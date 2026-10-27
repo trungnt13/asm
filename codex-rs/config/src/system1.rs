@@ -80,7 +80,7 @@ impl Default for System1Config {
             decision_timeout_ms: 200,
             max_context_bytes: 8192,
             update_on: vec![System1Trigger::TurnStart, System1Trigger::ToolResult],
-            low_effort_description: "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use.".to_string(),
+            low_effort_description: "Straightforward coding, focused searches, and bounded analysis.".to_string(),
             medium_effort_description: "Ordinary substantive work, including moderately complex coding.".to_string(),
             high_effort_description: "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.".to_string(),
             xhigh_effort_description: "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.".to_string(),
@@ -158,7 +158,9 @@ impl System1Config {
             ReasoningEffort::Low
             | ReasoningEffort::Medium
             | ReasoningEffort::High
-            | ReasoningEffort::XHigh => Some(if position < reference {
+            | ReasoningEffort::XHigh => Some(if position + 1 < reference {
+                "Mechanical execution, settled decisions, and simple responses."
+            } else if position < reference {
                 &self.low_effort_description
             } else if position == reference {
                 &self.medium_effort_description

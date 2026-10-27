@@ -4962,7 +4962,7 @@
           "type": "string"
         },
         "low_effort_description": {
-          "default": "Efficient reasoning for routine execution, straightforward coding, focused searches, and simple tool use.",
+          "default": "Straightforward coding, focused searches, and bounded analysis.",
           "type": "string"
         },
         "max_context_bytes": {
