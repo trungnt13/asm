@@ -2992,7 +2992,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         tool_namespace,
         hide_spawn_agent_metadata,
         expose_spawn_agent_model_overrides,
-        subagent_model_list: base.and_then(|config| config.subagent_model_list.clone()),
+        subagent_model_list: config_toml.subagent_model_list.clone(),
         wait_agent_enabled,
         disable_native_tools,
         disable_direct_message,

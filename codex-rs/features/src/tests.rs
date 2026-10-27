@@ -850,7 +850,6 @@ non_code_mode_only = true
             tool_namespace: Some("agents".to_string()),
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
-            subagent_model_list: None,
             wait_agent_enabled: Some(false),
             disable_native_tools: Some(true),
             disable_direct_message: Some(true),

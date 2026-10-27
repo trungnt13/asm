@@ -21,7 +21,7 @@ pub(crate) fn advertised_models<'a>(
                 .ok_or_else(|| {
                     let id = id.chars().take(128).collect::<String>();
                     format!(
-                        "Invalid features.multi_agent_v2.subagent_model_list: model `{id}` is not loaded or does not support spawning."
+                        "Invalid subagent_model_list: model `{id}` is not loaded or does not support spawning."
                     )
                 })?;
             if !selected.contains(&model) {

@@ -342,10 +342,6 @@ pub struct MultiAgentV2ConfigToml {
     /// corresponding guidance to root and subagent usage hints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expose_spawn_agent_model_overrides: Option<bool>,
-    /// Selects advertised subagent models in the given order without restricting spawning.
-    /// Omission uses picker-visible models. An empty list advertises none.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_model_list: Option<Vec<String>>,
     /// Expose the multi-agent v2 `wait_agent` tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_agent_enabled: Option<bool>,
