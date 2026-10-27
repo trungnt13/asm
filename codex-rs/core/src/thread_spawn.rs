@@ -7,6 +7,7 @@ use crate::agent::api::SpawnRequest;
 use crate::agent::child_config::SpawnConfigOptions;
 use crate::agent::child_config::SpawnConfigVersion;
 use crate::agent::child_config::prepare_agent_spawn_config;
+use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
 use crate::agent::types::AgentMessage;
 use crate::agent::types::LiveAgent;
@@ -99,6 +100,12 @@ pub(crate) async fn prepare(
     request: ThreadSpawnRequest,
 ) -> Result<(SpawnRequest, AgentPath), ThreadSpawnError> {
     let turn = &step_context.turn;
+    let child_depth = next_thread_spawn_depth(&turn.session_source);
+    if exceeds_thread_spawn_depth_limit(child_depth, turn.config.agent_max_depth) {
+        return Err(ThreadSpawnError::Preparation(
+            "Agent depth limit reached. Solve the task yourself.".to_string(),
+        ));
+    }
     let ThreadSpawnRequest {
         task_name,
         spawn_arguments,
@@ -142,7 +149,7 @@ pub(crate) async fn prepare(
         .map_err(ThreadSpawnError::Preparation)?;
     let spawn_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: session.thread_id,
-        depth: next_thread_spawn_depth(&turn.session_source),
+        depth: child_depth,
         agent_path: Some(task_name.clone()),
         agent_nickname: None,
         agent_role: prepared.role_name,

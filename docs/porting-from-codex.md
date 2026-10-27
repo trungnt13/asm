@@ -1045,6 +1045,10 @@ Keep Markdown paragraphs/code blocks/list items adjacent while streaming and com
 - Opt-in `cache-hit-rate` in `/statusline`/`tui.status_line`; defaults unchanged. Show current thread's latest reported request cached/input ratio as `CchN.N%`, rounded to one decimal. Use existing usage; no averages/totals/new requests/APIs. Hide unknown/zero-input usage. Missing cache detail remains indistinguishable from reported zero.
 - Offer opt-in `output-tps` with unchanged defaults. Show `Ntps`, rounded to the nearest whole number, for the latest successful ordinary Responses request: provider-reported output tokens, including reasoning, divided by that successful attempt's duration from send to completion. Exclude failed attempts, retry waits, compaction, warmup, tools, and other threads. This is observed request throughput, not pure decoding speed. Calculate once at live response completion and carry the result on the existing token-usage event. Cache the formatted value in the TUI and use its existing refresh without another notification, redraw request, timer, or streaming estimate. Retain the latest valid result across failed requests; omit unavailable timing or usage and do not reconstruct it from replayed history.
 
+### Multi-agent V2 depth
+
+- Apply `[agents] max_depth` to V2 child creation, counting root as depth 0. The existing default is 1, so omitted settings allow only direct children. Reject deeper spawns before preparing a child; keep existing agents and communication tools available.
+
 ### Subagent context windows, service tiers, and picker
 
 Optional top-level `subagent_model_context_windows = { "gpt-6-astra" = 272000, "gpt-6.1-sol" = 272000 }`:
