@@ -344,6 +344,11 @@ Provider-owned catalogs remain authoritative and ignore this flag.
 Explicit custom catalogs honor this flag and retain metadata for duplicate IDs.
 Claude Code owns native model access and effort acceptance; metadata grants no access.
 
+Native Claude and Cursor sessions discard inherited service tiers from config files and
+profiles. Explicit request or session-flag tiers remain subject to native startup
+validation: only Default is supported. Reject unsupported persistent and turn-only
+tier updates before committing settings. OpenAI service-tier resolution is unchanged.
+
 Keep CC entries visible independently of OpenAI login; never bypass filtering by
 marking them API-supported. Preserve ordinary model defaults.
 The model picker starts a fresh session after confirmation when entering/leaving this

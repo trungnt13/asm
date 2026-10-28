@@ -577,6 +577,12 @@ impl SessionConfiguration {
             &updates.step_settings,
             &next_configuration.step_settings_constraints(next_environments),
         )?);
+        if let Some(service_tier) = &updates.service_tier_for_turn {
+            let mut turn_settings = next_configuration.step_settings.as_ref().clone();
+            turn_settings.service_tier = Some(service_tier.clone());
+            turn_settings
+                .validate(&next_configuration.step_settings_constraints(next_environments))?;
+        }
         // Native sessions bind to an executor and cwd, not ASM workspace roots or config.
         if crate::claude_runtime::is_native_model(self.step_settings.collaboration_mode.model())
             && (next_configuration.cwd() != self.cwd()

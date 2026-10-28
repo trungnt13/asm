@@ -395,6 +395,17 @@ impl StepSettings {
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }
+        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
+            && let Some(service_tier) = self.service_tier.as_deref()
+            && service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
+        {
+            return Err(ConstraintError::InvalidValue {
+                field_name: "Native runtime service tier",
+                candidate: service_tier.to_string(),
+                allowed: SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string(),
+                requirement_source: codex_config::RequirementSource::Unknown,
+            });
+        }
         if constraints.trusted_guardian_reviewer {
             return Ok(());
         }
