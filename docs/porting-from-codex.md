@@ -366,8 +366,13 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
-  hooks and its internal subagents. Do not synchronize ASM developer instructions,
-  approval receipts or tool results into Claude's private conversation. The one instruction
+  hooks and its internal subagents. All external runtimes share one input policy before
+  native dispatch or mailbox delivery. Forward explicitly queued plaintext ASM context and
+  tool outputs in labeled JSON context blocks separate from the actual user message.
+  Skip encrypted injected items with a warning, preserving the actual prompt. Do not
+  forward ciphertext or replay previously ignored history. Persist a projection marker
+  for newly forwarded context so warm turns and cold resume retain native input accounting.
+  Do not synchronize generated ASM instructions or approval receipts. The one instruction
   exception is a spawned child's selected role: append only that role's own
   `developer_instructions` through `--append-system-prompt`, preserving Claude's
   default prompt. Pass the text as one argument, without shell interpolation or a
@@ -521,7 +526,9 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 
 Explicit `cursor-agent/<model>` IDs select the official Cursor CLI over ACP (`agent acp`,
 JSON-RPC on stdio) for main threads and ASM-managed children. It extends the Claude Code
-runtime above: the same rules apply except where listed here. Do not add a separate runtime
+runtime above: the same rules apply except where listed here, including plaintext context
+blocks and warning/skip behavior for encrypted input. Keep this policy shared; only the
+transport and supported delivery timing differ. Do not add a separate runtime
 copy, backend hierarchy or event vocabulary; branch only where the protocols differ.
 
 ```bash
