@@ -422,7 +422,7 @@ use codex_utils_stream_parser::ProposedPlanSegment;
 /// Whether reported usage updates the installed context baseline or only spending.
 #[derive(Clone, Copy)]
 pub(crate) enum TokenUsageContext {
-    Sampling,
+    Sampling { includes_reasoning: bool },
     SpendingOnly,
 }
 
@@ -1711,7 +1711,7 @@ impl Session {
 
     pub(crate) async fn get_total_token_usage(&self) -> i64 {
         let state = self.state.lock().await;
-        state.get_total_token_usage(state.server_reasoning_included())
+        state.get_total_token_usage()
     }
 
     pub(crate) async fn auto_compact_window_snapshot(&self) -> AutoCompactWindowSnapshot {
@@ -5467,13 +5467,14 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         token_usage: Option<&TokenUsage>,
+        includes_reasoning: bool,
     ) -> CodexResult<()> {
         let result = self
             .record_token_usage_info(
                 turn_context,
                 &turn_context.initial_settings,
                 token_usage,
-                TokenUsageContext::Sampling,
+                TokenUsageContext::Sampling { includes_reasoning },
             )
             .await;
         self.send_token_count_event(turn_context, /*output_tokens_per_second*/ None)
@@ -5536,10 +5537,11 @@ impl Session {
             let token_info = {
                 let mut state = self.state.lock().await;
                 match context {
-                    TokenUsageContext::Sampling => {
+                    TokenUsageContext::Sampling { includes_reasoning } => {
                         state.update_token_info_from_usage(
                             token_usage,
                             turn_context.model_context_window(),
+                            includes_reasoning,
                         );
                         if matches!(
                             turn_context.config.model_auto_compact_token_limit_scope,
@@ -5552,6 +5554,7 @@ impl Session {
                     TokenUsageContext::SpendingOnly => {
                         let mut info = state.token_info().unwrap_or(TokenUsageInfo {
                             total_token_usage: TokenUsage::default(),
+                            last_usage_includes_reasoning: None,
                             last_token_usage: TokenUsage::default(),
                             model_context_window: turn_context.model_context_window(),
                         });
@@ -5560,6 +5563,7 @@ impl Session {
 
                         // Contributors receive the reported usage; stored context stays unchanged.
                         info.last_token_usage = token_usage.clone();
+                        info.last_usage_includes_reasoning = None;
                         info.model_context_window = turn_context
                             .model_context_window()
                             .or(info.model_context_window);
@@ -5608,6 +5612,7 @@ impl Session {
             let mut state = self.state.lock().await;
             let mut info = state.token_info().unwrap_or(TokenUsageInfo {
                 total_token_usage: TokenUsage::default(),
+                last_usage_includes_reasoning: None,
                 last_token_usage: TokenUsage::default(),
                 model_context_window: None,
             });
@@ -5626,9 +5631,9 @@ impl Session {
                 info.model_context_window = Some(model_context_window);
             }
 
-            state.set_token_info(Some(info));
             // The local estimate already includes every retained reasoning item.
-            state.set_server_reasoning_included(/*included*/ true);
+            info.last_usage_includes_reasoning = Some(true);
+            state.set_token_info(Some(info));
         }
         self.set_auto_compact_window_estimated_prefill_for_scope(
             turn_context,
@@ -5667,11 +5672,6 @@ impl Session {
     {
         let mut state = self.state.lock().await;
         state.record_mcp_dependency_prompted(names);
-    }
-
-    pub(crate) async fn set_server_reasoning_included(&self, included: bool) {
-        let mut state = self.state.lock().await;
-        state.set_server_reasoning_included(included);
     }
 
     pub(crate) async fn send_token_count_event(
