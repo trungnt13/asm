@@ -258,7 +258,7 @@ impl InputQueue {
             .iter()
             .take_while(|input| {
                 matches!(input, TurnInput::InterAgentCommunication(mail)
-                if !mail.trigger_turn && mail.encrypted_content.is_none())
+                if !mail.trigger_turn)
             })
             .count();
         let mut items: Vec<_> = state.pending_input.items.drain(..count).collect();
@@ -267,9 +267,10 @@ impl InputQueue {
         }
         let mut pending = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut pending);
-        while pending.front().is_some_and(|mail| {
-            !mail.communication.trigger_turn && mail.communication.encrypted_content.is_none()
-        }) {
+        while pending
+            .front()
+            .is_some_and(|mail| !mail.communication.trigger_turn)
+        {
             if let Some(mail) = pending.pop_front() {
                 items.push(TurnInput::InterAgentCommunication(mail.communication));
             }
