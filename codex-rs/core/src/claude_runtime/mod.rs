@@ -2,6 +2,7 @@
 mod activity;
 mod bridge;
 mod cursor;
+mod delivery;
 mod events;
 mod fork;
 mod input;
@@ -522,6 +523,8 @@ async fn run_conversation(
             .await;
         let (steering_tx, steering_rx) = tokio::sync::mpsc::channel(1);
         let mut submitted_steering_count = 0;
+        let mut mail_receipts =
+            delivery::CursorMailReceipts::new(runtime.checkpoint.session_id.clone());
         let result = {
             let mut run = match &mut runtime.runtime {
                 RuntimeProcess::Claude(process) => Box::pin(process.run_turn(
@@ -581,13 +584,13 @@ async fn run_conversation(
                             }
                         }
                         let messages = input_messages(session.clone_history().await.raw_items())?;
-                        let delivered = messages[runtime.checkpoint.input_count..].to_vec();
+                        let mut delivered = messages[runtime.checkpoint.input_count..].to_vec();
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
                         session.flush_rollout().await?;
                         runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-                        // The helper returns these messages inside Cursor's active shell result.
-                        // Advancing the checkpoint prevents next-prompt reinjection.
+                        // The internal oneshot confirms only bridge receipt, not native delivery.
+                        mail_receipts.stamp(&mut delivered);
                         if reply.send(delivered).is_err() {
                             bail!("Cursor mailbox result was not accepted; explicit recovery is required");
                         }
@@ -596,7 +599,7 @@ async fn run_conversation(
                         if changed.is_err() { bail!("Claude steering capability channel closed"); }
                     }
                     Some(frame) = events_rx.recv() => {
-                        if let Some(text) = record_frame(native_runtime, session, turn, &frame, &mut stream).await? {
+                        if let Some(text) = record_frame(native_runtime, session, turn, &frame, &mut stream, &mut mail_receipts).await? {
                             last_message = Some(text);
                         }
                     }
@@ -604,8 +607,15 @@ async fn run_conversation(
             }
         };
         while let Ok(frame) = events_rx.try_recv() {
-            if let Some(text) =
-                record_frame(native_runtime, session, turn, &frame, &mut stream).await?
+            if let Some(text) = record_frame(
+                native_runtime,
+                session,
+                turn,
+                &frame,
+                &mut stream,
+                &mut mail_receipts,
+            )
+            .await?
             {
                 last_message = Some(text);
             }
@@ -627,6 +637,7 @@ async fn run_conversation(
                 return Err(error);
             }
         };
+        mail_receipts.ensure_delivered()?;
         if outcome.submitted_steering_count != submitted_steering_count {
             bail!(
                 "Claude did not submit all recorded steering messages; explicit recovery is required"
@@ -738,7 +749,9 @@ async fn record_frame(
     turn: &TurnContext,
     frame: &Value,
     stream: &mut events::MessageStream,
+    mail_receipts: &mut delivery::CursorMailReceipts,
 ) -> anyhow::Result<Option<String>> {
+    mail_receipts.observe(frame);
     match native_runtime {
         NativeRuntime::ClaudeCode => record_assistant_frame(session, turn, frame, stream).await,
         NativeRuntime::CursorAgent => record_cursor_frame(session, turn, frame, stream).await,
