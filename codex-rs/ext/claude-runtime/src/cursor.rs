@@ -5,15 +5,12 @@ use super::ClaudeTurnOutcome;
 use super::NativeProcess;
 use super::STOP_TIMEOUT;
 use super::TurnGuard;
-use super::kill_group;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use codex_utils_pty::process_group;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
@@ -88,7 +85,7 @@ impl CursorRuntime {
         };
         let setup = runtime.start_session(options).await;
         if setup.is_err() {
-            runtime.process.kill(kill_tree).await;
+            runtime.process.kill().await;
         }
         setup.map(|()| runtime)
     }
@@ -149,16 +146,25 @@ impl CursorRuntime {
             .map_or((options.model.as_str(), ""), |(model, parameters)| {
                 (model, parameters.trim_end_matches(']'))
             });
-        anyhow::ensure!(
-            session["configOptions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|option| option["id"] == "model")
-                .flat_map(|option| option["options"].as_array().into_iter().flatten())
-                .any(|option| option["value"] == model),
-            "Cursor does not advertise model `{model}`"
-        );
+        let model_options = session["configOptions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|option| option["id"] == "model")
+            .and_then(|option| option["options"].as_array())
+            .context("Cursor did not advertise model choices")?;
+        // Saved Auto IDs and the CLI display ID differ from ACP's canonical value.
+        let model = if model_options.iter().any(|option| option["value"] == model) {
+            model
+        } else if matches!(model, "auto" | "auto-smart")
+            && model_options
+                .iter()
+                .any(|option| option["value"] == "default")
+        {
+            "default"
+        } else {
+            bail!("Cursor does not advertise model `{model}`");
+        };
         let mut selected = self
             .request(
                 "session/set_config_option",
@@ -202,7 +208,7 @@ impl CursorRuntime {
                     .context("Cursor effort parameter has no ID")?;
                 parameters.retain(|(key, _)| key != id);
                 parameters.push((id.to_owned(), effort));
-            } else if effort != "none" || model != "auto-smart" {
+            } else if effort != "none" || !matches!(model, "default" | "auto" | "auto-smart") {
                 bail!("Cursor model `{model}` does not advertise adjustable effort");
             }
         }
@@ -240,34 +246,59 @@ impl CursorRuntime {
 
     #[tracing::instrument(skip_all)]
     pub async fn set_effort(&mut self, effort: Option<&str>) -> Result<()> {
-        anyhow::ensure!(self.usable, "Cursor session requires recovery before changing effort");
+        anyhow::ensure!(
+            self.usable,
+            "Cursor session requires recovery before changing effort"
+        );
         let effort = effort.context("Cursor requires an explicit effort when changing it")?;
-        let id = self.config_options.as_array().into_iter().flatten()
-            .find(|option| option["category"] == "thought_level"
-                && option["options"].as_array().into_iter().flatten()
-                    .any(|value| value["value"] == effort))
+        let id = self
+            .config_options
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|option| {
+                option["category"] == "thought_level"
+                    && option["options"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|value| value["value"] == effort)
+            })
             .and_then(|option| option["id"].as_str())
-            .context("Cursor does not advertise the requested effort")?.to_owned();
+            .context("Cursor does not advertise the requested effort")?
+            .to_owned();
         self.usable = false;
         let mut guard = TurnGuard {
             pid: self.process.child.id(),
             armed: true,
-            kill: kill_tree,
+            marker: self.process.marker.clone(),
+            birth: self.process.birth,
         };
         let result = async {
-            let selected = self.request("session/set_config_option", json!({
-                "sessionId": self.session_id, "configId": id, "value": effort
-            })).await?;
-            anyhow::ensure!(selected["configOptions"].as_array().into_iter().flatten()
-                .any(|option| option["id"] == id && option["currentValue"] == effort),
-                "Cursor did not confirm requested effort");
+            let selected = self
+                .request(
+                    "session/set_config_option",
+                    json!({
+                        "sessionId": self.session_id, "configId": id, "value": effort
+                    }),
+                )
+                .await?;
+            anyhow::ensure!(
+                selected["configOptions"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|option| option["id"] == id && option["currentValue"] == effort),
+                "Cursor did not confirm requested effort"
+            );
             self.config_options = selected["configOptions"].clone();
             Ok(())
-        }.await;
+        }
+        .await;
         if result.is_ok() {
             self.usable = true;
         } else {
-            self.process.kill(kill_tree).await;
+            self.process.kill().await;
         }
         guard.armed = false;
         result
@@ -285,8 +316,8 @@ impl CursorRuntime {
 
     /// Sends one setup request and waits for its response, discarding notifications.
     async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        let id = self.send_request(method, params).await?;
         timeout(SETUP_TIMEOUT, async {
+            let id = self.send_request(method, params).await?;
             loop {
                 let frame = self
                     .process
@@ -372,7 +403,8 @@ impl CursorRuntime {
         let mut guard = TurnGuard {
             pid: self.process.child.id(),
             armed: true,
-            kill: kill_tree,
+            marker: self.process.marker.clone(),
+            birth: self.process.birth,
         };
         let prompt = match self.bridge_instructions.take() {
             Some(instructions) => format!("{instructions}\n\n{prompt}"),
@@ -385,14 +417,13 @@ impl CursorRuntime {
             // groups; stop the tree and let the next turn load the clean native session.
             // Uncertain descendant cleanup must not be reported as a clean cancellation.
             Ok(_) => {
-                let cleanup = try_kill_tree(self.process.child.id());
-                self.process.kill(kill_group).await;
+                let cleanup = self.process.terminate().await;
                 if let Err(error) = cleanup {
                     result =
                         Err(error.context("Cursor tool cleanup after cancellation is uncertain"));
                 }
             }
-            Err(_) => self.process.kill(kill_tree).await,
+            Err(_) => self.process.kill().await,
         }
         guard.armed = false;
         result
@@ -513,9 +544,9 @@ impl CursorRuntime {
     pub async fn shutdown(&mut self) -> Result<()> {
         self.usable = false;
         // `agent acp` does not exit when stdin closes; native history is already saved.
-        self.process.kill(kill_tree).await;
+        let cleanup = self.process.terminate().await;
         self.process.wait_for_stderr().await;
-        Ok(())
+        cleanup
     }
 }
 
@@ -560,141 +591,4 @@ fn copy_user_config(config_dir: &std::path::Path) -> Result<()> {
         std::fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     }
     Ok(())
-}
-
-impl Drop for CursorRuntime {
-    fn drop(&mut self) {
-        // The process's own Drop stops only its group; tools run in separate groups.
-        kill_tree(self.process.child.id());
-    }
-}
-
-/// Bounds the process-table snapshot used during cleanup.
-const PROCESS_LIST_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 2);
-
-fn kill_tree(pid: Option<u32>) {
-    if let Err(error) = try_kill_tree(pid) {
-        tracing::warn!(?pid, %error, "Cursor descendant cleanup is incomplete");
-    }
-}
-
-/// Kills the process groups of `pid`'s descendants, then its own group.
-/// Cursor runs shell tools in separate process groups under the ACP process, so the
-/// owned group alone does not stop them. Never signals ASM's own process group.
-/// The owned group is killed even when descendants cannot be listed; that case errors.
-fn try_kill_tree(pid: Option<u32>) -> Result<()> {
-    let Some(pid) = pid else {
-        return Ok(());
-    };
-    let groups = list_processes()
-        .and_then(|table| descendant_groups(&table, pid))
-        .context("listing Cursor descendants failed");
-    // Signal every known group, including the owned one, but report the first failure.
-    let mut result = groups
-        .as_ref()
-        .map(|_| ())
-        .map_err(|error| anyhow::anyhow!("{error:#}"));
-    for group in groups.iter().flatten().copied().chain([pid]) {
-        if let Err(error) = process_group::kill_process_group(group)
-            && result.is_ok()
-        {
-            result =
-                Err(anyhow::Error::from(error)
-                    .context(format!("killing Cursor process group {group}")));
-        }
-    }
-    result?;
-    let groups = groups?;
-    // Signals are asynchronous; report success only after the groups are observed gone.
-    // A dead leader stays a zombie until its owner reaps it. This covers groups seen in the
-    // snapshot, not processes that left them, for example with `setsid`.
-    let deadline = std::time::Instant::now() + PROCESS_LIST_TIMEOUT;
-    loop {
-        let survivors = list_processes()?
-            .into_iter()
-            .any(|row| !row.zombie && (row.group == pid || groups.contains(&row.group)));
-        if !survivors {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            bail!("Cursor processes survived SIGKILL");
-        }
-        std::thread::sleep(Duration::from_millis(/*millis*/ 20));
-    }
-}
-
-/// Returns the process groups of `pid`'s descendants other than `pid`'s and ASM's.
-fn descendant_groups(table: &[ProcessRow], pid: u32) -> Result<HashSet<u32>> {
-    let own_group = table
-        .iter()
-        .find(|row| row.pid == std::process::id())
-        .map(|row| row.group)
-        .context("ASM is missing from the process list")?;
-    let mut tree = HashSet::from([pid]);
-    let mut groups = HashSet::new();
-    // The table is a snapshot, so repeat until no new descendants are found.
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for row in table {
-            if tree.contains(&row.parent) && tree.insert(row.pid) {
-                changed = true;
-                if row.group != pid && row.group != own_group {
-                    groups.insert(row.group);
-                }
-            }
-        }
-    }
-    Ok(groups)
-}
-
-struct ProcessRow {
-    pid: u32,
-    parent: u32,
-    group: u32,
-    zombie: bool,
-}
-
-/// Lists all processes. Output goes to a file so a full pipe cannot stall `ps`.
-fn list_processes() -> Result<Vec<ProcessRow>> {
-    use std::io::Read;
-    use std::io::Seek;
-    let mut output = tempfile::tempfile()?;
-    let mut child = std::process::Command::new("ps")
-        .args(["-A", "-o", "pid=,ppid=,pgid=,stat="])
-        .stdin(std::process::Stdio::null())
-        .stdout(output.try_clone()?)
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    let deadline = std::time::Instant::now() + PROCESS_LIST_TIMEOUT;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("ps timed out");
-        }
-        std::thread::sleep(Duration::from_millis(/*millis*/ 10));
-    };
-    anyhow::ensure!(status.success(), "ps failed: {status}");
-    let mut text = String::new();
-    output.rewind()?;
-    output.read_to_string(&mut text)?;
-    Ok(text
-        .lines()
-        .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let mut number = || fields.next()?.parse::<u32>().ok();
-            let (pid, parent, group) = (number()?, number()?, number()?);
-            let zombie = fields.next()?.starts_with('Z');
-            Some(ProcessRow {
-                pid,
-                parent,
-                group,
-                zombie,
-            })
-        })
-        .collect())
 }
