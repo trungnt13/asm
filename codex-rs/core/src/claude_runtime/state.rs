@@ -35,7 +35,7 @@ impl Checkpoint {
         auto_compact_window: Option<i64>,
         cwd: &std::path::Path,
         messaging: bool,
-        messages: &[String],
+        messages: &[serde_json::Value],
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.format_version == 2,

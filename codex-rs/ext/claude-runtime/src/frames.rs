@@ -11,16 +11,59 @@ use tokio::io::AsyncReadExt;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
 
-pub(crate) const FRAME_LIMIT: usize = 1024 * 1024;
+const FRAME_LIMIT: usize = 1024 * 1024;
+// This is ASM's bounded stream-json transport budget, not a provider image limit.
+const IMAGE_FRAME_LIMIT: usize = 32 * FRAME_LIMIT;
+
+#[derive(Clone, Copy)]
+pub(crate) enum FramePolicy {
+    TextOnly,
+    ClaudeImages,
+}
+
+impl FramePolicy {
+    fn max_size(self) -> usize {
+        match self {
+            Self::TextOnly => FRAME_LIMIT,
+            Self::ClaudeImages => IMAGE_FRAME_LIMIT,
+        }
+    }
+
+    fn frame_limit(self, frame: &Value) -> usize {
+        if matches!(self, Self::ClaudeImages)
+            && frame["type"] == "user"
+            && frame["message"]["content"]
+                .as_array()
+                .is_some_and(|content| content.iter().any(|block| block["type"] == "image"))
+        {
+            IMAGE_FRAME_LIMIT
+        } else {
+            FRAME_LIMIT
+        }
+    }
+
+    pub(crate) fn input_limit(self, frame: &Value) -> usize {
+        let limit = self.frame_limit(frame);
+        if limit == IMAGE_FRAME_LIMIT {
+            // Replayed user messages add native metadata. Reserve the ordinary
+            // frame budget so input accepted here also fits the stdout reader.
+            limit - FRAME_LIMIT
+        } else {
+            limit
+        }
+    }
+}
 const STDERR_LIMIT: usize = 16 * 1024;
 
+#[tracing::instrument(skip_all)]
 pub(crate) async fn read_frames(
     stdout: impl AsyncRead + Unpin,
     sender: mpsc::Sender<Result<Value>>,
+    policy: FramePolicy,
 ) {
     let mut reader = BufReader::new(stdout);
     loop {
-        let frame = read_frame(&mut reader).await;
+        let frame = read_frame(&mut reader, policy).await;
         let terminal = !matches!(&frame, Ok(Some(_)));
         let frame = match frame {
             Ok(Some(frame)) => Ok(frame),
@@ -35,7 +78,11 @@ pub(crate) async fn read_frames(
     }
 }
 
-async fn read_frame(reader: &mut (impl AsyncBufReadExt + Unpin)) -> Result<Option<Value>> {
+#[tracing::instrument(skip_all)]
+async fn read_frame(
+    reader: &mut (impl AsyncBufReadExt + Unpin),
+    policy: FramePolicy,
+) -> Result<Option<Value>> {
     let mut bytes = Vec::new();
     loop {
         let available = reader.fill_buf().await.context("reading Claude stdout")?;
@@ -47,15 +94,22 @@ async fn read_frame(reader: &mut (impl AsyncBufReadExt + Unpin)) -> Result<Optio
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let length = newline.map_or(available.len(), |index| index + 1);
-        if bytes.len() + length > FRAME_LIMIT {
-            bail!("Claude stdout frame exceeded {FRAME_LIMIT} bytes");
+        if bytes.len() + length > policy.max_size() {
+            bail!(
+                "native CLI stdout frame exceeded {} bytes",
+                policy.max_size()
+            );
         }
         bytes.extend_from_slice(&available[..length]);
         reader.consume(length);
         if newline.is_some() {
-            return serde_json::from_slice(&bytes)
-                .context("Claude emitted an invalid stream-json frame")
-                .map(Some);
+            let frame = serde_json::from_slice(&bytes)
+                .context("native CLI emitted an invalid stream-json frame")?;
+            anyhow::ensure!(
+                bytes.len() <= policy.frame_limit(&frame),
+                "native CLI stdout frame exceeded its content size limit"
+            );
+            return Ok(Some(frame));
         }
     }
 }
