@@ -4,6 +4,7 @@ mod bridge;
 mod cursor;
 mod events;
 mod fork;
+mod input;
 mod state;
 use bridge::ClaudeMessageBridge;
 use cursor::record_cursor_frame;
@@ -261,6 +262,17 @@ async fn run_conversation(
                 .await;
             *input = pending;
         }
+        if native_runtime == NativeRuntime::ClaudeCode && input::prepare_input(input)? > 0 {
+            session
+                .send_event(
+                    turn,
+                    EventMsg::Warning(WarningEvent {
+                        message: "Encrypted ASM input was ignored; the user prompt is preserved."
+                            .to_owned(),
+                    }),
+                )
+                .await;
+        }
         for item in input.iter() {
             match item {
                 TurnInput::UserInput { content, .. }
@@ -275,6 +287,8 @@ async fn run_conversation(
                 TurnInput::InterAgentCommunication(_) => {
                     bail!("encrypted agent messages cannot be delivered to the native runtime")
                 }
+                TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_)
+                    if native_runtime == NativeRuntime::ClaudeCode => {}
                 TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => bail!(
                     "ASM-injected context and tool outputs are not supported by the native runtime"
                 ),
@@ -553,13 +567,16 @@ async fn run_conversation(
                     }, if steering && *mid_turn_delivery.borrow() && steering_tx.capacity() > 0 && !cancellation.is_cancelled() => {
                         pending_activity = None;
                         session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
-                        let (pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
+                        let (mut pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
+                        if input::prepare_input(&mut pending)? > 0 {
+                            session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
+                        }
                         if pending.is_empty() { continue; }
                         for item in &pending {
                             let supported = match item {
                                 TurnInput::InterAgentCommunication(message) => message.encrypted_content.is_none(),
                                 TurnInput::UserInput { content, .. } => content.iter().all(|part| matches!(part, UserInput::Text { .. })),
-                                _ => false,
+                                TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => true,
                             };
                             if !supported {
                                 bail!("only text input and unencrypted agent messages can steer the native Claude turn");
@@ -763,6 +780,20 @@ fn input_messages<'a>(
     let mut messages = Vec::new();
     for item in items {
         match item {
+            ResponseItem::Message {
+                content,
+                internal_chat_message_metadata_passthrough: Some(metadata),
+                ..
+            } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
+                kinds.len() == 1 && kinds[0].as_str() == input::CONTEXT_KIND
+            }) =>
+            {
+                for part in content {
+                    if let ContentItem::InputText { text } = part {
+                        messages.push(text.clone());
+                    }
+                }
+            }
             ResponseItem::Message {
                 role,
                 content,
