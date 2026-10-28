@@ -38,7 +38,6 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::WarningEvent;
-use codex_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
 
 use crate::hook_runtime::record_pending_input;
@@ -262,7 +261,7 @@ async fn run_conversation(
                 .await;
             *input = pending;
         }
-        if native_runtime == NativeRuntime::ClaudeCode && input::prepare_input(input)? > 0 {
+        if input::prepare_input(input)? > 0 {
             session
                 .send_event(
                     turn,
@@ -272,27 +271,6 @@ async fn run_conversation(
                     }),
                 )
                 .await;
-        }
-        for item in input.iter() {
-            match item {
-                TurnInput::UserInput { content, .. }
-                    if content
-                        .iter()
-                        .all(|part| matches!(part, UserInput::Text { .. })) => {}
-                TurnInput::InterAgentCommunication(message)
-                    if message.encrypted_content.is_none() => {}
-                TurnInput::UserInput { .. } => bail!(
-                    "only text input is supported; use native text references for files and skills"
-                ),
-                TurnInput::InterAgentCommunication(_) => {
-                    bail!("encrypted agent messages cannot be delivered to the native runtime")
-                }
-                TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_)
-                    if native_runtime == NativeRuntime::ClaudeCode => {}
-                TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => bail!(
-                    "ASM-injected context and tool outputs are not supported by the native runtime"
-                ),
-            }
         }
         let original_history = session.clone_history().await;
         let messages = input_messages(original_history.raw_items())?;
@@ -572,16 +550,6 @@ async fn run_conversation(
                             session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
                         }
                         if pending.is_empty() { continue; }
-                        for item in &pending {
-                            let supported = match item {
-                                TurnInput::InterAgentCommunication(message) => message.encrypted_content.is_none(),
-                                TurnInput::UserInput { content, .. } => content.iter().all(|part| matches!(part, UserInput::Text { .. })),
-                                TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => true,
-                            };
-                            if !supported {
-                                bail!("only text input and unencrypted agent messages can steer the native Claude turn");
-                            }
-                        }
                         for item in pending {
                             record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
                                 codex_thread_store::PersistContext::TurnStart).await;
@@ -603,7 +571,10 @@ async fn run_conversation(
                     }, if native_runtime == NativeRuntime::CursorAgent && !cancellation.is_cancelled() => {
                         if reply.is_closed() { continue; }
                         if let Some(turn_state) = &turn_state {
-                            let pending = session.input_queue.take_current_turn_mail(turn_state).await;
+                            let mut pending = session.input_queue.take_current_turn_mail(turn_state).await;
+                            if input::prepare_input(&mut pending)? > 0 {
+                                session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
+                            }
                             for item in pending {
                                 record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
                                     codex_thread_store::PersistContext::TurnStart).await;

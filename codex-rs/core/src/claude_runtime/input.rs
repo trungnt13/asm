@@ -37,7 +37,7 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                                 | ContentItem::OutputText { text, .. } => texts.push(text.as_str()),
                                 ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => {
                                     bail!(
-                                        "only plaintext injected context is supported by the native Claude runtime"
+                                        "only plaintext injected context is supported by the native runtime"
                                     )
                                 }
                             }
@@ -55,7 +55,7 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                     ResponseItem::CustomToolCallOutput { name, output, .. } => {
                         serde_json::json!({"source": "ASM tool output", "name": name, "text": output_text(&output.body)?})
                     }
-                    _ => bail!("unsupported injected item for the native Claude runtime"),
+                    _ => bail!("unsupported injected item for the native runtime"),
                 };
                 // A persisted marker extends native input accounting without replaying old ASM context.
                 envelope.item = ResponseItem::Message {
@@ -80,7 +80,17 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                     ),
                 };
             }
-            TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_) => {}
+            TurnInput::UserInput { content, .. } => {
+                if !content
+                    .iter()
+                    .all(|part| matches!(part, codex_protocol::user_input::UserInput::Text { .. }))
+                {
+                    bail!(
+                        "only text input is supported; use native text references for files and skills"
+                    );
+                }
+            }
+            TurnInput::InterAgentCommunication(_) => {}
         }
         prepared.push(item);
     }
@@ -112,7 +122,7 @@ fn output_text(body: &FunctionCallOutputBody) -> anyhow::Result<String> {
                     FunctionCallOutputContentItem::InputImage { .. }
                     | FunctionCallOutputContentItem::InputAudio { .. }
                     | FunctionCallOutputContentItem::EncryptedContent { .. } => bail!(
-                        "only plaintext injected tool outputs are supported by the native Claude runtime"
+                        "only plaintext injected tool outputs are supported by the native runtime"
                     ),
                 }
             }

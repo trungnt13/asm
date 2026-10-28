@@ -366,7 +366,8 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 
 - ASM owns thread identity, queues, user input, output display and process lifecycle.
   Claude Code owns conversation context, instructions, skills, tools, permissions,
-  hooks and its internal subagents. Forward explicitly queued plaintext ASM context and
+  hooks and its internal subagents. All external runtimes share one input policy before
+  native dispatch or mailbox delivery. Forward explicitly queued plaintext ASM context and
   tool outputs in labeled JSON context blocks separate from the actual user message.
   Skip encrypted injected items with a warning, preserving the actual prompt. Do not
   forward ciphertext or replay previously ignored history. Persist a projection marker
@@ -525,7 +526,9 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
 
 Explicit `cursor-agent/<model>` IDs select the official Cursor CLI over ACP (`agent acp`,
 JSON-RPC on stdio) for main threads and ASM-managed children. It extends the Claude Code
-runtime above: the same rules apply except where listed here. Do not add a separate runtime
+runtime above: the same rules apply except where listed here, including plaintext context
+blocks and warning/skip behavior for encrypted input. Keep this policy shared; only the
+transport and supported delivery timing differ. Do not add a separate runtime
 copy, backend hierarchy or event vocabulary; branch only where the protocols differ.
 
 ```bash
