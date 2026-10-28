@@ -9,7 +9,6 @@ use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::user_input::UserInput;
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::load_data_url_for_prompt;
@@ -19,10 +18,7 @@ use crate::session::TurnInput;
 
 pub(super) const CONTEXT_KIND: &str = "asm.native_context";
 
-pub(super) fn prepare_input(
-    input: &mut Vec<TurnInput>,
-    runtime: NativeRuntime,
-) -> anyhow::Result<usize> {
+pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize> {
     let mut skipped = 0;
     let mut prepared = Vec::with_capacity(input.len());
     for mut item in input.drain(..) {
@@ -95,20 +91,16 @@ pub(super) fn prepare_input(
                 for part in content {
                     let (encoded, detail) = match part {
                         UserInput::Text { .. } => continue,
-                        UserInput::Image { image, detail }
-                            if runtime == NativeRuntime::ClaudeCode =>
-                        {
+                        UserInput::Image { image, detail } => {
                             let ImageReference::Inline { image_url } = image else {
-                                bail!("Claude images require a base64 data URL, not a file ID");
+                                bail!("Native images require a base64 data URL, not a file ID");
                             };
                             (
                                 load_data_url_for_prompt(image_url, image_mode(*detail))?,
                                 *detail,
                             )
                         }
-                        UserInput::LocalImage { path, detail }
-                            if runtime == NativeRuntime::ClaudeCode =>
-                        {
+                        UserInput::LocalImage { path, detail } => {
                             let bytes = std::fs::read(&*path)
                                 .with_context(|| format!("read native image {}", path.display()))?;
                             (
@@ -117,7 +109,7 @@ pub(super) fn prepare_input(
                             )
                         }
                         _ => bail!(
-                            "this native runtime only supports text input, with image attachments also supported by Claude Code; use native text references for other files and skills"
+                            "native runtimes support text and image attachments; use native text references for other files and skills"
                         ),
                     };
                     *part = UserInput::Image {

@@ -475,13 +475,12 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   after their CLI exits. Combine marker ownership with verified live ancestry. Never
   signal ASM’s own process group. This is lifecycle cleanup, not a sandbox: processes
   that clear the marker and leave observable ancestry can escape cleanup.
-- Forward Claude user images as native image content blocks, preserving text/image
+- Forward native user images as typed content blocks, preserving text/image
   order and delivery checkpoints. Accept inline image data and local attachments through
-  existing image processing; keep injected ASM context plaintext-only. Cursor user input
-  remains text-only until its ACP image forwarding is implemented. Native history keeps
+  existing image processing; keep injected ASM context plaintext-only. Native history keeps
   prepared image bytes inline, without OpenAI uploads or replay transformations. Bound
   Claude image user frames to 31 MiB with a 32 MiB echoed-frame limit; validate before
-  recording input or advancing its checkpoint. Keep text/control and Cursor frames at
+  recording input or advancing its checkpoint. Keep ordinary text/control frames at
   1 MiB. These are ASM transport bounds, not provider limits. Reject unsupported history forks,
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
@@ -562,6 +561,11 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   choices fail without fallback. Saved bracket-encoded model IDs
   retain their native parameters; an explicit effort replaces that parameter. Custom
   catalogs remain authoritative; bundled metadata grants no native model access.
+- Forward user images through ACP `session/prompt` image blocks only when the agent
+  advertises `promptCapabilities.image`. Reject unsupported image input before recording
+  history or advancing the native checkpoint; never drop images or replace them with paths.
+  Preserve inline image history. Bound ACP image prompts to 31 MiB and image replay
+  frames to 32 MiB; ordinary text/control frames retain the 1 MiB bound.
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.

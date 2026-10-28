@@ -145,6 +145,7 @@ pub(super) fn validate_pending_prompt(
     messages: &[Value],
     pending: &[TurnInput],
     boundary: Option<&str>,
+    validate: impl FnOnce(&Value) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     // Preview the same normalized content that admission will record, without
     // changing history or the native delivery checkpoint on validation failure.
@@ -165,5 +166,5 @@ pub(super) fn validate_pending_prompt(
     if let Some(boundary) = boundary {
         messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
     }
-    codex_claude_runtime::validate_prompt(&prompt_content(&messages))
+    validate(&prompt_content(&messages))
 }

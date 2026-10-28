@@ -264,7 +264,7 @@ async fn run_conversation(
                 .await;
             *input = pending;
         }
-        if input::prepare_input(input, native_runtime)? > 0 {
+        if input::prepare_input(input)? > 0 {
             session
                 .send_event(
                     turn,
@@ -456,14 +456,16 @@ async fn run_conversation(
             messaging,
             &messages,
         )?;
-        if native_runtime == NativeRuntime::ClaudeCode {
-            validate_pending_prompt(
-                session,
-                &messages[runtime.checkpoint.input_count..],
-                input,
-                fork_boundary,
-            )?;
-        }
+        validate_pending_prompt(
+            session,
+            &messages[runtime.checkpoint.input_count..],
+            input,
+            fork_boundary,
+            |prompt| match &runtime.runtime {
+                RuntimeProcess::Claude(_) => codex_claude_runtime::validate_prompt(prompt),
+                RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
+            },
+        )?;
         if runtime.checkpoint.effort != effort {
             match &mut runtime.runtime {
                 RuntimeProcess::Claude(process) => process.set_effort(effort.as_deref()).await?,
@@ -546,11 +548,9 @@ async fn run_conversation(
                     steering.then_some(steering_rx),
                 ))
                     as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>>,
-                RuntimeProcess::Cursor(process) => Box::pin(process.run_turn(
-                    prompt.as_str().context("Cursor only supports text input")?,
-                    events_tx,
-                    cancellation.clone(),
-                )),
+                RuntimeProcess::Cursor(process) => {
+                    Box::pin(process.run_turn(&prompt, events_tx, cancellation.clone()))
+                }
             };
             loop {
                 tokio::select! {
@@ -563,7 +563,7 @@ async fn run_conversation(
                         pending_activity = None;
                         session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
                         let (mut pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
-                        match input::prepare_input(&mut pending, native_runtime) {
+                        match input::prepare_input(&mut pending) {
                             Ok(0) => {},
                             Ok(_) => session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await,
                             Err(error) => {
@@ -574,7 +574,7 @@ async fn run_conversation(
                         if pending.is_empty() { continue; }
                         let history = session.clone_history().await;
                         let messages = input_messages(history.raw_items())?;
-                        if let Err(error) = validate_pending_prompt(session, &messages[runtime.checkpoint.input_count..], &pending, /*boundary*/ None) {
+                        if let Err(error) = validate_pending_prompt(session, &messages[runtime.checkpoint.input_count..], &pending, /*boundary*/ None, codex_claude_runtime::validate_prompt) {
                             session.send_event(turn, EventMsg::Warning(WarningEvent { message: format!("Claude queued input was rejected: {error}") })).await;
                             continue;
                         }
@@ -600,7 +600,7 @@ async fn run_conversation(
                         if reply.is_closed() { continue; }
                         if let Some(turn_state) = &turn_state {
                             let mut pending = session.input_queue.take_current_turn_mail(turn_state).await;
-                            if input::prepare_input(&mut pending, native_runtime)? > 0 {
+                            if input::prepare_input(&mut pending)? > 0 {
                                 session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
                             }
                             for item in pending {

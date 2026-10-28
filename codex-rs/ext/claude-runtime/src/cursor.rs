@@ -1,6 +1,8 @@
 //! Run persistent official Cursor Agent sessions over ACP: JSON-RPC frames on `agent acp` stdio.
 //! Cursor owns its tools, permissions and history; ASM grants no approvals.
 
+mod images;
+
 use super::ClaudeTurnOutcome;
 use super::NativeProcess;
 use super::STOP_TIMEOUT;
@@ -48,6 +50,7 @@ pub struct CursorRuntime {
     session_id: String,
     next_request_id: u64,
     config_options: Value,
+    supports_images: bool,
     usable: bool,
     failure_result: Option<Value>,
     bridge_instructions: Option<String>,
@@ -74,11 +77,12 @@ impl CursorRuntime {
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
         let mut runtime = Self {
-            process: NativeProcess::spawn(command, crate::frames::FramePolicy::TextOnly)
+            process: NativeProcess::spawn(command, crate::frames::FramePolicy::CursorImages)
                 .context("starting official Cursor agent")?,
             session_id: String::new(),
             next_request_id: 0,
             config_options: Value::Null,
+            supports_images: false,
             usable: false,
             failure_result: None,
             bridge_instructions: options.bridge_directory.as_ref().map(|_| "ASM communication: use native shell to run \"$ASM_NATIVE_EXE\" --asm-native-tools list for available tools and JSON schemas. Call a listed tool with JSON arguments on stdin: printf '%s' '<JSON>' | \"$ASM_NATIVE_EXE\" --asm-native-tools call <name>. Do not print the private descriptor or retry side-effecting calls automatically. Long calls may background; await their completion.".to_owned()),
@@ -114,6 +118,9 @@ impl CursorRuntime {
                 "Cursor agent does not support ACP systemPrompt; cannot forward selected role instructions"
             );
         }
+        self.supports_images = initialized["agentCapabilities"]["promptCapabilities"]["image"]
+            .as_bool()
+            .unwrap_or(false);
         self.request("authenticate", json!({"methodId": "cursor_login"}))
             .await
             .context("Cursor login is required; run `agent login`")?;
@@ -388,7 +395,7 @@ impl CursorRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn run_turn(
         &mut self,
-        prompt: &str,
+        prompt: &Value,
         events: mpsc::Sender<Value>,
         cancel: CancellationToken,
     ) -> Result<ClaudeTurnOutcome> {
@@ -398,6 +405,7 @@ impl CursorRuntime {
         if cancel.is_cancelled() {
             bail!("Cursor turn cancelled before submission");
         }
+        let frame = self.prompt_frame(prompt)?;
         self.usable = false;
         self.failure_result = None;
         let mut guard = TurnGuard {
@@ -406,11 +414,8 @@ impl CursorRuntime {
             marker: self.process.marker.clone(),
             birth: self.process.birth,
         };
-        let prompt = match self.bridge_instructions.take() {
-            Some(instructions) => format!("{instructions}\n\n{prompt}"),
-            None => prompt.to_owned(),
-        };
-        let mut result = self.read_result(&prompt, &events, cancel).await;
+        self.bridge_instructions = None;
+        let mut result = self.read_result(frame, &events, cancel).await;
         match &result {
             Ok(outcome) if !outcome.interrupted => self.usable = true,
             // Cancelled tools can outlive Cursor's acknowledgement in their own process
@@ -431,17 +436,18 @@ impl CursorRuntime {
 
     async fn read_result(
         &mut self,
-        prompt: &str,
+        frame: Value,
         events: &mpsc::Sender<Value>,
         cancel: CancellationToken,
     ) -> Result<ClaudeTurnOutcome> {
-        let prompt_id = tokio::select! {
+        self.next_request_id += 1;
+        let prompt_id = self.next_request_id;
+        tokio::select! {
             biased;
             _ = cancel.cancelled() => {
                 bail!("Cursor turn cancelled during submission; explicit recovery is required");
             }
-            id = self.send_request("session/prompt", json!({"sessionId": self.session_id,
-                "prompt": [{"type": "text", "text": prompt}]})) => id?,
+            result = self.process.write_frame(frame) => result?,
         };
         let mut cancel_deadline = None;
         // Native child sessions announced this turn, with their last reported state.
