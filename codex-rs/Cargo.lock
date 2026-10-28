@@ -2501,6 +2501,7 @@ version = "0.166.1-alpha.3"
 dependencies = [
  "anyhow",
  "codex-utils-pty",
+ "libc",
  "serde_json",
  "tempfile",
  "tokio",

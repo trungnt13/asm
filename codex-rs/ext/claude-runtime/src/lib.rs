@@ -1,6 +1,7 @@
 //! Run persistent official Claude and Cursor CLI sessions.
 //! The native CLI owns tools and configuration. Callers serialize turns.
 
+mod cleanup;
 mod cursor;
 mod frames;
 
@@ -90,34 +91,33 @@ pub struct ClaudeRuntime {
 /// Native CLI process leading its own process group, with framed stdout and a bounded stderr tail.
 struct NativeProcess {
     child: Child,
+    marker: String,
+    birth: Option<cleanup::ProcessBirth>,
+    cleanup_complete: bool,
     stdin: Option<ChildStdin>,
     frames: mpsc::Receiver<Result<Value>>,
     stdout_reader: JoinHandle<()>,
     stderr_reader: Option<JoinHandle<()>>,
     stderr: Arc<Mutex<VecDeque<u8>>>,
     exit_status: Option<String>,
+    frame_policy: frames::FramePolicy,
 }
 
 // A dropped turn future must not leave a live agent executing outside ASM's task lifetime.
 struct TurnGuard {
     pid: Option<u32>,
     armed: bool,
-    kill: fn(Option<u32>),
+    marker: String,
+    birth: Option<cleanup::ProcessBirth>,
 }
 
 impl Drop for TurnGuard {
     fn drop(&mut self) {
         if self.armed {
-            (self.kill)(self.pid);
+            cleanup::kill_owned(self.pid, &self.marker, self.birth).unwrap_or_else(|error| {
+                tracing::warn!(%error, "native descendant cleanup is incomplete");
+            });
         }
-    }
-}
-
-fn kill_group(pid: Option<u32>) {
-    if let Some(pid) = pid
-        && let Err(error) = process_group::kill_process_group(pid)
-    {
-        tracing::warn!(pid, %error, "failed to kill native CLI process group");
     }
 }
 
@@ -222,7 +222,8 @@ impl ClaudeRuntime {
                 .arg(options.disallowed_tools.join(","));
         }
         Ok(Self {
-            process: NativeProcess::spawn(command).context("starting official Claude CLI")?,
+            process: NativeProcess::spawn(command, frames::FramePolicy::ClaudeImages)
+                .context("starting official Claude CLI")?,
             session_id,
             usable: true,
             failure_result: None,
@@ -266,7 +267,8 @@ impl ClaudeRuntime {
         let mut guard = TurnGuard {
             pid: self.process.child.id(),
             armed: true,
-            kill: kill_group,
+            marker: self.process.marker.clone(),
+            birth: self.process.birth,
         };
         let result = timeout(Duration::from_secs(/*secs*/ 15), async {
             for request in [
@@ -312,7 +314,7 @@ impl ClaudeRuntime {
             self.usable = true;
             self.failure_result = None;
         } else {
-            self.process.kill(kill_group).await;
+            self.process.kill().await;
         }
         guard.armed = false;
         result
@@ -321,10 +323,10 @@ impl ClaudeRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn run_turn(
         &mut self,
-        prompt: &str,
+        prompt: &Value,
         events: mpsc::Sender<Value>,
         cancel: CancellationToken,
-        steering: Option<mpsc::Receiver<String>>,
+        steering: Option<mpsc::Receiver<Value>>,
     ) -> Result<ClaudeTurnOutcome> {
         if !self.usable {
             bail!("Claude session requires explicit recovery after an unfinished turn");
@@ -332,13 +334,15 @@ impl ClaudeRuntime {
         if cancel.is_cancelled() {
             bail!("Claude turn cancelled before submission");
         }
+        validate_prompt(prompt)?;
         self.usable = false;
         self.failure_result = None;
         self.last_assistant_uuid = None;
         let mut guard = TurnGuard {
             pid: self.process.child.id(),
             armed: true,
-            kill: kill_group,
+            marker: self.process.marker.clone(),
+            birth: self.process.birth,
         };
         let user_message_uuid = Uuid::new_v4().to_string();
         let result = async {
@@ -347,8 +351,7 @@ impl ClaudeRuntime {
                 _ = cancel.cancelled() => {
                     bail!("Claude turn cancelled during submission; explicit recovery is required");
                 }
-                result = self.process.write_frame(json!({"type":"user", "uuid":user_message_uuid,
-                    "message":{"role":"user","content":prompt}})) => result?,
+                result = self.process.write_frame(user_frame(prompt, &user_message_uuid)) => result?,
             }
             self.read_result(&events, cancel, &user_message_uuid, steering)
                 .await
@@ -359,7 +362,7 @@ impl ClaudeRuntime {
         }
         if !self.usable {
             // Preserve the original turn error even if cleanup fails.
-            self.process.kill(kill_group).await;
+            self.process.kill().await;
         }
         guard.armed = false;
         result
@@ -370,7 +373,7 @@ impl ClaudeRuntime {
         events: &mpsc::Sender<Value>,
         cancel: CancellationToken,
         user_message_uuid: &str,
-        mut steering: Option<mpsc::Receiver<String>>,
+        mut steering: Option<mpsc::Receiver<Value>>,
     ) -> Result<ClaudeTurnOutcome> {
         let mut pending_result = None;
         let mut latest_command = user_message_uuid.to_owned();
@@ -425,8 +428,7 @@ impl ClaudeRuntime {
                     // No Send now or interrupt: native queues the message and folds it in at
                     // its next tool boundary, so running tools finish instead of being rejected.
                     // Persisted input is never replayed if the write fails partway through.
-                    timeout(STOP_TIMEOUT, self.process.write_frame(json!({"type":"user",
-                        "uuid":command_uuid, "message":{"role":"user","content":prompt}})))
+                    timeout(STOP_TIMEOUT, self.process.write_frame(user_frame(&prompt, &command_uuid)))
                     .await
                     .context("Claude steering submission timed out")??;
                     commands.insert(command_uuid.clone());
@@ -695,9 +697,26 @@ impl ClaudeRuntime {
     }
 }
 
+pub fn validate_prompt(prompt: &Value) -> Result<()> {
+    // UUIDs emitted by the adapter always have this fixed width.
+    let frame = user_frame(prompt, "00000000-0000-0000-0000-000000000000");
+    let limit = frames::FramePolicy::ClaudeImages.input_limit(&frame);
+    anyhow::ensure!(
+        serde_json::to_vec(&frame)?.len() < limit,
+        "Claude input exceeds the native stream-json frame limit ({limit} bytes); reduce the image or prompt size"
+    );
+    Ok(())
+}
+
+fn user_frame(prompt: &Value, uuid: &str) -> Value {
+    json!({"type":"user", "uuid":uuid, "message":{"role":"user","content":prompt}})
+}
+
 impl NativeProcess {
     /// Starts `command` as the leader of a new process group that dies with ASM.
-    fn spawn(mut command: Command) -> Result<Self> {
+    fn spawn(mut command: Command, frame_policy: frames::FramePolicy) -> Result<Self> {
+        let marker = Uuid::new_v4().to_string();
+        command.env(cleanup::OWNER_ENV, &marker);
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -715,6 +734,11 @@ impl NativeProcess {
             }
         }
         let mut child = command.spawn()?;
+        let birth = child.id().and_then(|pid| {
+            cleanup::process_birth(pid).inspect_err(|error| {
+                tracing::warn!(%error, "native process identity is unavailable; cleanup remains conservative");
+            }).ok()
+        });
         let stdin = child.stdin.take().context("native CLI stdin unavailable")?;
         let stdout = child
             .stdout
@@ -726,19 +750,23 @@ impl NativeProcess {
             .context("native CLI stderr unavailable")?;
         let (sender, frames) = mpsc::channel(/*buffer*/ 32);
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
-        let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender));
+        let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender, frame_policy));
         let stderr_reader = Some(tokio::spawn(frames::drain_stderr(
             stderr_pipe,
             Arc::clone(&stderr),
         )));
         Ok(Self {
             child,
+            marker,
+            birth,
+            cleanup_complete: false,
             stdin: Some(stdin),
             frames,
             stdout_reader,
             stderr_reader,
             stderr,
             exit_status: None,
+            frame_policy,
         })
     }
 
@@ -759,7 +787,7 @@ impl NativeProcess {
 
     async fn write_frame(&mut self, frame: Value) -> Result<()> {
         let mut bytes = serde_json::to_vec(&frame)?;
-        if bytes.len() > frames::FRAME_LIMIT {
+        if bytes.len() + 1 > self.frame_policy.input_limit(&frame) {
             bail!("native CLI input frame exceeded size limit");
         }
         bytes.push(b'\n');
@@ -771,39 +799,34 @@ impl NativeProcess {
         stdin.flush().await.context("flushing native CLI input")
     }
 
-    /// Kills the owned process tree with `kill` and records the leader's exit status.
-    async fn kill(&mut self, kill: fn(Option<u32>)) {
+    async fn kill(&mut self) {
+        if let Err(error) = self.terminate().await {
+            tracing::warn!(%error, "native descendant cleanup is incomplete");
+        }
+    }
+
+    async fn terminate(&mut self) -> Result<()> {
         let pid = self.child.id();
-        let exited = self.child.try_wait();
-        // try_wait can reap the leader and clear child.id(), while helpers
-        // still hold its process group. Keep the original group ID for cleanup.
-        kill(pid);
-        if let Ok(Some(status)) = exited {
-            self.exit_status = Some(status.to_string());
-        } else if let Ok(Ok(status)) = timeout(STOP_TIMEOUT, self.child.wait()).await {
+        let marker = self.marker.clone();
+        let birth = self.birth;
+        let cleanup = tokio::task::spawn_blocking(move || cleanup::kill_owned(pid, &marker, birth))
+            .await
+            .context("native cleanup task failed")?;
+        self.cleanup_complete = cleanup.is_ok();
+        if let Ok(Ok(status)) = timeout(STOP_TIMEOUT, self.child.wait()).await {
             self.exit_status = Some(status.to_string());
         }
+        cleanup
     }
 
     async fn shutdown(&mut self) -> Result<()> {
         self.stdin.take();
-        let pid = self.child.id();
-        let result = timeout(STOP_TIMEOUT, self.child.wait()).await;
-        // Also stop group descendants after an apparently clean leader exit.
-        kill_group(pid);
-        match result {
-            Ok(status) => {
-                self.exit_status = Some(status.context("waiting for native CLI exit")?.to_string());
-            }
-            Err(_) => {
-                let status = timeout(STOP_TIMEOUT, self.child.wait())
-                    .await
-                    .context("native CLI did not exit after termination")??;
-                self.exit_status = Some(status.to_string());
-            }
+        if let Ok(Ok(status)) = timeout(STOP_TIMEOUT, self.child.wait()).await {
+            self.exit_status = Some(status.to_string());
         }
+        let cleanup = self.terminate().await;
         self.wait_for_stderr().await;
-        Ok(())
+        cleanup
     }
 
     /// Lets stderr finish before callers capture diagnostics. Keeps the task owned
@@ -820,7 +843,11 @@ impl NativeProcess {
 
 impl Drop for NativeProcess {
     fn drop(&mut self) {
-        kill_group(self.child.id());
+        if !self.cleanup_complete
+            && let Err(error) = cleanup::kill_owned(self.child.id(), &self.marker, self.birth)
+        {
+            tracing::warn!(%error, "native descendant cleanup is incomplete");
+        }
         self.stdout_reader.abort();
         if let Some(reader) = &self.stderr_reader {
             reader.abort();

@@ -1,11 +1,18 @@
+use anyhow::Context;
 use anyhow::bail;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::ImageDetail;
+use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::user_input::UserInput;
+use codex_utils_image::PromptImageMode;
+use codex_utils_image::load_data_url_for_prompt;
+use codex_utils_image::load_for_prompt_bytes;
 
 use crate::session::TurnInput;
 
@@ -81,13 +88,36 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                 };
             }
             TurnInput::UserInput { content, .. } => {
-                if !content
-                    .iter()
-                    .all(|part| matches!(part, codex_protocol::user_input::UserInput::Text { .. }))
-                {
-                    bail!(
-                        "only text input is supported; use native text references for files and skills"
-                    );
+                for part in content {
+                    let (encoded, detail) = match part {
+                        UserInput::Text { .. } => continue,
+                        UserInput::Image { image, detail } => {
+                            let ImageReference::Inline { image_url } = image else {
+                                bail!("Native images require a base64 data URL, not a file ID");
+                            };
+                            (
+                                load_data_url_for_prompt(image_url, image_mode(*detail))?,
+                                *detail,
+                            )
+                        }
+                        UserInput::LocalImage { path, detail } => {
+                            let bytes = std::fs::read(&*path)
+                                .with_context(|| format!("read native image {}", path.display()))?;
+                            (
+                                load_for_prompt_bytes(path, bytes, image_mode(*detail))?,
+                                *detail,
+                            )
+                        }
+                        _ => bail!(
+                            "native runtimes support text and image attachments; use native text references for other files and skills"
+                        ),
+                    };
+                    *part = UserInput::Image {
+                        image: ImageReference::Inline {
+                            image_url: encoded.into_data_url(),
+                        },
+                        detail,
+                    };
                 }
             }
             TurnInput::InterAgentCommunication(_) => {}
@@ -127,6 +157,15 @@ fn output_text(body: &FunctionCallOutputBody) -> anyhow::Result<String> {
                 }
             }
             Ok(texts.join("\n"))
+        }
+    }
+}
+
+fn image_mode(detail: Option<ImageDetail>) -> PromptImageMode {
+    match detail {
+        Some(ImageDetail::Original) => PromptImageMode::Original,
+        Some(ImageDetail::Auto | ImageDetail::Low | ImageDetail::High) | None => {
+            PromptImageMode::ResizeToFit
         }
     }
 }

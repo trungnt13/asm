@@ -2,9 +2,11 @@
 mod activity;
 mod bridge;
 mod cursor;
+mod delivery;
 mod events;
 mod fork;
 mod input;
+mod messages;
 mod state;
 use bridge::ClaudeMessageBridge;
 use cursor::record_cursor_frame;
@@ -12,6 +14,10 @@ use events::record_assistant_frame;
 use fork::TEMPORARY_FORK_BOUNDARY;
 use fork::TEMPORARY_FORK_DISALLOWED_TOOLS;
 pub(crate) use fork::prepare_temporary_fork;
+use messages::input_messages;
+use messages::input_prefix;
+use messages::prompt_content;
+use messages::validate_pending_prompt;
 use state::Checkpoint;
 use state::ClaudeSession;
 use state::Linkage;
@@ -28,9 +34,6 @@ use anyhow::bail;
 use codex_async_utils::OrCancelExt;
 use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
-use codex_protocol::models::AgentMessageInputContent;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ContentItemProvenance;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::EventMsg;
@@ -368,7 +371,7 @@ async fn run_conversation(
             if input.is_empty()
                 && messages[checkpoint.input_count..]
                     .iter()
-                    .all(|message| message.trim().is_empty())
+                    .all(|message| message.as_str().is_some_and(|text| text.trim().is_empty()))
             {
                 return Ok(last_message);
             }
@@ -453,6 +456,16 @@ async fn run_conversation(
             messaging,
             &messages,
         )?;
+        validate_pending_prompt(
+            session,
+            &messages[runtime.checkpoint.input_count..],
+            input,
+            fork_boundary,
+            |prompt| match &runtime.runtime {
+                RuntimeProcess::Claude(_) => codex_claude_runtime::validate_prompt(prompt),
+                RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
+            },
+        )?;
         if runtime.checkpoint.effort != effort {
             match &mut runtime.runtime {
                 RuntimeProcess::Claude(process) => process.set_effort(effort.as_deref()).await?,
@@ -477,12 +490,14 @@ async fn run_conversation(
         }
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items())?;
-        let mut prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
-        if prompt.trim().is_empty() {
+        let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
+        let mut prompt = prompt_content(&pending_messages);
+        if prompt.as_str().is_some_and(|text| text.trim().is_empty()) {
             return Ok(last_message);
         }
         if let Some(boundary) = fork_boundary {
-            prompt = format!("{boundary}\n\n{prompt}");
+            pending_messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
+            prompt = prompt_content(&pending_messages);
         }
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = session
@@ -522,6 +537,8 @@ async fn run_conversation(
             .await;
         let (steering_tx, steering_rx) = tokio::sync::mpsc::channel(1);
         let mut submitted_steering_count = 0;
+        let mut mail_receipts =
+            delivery::CursorMailReceipts::new(runtime.checkpoint.session_id.clone());
         let result = {
             let mut run = match &mut runtime.runtime {
                 RuntimeProcess::Claude(process) => Box::pin(process.run_turn(
@@ -546,16 +563,27 @@ async fn run_conversation(
                         pending_activity = None;
                         session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
                         let (mut pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
-                        if input::prepare_input(&mut pending)? > 0 {
-                            session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await;
+                        match input::prepare_input(&mut pending) {
+                            Ok(0) => {},
+                            Ok(_) => session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await,
+                            Err(error) => {
+                                session.send_event(turn, EventMsg::Warning(WarningEvent { message: format!("Claude queued input was rejected: {error}") })).await;
+                                continue;
+                            }
                         }
                         if pending.is_empty() { continue; }
+                        let history = session.clone_history().await;
+                        let messages = input_messages(history.raw_items())?;
+                        if let Err(error) = validate_pending_prompt(session, &messages[runtime.checkpoint.input_count..], &pending, /*boundary*/ None, codex_claude_runtime::validate_prompt) {
+                            session.send_event(turn, EventMsg::Warning(WarningEvent { message: format!("Claude queued input was rejected: {error}") })).await;
+                            continue;
+                        }
                         for item in pending {
                             record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
                                 codex_thread_store::PersistContext::TurnStart).await;
                         }
                         let messages = input_messages(session.clone_history().await.raw_items())?;
-                        let prompt = messages[runtime.checkpoint.input_count..].join("\n\n");
+                        let prompt = prompt_content(&messages[runtime.checkpoint.input_count..]);
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
                         session.flush_rollout().await?;
@@ -581,13 +609,16 @@ async fn run_conversation(
                             }
                         }
                         let messages = input_messages(session.clone_history().await.raw_items())?;
-                        let delivered = messages[runtime.checkpoint.input_count..].to_vec();
+                        let mut delivered = messages[runtime.checkpoint.input_count..].iter()
+                            .map(|message| message.as_str().map(str::to_owned)
+                                .context("Cursor mailbox only supports text input"))
+                            .collect::<anyhow::Result<Vec<_>>>()?;
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
                         session.flush_rollout().await?;
                         runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-                        // The helper returns these messages inside Cursor's active shell result.
-                        // Advancing the checkpoint prevents next-prompt reinjection.
+                        // The internal oneshot confirms only bridge receipt, not native delivery.
+                        mail_receipts.stamp(&mut delivered);
                         if reply.send(delivered).is_err() {
                             bail!("Cursor mailbox result was not accepted; explicit recovery is required");
                         }
@@ -596,7 +627,7 @@ async fn run_conversation(
                         if changed.is_err() { bail!("Claude steering capability channel closed"); }
                     }
                     Some(frame) = events_rx.recv() => {
-                        if let Some(text) = record_frame(native_runtime, session, turn, &frame, &mut stream).await? {
+                        if let Some(text) = record_frame(native_runtime, session, turn, &frame, &mut stream, &mut mail_receipts).await? {
                             last_message = Some(text);
                         }
                     }
@@ -604,8 +635,15 @@ async fn run_conversation(
             }
         };
         while let Ok(frame) = events_rx.try_recv() {
-            if let Some(text) =
-                record_frame(native_runtime, session, turn, &frame, &mut stream).await?
+            if let Some(text) = record_frame(
+                native_runtime,
+                session,
+                turn,
+                &frame,
+                &mut stream,
+                &mut mail_receipts,
+            )
+            .await?
             {
                 last_message = Some(text);
             }
@@ -627,6 +665,7 @@ async fn run_conversation(
                 return Err(error);
             }
         };
+        mail_receipts.ensure_delivered()?;
         if outcome.submitted_steering_count != submitted_steering_count {
             bail!(
                 "Claude did not submit all recorded steering messages; explicit recovery is required"
@@ -738,87 +777,11 @@ async fn record_frame(
     turn: &TurnContext,
     frame: &Value,
     stream: &mut events::MessageStream,
+    mail_receipts: &mut delivery::CursorMailReceipts,
 ) -> anyhow::Result<Option<String>> {
+    mail_receipts.observe(frame);
     match native_runtime {
         NativeRuntime::ClaudeCode => record_assistant_frame(session, turn, frame, stream).await,
         NativeRuntime::CursorAgent => record_cursor_frame(session, turn, frame, stream).await,
     }
-}
-
-fn input_messages<'a>(
-    items: impl IntoIterator<Item = &'a ResponseItem>,
-) -> anyhow::Result<Vec<String>> {
-    let mut messages = Vec::new();
-    for item in items {
-        match item {
-            ResponseItem::Message {
-                content,
-                internal_chat_message_metadata_passthrough: Some(metadata),
-                ..
-            } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
-                kinds.len() == 1 && kinds[0].as_str() == input::CONTEXT_KIND
-            }) =>
-            {
-                for part in content {
-                    if let ContentItem::InputText { text } = part {
-                        messages.push(text.clone());
-                    }
-                }
-            }
-            ResponseItem::Message {
-                role,
-                content,
-                internal_chat_message_metadata_passthrough: Some(metadata),
-                ..
-            } if role == "user"
-                && metadata
-                    .content_item_metadata
-                    .as_ref()
-                    .is_some_and(|parts| {
-                        parts.len() == content.len()
-                            && parts
-                                .iter()
-                                .all(|part| part.provenance == ContentItemProvenance::User)
-                    }) =>
-            {
-                let mut texts = Vec::new();
-                for part in content {
-                    let ContentItem::InputText { text } = part else {
-                        bail!("non-text user history cannot be delivered to the native runtime");
-                    };
-                    texts.push(text.as_str());
-                }
-                messages.push(texts.join("\n"));
-            }
-            // Native received mail uses AgentMessage; sent mail is an assistant Message.
-            ResponseItem::AgentMessage {
-                author,
-                recipient,
-                content,
-                ..
-            } => {
-                let mut texts = Vec::new();
-                for part in content {
-                    let AgentMessageInputContent::InputText { text } = part else {
-                        bail!("encrypted agent history cannot be delivered to the native runtime");
-                    };
-                    texts.push(text.as_str());
-                }
-                messages.push(format!(
-                    "Message from {author} to {recipient}:\n{}",
-                    texts.join("\n")
-                ));
-            }
-            _ => {}
-        }
-    }
-    Ok(messages)
-}
-
-fn input_prefix(messages: &[String]) -> anyhow::Result<String> {
-    use sha1::Digest;
-    Ok(format!(
-        "{:x}",
-        sha1::Sha1::digest(serde_json::to_vec(messages)?)
-    ))
 }

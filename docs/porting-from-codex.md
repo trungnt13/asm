@@ -469,9 +469,19 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   ASM-requested interrupt, for the submitted UUID with its cancelled-command receipt
   and the confirmed cleanup above. Continue with new input; never replay the interrupted
   input or assume its tools had no side effects. Other execution errors require recovery.
-- Bound framing, stderr and cleanup waits. Interrupt and kill only owned process
-  groups; preserve primary failures and retain diagnostics only when requested.
-- Keep text-only local execution initially. Reject unsupported history forks,
+- Bound framing, stderr and cleanup waits. Kill only owned native processes; preserve
+  primary failures and retain diagnostics only when requested. Give each native CLI a
+  unique inherited process-ownership marker so ordinary detached tools remain identifiable
+  after their CLI exits. Combine marker ownership with verified live ancestry. Never
+  signal ASM’s own process group. This is lifecycle cleanup, not a sandbox: processes
+  that clear the marker and leave observable ancestry can escape cleanup.
+- Forward native user images as typed content blocks, preserving text/image
+  order and delivery checkpoints. Accept inline image data and local attachments through
+  existing image processing; keep injected ASM context plaintext-only. Native history keeps
+  prepared image bytes inline, without OpenAI uploads or replay transformations. Bound
+  Claude image user frames to 31 MiB with a 32 MiB echoed-frame limit; validate before
+  recording input or advancing its checkpoint. Keep ordinary text/control frames at
+  1 MiB. These are ASM transport bounds, not provider limits. Reject unsupported history forks,
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
   extraction may summarize their saved ASM transcripts.
@@ -545,9 +555,17 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   Negotiate ACP `parameterizedModelPicker` only when starting a Cursor session. Validate
   the requested model and effort against that session's advertised choices, apply the
   actual parameter ID from the `thought_level` category, and require confirmation before
-  prompting. Unavailable choices fail without fallback. Saved bracket-encoded model IDs
+  prompting. Preserve saved automatic model IDs: prefer an exact advertised match, then
+  translate `auto` or `auto-smart` to ACP `default` only when that value is advertised.
+  This is Auto identity translation, not fallback to another model. Other unavailable
+  choices fail without fallback. Saved bracket-encoded model IDs
   retain their native parameters; an explicit effort replaces that parameter. Custom
   catalogs remain authoritative; bundled metadata grants no native model access.
+- Forward user images through ACP `session/prompt` image blocks only when the agent
+  advertises `promptCapabilities.image`. Reject unsupported image input before recording
+  history or advancing the native checkpoint; never drop images or replace them with paths.
+  Preserve inline image history. Bound ACP image prompts to 31 MiB and image replay
+  frames to 32 MiB; ordinary text/control frames retain the 1 MiB bound.
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
@@ -587,14 +605,15 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   no role text applies.
 - Child role context limits and `subagent_model_context_windows` set no Cursor compaction
   window and skip the Claude window validation; Cursor manages its own context.
-- Bound login and session setup (60 s); Cursor can stall there. Native turns stay unbounded.
+- Bound each login and session setup request (60 s), including stdin submission; Cursor
+  can stall before reading a request. Native turns stay unbounded.
 - `session/load` replays native history before it responds; discard that replay so the ASM
   transcript does not get duplicates. Set the model again after every new or loaded session.
-- Cursor starts shell tools in their own process groups below the ACP process. Cleanup lists
-  descendants with a bounded `ps` snapshot, kills their groups and then the owned group. Never
-  kill by socket, path or name, and never signal ASM's group. Cleanup succeeds only after those
-  groups are observed gone; it does not cover processes that left them, such as with `setsid`. On interrupt, send
-  `session/cancel`. After `stopReason: cancelled`, stop the process tree and keep the linkage
+- Cursor starts shell tools in their own process groups below the ACP process. Use the
+  shared native ownership-marker cleanup, including after the ACP leader exits. Never kill
+  by socket, path or name. Cleanup succeeds only after identified owned processes stop;
+  marker-clearing processes outside observable ancestry remain outside its guarantee.
+  On interrupt, send `session/cancel`. After `stopReason: cancelled`, stop the process tree and keep the linkage
   clean only when descendant cleanup succeeded; the next turn loads the session. A missing
   acknowledgement, failed cleanup or any other failure leaves the linkage dirty.
 - Cursor reports no token usage or context fill. Show them as unavailable, never zero, in ASM
@@ -605,9 +624,13 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   `session/new` and `session/load` carry empty `mcpServers`. Team MCP policy blocked the
   previous transport; do not reintroduce it or bypass native policy. Cursor mail
   and board notices can be delivered inside an active prompt through the canonical
-  wait tool's CLI result. The owning runtime records mail and advances its checkpoint
-  before returning it, so the next prompt does not replay it. Queued user input and
-  followups with next-turn options stay ordered for the next prompt. ASM still returns
+  wait tool's CLI result. The owning runtime records mail and advances its dirty checkpoint
+  before returning it, so the next prompt does not replay it. Each nonempty delivery gets
+  a unique receipt. Save clean linkage only after Cursor reports that receipt in a
+  successful root shell tool result; internal bridge receipt or HTTP completion alone
+  is insufficient. Missing or truncated confirmation requires explicit recovery, without
+  retrying potentially side-effecting tools. Queued user input and followups with
+  next-turn options stay ordered for the next prompt. ASM still returns
   Cursor's final answer; there is no Send now. Cursor children saved before this bridge recorded no messaging; their
   cold resume fails closed and needs a new thread. Mains are unaffected.
 - Verified with Cursor CLI 2026.10.22-27dcf5f. Revalidate the protocol when upgrading it.
