@@ -68,6 +68,11 @@ pub(crate) async fn prepare_agent_spawn_config(
         config.role_system1_base_bounds = turn.config.role_system1_base_bounds.clone();
         config.config_layer_stack = turn.config.config_layer_stack.clone();
     }
+    let has_requested_reasoning_effort = options.reasoning_effort.is_some()
+        || turn
+            .config
+            .agent_default_subagent_reasoning_effort
+            .is_some();
     apply_requested_spawn_agent_model_overrides(
         session,
         step_context,
@@ -77,10 +82,12 @@ pub(crate) async fn prepare_agent_spawn_config(
     )
     .await?;
     let explicit_model = options.model.and(config.model.clone());
+    let model_before_role = config.model.clone();
+    let mut role_reasoning_effort = None;
     if !options.full_history_fork
         || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
     {
-        apply_role_to_config(&mut config, options.role_name).await?;
+        role_reasoning_effort = apply_role_to_config(&mut config, options.role_name).await?;
         if options.version == SpawnConfigVersion::V2
             && options.full_history_fork
             && config.developer_instructions.is_none()
@@ -99,6 +106,27 @@ pub(crate) async fn prepare_agent_spawn_config(
         .and_then(codex_models_manager::canonical_model)
     {
         config.model = Some(model.to_owned());
+    }
+    if options.model.is_none()
+        && !has_requested_reasoning_effort
+        && role_reasoning_effort.is_none()
+        && config.model.as_deref()
+            != model_before_role
+                .as_deref()
+                .map(|model| codex_models_manager::canonical_model(model).unwrap_or(model))
+        && let Some(model) = config.model.as_deref()
+        && crate::external_runtime::is_native_model(model)
+    {
+        let model_info = session
+            .services
+            .models_manager
+            .get_model_info(model, &config.to_models_manager_config())
+            .await;
+        config.model_reasoning_effort = if model_info.used_fallback_model_metadata {
+            None
+        } else {
+            model_info.default_reasoning_level
+        };
     }
     validate_spawn_agent_config_effort(session, &config).await?;
     config

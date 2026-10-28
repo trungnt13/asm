@@ -61,10 +61,11 @@ struct System1RoleOverride {
 }
 
 /// Applies typed role overrides to the existing parent-derived configuration.
+/// Returns the role's explicit reasoning effort, if present.
 pub(crate) async fn apply_role_to_config(
     config: &mut Config,
     role_name: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Option<ReasoningEffort>, String> {
     config.role_developer_instructions = None;
     let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
 
@@ -84,10 +85,10 @@ async fn apply_role_to_config_inner(
     config: &mut Config,
     role_name: &str,
     role: &AgentRoleConfig,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<ReasoningEffort>> {
     let is_built_in = !config.agent_roles.contains_key(role_name);
     let Some(config_file) = role.config_file.as_ref() else {
-        return Ok(());
+        return Ok(None);
     };
     let role_layer_toml = load_role_layer_toml(config, config_file, is_built_in, role_name).await?;
     let system1 = role_layer_toml
@@ -165,10 +166,10 @@ async fn apply_role_to_config_inner(
         .as_table()
         .is_some_and(toml::map::Map::is_empty)
     {
-        return Ok(());
+        return Ok(None);
     }
     *config = role_overrides::build_next_config(config, role_layer_toml, &overrides)?;
-    Ok(())
+    Ok(overrides.model_reasoning_effort)
 }
 
 async fn load_role_layer_toml(
