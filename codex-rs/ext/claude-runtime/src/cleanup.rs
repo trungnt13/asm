@@ -105,15 +105,29 @@ mod supported {
                             }
                         }
                     }
-                    if !marked
-                        && !row.birth.is_some_and(|birth| {
-                            process_birth(row.pid).is_ok_and(|actual| actual == birth)
-                        })
-                    {
-                        scan_error.get_or_insert_with(|| {
-                            anyhow::anyhow!("native descendant identity changed or is unavailable")
-                        });
-                        continue;
+                    if !marked {
+                        match (row.birth, process_birth(row.pid)) {
+                            (Some(expected), Ok(actual)) if expected == actual => {}
+                            (Some(_), Ok(_)) => continue,
+                            (_, Err(error))
+                                if error.downcast_ref::<std::io::Error>().is_some_and(
+                                    |error| {
+                                        matches!(
+                                            error.raw_os_error(),
+                                            Some(libc::ENOENT | libc::ESRCH)
+                                        )
+                                    },
+                                ) =>
+                            {
+                                continue;
+                            }
+                            _ => {
+                                scan_error.get_or_insert_with(|| {
+                                    anyhow::anyhow!("native descendant identity is unavailable")
+                                });
+                                continue;
+                            }
+                        }
                     }
                     found = true;
                     // SAFETY: the PID belongs to this native runtime, not ASM's group.
@@ -180,11 +194,10 @@ mod supported {
                 size,
             )
         };
-        anyhow::ensure!(
-            read == size,
-            "cannot read process birth: {}",
-            std::io::Error::last_os_error()
-        );
+        if read <= 0 {
+            return Err(std::io::Error::last_os_error()).context("cannot read process birth");
+        }
+        anyhow::ensure!(read == size, "incomplete process birth");
         // SAFETY: proc_pidinfo initialized the complete structure on success.
         let info = unsafe { info.assume_init() };
         Ok((info.pbi_start_tvsec, info.pbi_start_tvusec))
