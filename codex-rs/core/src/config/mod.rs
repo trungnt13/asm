@@ -4280,13 +4280,27 @@ impl Config {
 
         let model = model.or(cfg.model);
         let notices = cfg.notice.unwrap_or_default();
+        let uses_native_runtime = model
+            .as_deref()
+            .is_some_and(|model| {
+                codex_protocol::openai_models::is_native_runtime_model(
+                    codex_models_manager::canonical_model(model).unwrap_or(model),
+                )
+            });
+        let session_overrides_service_tier = config_layer_stack.layers_high_to_low().any(|layer| {
+            is_session_layer(&layer.name) && layer.config.get("service_tier").is_some()
+        });
         let service_tier = match service_tier_override {
             Some(Some(service_tier)) => Some(service_tier),
             Some(None) => Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()),
+            None if uses_native_runtime && !session_overrides_service_tier => None,
             None => cfg.service_tier,
         };
-        let service_tier = service_tier.and_then(|service_tier| {
-            match ServiceTier::from_request_value(&service_tier) {
+        // Preserve explicit native tiers for startup validation, even when Fast is disabled.
+        let service_tier = if uses_native_runtime {
+            service_tier
+        } else {
+            service_tier.and_then(|service_tier| match ServiceTier::from_request_value(&service_tier) {
                 Some(ServiceTier::Fast) => features
                     .enabled(Feature::FastMode)
                     .then(|| ServiceTier::Fast.request_value().to_string()),
@@ -4295,8 +4309,8 @@ impl Config {
                     .enabled(Feature::UltrafastMode)
                     .then_some(service_tier),
                 None => Some(service_tier),
-            }
-        });
+            })
+        };
 
         let compact_prompt = compact_prompt.or(cfg.compact_prompt).and_then(|value| {
             let trimmed = value.trim();
