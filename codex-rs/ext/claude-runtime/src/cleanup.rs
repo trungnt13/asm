@@ -43,7 +43,7 @@ mod supported {
         let mut bytes = Vec::new();
         let cleanup = (|| -> Result<()> {
             loop {
-                let table = list_processes()?;
+                let table = list_processes(deadline)?;
                 let own_group = table
                     .iter()
                     .find(|row| row.pid == std::process::id())
@@ -282,7 +282,7 @@ mod supported {
         birth: Option<ProcessBirth>,
     }
 
-    fn list_processes() -> Result<Vec<ProcessRow>> {
+    fn list_processes(deadline: std::time::Instant) -> Result<Vec<ProcessRow>> {
         use std::io::Read;
         use std::io::Seek;
         let mut output = tempfile::tempfile()?;
@@ -292,7 +292,6 @@ mod supported {
             .stdout(output.try_clone()?)
             .stderr(std::process::Stdio::null())
             .spawn()?;
-        let deadline = std::time::Instant::now() + PROCESS_LIST_TIMEOUT;
         let status = loop {
             if let Some(status) = child.try_wait()? {
                 break status;
@@ -310,6 +309,10 @@ mod supported {
         output.read_to_string(&mut text)?;
         text.lines()
             .map(|line| {
+                anyhow::ensure!(
+                    std::time::Instant::now() < deadline,
+                    "process metadata scan timed out"
+                );
                 let mut fields = line.split_whitespace();
                 let mut number = || {
                     fields
@@ -329,7 +332,9 @@ mod supported {
                     group,
                     uid,
                     zombie,
-                    birth: process_birth(pid).ok(),
+                    birth: (uid == current_uid())
+                        .then(|| process_birth(pid).ok())
+                        .flatten(),
                 })
             })
             .collect()

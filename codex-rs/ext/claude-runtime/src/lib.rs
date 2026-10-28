@@ -718,7 +718,11 @@ impl NativeProcess {
             }
         }
         let mut child = command.spawn()?;
-        let birth = child.id().and_then(|pid| cleanup::process_birth(pid).ok());
+        let birth = child.id().and_then(|pid| {
+            cleanup::process_birth(pid).inspect_err(|error| {
+                tracing::warn!(%error, "native process identity is unavailable; cleanup remains conservative");
+            }).ok()
+        });
         let stdin = child.stdin.take().context("native CLI stdin unavailable")?;
         let stdout = child
             .stdout
