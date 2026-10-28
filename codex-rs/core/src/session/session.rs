@@ -754,6 +754,17 @@ impl Session {
         );
         ExecutionMetadata::from_settings(&step_context.settings).apply_to(&mut responses_metadata);
         responses_metadata.guardian_recorded_items = self.parent_observer_event_tx.get().is_some();
+        if responses_metadata.subagent_header.as_deref()
+            == Some(crate::guardian::GUARDIAN_REVIEWER_NAME)
+            && let Some(pending) = self
+                .services
+                .thread_extension_data
+                .get::<crate::guardian::PendingReviewRouting>()
+            && let Some(parent) = &pending.0
+            && responses_metadata.parent_response_id.as_deref() == Some(parent.id.as_str())
+        {
+            responses_metadata.parent_routing_affinity = parent.routing_affinity.clone();
+        }
         responses_metadata.tool_namespaces_info = if step_context
             .turn
             .config
@@ -1312,53 +1323,37 @@ impl Session {
             } else {
                 None
             };
-            let rollout_thread_trace = if config.diagnostic_log_capture {
-                let trace_agent_path = session_configuration
-                    .session_source
-                    .get_agent_path()
-                    .unwrap_or_else(codex_protocol::AgentPath::root);
-                let trace_task_name =
-                    (!trace_agent_path.is_root()).then(|| trace_agent_path.name().to_string());
-                let trace_metadata = ThreadStartedTraceMetadata {
-                    thread_id: thread_id.to_string(),
-                    agent_path: trace_agent_path.to_string(),
-                    task_name: trace_task_name,
-                    nickname: session_configuration.session_source.get_nickname(),
-                    agent_role: session_configuration.session_source.get_agent_role(),
-                    session_source: session_configuration.session_source.clone(),
-                    cwd: session_configuration.cwd().to_path_buf(),
-                    rollout_path: rollout_path.clone(),
-                    model: session_configuration
-                        .step_settings
-                        .collaboration_mode
-                        .model()
-                        .to_string(),
-                    provider_name: config.model_provider_id.clone(),
-                    approval_policy: session_configuration
-                        .step_settings
-                        .approval_policy
-                        .value()
-                        .to_string(),
-                    sandbox_policy: format!(
-                        "{:?}",
-                        session_configuration.sandbox_policy(environment_selections)
-                    ),
-                };
-                if matches!(
-                    session_configuration.session_source,
-                    SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-                ) {
-                    // Spawned child threads are part of their root rollout tree. If the
-                    // parent had no trace bundle, do not create an orphan child bundle
-                    // that looks like an independent rollout.
-                    parent_rollout_thread_trace.start_child_thread_trace_or_disabled(trace_metadata)
-                } else {
-                    ThreadTraceContext::start_root_or_disabled(trace_metadata)
-                }
-            } else {
-                ThreadTraceContext::disabled()
+            let trace_agent_path = session_configuration
+                .session_source
+                .get_agent_path()
+                .unwrap_or_else(codex_protocol::AgentPath::root);
+            let trace_task_name =
+                (!trace_agent_path.is_root()).then(|| trace_agent_path.name().to_string());
+            let trace_metadata = ThreadStartedTraceMetadata {
+                thread_id: thread_id.to_string(),
+                agent_path: trace_agent_path.to_string(),
+                task_name: trace_task_name,
+                nickname: session_configuration.session_source.get_nickname(),
+                agent_role: session_configuration.session_source.get_agent_role(),
+                session_source: session_configuration.session_source.clone(),
+                cwd: session_configuration.cwd().to_path_buf(),
+                rollout_path: rollout_path.clone(),
+                model: session_configuration
+                    .step_settings
+                    .collaboration_mode
+                    .model()
+                    .to_string(),
+                provider_name: config.model_provider_id.clone(),
+                approval_policy: session_configuration
+                    .step_settings
+                    .approval_policy
+                    .value()
+                    .to_string(),
+                sandbox_policy: format!(
+                    "{:?}",
+                    session_configuration.sandbox_policy(environment_selections)
+                ),
             };
-
             let mut post_session_configured_events = Vec::<Event>::new();
 
             for usage in config.features.legacy_feature_usages() {
@@ -1808,6 +1803,25 @@ impl Session {
                 );
             let reasoning_effort_override_enabled =
                 config.features.enabled(Feature::ReasoningEffortOverride) && !title_request;
+            // Once tracing starts, startup cleanup must own the session before the next await.
+            let rollout_thread_trace = if !config.diagnostic_log_capture {
+                ThreadTraceContext::disabled()
+            } else if matches!(
+                session_configuration.session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            ) {
+                // Spawned child threads are part of their root rollout tree. If the
+                // parent had no trace bundle, do not create an orphan child bundle
+                // that looks like an independent rollout.
+                if matches!(&initial_history, InitialHistory::Resumed(_)) {
+                    parent_rollout_thread_trace
+                        .resume_child_thread_trace_or_disabled(thread_id.to_string())
+                } else {
+                    parent_rollout_thread_trace.start_child_thread_trace_or_disabled(trace_metadata)
+                }
+            } else {
+                ThreadTraceContext::start_root_or_disabled(trace_metadata)
+            };
             let services = SessionServices {
                 // Start with an empty connection set. The initialized set is
                 // published after SessionConfigured so MCP events follow it.

@@ -1,12 +1,16 @@
 use super::*;
 use crate::context::APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX;
+use crate::context::ApprovedCommandPrefixSaved;
+use crate::context::ContextualUserFragment;
 use crate::context::UserInstructions;
 use crate::context::world_state::SectionTransition;
 use crate::context::world_state::WorldState;
 use crate::context::world_state::WorldStateSection;
 use crate::context::world_state::WorldStateUpdateContent;
+use crate::image_preparation::tests::FailingAttachmentStore;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use codex_attachment_store::InlineAttachmentStore;
 use codex_history::CodexHarnessMetadata;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::AgentPath;
@@ -826,8 +830,8 @@ fn filters_non_api_messages() {
     assert_eq!(raw_items(&h), vec![reasoning, u, a]);
 }
 
-#[test]
-fn retains_only_harness_authored_configuration_updates() {
+#[tokio::test]
+async fn retains_only_harness_authored_configuration_updates() {
     let mut history = ContextManager::new();
     let update = ResponseItem::ConfigurationUpdate {
         reasoning: ConfigurationReasoning {
@@ -938,11 +942,17 @@ fn retains_only_harness_authored_configuration_updates() {
         for history in [replaced, compacted] {
             let snapshot = history.clone().into_shared_annotated_items();
             assert_eq!(
-                history.clone().for_prompt_annotated(&[InputModality::Text]),
+                history
+                    .clone()
+                    .for_prompt_annotated(&[InputModality::Text], &InlineAttachmentStore)
+                    .await,
                 expected
             );
             assert_eq!(
-                history.clone().for_prompt(&[InputModality::Text]),
+                history
+                    .clone()
+                    .for_prompt(&[InputModality::Text], &InlineAttachmentStore)
+                    .await,
                 expected
                     .iter()
                     .map(|envelope| envelope.item.clone())
@@ -1050,13 +1060,18 @@ fn inter_agent_assistant_messages_are_turn_boundaries() {
     assert!(is_user_turn_boundary(&item));
 }
 
-#[test]
-fn for_prompt_preserves_inter_agent_assistant_messages() {
+#[tokio::test]
+async fn for_prompt_preserves_inter_agent_assistant_messages() {
     let item = inter_agent_assistant_msg("continue");
     let history = create_history_with_items(vec![item.clone()]);
 
     assert_eq!(raw_items(&history), std::slice::from_ref(&item));
-    assert_eq!(history.for_prompt(&default_input_modalities()), vec![item]);
+    assert_eq!(
+        history
+            .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
+            .await,
+        vec![item]
+    );
 }
 
 #[test]
@@ -1156,8 +1171,8 @@ fn record_annotated_items_preserves_metadata_while_processing_item(
     );
 }
 
-#[test]
-fn for_prompt_annotated_preserves_metadata_while_normalizing_item() {
+#[tokio::test]
+async fn for_prompt_annotated_preserves_metadata_while_normalizing_item() {
     let envelope = ResponseItemEnvelope {
         item: ResponseItem::Message {
             status: None,
@@ -1183,7 +1198,9 @@ fn for_prompt_annotated_preserves_metadata_while_normalizing_item() {
     let mut history = ContextManager::new();
     history.replace_annotated(vec![envelope.clone()]);
 
-    let normalized = history.for_prompt_annotated(&[InputModality::Text]);
+    let normalized = history
+        .for_prompt_annotated(&[InputModality::Text], &InlineAttachmentStore)
+        .await;
 
     assert_eq!(normalized.len(), 1);
     assert_eq!(normalized[0].metadata, envelope.metadata);
@@ -1241,8 +1258,101 @@ fn total_token_usage_includes_all_items_after_last_model_generated_item() {
     );
 }
 
-#[test]
-fn for_prompt_strips_media_when_model_does_not_support_it() {
+/// Unavailable images become harness-attributed placeholders without changing saved history or
+/// neighboring inline content and its annotations.
+#[tokio::test]
+async fn for_prompt_replaces_unavailable_message_images() {
+    let original: ResponseItem = from_value(json!({
+        "type": "message", "role": "user",
+        "content": [
+            {"type": "input_text", "text": "look"},
+            {"type": "input_image", "file_id": "expired"},
+            {"type": "input_image", "image_url": "data:image/png;base64,aW1hZ2U="}
+        ],
+        "internal_chat_message_metadata_passthrough": {
+            "content_item_kinds": ["user.text", "user.image", "user.image"]
+        }
+    }))
+    .unwrap();
+    let history = create_history_with_items(vec![original.clone()]);
+    let projected = history
+        .clone()
+        .for_prompt_annotated(
+            &[
+                InputModality::Text,
+                InputModality::Image,
+                InputModality::Audio,
+            ],
+            &FailingAttachmentStore,
+        )
+        .await;
+    let expected: ResponseItem = from_value(json!({
+        "type": "message", "role": "user",
+        "content": [
+            {"type": "input_text", "text": "look"},
+            {"type": "input_text", "text": "[image unavailable]"},
+            {"type": "input_image", "image_url": "data:image/png;base64,aW1hZ2U="}
+        ],
+        "internal_chat_message_metadata_passthrough": {
+            "content_item_kinds": ["user.text", "images.unavailable", "user.image"],
+            "content_item_metadata": [{}, {"harness_injected": true}, {}]
+        }
+    }))
+    .unwrap();
+    assert_eq!(projected, vec![ResponseItemEnvelope::new(expected)]);
+    assert_eq!(raw_items(&history), vec![original]);
+}
+
+/// Both tool output formats retain inline images and text when a neighboring file expires.
+#[tokio::test]
+async fn for_prompt_replaces_unavailable_tool_images() {
+    for (call, output) in [
+        (
+            json!({"type": "function_call", "call_id": "call-1", "name": "view_image", "arguments": "{}"}),
+            json!({"type": "function_call_output", "call_id": "call-1"}),
+        ),
+        (
+            json!({"type": "custom_tool_call", "call_id": "call-1", "name": "js_repl", "input": "view_image"}),
+            json!({"type": "custom_tool_call_output", "call_id": "call-1"}),
+        ),
+    ] {
+        let call: ResponseItem = from_value(call).unwrap();
+        let mut original = output.clone();
+        original["output"] = json!([
+            {"type": "input_text", "text": "result"},
+            {"type": "input_image", "file_id": "expired"},
+            {"type": "input_image", "image_url": "data:image/png;base64,aW1hZ2U="}
+        ]);
+        let original: ResponseItem = from_value(original).unwrap();
+        let history = create_history_with_items(vec![call.clone(), original.clone()]);
+        let mut expected = output;
+        expected["output"] = json!([
+            {"type": "input_text", "text": "result"},
+            {"type": "input_text", "text": "[image unavailable]"},
+            {"type": "input_image", "image_url": "data:image/png;base64,aW1hZ2U="}
+        ]);
+        let expected: ResponseItem = from_value(expected).unwrap();
+
+        assert_eq!(
+            history
+                .clone()
+                .for_prompt(
+                    &[
+                        InputModality::Text,
+                        InputModality::Image,
+                        InputModality::Audio
+                    ],
+                    &FailingAttachmentStore,
+                )
+                .await,
+            vec![call.clone(), expected]
+        );
+        assert_eq!(raw_items(&history), vec![call, original]);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn for_prompt_strips_media_when_model_does_not_support_it() {
     let items = vec![
         ResponseItem::Message {
             status: None,
@@ -1345,7 +1455,9 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
     let fully_supported_items = items.clone();
     let history = create_history_with_items(items);
     let text_only_modalities = vec![InputModality::Text];
-    let stripped = history.for_prompt(&text_only_modalities);
+    let stripped = history
+        .for_prompt(&text_only_modalities, &InlineAttachmentStore)
+        .await;
 
     let expected = vec![
         ResponseItem::Message {
@@ -1449,11 +1561,16 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
     ];
     assert_eq!(stripped, expected);
     assert_eq!(
-        create_history_with_items(fully_supported_items.clone()).for_prompt(&[
-            InputModality::Text,
-            InputModality::Image,
-            InputModality::Audio,
-        ]),
+        create_history_with_items(fully_supported_items.clone())
+            .for_prompt(
+                &[
+                    InputModality::Text,
+                    InputModality::Image,
+                    InputModality::Audio,
+                ],
+                &InlineAttachmentStore
+            )
+            .await,
         fully_supported_items
     );
 
@@ -1478,7 +1595,9 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }]);
-    let preserved = with_images.for_prompt(&modalities);
+    let preserved = with_images
+        .for_prompt(&modalities, &InlineAttachmentStore)
+        .await;
     assert_eq!(preserved.len(), 1);
     if let ResponseItem::Message { content, .. } = &preserved[0] {
         assert_eq!(content.len(), 2);
@@ -1500,13 +1619,18 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
     };
     let with_audio = create_history_with_items(vec![audio_message.clone()]);
     assert_eq!(
-        with_audio.for_prompt(&[InputModality::Text, InputModality::Audio]),
+        with_audio
+            .for_prompt(
+                &[InputModality::Text, InputModality::Audio],
+                &InlineAttachmentStore
+            )
+            .await,
         vec![audio_message]
     );
 }
 
-#[test]
-fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
+#[tokio::test]
+async fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
     let history = create_history_with_items(vec![
         ResponseItem::ImageGenerationCall {
             encrypted_content: None,
@@ -1530,7 +1654,9 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
     ]);
 
     assert_eq!(
-        history.for_prompt(&default_input_modalities()),
+        history
+            .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
+            .await,
         vec![
             ResponseItem::ImageGenerationCall {
                 encrypted_content: None,
@@ -1555,8 +1681,8 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
     );
 }
 
-#[test]
-fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
+#[tokio::test]
+async fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
     let history = create_history_with_items(vec![
         ResponseItem::Message {
             status: None,
@@ -1580,7 +1706,9 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
     ]);
 
     assert_eq!(
-        history.for_prompt(&[InputModality::Text]),
+        history
+            .for_prompt(&[InputModality::Text], &InlineAttachmentStore)
+            .await,
         vec![
             ResponseItem::Message {
                 encrypted_content: None,
@@ -1734,8 +1862,8 @@ fn remove_first_item_handles_local_shell_pair() {
     assert_eq!(raw_items(&h), vec![]);
 }
 
-#[test]
-fn drop_last_n_user_turns_preserves_prefix() {
+#[tokio::test]
+async fn drop_last_n_user_turns_preserves_prefix() {
     let items = vec![
         assistant_msg("session prefix item"),
         user_msg("u1"),
@@ -1748,7 +1876,9 @@ fn drop_last_n_user_turns_preserves_prefix() {
     let mut history = create_history_with_items(items);
     history.drop_last_n_user_turns(/*num_turns*/ 1);
     assert_eq!(
-        history.for_prompt(&modalities),
+        history
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
         vec![
             assistant_msg("session prefix item"),
             user_msg("u1"),
@@ -1765,7 +1895,10 @@ fn drop_last_n_user_turns_preserves_prefix() {
     ]);
     history.drop_last_n_user_turns(/*num_turns*/ 99);
     assert_eq!(
-        history.clone().for_prompt(&modalities),
+        history
+            .clone()
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
         vec![assistant_msg("session prefix item")]
     );
     // With no remaining instruction boundary, rollback must not revoke facts from a
@@ -1869,8 +2002,8 @@ fn rollback_removes_assistant_sources_recorded_ahead_of_queued_input() {
     );
 }
 
-#[test]
-fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
+#[tokio::test]
+async fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
     let items = vec![
         user_input_text_msg("<environment_context>ctx</environment_context>"),
         user_input_text_msg(
@@ -1910,7 +2043,9 @@ fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
     ];
 
     assert_eq!(
-        history.for_prompt(&modalities),
+        history
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
         expected_prefix_and_first_turn
     );
 
@@ -1946,7 +2081,12 @@ fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
         assistant_msg("turn 2 assistant"),
     ]);
     history.drop_last_n_user_turns(/*num_turns*/ 2);
-    assert_eq!(history.for_prompt(&modalities), expected_prefix_only);
+    assert_eq!(
+        history
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
+        expected_prefix_only
+    );
 
     let mut history = create_history_with_items(vec![
         user_input_text_msg("<environment_context>ctx</environment_context>"),
@@ -1966,11 +2106,16 @@ fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
         assistant_msg("turn 2 assistant"),
     ]);
     history.drop_last_n_user_turns(/*num_turns*/ 3);
-    assert_eq!(history.for_prompt(&modalities), expected_prefix_only);
+    assert_eq!(
+        history
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
+        expected_prefix_only
+    );
 }
 
-#[test]
-fn drop_last_n_user_turns_trims_context_updates_above_rolled_back_turn() {
+#[tokio::test]
+async fn drop_last_n_user_turns_trims_context_updates_above_rolled_back_turn() {
     let items = vec![
         assistant_msg("session prefix item"),
         user_input_text_msg("turn 1 user"),
@@ -2004,7 +2149,10 @@ fn drop_last_n_user_turns_trims_context_updates_above_rolled_back_turn() {
     history.drop_last_n_user_turns(/*num_turns*/ 1);
 
     assert_eq!(
-        history.clone().for_prompt(&modalities),
+        history
+            .clone()
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
         vec![
             assistant_msg("session prefix item"),
             user_input_text_msg("turn 1 user"),
@@ -2091,15 +2239,38 @@ fn drop_last_n_user_turns_preserves_annotations_for_surviving_developer_fragment
     );
 }
 
-#[test]
-fn drop_last_n_user_turns_trims_saved_prefix_update_above_rolled_back_turn() {
+#[test_case::test_case(APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX, None; "legacy")]
+#[test_case::test_case("Saved for this session", Some(crate::context::SAVED_PREFIX_KIND); "catalog")]
+#[test_case::test_case("Saved for this session", None; "catalog_without_metadata")]
+#[tokio::test]
+async fn drop_last_n_user_turns_trims_saved_prefix_update_above_rolled_back_turn(
+    heading: &str,
+    kind: Option<&str>,
+) {
+    // Without metadata, use the rendered text to exercise the legacy reader's
+    // prefix-based classification of notifications written by this client.
+    let text = match kind {
+        Some(_) => format!("{heading}\n- [\"touch\"]"),
+        None => ApprovedCommandPrefixSaved::new("- [\"touch\"]".to_string(), Some(heading))
+            .render()
+            .expect_text(),
+    };
+    let mut notification = developer_msg(&text);
+    if let Some(kind) = kind
+        && let ResponseItem::Message {
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = &mut notification
+    {
+        internal_chat_message_metadata_passthrough
+            .get_or_insert_with(Default::default)
+            .content_item_kinds = Some(vec![ContentItemKind(kind.to_owned())]);
+    }
     let items = vec![
         assistant_msg("session prefix item"),
         user_input_text_msg("turn 1 user"),
         assistant_msg("turn 1 assistant"),
-        developer_msg(&format!(
-            "{APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX}\n- [\"touch\"]"
-        )),
+        notification,
         user_input_text_msg("turn 2 user"),
         assistant_msg("turn 2 assistant"),
     ];
@@ -2109,7 +2280,9 @@ fn drop_last_n_user_turns_trims_saved_prefix_update_above_rolled_back_turn() {
     history.drop_last_n_user_turns(/*num_turns*/ 1);
 
     assert_eq!(
-        history.for_prompt(&modalities),
+        history
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
         vec![
             assistant_msg("session prefix item"),
             user_input_text_msg("turn 1 user"),
@@ -2118,8 +2291,8 @@ fn drop_last_n_user_turns_trims_saved_prefix_update_above_rolled_back_turn() {
     );
 }
 
-#[test]
-fn drop_last_n_user_turns_clears_reference_context_for_mixed_developer_context_bundles() {
+#[tokio::test]
+async fn drop_last_n_user_turns_clears_reference_context_for_mixed_developer_context_bundles() {
     let items = vec![
         user_input_text_msg("turn 1 user"),
         assistant_msg("turn 1 assistant"),
@@ -2140,7 +2313,10 @@ fn drop_last_n_user_turns_clears_reference_context_for_mixed_developer_context_b
     history.drop_last_n_user_turns(/*num_turns*/ 1);
 
     assert_eq!(
-        history.clone().for_prompt(&modalities),
+        history
+            .clone()
+            .for_prompt(&modalities, &InlineAttachmentStore)
+            .await,
         vec![
             user_input_text_msg("turn 1 user"),
             assistant_msg("turn 1 assistant"),
@@ -2175,8 +2351,8 @@ fn remove_first_item_handles_custom_tool_pair() {
     assert_eq!(raw_items(&h), vec![]);
 }
 
-#[test]
-fn normalization_retains_local_shell_outputs() {
+#[tokio::test]
+async fn normalization_retains_local_shell_outputs() {
     let items = vec![
         ResponseItem::LocalShellCall {
             encrypted_content: None,
@@ -2204,7 +2380,9 @@ fn normalization_retains_local_shell_outputs() {
 
     let modalities = default_input_modalities();
     let history = create_history_with_items(items.clone());
-    let normalized = history.for_prompt(&modalities);
+    let normalized = history
+        .for_prompt(&modalities, &InlineAttachmentStore)
+        .await;
     assert_eq!(normalized, items);
 }
 
@@ -2707,8 +2885,8 @@ fn normalize_adds_missing_output_for_function_call_inserts_output() {
     );
 }
 
-#[test]
-fn normalize_preserves_named_function_call_output_without_call_id() {
+#[tokio::test]
+async fn normalize_preserves_named_function_call_output_without_call_id() {
     let item = ResponseItem::FunctionCallOutput {
         id: None,
         call_id: None,
@@ -2719,11 +2897,16 @@ fn normalize_preserves_named_function_call_output_without_call_id() {
     };
     let history = create_history_with_items(vec![item.clone()]);
 
-    assert_eq!(history.for_prompt(&default_input_modalities()), vec![item]);
+    assert_eq!(
+        history
+            .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
+            .await,
+        vec![item]
+    );
 }
 
-#[test]
-fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_history() {
+#[tokio::test]
+async fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_history() {
     let items = vec![
         ResponseItem::FunctionCall {
             status: None,
@@ -2749,8 +2932,12 @@ fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_history()
         },
     ];
 
-    let first = create_history_with_items(items.clone()).for_prompt(&default_input_modalities());
-    let second = create_history_with_items(items).for_prompt(&default_input_modalities());
+    let first = create_history_with_items(items.clone())
+        .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
+        .await;
+    let second = create_history_with_items(items)
+        .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
+        .await;
 
     assert_eq!(
         first, second,

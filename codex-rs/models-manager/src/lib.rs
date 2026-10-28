@@ -1,4 +1,5 @@
 pub mod cache;
+mod catalog;
 pub mod collaboration_mode_presets;
 pub(crate) mod config;
 mod external_models;
@@ -12,6 +13,8 @@ pub use external_models::provider_for_model;
 pub use external_models::provider_has_model_bindings;
 pub mod test_support;
 
+pub use catalog::CatalogModel;
+pub use catalog::ModelOrigin;
 pub use codex_protocol::auth::AuthMode;
 pub use config::ModelsManagerConfig;
 pub use originator::ModelCatalogOriginator;

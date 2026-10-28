@@ -2,6 +2,7 @@
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::GuardianAssessment;
 use codex_extension_api::ModelRequestContributor;
 use codex_extension_api::ModelRequestInput;
 use codex_extension_api::ModelRequestKind;
@@ -32,6 +33,8 @@ struct Gates {
     output_waiting: Semaphore,
     cancelled: Semaphore,
     output_items: std::sync::atomic::AtomicUsize,
+    guardian_assessments: std::sync::Mutex<Vec<(GuardianAssessment, usize)>>,
+    metadata_event_types: std::sync::Mutex<Vec<&'static str>>,
 }
 #[derive(Debug)]
 struct Contributor(Arc<Gates>);
@@ -68,6 +71,27 @@ impl ModelResponseInterceptor for Permit {
                     {
                         // A fixed transport duration isolates core accounting from test scheduling.
                         *request_duration_ms = Some(2_000);
+                    }
+                    let metadata_event_type = match &event {
+                        Ok(ResponseEvent::ModelVerifications(_)) => Some("verification"),
+                        Ok(ResponseEvent::TurnModerationMetadata(_)) => Some("moderation"),
+                        Ok(ResponseEvent::SafetyBuffering(_)) => Some("buffering"),
+                        Ok(ResponseEvent::GuardianAssessment(_)) => Some("guardian"),
+                        _ => None,
+                    };
+                    if let Some(metadata_event_type) = metadata_event_type {
+                        self.gates
+                            .metadata_event_types
+                            .lock()
+                            .expect("metadata events mutex is not poisoned")
+                            .push(metadata_event_type);
+                    }
+                    if let Ok(ResponseEvent::GuardianAssessment(assessment)) = &event {
+                        self.gates
+                            .guardian_assessments
+                            .lock()
+                            .expect("guardian assessments mutex is not poisoned")
+                            .push((assessment.clone(), output_items));
                     }
                     if matches!(&event, Ok(ResponseEvent::OutputItemDone(_))) {
                         output_items += 1;
@@ -117,6 +141,10 @@ async fn model_request_gates_output_and_cancellation() -> Result<()> {
     let expected_metadata = completed["response"]["usage"].clone();
     let response = sse(vec![
         ev_response_created("r1"),
+        json!({
+            "type": "response.metadata", "response_id": "r1",
+            "metadata": {"guardian": {"item_id": "m1", "requires_review": false}}
+        }),
         ev_assistant_message("m1", "first"),
         ev_assistant_message("m2", "done"),
         completed,
@@ -127,6 +155,8 @@ async fn model_request_gates_output_and_cancellation() -> Result<()> {
         output_waiting: Semaphore::new(0),
         cancelled: Semaphore::new(0),
         output_items: std::sync::atomic::AtomicUsize::new(0),
+        guardian_assessments: std::sync::Mutex::new(Vec::new()),
+        metadata_event_types: std::sync::Mutex::new(Vec::new()),
     });
     let mut registry = ExtensionRegistryBuilder::new();
     registry.model_request_contributor(Arc::new(Contributor(gates.clone())));
@@ -142,6 +172,17 @@ async fn model_request_gates_output_and_cancellation() -> Result<()> {
         .await??
         .forget();
     assert_eq!(model.requests().len(), 1);
+    assert_eq!(
+        *gates.guardian_assessments.lock().unwrap(),
+        vec![(
+            GuardianAssessment {
+                response_id: "r1".into(),
+                item_id: "m1".into(),
+                requires_review: false,
+            },
+            0
+        )]
+    );
     assert_eq!(
         gates.output_items.load(std::sync::atomic::Ordering::SeqCst),
         2
@@ -200,6 +241,12 @@ async fn model_request_gates_output_and_cancellation() -> Result<()> {
         .await??
         .forget();
     assert_eq!(model.requests().len(), 2);
+    assert!(
+        !model.requests()[1]
+            .body_json()
+            .to_string()
+            .contains("requires_review")
+    );
     Ok(())
 }
 
@@ -209,6 +256,26 @@ async fn model_request_gates_websocket_output_but_not_warmup() -> Result<()> {
         vec![ev_response_created("warm"), ev_completed("warm")],
         vec![
             ev_response_created("response"),
+            json!({
+                "type": "response.metadata", "response_id": "response",
+                "metadata": {
+                    "guardian": {"item_id": "message", "requires_review": true},
+                    "openai_verification_recommendation": ["trusted_access_for_cyber"],
+                    "openai_chatgpt_moderation_metadata": {"presentation": "inline"},
+                    "type": "safety_buffering", "use_cases": ["cyber"],
+                    "reasons": ["user_risk"], "future_metadata": true
+                }
+            }),
+            json!({
+                "type": "response.metadata", "response_id": "response",
+                "metadata": {
+                    "guardian": {"item_id": "other", "requires_review": "false"},
+                    "openai_verification_recommendation": ["trusted_access_for_cyber"],
+                    "openai_chatgpt_moderation_metadata": {"presentation": "inline"},
+                    "type": "safety_buffering", "use_cases": ["cyber"],
+                    "reasons": ["user_risk"]
+                }
+            }),
             ev_assistant_message("message", "done"),
             ev_completed("response"),
         ],
@@ -219,6 +286,8 @@ async fn model_request_gates_websocket_output_but_not_warmup() -> Result<()> {
         output_waiting: Semaphore::new(0),
         cancelled: Semaphore::new(0),
         output_items: std::sync::atomic::AtomicUsize::new(0),
+        guardian_assessments: std::sync::Mutex::new(Vec::new()),
+        metadata_event_types: std::sync::Mutex::new(Vec::new()),
     });
     let mut registry = ExtensionRegistryBuilder::new();
     registry.model_request_contributor(Arc::new(Contributor(gates.clone())));
@@ -236,6 +305,32 @@ async fn model_request_gates_websocket_output_but_not_warmup() -> Result<()> {
         .await??
         .forget();
     let requests = server.single_connection();
+    assert_eq!(
+        *gates
+            .metadata_event_types
+            .lock()
+            .expect("metadata events mutex is not poisoned"),
+        vec![
+            "verification",
+            "moderation",
+            "buffering",
+            "guardian",
+            "verification",
+            "moderation",
+            "buffering",
+        ]
+    );
+    assert_eq!(
+        *gates.guardian_assessments.lock().unwrap(),
+        vec![(
+            GuardianAssessment {
+                response_id: "response".into(),
+                item_id: "message".into(),
+                requires_review: true,
+            },
+            0
+        )]
+    );
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].body_json()["generate"], false);
     assert_eq!(

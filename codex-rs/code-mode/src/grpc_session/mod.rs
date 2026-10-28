@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -67,6 +68,8 @@ fn inject_span_traceparent<T>(request: &mut tonic::Request<T>, span: &tracing::S
 #[derive(Clone)]
 pub struct GrpcCodeModeSessionProvider {
     transport: Arc<SharedTransport>,
+    // Reloaded threads share this counter rather than reusing a cell namespace.
+    next_generation: Arc<AtomicU64>,
 }
 
 impl GrpcCodeModeSessionProvider {
@@ -91,9 +94,28 @@ impl GrpcCodeModeSessionProvider {
         Self::from_transport(SharedTransport::with_channel(channel))
     }
 
+    /// Uses a caller-owned transport to control connection establishment and recovery.
+    pub fn with_transport<T>(transport: T) -> Self
+    where
+        T: tower::Service<
+                tonic::codegen::http::Request<tonic::body::Body>,
+                Response = tonic::codegen::http::Response<tonic::body::Body>,
+                Error = tonic::Status,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+        T::Future: Send + 'static,
+    {
+        Self::from_transport(SharedTransport::with_transport(
+            tower::util::BoxCloneSyncService::new(transport),
+        ))
+    }
+
     fn from_transport(transport: SharedTransport) -> Self {
         Self {
             transport: Arc::new(transport),
+            next_generation: Arc::new(AtomicU64::new(1)),
         }
     }
 

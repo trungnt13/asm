@@ -15,6 +15,7 @@ use crate::agent::types::MessageDeliveryMode;
 use crate::agent::types::SpawnAgentForkMode;
 use crate::agent::types::SpawnAgentOptions;
 use crate::codex_thread::ThreadConfigSnapshot;
+use crate::config::Config;
 use crate::session::multi_agents::resolve_usage_hints;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -27,6 +28,15 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 
 /// Child creation options; omitted overrides retain native MAv2 inheritance and role rules.
+pub struct ThreadCreateRequest {
+    pub task_name: String,
+    /// `None` starts fresh; `FullHistory` uses native fork preparation.
+    pub fork_mode: Option<SpawnAgentForkMode>,
+    pub agent_type: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
 pub(crate) struct ThreadSpawnRequest {
     pub task_name: String,
     pub spawn_arguments: String,
@@ -39,8 +49,39 @@ pub(crate) struct ThreadSpawnRequest {
     pub reasoning_effort: Option<ReasoningEffort>,
 }
 
-/// Accepted child and its effective configuration. Acceptance does not mean the turn completed.
-pub(crate) struct ThreadSpawnResult {
+impl ThreadSpawnRequest {
+    pub(crate) fn into_parts(
+        self,
+    ) -> Result<(ThreadCreateRequest, AgentMessage), ThreadSpawnError> {
+        let message_text = match &self.message {
+            AgentMessage::Plaintext(text) | AgentMessage::Encrypted(text) => text,
+        };
+        if message_text.trim().is_empty() {
+            return Err(ThreadSpawnError::Preparation(
+                "Empty message can't be sent to an agent".to_string(),
+            ));
+        }
+        Ok((
+            ThreadCreateRequest {
+                task_name: self.task_name,
+                fork_mode: self.fork_mode,
+                agent_type: self.agent_type,
+                model: self.model,
+                reasoning_effort: self.reasoning_effort,
+            },
+            self.message,
+        ))
+    }
+}
+
+pub(crate) struct ChildSpawnSettings {
+    pub(crate) config: Config,
+    pub(crate) source: SessionSource,
+    pub(crate) options: SpawnAgentOptions,
+}
+
+/// Child runtime and its effective configuration.
+pub struct ThreadSpawnResult {
     pub agent: LiveAgent,
     pub config: ThreadConfigSnapshot,
     pub task_name: AgentPath,
@@ -48,7 +89,7 @@ pub(crate) struct ThreadSpawnResult {
 
 /// Separates preparation errors from backend failures to preserve native tool error reporting.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ThreadSpawnError {
+pub enum ThreadSpawnError {
     #[error("{0}")]
     Preparation(String),
     #[error(transparent)]
@@ -61,17 +102,23 @@ pub(crate) async fn spawn(
     call_id: &str,
     request: ThreadSpawnRequest,
 ) -> Result<ThreadSpawnResult, ThreadSpawnError> {
-    let (request, task_name) = prepare(session, step_context, call_id, request).await?;
-    let communication_prompt = match &request.input {
-        AgentInput::Message {
-            message: AgentMessage::Plaintext(text),
-            ..
-        } => Some(text.clone()),
-        AgentInput::Message {
-            message: AgentMessage::Encrypted(_),
-            ..
-        }
-        | AgentInput::UserInput(_) => None,
+    let spawn_arguments = request.spawn_arguments.clone();
+    let (request, message) = request.into_parts()?;
+    let communication_prompt = match &message {
+        AgentMessage::Plaintext(text) => Some(text.clone()),
+        AgentMessage::Encrypted(_) => None,
+    };
+    let (mut settings, task_name) = prepare(session, step_context, call_id, request).await?;
+    settings.options.spawn_arguments = Some(spawn_arguments);
+    let request = SpawnRequest {
+        caller: session.thread_id,
+        config: settings.config,
+        input: AgentInput::Message {
+            message,
+            mode: MessageDeliveryMode::TriggerTurn,
+        },
+        source: settings.source,
+        options: settings.options,
     };
     let (agent, config) = session.services.agent_control.spawn(request).await?;
     if let Some(prompt) = communication_prompt {
@@ -97,8 +144,8 @@ pub(crate) async fn prepare(
     session: &Session,
     step_context: &StepContext,
     call_id: &str,
-    request: ThreadSpawnRequest,
-) -> Result<(SpawnRequest, AgentPath), ThreadSpawnError> {
+    request: ThreadCreateRequest,
+) -> Result<(ChildSpawnSettings, AgentPath), ThreadSpawnError> {
     let turn = &step_context.turn;
     let child_depth = next_thread_spawn_depth(&turn.session_source);
     if exceeds_thread_spawn_depth_limit(child_depth, turn.config.agent_max_depth) {
@@ -106,23 +153,13 @@ pub(crate) async fn prepare(
             "Agent depth limit reached. Solve the task yourself.".to_string(),
         ));
     }
-    let ThreadSpawnRequest {
+    let ThreadCreateRequest {
         task_name,
-        spawn_arguments,
-        message,
         fork_mode,
         agent_type,
         model,
         reasoning_effort,
     } = request;
-    let message_text = match &message {
-        AgentMessage::Plaintext(text) | AgentMessage::Encrypted(text) => text,
-    };
-    if message_text.trim().is_empty() {
-        return Err(ThreadSpawnError::Preparation(
-            "Empty message can't be sent to an agent".to_string(),
-        ));
-    }
     let role_name = agent_type
         .as_deref()
         .map(str::trim)
@@ -180,16 +217,11 @@ pub(crate) async fn prepare(
         None
     };
     Ok((
-        SpawnRequest {
-            caller: session.thread_id,
+        ChildSpawnSettings {
             config,
-            input: AgentInput::Message {
-                message,
-                mode: MessageDeliveryMode::TriggerTurn,
-            },
             source: spawn_source,
             options: SpawnAgentOptions {
-                spawn_arguments: Some(spawn_arguments),
+                spawn_arguments: None,
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.to_string()),
                 fork_mode,
                 parent_thread_id: Some(session.thread_id),
