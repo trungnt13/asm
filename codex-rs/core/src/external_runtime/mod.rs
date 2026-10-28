@@ -8,7 +8,7 @@ mod fork;
 mod input;
 mod messages;
 mod state;
-use bridge::ClaudeMessageBridge;
+use bridge::ExternalMessageBridge;
 use cursor::record_cursor_frame;
 use events::record_assistant_frame;
 use fork::TEMPORARY_FORK_BOUNDARY;
@@ -19,11 +19,12 @@ use messages::input_prefix;
 use messages::prompt_content;
 use messages::validate_pending_prompt;
 use state::Checkpoint;
-use state::ClaudeSession;
+use state::ExternalSession;
 use state::Linkage;
 use state::RuntimeLease;
 use state::RuntimeProcess;
 pub(crate) use state::RuntimeSlot;
+use state::SessionStart;
 
 use serde_json::Value;
 use std::io::Write;
@@ -57,7 +58,7 @@ pub(crate) fn is_native_model(model: &str) -> bool {
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn abort(session: &Session) {
-    let preserve = match RuntimeLease::take(&session.claude_runtime) {
+    let preserve = match RuntimeLease::take(&session.external_runtime) {
         Ok(lease) => lease
             .runtime
             .as_ref()
@@ -76,7 +77,7 @@ pub(crate) async fn abort(session: &Session) {
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn shutdown(session: &Session) {
-    let runtime = match session.claude_runtime.take_for_shutdown().await {
+    let runtime = match session.external_runtime.take_for_shutdown().await {
         Ok(runtime) => runtime,
         Err(error) => {
             tracing::warn!(%error, "Claude runtime lease shutdown failed");
@@ -277,7 +278,7 @@ async fn run_conversation(
         }
         let original_history = session.clone_history().await;
         let messages = input_messages(original_history.raw_items())?;
-        let mut lease = RuntimeLease::take(&session.claude_runtime)?;
+        let mut lease = RuntimeLease::take(&session.external_runtime)?;
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
         if lease.runtime.is_none() {
@@ -312,7 +313,7 @@ async fn run_conversation(
                 .open(directory.join(format!("{}.lock", session.thread_id())))?;
             lock.try_lock()
                 .context("native session is already owned by another ASM process")?;
-            let (mut checkpoint, claude_session, linkage) = match (
+            let (mut checkpoint, session_start, linkage) = match (
                 lease.start_fork()?,
                 std::fs::read(&checkpoint_path),
             ) {
@@ -323,13 +324,13 @@ async fn run_conversation(
                     let parent = std::mem::replace(&mut checkpoint.session_id, id.clone());
                     checkpoint.fork_point = None;
                     let at = seed.fork_point;
-                    let fork = codex_claude_runtime::ClaudeSession::Fork { parent, at, id };
+                    let fork = SessionStart::Fork { parent, at, id };
                     (checkpoint, fork, Linkage::Temporary)
                 }
                 (None, Ok(bytes)) => {
                     let checkpoint: Checkpoint = serde_json::from_slice(&bytes)
                         .context("incompatible native session linkage; start a new chat")?;
-                    let resume = codex_claude_runtime::ClaudeSession::Resume {
+                    let resume = SessionStart::Resume {
                         id: checkpoint.session_id.clone(),
                     };
                     (checkpoint, resume, Linkage::Saved)
@@ -355,7 +356,7 @@ async fn run_conversation(
                             input_prefix: input_prefix(&[])?,
                             fork_point: None,
                         },
-                        codex_claude_runtime::ClaudeSession::New { id },
+                        SessionStart::New { id },
                         Linkage::Saved,
                     )
                 }
@@ -380,7 +381,7 @@ async fn run_conversation(
                     .capture_speculative_step_context(Arc::clone(turn), cancellation)
                     .await?;
                 let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
-                let bridge = ClaudeMessageBridge::start(std::time::Duration::from_millis(
+                let bridge = ExternalMessageBridge::start(std::time::Duration::from_millis(
                     u64::try_from(max_wait).unwrap_or_default(),
                 ))
                 .await?;
@@ -410,10 +411,9 @@ async fn run_conversation(
                     }),
                 )
                 .await;
-            let usage_baseline = match &claude_session {
-                codex_claude_runtime::ClaudeSession::New { .. } => Some(Default::default()),
-                codex_claude_runtime::ClaudeSession::Resume { .. }
-                | codex_claude_runtime::ClaudeSession::Fork { .. } => None,
+            let usage_baseline = match &session_start {
+                SessionStart::New { .. } => Some(Default::default()),
+                SessionStart::Resume { .. } | SessionStart::Fork { .. } => None,
             };
             let mut disallowed_tools = Vec::new();
             // Spawned children run headless: nobody can answer their native questions.
@@ -425,16 +425,16 @@ async fn run_conversation(
                 disallowed_tools.extend(TEMPORARY_FORK_DISALLOWED_TOOLS.map(str::to_owned));
                 fork_boundary = Some(TEMPORARY_FORK_BOUNDARY);
             }
-            let runtime = ClaudeSession::spawn_runtime(
+            let runtime = ExternalSession::spawn_runtime(
                 bridge.as_ref(),
                 disallowed_tools,
                 role_instructions,
                 &mut checkpoint,
                 &checkpoint_path,
-                claude_session,
+                session_start,
             )
             .await?;
-            lease.runtime = Some(ClaudeSession {
+            lease.runtime = Some(ExternalSession {
                 runtime,
                 bridge,
                 checkpoint,
@@ -462,7 +462,7 @@ async fn run_conversation(
             input,
             fork_boundary,
             |prompt| match &runtime.runtime {
-                RuntimeProcess::Claude(_) => codex_claude_runtime::validate_prompt(prompt),
+                RuntimeProcess::Claude(_) => codex_external_runtime::validate_claude_prompt(prompt),
                 RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
             },
         )?;
@@ -491,13 +491,13 @@ async fn run_conversation(
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items())?;
         let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
-        let mut prompt = prompt_content(&pending_messages);
-        if prompt.as_str().is_some_and(|text| text.trim().is_empty()) {
+        let mut prompt = prompt_content(&pending_messages)?;
+        if matches!(&prompt, codex_external_runtime::Prompt::Text(text) if text.trim().is_empty()) {
             return Ok(last_message);
         }
         if let Some(boundary) = fork_boundary {
             pending_messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
-            prompt = prompt_content(&pending_messages);
+            prompt = prompt_content(&pending_messages)?;
         }
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = session
@@ -574,7 +574,7 @@ async fn run_conversation(
                         if pending.is_empty() { continue; }
                         let history = session.clone_history().await;
                         let messages = input_messages(history.raw_items())?;
-                        if let Err(error) = validate_pending_prompt(session, &messages[runtime.checkpoint.input_count..], &pending, /*boundary*/ None, codex_claude_runtime::validate_prompt) {
+                        if let Err(error) = validate_pending_prompt(session, &messages[runtime.checkpoint.input_count..], &pending, /*boundary*/ None, codex_external_runtime::validate_claude_prompt) {
                             session.send_event(turn, EventMsg::Warning(WarningEvent { message: format!("Claude queued input was rejected: {error}") })).await;
                             continue;
                         }
@@ -583,7 +583,7 @@ async fn run_conversation(
                                 codex_thread_store::PersistContext::TurnStart).await;
                         }
                         let messages = input_messages(session.clone_history().await.raw_items())?;
-                        let prompt = prompt_content(&messages[runtime.checkpoint.input_count..]);
+                        let prompt = prompt_content(&messages[runtime.checkpoint.input_count..])?;
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
                         session.flush_rollout().await?;

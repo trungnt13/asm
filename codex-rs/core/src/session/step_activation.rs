@@ -336,7 +336,7 @@ impl Session {
         let Some((turn_context, task_done, current)) = target else {
             return TurnSettingsUpdateOutcome::TargetUnavailable;
         };
-        if crate::claude_runtime::is_native_model(&current.model_info.slug)
+        if crate::external_runtime::is_native_model(&current.model_info.slug)
             && update.environments.is_some()
         {
             return TurnSettingsUpdateOutcome::Rejected {

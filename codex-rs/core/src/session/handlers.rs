@@ -281,7 +281,7 @@ pub async fn reload_user_config(sess: &Arc<Session>) {
 
 async fn reject_native_operation(sess: &Session, sub_id: &str, operation: &str) -> bool {
     let model = sess.thread_settings_snapshot().await.model;
-    if !crate::claude_runtime::is_native_model(&model) {
+    if !crate::external_runtime::is_native_model(&model) {
         return false;
     }
     sess.send_event_raw(Event {
@@ -297,7 +297,7 @@ async fn reject_native_operation(sess: &Session, sub_id: &str, operation: &str) 
 }
 
 pub async fn compact(sess: &Arc<Session>, sub_id: String) {
-    if crate::claude_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
+    if crate::external_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
         sess.send_event_raw(Event {
             id: sub_id,
             msg: EventMsg::Warning(WarningEvent {
@@ -364,7 +364,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     sess.stop_system1().await;
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
-    crate::claude_runtime::shutdown(sess).await;
+    crate::external_runtime::shutdown(sess).await;
     super::async_compaction::shutdown(sess).await;
     // Cancel the turn before starting the bounded, best-effort diagnostic drain.
     if let Some(log) = sess
@@ -602,7 +602,7 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationAttach { params, reply } => {
-                    if crate::claude_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
+                    if crate::external_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
                         let _ = reply.send(Err(CodexErr::InvalidRequest(
                             "Native runtimes do not support realtime conversations".to_string(),
                         )));

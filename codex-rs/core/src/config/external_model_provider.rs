@@ -6,7 +6,7 @@ impl Config {
         let provider = self.model_provider_id.as_str();
         if codex_models_manager::provider_has_model_bindings(provider)
             && !self.model.as_deref().is_some_and(|model| {
-                crate::claude_runtime::is_native_model(model)
+                crate::external_runtime::is_native_model(model)
                     || codex_models_manager::provider_for_model(model) == Some(provider)
             })
         {

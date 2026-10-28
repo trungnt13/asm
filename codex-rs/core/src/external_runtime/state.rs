@@ -1,6 +1,6 @@
-use super::bridge::ClaudeMessageBridge;
-use codex_claude_runtime::ClaudeRuntime;
-use codex_claude_runtime::CursorRuntime;
+use super::bridge::ExternalMessageBridge;
+use codex_external_runtime::ClaudeRuntime;
+use codex_external_runtime::CursorRuntime;
 use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::TokenUsage;
 use serde::Deserialize;
@@ -119,9 +119,9 @@ enum TemporaryFork {
     Started,
 }
 
-pub(crate) struct ClaudeSession {
+pub(crate) struct ExternalSession {
     pub(super) runtime: RuntimeProcess,
-    pub(super) bridge: Option<ClaudeMessageBridge>,
+    pub(super) bridge: Option<ExternalMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
     pub(super) linkage: Linkage,
@@ -188,32 +188,42 @@ impl Linkage {
     }
 }
 
-impl ClaudeSession {
+pub(super) enum SessionStart {
+    New {
+        id: String,
+    },
+    Resume {
+        id: String,
+    },
+    Fork {
+        parent: String,
+        at: String,
+        id: String,
+    },
+}
+
+impl ExternalSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
-        bridge: Option<&ClaudeMessageBridge>,
+        bridge: Option<&ExternalMessageBridge>,
         disallowed_tools: Vec<String>,
         role_instructions: Option<String>,
         checkpoint: &mut Checkpoint,
         checkpoint_path: &std::path::Path,
-        session: codex_claude_runtime::ClaudeSession,
+        session: SessionStart,
     ) -> anyhow::Result<RuntimeProcess> {
         use anyhow::Context;
         let (runtime, model) =
             NativeRuntime::for_model(&checkpoint.model).context("not a native runtime model")?;
         if runtime == NativeRuntime::CursorAgent {
             let session = match session {
-                codex_claude_runtime::ClaudeSession::New { .. } => {
-                    codex_claude_runtime::CursorSession::New
-                }
-                codex_claude_runtime::ClaudeSession::Resume { id } => {
-                    codex_claude_runtime::CursorSession::Load { id }
-                }
-                codex_claude_runtime::ClaudeSession::Fork { .. } => {
+                SessionStart::New { .. } => codex_external_runtime::CursorSession::New,
+                SessionStart::Resume { id } => codex_external_runtime::CursorSession::Load { id },
+                SessionStart::Fork { .. } => {
                     anyhow::bail!("Cursor Agent has no native session fork")
                 }
             };
-            let runtime = CursorRuntime::spawn(codex_claude_runtime::CursorOptions {
+            let runtime = CursorRuntime::spawn(codex_external_runtime::CursorOptions {
                 executable: PathBuf::from("agent"),
                 cwd: checkpoint.cwd.clone(),
                 model: model.to_owned(),
@@ -233,7 +243,14 @@ impl ClaudeSession {
         } else {
             model.to_owned()
         };
-        ClaudeRuntime::spawn(codex_claude_runtime::ClaudeOptions {
+        let session = match session {
+            SessionStart::New { id } => codex_external_runtime::ClaudeSession::New { id },
+            SessionStart::Resume { id } => codex_external_runtime::ClaudeSession::Resume { id },
+            SessionStart::Fork { parent, at, id } => {
+                codex_external_runtime::ClaudeSession::Fork { parent, at, id }
+            }
+        };
+        ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
             model,
@@ -315,7 +332,7 @@ pub(crate) struct RuntimeSlot {
 
 #[derive(Default)]
 struct SlotState {
-    runtime: Option<ClaudeSession>,
+    runtime: Option<ExternalSession>,
     leased: bool,
     discard_on_return: bool,
     fork: Option<TemporaryFork>,
@@ -345,7 +362,7 @@ impl RuntimeSlot {
             })
     }
 
-    pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ClaudeSession>> {
+    pub(super) async fn take_for_shutdown(&self) -> anyhow::Result<Option<ExternalSession>> {
         let returned = async {
             loop {
                 // Register before inspecting state so all concurrent shutdown waiters wake.
@@ -390,7 +407,7 @@ impl RuntimeSlot {
 /// Returns the process on success, error, or forced destruction of its turn future.
 pub(super) struct RuntimeLease<'a> {
     slot: &'a RuntimeSlot,
-    pub(super) runtime: Option<ClaudeSession>,
+    pub(super) runtime: Option<ExternalSession>,
 }
 
 impl<'a> RuntimeLease<'a> {

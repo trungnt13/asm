@@ -352,12 +352,12 @@ impl StepSettings {
             });
         }
         let current_claude =
-            crate::claude_runtime::is_native_model(self.collaboration_mode.model());
+            crate::external_runtime::is_native_model(self.collaboration_mode.model());
         let claude_model_changed =
             current_claude && self.collaboration_mode.model() != next.collaboration_mode.model();
         if claude_model_changed
             || (!current_claude
-                && crate::claude_runtime::is_native_model(next.collaboration_mode.model()))
+                && crate::external_runtime::is_native_model(next.collaboration_mode.model()))
         {
             return Err(ConstraintError::InvalidValue {
                 field_name: "Native runtime model (start a fresh thread to change)",
@@ -375,7 +375,7 @@ impl StepSettings {
         &self,
         constraints: &StepSettingsConstraints<'_>,
     ) -> ConstraintResult<()> {
-        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
+        if crate::external_runtime::is_native_model(self.collaboration_mode.model())
             && self.collaboration_mode.mode != ModeKind::Default
         {
             return Err(ConstraintError::InvalidValue {
@@ -385,7 +385,7 @@ impl StepSettings {
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }
-        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
+        if crate::external_runtime::is_native_model(self.collaboration_mode.model())
             && self.approvals_reviewer != ApprovalsReviewer::User
         {
             return Err(ConstraintError::InvalidValue {
@@ -395,7 +395,7 @@ impl StepSettings {
                 requirement_source: codex_config::RequirementSource::Unknown,
             });
         }
-        if crate::claude_runtime::is_native_model(self.collaboration_mode.model())
+        if crate::external_runtime::is_native_model(self.collaboration_mode.model())
             && let Some(service_tier) = self.service_tier.as_deref()
             && service_tier != SERVICE_TIER_DEFAULT_REQUEST_VALUE
         {

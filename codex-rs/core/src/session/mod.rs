@@ -2057,7 +2057,7 @@ impl Session {
         // Replay must not upload or migrate recorded history. The inline store returns prepared
         // inline bytes, while existing file references bypass preparation and remain unchanged.
         // Bound replay future size now that image preparation can await storage.
-        if !crate::claude_runtime::is_native_model(&turn_context.model_info().slug) {
+        if !crate::external_runtime::is_native_model(&turn_context.model_info().slug) {
             let _ = Box::pin(prepare_image_response_items(
                 &self.thread_id.to_string(),
                 turn_context.config.ephemeral,
@@ -2687,7 +2687,7 @@ impl Session {
 
     pub(crate) async fn emit_turn_started(&self, turn_context: &TurnContext, task_kind: TaskKind) {
         let model_context_window =
-            if crate::claude_runtime::is_native_model(&turn_context.model_info().slug) {
+            if crate::external_runtime::is_native_model(&turn_context.model_info().slug) {
                 self.token_usage_info()
                     .await
                     .and_then(|info| info.model_context_window)
@@ -3868,7 +3868,7 @@ impl Session {
         // Keep nested image-upload futures out of every caller's future frame.
         // Native input is normalized before admission. Keep its bytes inline: OpenAI
         // preparation can replace low-detail images or upload them as file references.
-        let image_preparations = if crate::claude_runtime::is_native_model(&model_info.slug) {
+        let image_preparations = if crate::external_runtime::is_native_model(&model_info.slug) {
             Vec::new()
         } else {
             Box::pin(prepare_image_response_items(
@@ -5978,7 +5978,7 @@ async fn build_hooks_config(
     if config
         .model
         .as_deref()
-        .is_some_and(crate::claude_runtime::is_native_model)
+        .is_some_and(crate::external_runtime::is_native_model)
     {
         return HooksConfig::default();
     }

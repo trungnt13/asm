@@ -260,7 +260,7 @@ async fn apply_requested_spawn_agent_model_overrides(
     if let Some(requested_model) = requested_model {
         let requested_model =
             codex_models_manager::canonical_model(requested_model).unwrap_or(requested_model);
-        let native_model = crate::claude_runtime::is_native_model(requested_model);
+        let native_model = crate::external_runtime::is_native_model(requested_model);
         let catalog_bound_model = config.model_catalog.is_none()
             && config.model_provider.model_catalog_url.is_none()
             && codex_models_manager::provider_for_model(requested_model).is_some();
@@ -318,7 +318,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .models_manager
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
-    if crate::claude_runtime::is_native_model(&model) {
+    if crate::external_runtime::is_native_model(&model) {
         if !model_info.used_fallback_model_metadata
             && let Some(effort) = config.model_reasoning_effort.as_ref()
         {

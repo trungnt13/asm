@@ -58,7 +58,7 @@ type McpToolApprovalMetadataMap =
 ///
 /// A session has at most 1 running task at a time, and can be interrupted by user input.
 pub(crate) struct Session {
-    pub(crate) claude_runtime: crate::claude_runtime::RuntimeSlot,
+    pub(crate) external_runtime: crate::external_runtime::RuntimeSlot,
     pub(crate) thread_id: ThreadId,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
@@ -584,7 +584,7 @@ impl SessionConfiguration {
                 .validate(&next_configuration.step_settings_constraints(next_environments))?;
         }
         // Native sessions bind to an executor and cwd, not ASM workspace roots or config.
-        if crate::claude_runtime::is_native_model(self.step_settings.collaboration_mode.model())
+        if crate::external_runtime::is_native_model(self.step_settings.collaboration_mode.model())
             && (next_configuration.cwd() != self.cwd()
                 || next_configuration.environments.len() != self.environments.len()
                 || next_configuration
@@ -1963,7 +1963,7 @@ impl Session {
                     == ThreadHistoryMode::Paginated
                     && services.live_thread.is_some())
                 .then(|| Mutex::new(Default::default())),
-                claude_runtime: Default::default(),
+                external_runtime: Default::default(),
                 active_turn: Mutex::new(None),
                 async_hook_results,
                 input_queue: InputQueue::with_controller(
@@ -1982,7 +1982,7 @@ impl Session {
                 next_internal_sub_id: AtomicU64::new(0),
             });
             let initial_system1 = config.system1.enabled
-                && !crate::claude_runtime::is_native_model(
+                && !crate::external_runtime::is_native_model(
                     session_configuration
                         .step_settings
                         .collaboration_mode

@@ -1759,7 +1759,7 @@ impl ThreadManager {
                 // Closing a side unsubscribes it; unload at once so its native process ends too.
                 options.config.thread_unload_delay = std::time::Duration::ZERO;
                 Some(
-                    crate::claude_runtime::prepare_temporary_fork(
+                    crate::external_runtime::prepare_temporary_fork(
                         &source.session,
                         &options.config.codex_home,
                         options.config.model.as_deref(),
@@ -1811,7 +1811,7 @@ impl ThreadManager {
         request.inherited_instructions = Some(instructions);
         let new_thread = Box::pin(self.state.spawn_thread(request)).await?;
         if let Some(seed) = native_fork {
-            new_thread.thread.session.claude_runtime.seed_fork(seed);
+            new_thread.thread.session.external_runtime.seed_fork(seed);
         }
         Ok(new_thread)
     }
