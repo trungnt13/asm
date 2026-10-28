@@ -11,7 +11,7 @@
 //! active model. Unsupported efforts anchor to the model default, or the first
 //! advertised effort when the default is absent, before stepping through the
 //! advertised order. Raising into Ultra requires the explicit
-//! advanced-reasoning picker.
+//! reasoning picker.
 
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::openai_models::ModelPreset;
@@ -125,7 +125,7 @@ impl ChatWidget {
                 format!("All models → {current_model}")
             };
             self.add_info_message(
-                format!("Ultra is available under /model → {model_path} → More reasoning…"),
+                format!("Ultra is available under /model → {model_path}"),
                 /*hint*/ None,
             );
             return true;

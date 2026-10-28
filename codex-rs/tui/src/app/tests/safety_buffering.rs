@@ -229,6 +229,7 @@ async fn safety_recourse_handles_a_policy_block() -> Result<()> {
         let source_id = started.session.thread_id;
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
+            &server,
             started,
             ThreadAttachPresentation::SessionLineage,
             /*initial_user_message*/ None,

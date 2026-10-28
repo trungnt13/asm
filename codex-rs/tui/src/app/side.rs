@@ -767,6 +767,13 @@ impl App {
             if let Some(effort) = &self.config.side_reasoning_effort {
                 fork_config.model_reasoning_effort = Some(effort.clone());
             }
+            if let Some(tier) = &self.config.side_service_tier {
+                fork_config.service_tier = Some(
+                    codex_protocol::config_types::ServiceTier::from_request_value(tier)
+                        .map(|tier| tier.request_value().to_string())
+                        .unwrap_or_else(|| tier.clone()),
+                );
+            }
             fork_config.daybreak_enabled = false;
         }
         fork_config.developer_instructions = Some(Self::side_developer_instructions(

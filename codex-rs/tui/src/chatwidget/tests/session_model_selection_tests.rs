@@ -33,7 +33,7 @@ async fn session_model_selection_accepts_final_choices_without_saving() {
         }
         match picker {
             "auto" | "single" | "default_only" => chat.open_model_popup_with_presets(vec![preset]),
-            "max" | "ultra" => chat.open_advanced_reasoning_popup(preset),
+            "max" | "ultra" => chat.open_reasoning_popup(preset),
             "reasoning" => {
                 chat.set_reasoning_effort(Some(effort.clone()));
                 preset
@@ -91,7 +91,7 @@ async fn session_model_selection_notifies_the_original_task_after_each_final_ast
                     });
                 chat.open_reasoning_popup(preset);
             }
-            "advanced" => chat.open_advanced_reasoning_popup(preset),
+            "advanced" => chat.open_reasoning_popup(preset),
             _ => unreachable!(),
         }
         while events.try_recv().is_ok() {}

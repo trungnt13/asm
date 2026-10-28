@@ -998,29 +998,31 @@ pub(super) async fn run_main_inner(
     }
 
     // Keep the large app future off the enclosing CLI startup stack during transitions.
-    let app_result = Box::pin(run_ratatui_app(
-        cli,
-        arg0_paths,
-        loader_overrides,
-        strict_config,
-        app_server_target,
-        remote_cwd_override,
-        config,
-        manually_selected_oss_provider,
-        overrides,
-        cli_kv_overrides,
-        cloud_config_bundle,
-        feedback,
-        log_db,
-        state_db,
-        environment_manager,
-        embedded_network_policy,
-        managed_worktree.clone(),
-        daemon_startup_warning,
-        managed_daemon,
-        launch_telemetry,
-        startup_draft,
-    ))
+    let app_result = crate::box_future(|| {
+        run_ratatui_app(
+            cli,
+            arg0_paths,
+            loader_overrides,
+            strict_config,
+            app_server_target,
+            remote_cwd_override,
+            config,
+            manually_selected_oss_provider,
+            overrides,
+            cli_kv_overrides,
+            cloud_config_bundle,
+            feedback,
+            log_db,
+            state_db,
+            environment_manager,
+            embedded_network_policy,
+            managed_worktree.clone(),
+            daemon_startup_warning,
+            managed_daemon,
+            launch_telemetry,
+            startup_draft,
+        )
+    })
     .await
     .map_err(|err| {
         err.downcast::<std::io::Error>()
