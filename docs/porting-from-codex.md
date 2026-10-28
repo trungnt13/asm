@@ -1167,3 +1167,9 @@ Keep `codex-ollama`'s `wiremock` dependency under `[dev-dependencies]` while onl
 ### Advertised subagent models
 
 Top-level `subagent_model_list` optionally selects advertised model IDs in user order for both the spawn-tool description and `<model_catalog>` context. Omission retains automatic picker-visible selection; `[]` advertises no choices. Explicit IDs may select hidden models from the loaded catalog. Duplicate IDs are deduplicated; only the first five choices are advertised, and the context catalog retains its 1,000-byte bound. All configured IDs are checked against the loaded catalog and spawning-backend compatibility before truncation; an invalid ID renders a configuration error instead of falling back. This setting does not restrict runtime spawning or change the model picker.
+
+### Flat reasoning-effort picker
+
+Show all model-supported reasoning efforts, including Max and Ultra, in one list.
+Do not gate them behind a “More reasoning…” submenu. Preserve selection persistence,
+Plan-mode scope, and the explicit picker requirement for raising into Ultra by shortcut.
