@@ -438,6 +438,8 @@ pub struct ConfigToml {
     pub model_reasoning_effort: Option<ReasoningEffort>,
     pub side_model: Option<String>,
     pub side_reasoning_effort: Option<ReasoningEffort>,
+    /// Overrides the parent service tier for temporary side conversations.
+    pub side_service_tier: Option<String>,
     pub plan_mode_reasoning_effort: Option<ReasoningEffort>,
     pub model_reasoning_summary: Option<ReasoningSummary>,
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
