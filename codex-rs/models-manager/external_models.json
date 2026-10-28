@@ -100,7 +100,6 @@
     },
     {
       "slug": "cursor-agent/claude-opus-5-5",
-      "input_modalities": ["text"],
       "alias": "cursor/opus-5.5",
       "tool_mode": "direct",
       "display_name": "Opus 5.5 · Cursor",
@@ -155,7 +154,6 @@
     },
     {
       "slug": "cursor-agent/claude-sonnet-5-5",
-      "input_modalities": ["text"],
       "alias": "cursor/sonnet-5.5",
       "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · Cursor",
@@ -210,7 +208,6 @@
     },
     {
       "slug": "cursor-agent/claude-haiku-5-5",
-      "input_modalities": ["text"],
       "alias": "cursor/haiku-5.5",
       "tool_mode": "direct",
       "display_name": "Haiku 5.5 · Cursor",
@@ -265,7 +262,6 @@
     },
     {
       "slug": "cursor-agent/auto-smart",
-      "input_modalities": ["text"],
       "alias": "cursor/auto-smart",
       "tool_mode": "direct",
       "display_name": "Auto · Cursor",

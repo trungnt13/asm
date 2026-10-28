@@ -12,30 +12,41 @@ use tokio::io::BufReader;
 use tokio::sync::mpsc;
 
 const FRAME_LIMIT: usize = 1024 * 1024;
-// This is ASM's bounded stream-json transport budget, not a provider image limit.
+// This is ASM's bounded native JSON transport budget, not a provider image limit.
 const IMAGE_FRAME_LIMIT: usize = 32 * FRAME_LIMIT;
 
 #[derive(Clone, Copy)]
 pub(crate) enum FramePolicy {
-    TextOnly,
+    CursorImages,
     ClaudeImages,
 }
 
 impl FramePolicy {
     fn max_size(self) -> usize {
         match self {
-            Self::TextOnly => FRAME_LIMIT,
-            Self::ClaudeImages => IMAGE_FRAME_LIMIT,
+            Self::ClaudeImages | Self::CursorImages => IMAGE_FRAME_LIMIT,
         }
     }
 
     fn frame_limit(self, frame: &Value) -> usize {
-        if matches!(self, Self::ClaudeImages)
-            && frame["type"] == "user"
-            && frame["message"]["content"]
-                .as_array()
-                .is_some_and(|content| content.iter().any(|block| block["type"] == "image"))
-        {
+        let has_image = match self {
+            Self::ClaudeImages => {
+                frame["type"] == "user"
+                    && frame["message"]["content"]
+                        .as_array()
+                        .is_some_and(|content| content.iter().any(|block| block["type"] == "image"))
+            }
+            Self::CursorImages => {
+                (frame["method"] == "session/prompt"
+                    && frame["params"]["prompt"].as_array().is_some_and(|content| {
+                        content.iter().any(|block| block["type"] == "image")
+                    }))
+                    || (frame["method"] == "session/update"
+                        && frame["params"]["update"]["sessionUpdate"] == "user_message_chunk"
+                        && frame["params"]["update"]["content"]["type"] == "image")
+            }
+        };
+        if has_image {
             IMAGE_FRAME_LIMIT
         } else {
             FRAME_LIMIT
