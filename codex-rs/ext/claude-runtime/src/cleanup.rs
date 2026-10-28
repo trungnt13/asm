@@ -84,14 +84,14 @@ mod supported {
                     {
                         continue;
                     }
-                    let marked = match owns_marker(row.pid, marker, &mut bytes) {
-                        Ok(marked) => marked,
-                        Err(error) => {
-                            scan_error.get_or_insert(error);
-                            false
-                        }
+                    let (marked, ownership_error) = match owns_marker(row.pid, marker, &mut bytes) {
+                        Ok(marked) => (marked, None),
+                        Err(error) => (false, Some(error)),
                     };
                     if !marked && !tree.contains(&row.pid) {
+                        if let Some(error) = ownership_error {
+                            scan_error.get_or_insert(error);
+                        }
                         continue;
                     }
                     // Recheck marked ownership just before signalling, rather than trust a recycled PID.
