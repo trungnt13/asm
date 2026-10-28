@@ -74,7 +74,8 @@ impl CursorRuntime {
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
         let mut runtime = Self {
-            process: NativeProcess::spawn(command).context("starting official Cursor agent")?,
+            process: NativeProcess::spawn(command, crate::frames::FramePolicy::TextOnly)
+                .context("starting official Cursor agent")?,
             session_id: String::new(),
             next_request_id: 0,
             config_options: Value::Null,

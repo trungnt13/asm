@@ -475,7 +475,14 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   after their CLI exits. Combine marker ownership with verified live ancestry. Never
   signal ASM’s own process group. This is lifecycle cleanup, not a sandbox: processes
   that clear the marker and leave observable ancestry can escape cleanup.
-- Keep text-only local execution initially. Reject unsupported history forks,
+- Forward Claude user images as native image content blocks, preserving text/image
+  order and delivery checkpoints. Accept inline image data and local attachments through
+  existing image processing; keep injected ASM context plaintext-only. Cursor user input
+  remains text-only until its ACP image forwarding is implemented. Native history keeps
+  prepared image bytes inline, without OpenAI uploads or replay transformations. Bound
+  Claude image user frames to 31 MiB with a 32 MiB echoed-frame limit; validate before
+  recording input or advancing its checkpoint. Keep text/control and Cursor frames at
+  1 MiB. These are ASM transport bounds, not provider limits. Reject unsupported history forks,
   rollback, runtime switches and native-only operations explicitly. Suppress native
   model prewarm, title inference and System1 for external threads. Native memory
   extraction may summarize their saved ASM transcripts.
