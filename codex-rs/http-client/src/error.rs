@@ -33,6 +33,24 @@ pub enum TransportError {
 }
 
 impl TransportError {
+    /// Identifies structured overloads that callers can retry outside the HTTP transport.
+    pub fn is_server_overloaded(&self) -> bool {
+        match self {
+            Self::Http { status, body, .. } if *status == StatusCode::SERVICE_UNAVAILABLE => body
+                .as_deref()
+                .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+                .is_some_and(|body| body["error"]["code"] == "server_is_overloaded"),
+            Self::Http { .. }
+            | Self::Timeout
+            | Self::Connection(_)
+            | Self::Network(_)
+            | Self::Build(_)
+            | Self::RetryLimit
+            | Self::Policy(_)
+            | Self::ResponseTooLarge { .. } => false,
+        }
+    }
+
     /// Returns retry advice captured when this error response arrived.
     pub fn retry_after(&self) -> Option<RetryAfter> {
         match self {

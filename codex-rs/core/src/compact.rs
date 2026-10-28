@@ -19,6 +19,7 @@ use crate::hook_runtime::run_post_compact_hooks;
 use crate::hook_runtime::run_pre_compact_hooks;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CompactionTurnMetadata;
+use crate::responses_retry::ModelCapacityRetryState;
 use crate::session::RequestEffortUsage;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -34,6 +35,7 @@ use codex_analytics::CompactionStatus;
 use codex_analytics::CompactionStrategy;
 use codex_analytics::CompactionTrigger;
 use codex_analytics::now_unix_seconds;
+use codex_client::RetryOperation;
 use codex_context_fragments::AnnotatedContent;
 use codex_context_fragments::set_annotated_content;
 use codex_context_fragments::truncate_annotated_text;
@@ -294,6 +296,7 @@ async fn run_compact_task_inner_impl(
 
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retries = 0;
+    let mut capacity_retry = ModelCapacityRetryState::default();
     // Reuse one client session so turn-scoped state (sticky routing and websocket incremental
     // request tracking) survives retries within this compact turn.
     let mut client_session = sess.services.model_client.new_session();
@@ -371,6 +374,13 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) => {
+                let e = match capacity_retry
+                    .wait_for_capacity(e, &sess, &turn_context, RetryOperation::Sampling)
+                    .await
+                {
+                    Ok(()) => continue,
+                    Err(e) => e,
+                };
                 if retries < max_retries {
                     retries += 1;
                     let delay = backoff(retries);

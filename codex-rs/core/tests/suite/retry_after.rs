@@ -411,6 +411,7 @@ async fn http_retry_backoff_exhausts_attempts() {
             retry_on: RetryOn {
                 retry_429: false,
                 retry_5xx: true,
+                defer_server_overload: false,
                 retry_transport: false,
             },
         },
@@ -466,6 +467,7 @@ async fn exhausted_http_retries_preserve_deadline_through_error_mapping() {
             retry_on: RetryOn {
                 retry_429: false,
                 retry_5xx: true,
+                defer_server_overload: false,
                 retry_transport: false,
             },
         },

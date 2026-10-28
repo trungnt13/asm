@@ -7726,6 +7726,10 @@
     "computer_use": {
       "$ref": "#/definitions/ComputerUseConfigToml"
     },
+    "continue_when_model_at_capacity": {
+      "description": "Retry model overloads until recovery or cancellation. Defaults to false.",
+      "type": "boolean"
+    },
     "daybreak": {
       "description": "Default Daybreak preference for new threads and non-interactive turns.",
       "type": "boolean"

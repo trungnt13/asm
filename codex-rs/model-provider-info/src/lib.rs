@@ -496,6 +496,7 @@ other non-default provider fields are not supported"
             base_delay: Duration::from_millis(200),
             retry_429: false,
             retry_5xx: true,
+            defer_server_overload: false,
             retry_transport: true,
         };
 

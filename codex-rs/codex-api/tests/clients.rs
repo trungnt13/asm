@@ -151,6 +151,7 @@ fn provider(name: &str) -> Provider {
             base_delay: Duration::from_millis(1),
             retry_429: false,
             retry_5xx: false,
+            defer_server_overload: false,
             retry_transport: true,
         },
         stream_idle_timeout: Duration::from_millis(10),

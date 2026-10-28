@@ -1060,6 +1060,30 @@ Keep Markdown paragraphs/code blocks/list items adjacent while streaming and com
 - Opt-in `cache-hit-rate` in `/statusline`/`tui.status_line`; defaults unchanged. Show current thread's latest reported request cached/input ratio as `CchN.N%`, rounded to one decimal. Use existing usage; no averages/totals/new requests/APIs. Hide unknown/zero-input usage. Missing cache detail remains indistinguishable from reported zero.
 - Offer opt-in `output-tps` with unchanged defaults. Show `Ntps`, rounded to the nearest whole number, for the latest successful ordinary Responses request: provider-reported output tokens, including reasoning, divided by that successful attempt's duration from send to completion. Exclude failed attempts, retry waits, compaction, warmup, tools, and other threads. This is observed request throughput, not pure decoding speed. Calculate once at live response completion and carry the result on the existing token-usage event. Cache the formatted value in the TUI and use its existing refresh without another notification, redraw request, timer, or streaming estimate. Retain the latest valid result across failed requests; omit unavailable timing or usage and do not reconstruct it from replayed history.
 
+### Continue through model capacity failures
+
+Top-level `continue_when_model_at_capacity = true` opts ordinary model requests
+and foreground compaction into unlimited retries for `ServerOverloaded` errors.
+Omission or `false` preserves upstream retry behavior. Children inherit the setting.
+
+- Retry the failed request on the same model, without restarting the task or
+  deliberately replaying completed tools. Keep ordinary retry budgets separate.
+- Without server advice, wait 30, 60, 120, 240, then 300 seconds between attempts;
+  subsequent local waits remain capped at five minutes. A valid `Retry-After`
+  takes precedence, including deadlines beyond five minutes; reporting time must
+  count toward that deadline.
+- With the option enabled, pass structured HTTP 503 overloads directly to this
+  waiter instead of running the ordinary short HTTP retry burst first. Keep
+  unrelated HTTP failures and non-Responses endpoint retry policies unchanged.
+- Surface the next retry delay, attempt count, and elapsed capacity-wait time.
+  Preserve cancellation and sampling input preemption. Do not add periodic redraws
+  or retry background compaction candidates indefinitely.
+- Leave other error classifications unchanged, including policy-restricted capacity,
+  Flex, quota, authentication, and invalid requests. Overload codes do not prove
+  eventual recovery: a backend that mislabels a permanently disabled model as
+  overloaded will also keep waiting until cancellation. Do not classify backend
+  prose with string heuristics or promise completion if capacity never recovers.
+
 ### Multi-agent V2 depth
 
 - Apply `[agents] max_depth` to V2 child creation, counting root as depth 0. The existing default is 1, so omitted settings allow only direct children. Reject deeper spawns before preparing a child; keep existing agents and communication tools available.
