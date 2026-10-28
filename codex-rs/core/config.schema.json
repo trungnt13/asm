@@ -8853,6 +8853,10 @@
     "side_reasoning_effort": {
       "$ref": "#/definitions/ReasoningEffort"
     },
+    "side_service_tier": {
+      "description": "Overrides the parent service tier for temporary side conversations.",
+      "type": "string"
+    },
     "skills": {
       "allOf": [
         {
