@@ -96,6 +96,7 @@ struct NativeProcess {
     stderr_reader: Option<JoinHandle<()>>,
     stderr: Arc<Mutex<VecDeque<u8>>>,
     exit_status: Option<String>,
+    frame_policy: frames::FramePolicy,
 }
 
 // A dropped turn future must not leave a live agent executing outside ASM's task lifetime.
@@ -222,7 +223,8 @@ impl ClaudeRuntime {
                 .arg(options.disallowed_tools.join(","));
         }
         Ok(Self {
-            process: NativeProcess::spawn(command).context("starting official Claude CLI")?,
+            process: NativeProcess::spawn(command, frames::FramePolicy::ClaudeImages)
+                .context("starting official Claude CLI")?,
             session_id,
             usable: true,
             failure_result: None,
@@ -321,10 +323,10 @@ impl ClaudeRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn run_turn(
         &mut self,
-        prompt: &str,
+        prompt: &Value,
         events: mpsc::Sender<Value>,
         cancel: CancellationToken,
-        steering: Option<mpsc::Receiver<String>>,
+        steering: Option<mpsc::Receiver<Value>>,
     ) -> Result<ClaudeTurnOutcome> {
         if !self.usable {
             bail!("Claude session requires explicit recovery after an unfinished turn");
@@ -332,6 +334,7 @@ impl ClaudeRuntime {
         if cancel.is_cancelled() {
             bail!("Claude turn cancelled before submission");
         }
+        validate_prompt(prompt)?;
         self.usable = false;
         self.failure_result = None;
         self.last_assistant_uuid = None;
@@ -347,8 +350,7 @@ impl ClaudeRuntime {
                 _ = cancel.cancelled() => {
                     bail!("Claude turn cancelled during submission; explicit recovery is required");
                 }
-                result = self.process.write_frame(json!({"type":"user", "uuid":user_message_uuid,
-                    "message":{"role":"user","content":prompt}})) => result?,
+                result = self.process.write_frame(user_frame(prompt, &user_message_uuid)) => result?,
             }
             self.read_result(&events, cancel, &user_message_uuid, steering)
                 .await
@@ -370,7 +372,7 @@ impl ClaudeRuntime {
         events: &mpsc::Sender<Value>,
         cancel: CancellationToken,
         user_message_uuid: &str,
-        mut steering: Option<mpsc::Receiver<String>>,
+        mut steering: Option<mpsc::Receiver<Value>>,
     ) -> Result<ClaudeTurnOutcome> {
         let mut pending_result = None;
         let mut latest_command = user_message_uuid.to_owned();
@@ -425,8 +427,7 @@ impl ClaudeRuntime {
                     // No Send now or interrupt: native queues the message and folds it in at
                     // its next tool boundary, so running tools finish instead of being rejected.
                     // Persisted input is never replayed if the write fails partway through.
-                    timeout(STOP_TIMEOUT, self.process.write_frame(json!({"type":"user",
-                        "uuid":command_uuid, "message":{"role":"user","content":prompt}})))
+                    timeout(STOP_TIMEOUT, self.process.write_frame(user_frame(&prompt, &command_uuid)))
                     .await
                     .context("Claude steering submission timed out")??;
                     commands.insert(command_uuid.clone());
@@ -695,9 +696,24 @@ impl ClaudeRuntime {
     }
 }
 
+pub fn validate_prompt(prompt: &Value) -> Result<()> {
+    // UUIDs emitted by the adapter always have this fixed width.
+    let frame = user_frame(prompt, "00000000-0000-0000-0000-000000000000");
+    let limit = frames::FramePolicy::ClaudeImages.input_limit(&frame);
+    anyhow::ensure!(
+        serde_json::to_vec(&frame)?.len() < limit,
+        "Claude input exceeds the native stream-json frame limit ({limit} bytes); reduce the image or prompt size"
+    );
+    Ok(())
+}
+
+fn user_frame(prompt: &Value, uuid: &str) -> Value {
+    json!({"type":"user", "uuid":uuid, "message":{"role":"user","content":prompt}})
+}
+
 impl NativeProcess {
     /// Starts `command` as the leader of a new process group that dies with ASM.
-    fn spawn(mut command: Command) -> Result<Self> {
+    fn spawn(mut command: Command, frame_policy: frames::FramePolicy) -> Result<Self> {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -726,7 +742,7 @@ impl NativeProcess {
             .context("native CLI stderr unavailable")?;
         let (sender, frames) = mpsc::channel(/*buffer*/ 32);
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
-        let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender));
+        let stdout_reader = tokio::spawn(frames::read_frames(stdout, sender, frame_policy));
         let stderr_reader = Some(tokio::spawn(frames::drain_stderr(
             stderr_pipe,
             Arc::clone(&stderr),
@@ -739,6 +755,7 @@ impl NativeProcess {
             stderr_reader,
             stderr,
             exit_status: None,
+            frame_policy,
         })
     }
 
@@ -759,7 +776,7 @@ impl NativeProcess {
 
     async fn write_frame(&mut self, frame: Value) -> Result<()> {
         let mut bytes = serde_json::to_vec(&frame)?;
-        if bytes.len() > frames::FRAME_LIMIT {
+        if bytes.len() + 1 > self.frame_policy.input_limit(&frame) {
             bail!("native CLI input frame exceeded size limit");
         }
         bytes.push(b'\n');

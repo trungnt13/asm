@@ -2055,15 +2055,17 @@ impl Session {
         // Replay must not upload or migrate recorded history. The inline store returns prepared
         // inline bytes, while existing file references bypass preparation and remain unchanged.
         // Bound replay future size now that image preparation can await storage.
-        let _ = Box::pin(prepare_image_response_items(
-            &self.thread_id.to_string(),
-            turn_context.config.ephemeral,
-            &mut prepared_history,
-            ImagePreparationMode::DetailBased,
-            ImageResizeNoticeMode::Disabled,
-            &InlineAttachmentStore,
-        ))
-        .await;
+        if !crate::claude_runtime::is_native_model(&turn_context.model_info().slug) {
+            let _ = Box::pin(prepare_image_response_items(
+                &self.thread_id.to_string(),
+                turn_context.config.ephemeral,
+                &mut prepared_history,
+                ImagePreparationMode::DetailBased,
+                ImageResizeNoticeMode::Disabled,
+                &InlineAttachmentStore,
+            ))
+            .await;
+        }
         prepare_audio_response_items(&mut prepared_history);
         assert_eq!(
             prepared_history.len(),
@@ -3814,6 +3816,7 @@ impl Session {
     }
 
     /// Prepares media using the originating model and preserves existing item identity.
+    #[tracing::instrument(skip_all)]
     pub(crate) async fn prepare_conversation_items_for_history<'a>(
         &self,
         turn_context: &TurnContext,
@@ -3837,15 +3840,21 @@ impl Session {
             ImageResizeNoticeMode::Disabled
         };
         // Keep nested image-upload futures out of every caller's future frame.
-        let image_preparations = Box::pin(prepare_image_response_items(
-            &self.thread_id.to_string(),
-            turn_context.config.ephemeral,
-            &mut items,
-            image_preparation_mode,
-            image_resize_notice_mode,
-            self.services.image_store.as_ref(),
-        ))
-        .await;
+        // Native input is normalized before admission. Keep its bytes inline: OpenAI
+        // preparation can replace low-detail images or upload them as file references.
+        let image_preparations = if crate::claude_runtime::is_native_model(&model_info.slug) {
+            Vec::new()
+        } else {
+            Box::pin(prepare_image_response_items(
+                &self.thread_id.to_string(),
+                turn_context.config.ephemeral,
+                &mut items,
+                image_preparation_mode,
+                image_resize_notice_mode,
+                self.services.image_store.as_ref(),
+            ))
+            .await
+        };
         prepare_audio_response_items(&mut items);
         // Most response items get their passthrough turn ID at the durable history boundary.
         for item in &mut items {
