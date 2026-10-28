@@ -1150,6 +1150,12 @@ fn restore_terminal_before_fatal_exit() {
     startup_recovery::print_unsent_draft();
 }
 
+// Construct large futures outside callers' poll frames, without adding allocations.
+#[inline(never)]
+fn box_future<F: std::future::Future>(create: impl FnOnce() -> F) -> std::pin::Pin<Box<F>> {
+    Box::pin(create())
+}
+
 pub async fn run_main(
     cli: Cli,
     arg0_paths: Arg0DispatchPaths,
@@ -1160,12 +1166,14 @@ pub async fn run_main(
     startup_recovery::scope(async move {
         // Startup retains a large future for the whole session. Keep it off callers' stacks,
         // which also need room to construct a replacement chat widget on `/new`.
-        match Box::pin(startup_orchestration::run_main_inner(
-            cli,
-            arg0_paths,
-            loader_overrides,
-            explicit_remote_endpoint,
-        ))
+        match box_future(|| {
+            startup_orchestration::run_main_inner(
+                cli,
+                arg0_paths,
+                loader_overrides,
+                explicit_remote_endpoint,
+            )
+        })
         .await
         {
             Err(err) if startup_draft::StartupCancelled::matches(&err) => Ok(AppExitInfo {
@@ -2254,33 +2262,35 @@ async fn run_ratatui_app(
 
     // Keep the large event-loop future out of the enclosing startup futures so session
     // transitions have enough stack headroom to rebuild configuration and the chat widget.
-    let app_result = Box::pin(App::run(
-        &mut tui,
-        crate::app::backend_sessions::InitialBackendSessions::singleton(app_server),
-        config,
-        current_cwd.to_path_buf(),
-        cli_kv_overrides.clone(),
-        overrides.clone(),
-        loader_overrides.clone(),
-        cloud_config_bundle,
-        prompt,
-        images,
-        session_selection,
-        feedback,
-        is_first_run,
-        should_prompt_windows_sandbox_nux_at_startup,
-        app_server_target,
-        state_db,
-        environment_manager,
-        startup_elapsed_before_app,
-        startup_bootstrap,
-        startup_hooks_browser,
-        daemon_startup_warning,
-        managed_daemon,
-        startup_draft,
-        managed_worktree,
-        daemon_cli_executable,
-    ))
+    let app_result = box_future(|| {
+        App::run(
+            &mut tui,
+            crate::app::backend_sessions::InitialBackendSessions::singleton(app_server),
+            config,
+            current_cwd.to_path_buf(),
+            cli_kv_overrides.clone(),
+            overrides.clone(),
+            loader_overrides.clone(),
+            cloud_config_bundle,
+            prompt,
+            images,
+            session_selection,
+            feedback,
+            is_first_run,
+            should_prompt_windows_sandbox_nux_at_startup,
+            app_server_target,
+            state_db,
+            environment_manager,
+            startup_elapsed_before_app,
+            startup_bootstrap,
+            startup_hooks_browser,
+            daemon_startup_warning,
+            managed_daemon,
+            startup_draft,
+            managed_worktree,
+            daemon_cli_executable,
+        )
+    })
     .await;
 
     terminal_restore_guard.restore_silently();

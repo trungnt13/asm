@@ -9,20 +9,13 @@ use super::reconnect::ReconnectState;
 use super::startup_bootstrap::bootstrap_server_owned_start;
 use super::startup_bootstrap::uses_server_owned_fresh_bootstrap;
 use super::*;
+use crate::box_future;
 use crate::session_start::SessionStartAction;
 use crate::session_start::SessionStartConfig;
 use crate::session_start::SessionStartOutcome;
 use crate::session_start::cancel_session_start;
 use crate::session_start::complete_session_start;
 use crate::unarchive_prompt::run_unarchive_prompt;
-use std::future::Future;
-use std::pin::Pin;
-
-// Keep construction temporaries out of the run-loop poll frame; the allocation already exists.
-#[inline(never)]
-fn box_future<F: Future>(create: impl FnOnce() -> F) -> Pin<Box<F>> {
-    Box::pin(create())
-}
 
 fn spawn_startup_thread_start(
     app_server: &AppServerSession,
