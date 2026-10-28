@@ -146,16 +146,25 @@ impl CursorRuntime {
             .map_or((options.model.as_str(), ""), |(model, parameters)| {
                 (model, parameters.trim_end_matches(']'))
             });
-        anyhow::ensure!(
-            session["configOptions"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|option| option["id"] == "model")
-                .flat_map(|option| option["options"].as_array().into_iter().flatten())
-                .any(|option| option["value"] == model),
-            "Cursor does not advertise model `{model}`"
-        );
+        let model_options = session["configOptions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|option| option["id"] == "model")
+            .and_then(|option| option["options"].as_array())
+            .context("Cursor did not advertise model choices")?;
+        // Saved Auto IDs and the CLI display ID differ from ACP's canonical value.
+        let model = if model_options.iter().any(|option| option["value"] == model) {
+            model
+        } else if matches!(model, "auto" | "auto-smart")
+            && model_options
+                .iter()
+                .any(|option| option["value"] == "default")
+        {
+            "default"
+        } else {
+            bail!("Cursor does not advertise model `{model}`");
+        };
         let mut selected = self
             .request(
                 "session/set_config_option",
@@ -199,7 +208,7 @@ impl CursorRuntime {
                     .context("Cursor effort parameter has no ID")?;
                 parameters.retain(|(key, _)| key != id);
                 parameters.push((id.to_owned(), effort));
-            } else if effort != "none" || model != "auto-smart" {
+            } else if effort != "none" || !matches!(model, "default" | "auto" | "auto-smart") {
                 bail!("Cursor model `{model}` does not advertise adjustable effort");
             }
         }
