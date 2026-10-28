@@ -20,6 +20,7 @@ pub struct RetryConfig {
     pub base_delay: Duration,
     pub retry_429: bool,
     pub retry_5xx: bool,
+    pub defer_server_overload: bool,
     pub retry_transport: bool,
 }
 
@@ -31,6 +32,7 @@ impl RetryConfig {
             retry_on: RetryOn {
                 retry_429: self.retry_429,
                 retry_5xx: self.retry_5xx,
+                defer_server_overload: self.defer_server_overload,
                 retry_transport: self.retry_transport,
             },
         }

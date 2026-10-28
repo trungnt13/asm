@@ -44,6 +44,7 @@ fn provider(base_url: &str) -> Provider {
             base_delay: std::time::Duration::from_millis(1),
             retry_429: false,
             retry_5xx: true,
+            defer_server_overload: false,
             retry_transport: true,
         },
         stream_idle_timeout: std::time::Duration::from_secs(1),

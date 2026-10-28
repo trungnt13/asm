@@ -16,12 +16,13 @@ pub struct RetryPolicy {
 pub struct RetryOn {
     pub retry_429: bool,
     pub retry_5xx: bool,
+    pub defer_server_overload: bool,
     pub retry_transport: bool,
 }
 
 impl RetryOn {
     pub fn should_retry(&self, err: &TransportError, attempt: u64, max_attempts: u64) -> bool {
-        if attempt >= max_attempts {
+        if attempt >= max_attempts || (self.defer_server_overload && err.is_server_overloaded()) {
             return false;
         }
         match err {

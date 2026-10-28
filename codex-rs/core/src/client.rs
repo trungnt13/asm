@@ -306,6 +306,7 @@ pub struct ModelClient {
     event_sender: Option<Sender<ProtocolEvent>>,
     http_client_factory: HttpClientFactory,
     restored_history: bool,
+    continue_when_model_at_capacity: bool,
     request_contributors: Vec<Arc<dyn codex_extension_api::ModelRequestContributor>>,
     executed_tool_calls: Option<ExecutedToolCalls>,
     // Resolved once when the session is created, like other session feature flags.
@@ -645,6 +646,7 @@ impl ModelClient {
             http_client_factory,
             runtime_auth: None,
             restored_history: false,
+            continue_when_model_at_capacity: false,
             request_contributors,
             executed_tool_calls: None,
             api_key_cyber_access_programs:
@@ -700,12 +702,14 @@ impl ModelClient {
         event_sender: Sender<ProtocolEvent>,
         codex_responses_headers: Option<Arc<CodexResponsesHeaders>>,
         api_key_cyber_access_programs: cyber_access_program::ApiKeyCyberAccessPrograms,
+        continue_when_model_at_capacity: bool,
     ) -> Self {
         self.prompt_cache_key_policy = prompt_cache_key;
         self.session_id_override = session_id_override;
         self.event_sender = Some(event_sender);
         self.codex_responses_headers = codex_responses_headers;
         self.api_key_cyber_access_programs = api_key_cyber_access_programs;
+        self.continue_when_model_at_capacity = continue_when_model_at_capacity;
         self
     }
 
@@ -2003,12 +2007,10 @@ impl ResponsesHttpExecutor<'_> {
                 request.input = input;
             }
             inference_trace_attempt.record_started(&request);
-            let client = ApiResponsesClient::new(
-                transport,
-                client_setup.api_provider,
-                client_setup.api_auth,
-            )
-            .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
+            let mut api_provider = client_setup.api_provider;
+            api_provider.retry.defer_server_overload = self.client.continue_when_model_at_capacity;
+            let client = ApiResponsesClient::new(transport, api_provider, client_setup.api_auth)
+                .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
             let stream_result = client.stream_request(request, options).await;
 
             match stream_result {

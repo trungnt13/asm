@@ -168,6 +168,8 @@ pub struct FeatureToggleToml {
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
+    /// Retry model overloads until recovery or cancellation. Defaults to false.
+    pub continue_when_model_at_capacity: Option<bool>,
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak: Option<bool>,
     /// Selects advertised multi-agent v2 subagent models in the given order without

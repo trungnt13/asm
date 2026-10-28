@@ -127,6 +127,7 @@ async fn check_connection(address: String) {
                 base_delay: Duration::from_millis(/*millis*/ 1),
                 retry_429: false,
                 retry_5xx: false,
+                defer_server_overload: false,
                 retry_transport: false,
             },
             stream_idle_timeout: Duration::from_secs(/*secs*/ 5),
