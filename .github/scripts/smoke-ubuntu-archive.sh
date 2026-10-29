@@ -15,7 +15,7 @@ docker run --rm --platform linux/amd64 \
       ca-certificates libssl3 liblzma5 libcap2 libgcc-s1 libstdc++6
     directory=$(mktemp -d)
     tar -xzf /archive.tar.gz -C "$directory"
-    for binary in bin/codex bin/codex-code-mode-host; do
+    for binary in bin/codex bin/codex-code-mode-host bin/codex-exec-server; do
       ldd "$directory/$binary"
       help_output=$("$directory/$binary" --help)
       grep -q "^Usage:" <<< "$help_output"
@@ -28,5 +28,6 @@ docker run --rm --platform linux/amd64 \
     "$directory/codex-path/rg" --version
     reported_version=$("$directory/bin/codex" --version)
     [[ "$reported_version" == "codex-cli $1" ]] || { echo "Wrong binary version: $reported_version" >&2; exit 1; }
-    echo "ubuntu=22.04 version=$reported_version help=ok helper_help=ok resources=ok"
+    [[ "$("$directory/bin/codex-exec-server" --version)" == "codex-exec-server $1" ]]
+    echo "ubuntu=22.04 version=$reported_version help=ok helper_help=ok exec_server_version=ok exec_server_help=ok resources=ok"
   ' smoke-ubuntu-archive "$version"

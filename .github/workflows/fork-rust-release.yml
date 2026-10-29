@@ -199,6 +199,9 @@ jobs:
             export CODEX_BWRAP_SHA256
           fi
           build_args=(--locked --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings)
+          if grep -q -- '"--exec-server-bin"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+            build_args+=(--bin codex-exec-server)
+          fi
           if [[ "$BUILD_JOBS" != 0 ]]; then build_args+=(--jobs "$BUILD_JOBS"); fi
           cargo build "${build_args[@]}"
 
@@ -216,6 +219,9 @@ jobs:
             resource_args=(--force)
             if grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
               resource_args+=(--no-zsh)
+            fi
+            if grep -q -- '"--exec-server-bin"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+              resource_args+=(--exec-server-bin "${release_dir}/codex-exec-server")
             fi
             if [[ "$TARGET" == *-linux-gnu ]]; then
               resource_args+=(--bwrap-bin "${release_dir}/bwrap")

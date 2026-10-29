@@ -1,0 +1,14 @@
+[
+  {
+    "run_id": 40822589072,
+    "source": "08492e08402bc49b6164a82bf0d6be9157233c97",
+    "tag": "v0.166.1-alpha.6",
+    "release_id": 427492578,
+    "installer": {
+      "id": 687449697,
+      "name": "install.sh",
+      "digest": "sha256:19b1ef69f7982846f1e8fe173ea39efd9bb58428ffe10a652efed61363182967"
+    },
+    "reason": "Owner authorized a new immutable candidate on 2026-10-29 to repair the source packaging contract; preserve this failed unpublished candidate and its assets."
+  }
+]

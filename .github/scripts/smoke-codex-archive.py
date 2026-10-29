@@ -28,7 +28,12 @@ version = tomllib.loads((repo_root / "codex-rs/Cargo.toml").read_text())["worksp
     "package"
 ]["version"]
 required_dirs = {"bin", "codex-resources", "codex-path"}
-executables = {"bin/codex", "bin/codex-code-mode-host", "codex-path/rg"}
+executables = {
+    "bin/codex",
+    "bin/codex-code-mode-host",
+    "bin/codex-exec-server",
+    "codex-path/rg",
+}
 if spec.is_linux:
     executables.add("codex-resources/bwrap")
 required_files = executables | {"codex-package.json"}
@@ -75,6 +80,7 @@ with tarfile.open(archive_path, "r:gz") as archive:
             "target": target,
             "variant": "codex",
             "entrypoint": "bin/codex",
+            "execServer": "bin/codex-exec-server",
             "resourcesDir": "codex-resources",
             "pathDir": "codex-path",
         }
@@ -85,15 +91,20 @@ with tarfile.open(archive_path, "r:gz") as archive:
         ):
             raise SystemExit("Package metadata does not match the candidate contract")
         if inspect_only:
-            print(f"archive={archive_path} target={target} version={version} package=complete")
+            print(
+                f"archive={archive_path} target={target} version={version} package=complete"
+            )
             raise SystemExit(0)
         if spec.is_linux:
             for name in sorted(executables):
                 executable = package / name
                 headers = subprocess.check_output(
                     [
-                        "readelf", "--file-header", "--program-headers",
-                        "--wide", executable,
+                        "readelf",
+                        "--file-header",
+                        "--program-headers",
+                        "--wide",
+                        executable,
                     ],
                     text=True,
                 )
@@ -102,7 +113,8 @@ with tarfile.open(archive_path, "r:gz") as archive:
                     value in headers
                     for value in ("ELF64", "Advanced Micro Devices X86-64")
                 ) or (
-                    name != "codex-path/rg" and "/lib64/ld-linux-x86-64.so.2" not in headers
+                    name != "codex-path/rg"
+                    and "/lib64/ld-linux-x86-64.so.2" not in headers
                 ):
                     raise SystemExit(f"{name} is not an expected x86_64 executable")
                 versions = subprocess.check_output(
@@ -124,6 +136,13 @@ with tarfile.open(archive_path, "r:gz") as archive:
                 print(
                     f"{name} glibc_versions={sorted(glibc_versions)} needed={libraries}"
                 )
+        else:
+            for name in sorted(executables):
+                architectures = subprocess.check_output(
+                    ["lipo", "-archs", package / name], text=True, timeout=30
+                ).split()
+                if "arm64" not in architectures:
+                    raise SystemExit(f"{name} lacks native arm64 code")
         binary_path = package / "bin/codex"
         helper_path = package / "bin/codex-code-mode-host"
         reported_version = subprocess.check_output(
@@ -133,7 +152,13 @@ with tarfile.open(archive_path, "r:gz") as archive:
             raise SystemExit(
                 f"Wrong binary version: {reported_version}; expected codex-cli {version}"
             )
-        for executable in (binary_path, helper_path):
+        exec_server_path = package / "bin/codex-exec-server"
+        exec_server_version = subprocess.check_output(
+            [exec_server_path, "--version"], text=True, timeout=30
+        ).strip()
+        if exec_server_version != f"codex-exec-server {version}":
+            raise SystemExit(f"Wrong exec-server version: {exec_server_version}")
+        for executable in (binary_path, helper_path, exec_server_path):
             output = subprocess.check_output(
                 [executable, "--help"], text=True, timeout=30
             )
@@ -144,12 +169,15 @@ with tarfile.open(archive_path, "r:gz") as archive:
             output = subprocess.check_output(
                 [package / "codex-resources/bwrap", "--help"], text=True, timeout=30
             )
-            if not all(option in output for option in ("--argv0", "--perms", "--as-pid-1")):
+            if not all(
+                option in output for option in ("--argv0", "--perms", "--as-pid-1")
+            ):
                 raise SystemExit("Bundled Bubblewrap lacks required sandbox options")
         print(
             f"archive={archive_path} bytes={archive_path.stat().st_size} "
-            f"version={reported_version} package=complete help=ok helper_help=ok resources=ok"
+            f"version={reported_version} package=complete help=ok helper_help=ok exec_server_version=ok exec_server_help=ok resources=ok"
         )
         print(
-            f"binary_bytes={binary_path.stat().st_size} helper_bytes={helper_path.stat().st_size}"
+            f"binary_bytes={binary_path.stat().st_size} helper_bytes={helper_path.stat().st_size} "
+            f"exec_server_bytes={exec_server_path.stat().st_size}"
         )

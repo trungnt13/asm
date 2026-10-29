@@ -255,6 +255,7 @@ def next_release_version(upstream):
         if len(batch) < 100:
             break
         page += 1
+    superseded = validated_superseded_releases(candidates, tags, releases)
     occupied = set(tags) | set(releases)
     versions = {
         tag: semver_precedence(tag.removeprefix("v"))
@@ -299,7 +300,7 @@ def next_release_version(upstream):
         existing_candidates.update(matching)
     completed = set()
     resume_runs = None
-    for tag in existing_candidates | proof_tags:
+    for tag in (existing_candidates | proof_tags) - superseded:
         release = releases.get(tag)
         if not tags.get(tag) or not release or not published_assets_complete(release):
             raise ValueError(f"Incomplete release {tag}; resume its original run")
@@ -340,9 +341,73 @@ def next_release_version(upstream):
             raise ValueError(
                 f"Release verification or main sync unfinished for {tag}; resume its original run"
             )
-    if any(release["draft"] for tag, release in releases.items() if tag in versions):
+    if any(
+        release["draft"]
+        for tag, release in releases.items()
+        if tag in versions and tag not in superseded
+    ):
         raise ValueError("Unfinished draft release exists; resume its original run")
     return selected
+
+
+def validated_superseded_releases(candidates, tags, releases):
+    records = json.loads(
+        Path(__file__).with_name("superseded-fork-releases.json").read_text()
+    )
+    superseded = set()
+    for record in records:
+        run_id, tag, source = record["run_id"], record["tag"], record["source"]
+        reference = f"refs/heads/agent/release-{run_id}"
+        release = releases.get(tag)
+        if (
+            candidates.get(reference) != source
+            or {ref for ref, sha in candidates.items() if sha == source} != {reference}
+            or tags.get(tag) != source
+            or not release
+            or release["id"] != record["release_id"]
+            or release["target_commitish"] != source
+            or not release["draft"]
+            or release["published_at"] is not None
+            or [
+                {key: asset.get(key) for key in ("id", "name", "digest")}
+                for asset in release.get("assets", [])
+            ] != [record["installer"]]
+        ):
+            raise ValueError(f"Superseded candidate {tag} no longer matches its record")
+        run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
+        if (
+            run["status"] != "completed"
+            or run["conclusion"] != "failure"
+            or run["event"] != "workflow_dispatch"
+            or run["head_branch"] != "main"
+            or run["path"] != ".github/workflows/fork-rust-release.yml"
+        ):
+            raise ValueError(f"Superseded candidate {tag} is not a failed release run")
+        jobs = api(
+            f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
+        )["jobs"]
+        failed_builds = {
+            job["name"] for job in jobs if job["conclusion"] == "failure"
+        }
+        if failed_builds != {
+            "Build x86_64-unknown-linux-gnu (jobs 0)",
+            "Build aarch64-apple-darwin (jobs 0)",
+        } or any(
+            job["conclusion"] != "skipped"
+            for job in jobs
+            if job["name"].startswith(
+                (
+                    "Complete and verify",
+                    "Publish and verify",
+                    "Verify published",
+                    "Advance main",
+                )
+            )
+        ):
+            raise ValueError(f"Superseded candidate {tag} has unexpected publication state")
+        print(f"Preserving superseded candidate {tag}: {record['reason']}")
+        superseded.add(tag)
+    return superseded
 
 
 def output(revision, tag="", candidate_ref="", complete=False, publish=False):
