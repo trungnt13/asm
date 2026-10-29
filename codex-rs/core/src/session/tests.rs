@@ -104,6 +104,10 @@ use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
 use codex_protocol::turn_input::TurnInputMode;
 use codex_protocol::turn_input::TurnInputRequest;
 use codex_protocol::turn_input::TurnInputSubmission;
+use codex_rollout_trace::RolloutStatus;
+use codex_rollout_trace::ThreadStartedTraceMetadata;
+use codex_rollout_trace::ThreadTraceContext;
+use codex_rollout_trace::replay_bundle;
 use codex_tools::ToolSpec;
 use codex_utils_path_uri::PathUri;
 use std::collections::BTreeMap;
@@ -624,6 +628,8 @@ fn skill_message(text: &str) -> ResponseItem {
 
 #[tokio::test]
 async fn regular_turn_emits_turn_started_with_trace_id_without_waiting_for_startup_prewarm() {
+    // Prepare filesystem-backed fixtures before replacing the ambient subscriber.
+    let (sess, _initial_turn, rx) = make_session_and_context_with_rx().await;
     let _trace_test_context = install_test_tracing("codex-core-tests");
     let request_parent = W3cTraceContext {
         traceparent: Some("00-00000000000000000000000000000011-0000000000000022-01".into()),
@@ -634,9 +640,7 @@ async fn regular_turn_emits_turn_started_with_trace_id_without_waiting_for_start
         &request_span,
         &request_parent
     ));
-    let (sess, tc, rx) = make_session_and_context_with_rx()
-        .instrument(request_span)
-        .await;
+    let tc = sess.new_default_turn().instrument(request_span).await;
     assert_eq!(
         tc.trace_id.as_deref(),
         Some("00000000000000000000000000000011")
@@ -8789,6 +8793,8 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
         }
     }
 
+    // Keep fixture creation and cleanup under the ambient subscriber.
+    let (sess, tc, rx) = make_session_and_context_with_rx().await;
     let _trace_test_context = install_test_tracing("codex-core-tests");
 
     let request_parent = W3cTraceContext {
@@ -8818,7 +8824,6 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
     });
     let dispatch_span_id = dispatch_span.context().span().span_context().span_id();
 
-    let (sess, tc, rx) = make_session_and_context_with_rx().await;
     let captured_trace = Arc::new(std::sync::Mutex::new(None));
 
     async {
@@ -8965,7 +8970,7 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
 }
 
 #[tokio::test]
-async fn submission_loop_channel_close_runs_full_thread_teardown() {
+async fn submission_loop_channel_close_runs_full_thread_teardown() -> anyhow::Result<()> {
     struct SessionStopMarker;
     struct ThreadStopMarker;
 
@@ -8995,6 +9000,24 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
     let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
     let thread_store: Arc<dyn codex_thread_store::ThreadStore> = store.clone();
     let config = session.get_config().await;
+    let traces = tempfile::tempdir()?;
+    session.services.rollout_thread_trace = ThreadTraceContext::start_root_in_root_for_test(
+        traces.path(),
+        ThreadStartedTraceMetadata {
+            thread_id: session.thread_id.to_string(),
+            agent_path: "/root".to_string(),
+            task_name: None,
+            nickname: None,
+            agent_role: None,
+            session_source: SessionSource::Exec,
+            cwd: config.cwd.to_path_buf(),
+            rollout_path: None,
+            model: turn_context.model_info().slug.clone(),
+            provider_name: config.model_provider_id.clone(),
+            approval_policy: "never".to_string(),
+            sandbox_policy: "danger-full-access".to_string(),
+        },
+    )?;
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
@@ -9055,6 +9078,13 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
     let session = Arc::new(session);
     submission_loop(session, Arc::clone(&turn_context.config), rx_sub).await;
 
+    // Channel closure aborts the rollout, but releasing the session still
+    // closes its recording normally, so the resulting bundle is complete.
+    let bundle = std::fs::read_dir(traces.path())?.next().unwrap()?.path();
+    let rollout = replay_bundle(bundle)?;
+    assert_eq!(rollout.status, RolloutStatus::Aborted);
+    assert!(rollout.recording_complete);
+
     assert_eq!(1, calls.load(std::sync::atomic::Ordering::SeqCst));
     assert_eq!(
         codex_thread_store::InMemoryThreadStoreCalls {
@@ -9064,6 +9094,7 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
         },
         store.calls().await
     );
+    Ok(())
 }
 
 #[tokio::test]
