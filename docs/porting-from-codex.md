@@ -175,6 +175,8 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
    - Read prior candidate job logs in memory with the GitHub CLI raw-output opt-in when supported; never render untrusted log escapes to a terminal.
 3. **Check live use.**
    - Before dispatch, run one time-limited local live turn with default config/existing sign-in. Do not override profile/model for cheaper testing unless the owner explicitly approves it.
+   - This bounded local release smoke has standing approval, including required System1/helper calls through the existing configured endpoints/models. Do not ask again for each release. Keep one turn, a 120-second limit, and the smallest read-only Code Mode task; stop at proof or first failure. Broader tests, new endpoints/models, and unrelated billable calls still need approval under the cost rules.
+   - After every smoke attempt, report actual request counts, elapsed time, input/cached-input/output/reasoning tokens, and required helper usage separately where reported. Distinguish totals from subtotals; mark unavailable fields explicitly. Never substitute estimates for actual usage or omit failed-attempt usage. The planning estimate is 20–60K input and 1–5K output/reasoning tokens plus helper usage, not a hard cap or a claim of actual use.
    - Use the release-source CLI/helper pair and [real-session isolation and cost limits](#real-session-checks).
    - Require a real model response and verified successful read-only Code Mode output.
    - Failure, timeout, or missing authentication blocks dispatch; never skip this check. Report source/result separately from package checks. Keep credentials out of CI.
