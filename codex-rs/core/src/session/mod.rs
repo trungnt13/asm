@@ -1752,9 +1752,11 @@ impl Session {
         let mut info = state.token_info().unwrap_or(TokenUsageInfo {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            last_usage_includes_reasoning: None,
             model_context_window: None,
         });
         info.last_token_usage = usage;
+        info.last_usage_includes_reasoning = None;
         info.model_context_window = model_context_window;
         state.set_token_info(Some(info));
     }
