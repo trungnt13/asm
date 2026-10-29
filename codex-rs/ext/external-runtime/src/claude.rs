@@ -39,10 +39,10 @@ pub enum ClaudeSession {
     },
 }
 
-/// Controls whether native saved instructions can override current launch instructions.
-pub enum ClaudePromptSnapshot {
+/// Applies ASM child startup policy without changing native root or side sessions.
+pub enum ClaudeSessionKind {
     NativeDefault,
-    Rebuild,
+    ManagedChild,
 }
 
 pub struct ClaudeOptions {
@@ -54,7 +54,7 @@ pub struct ClaudeOptions {
     pub auto_compact_window: Option<i64>,
     /// Selected role instructions appended to the native system prompt, including on resume.
     pub role_instructions: Option<String>,
-    pub prompt_snapshot: ClaudePromptSnapshot,
+    pub session_kind: ClaudeSessionKind,
     pub session: ClaudeSession,
     pub bridge_directory: Option<PathBuf>,
     /// Native tool names removed from this session, such as questions for headless children.
@@ -152,21 +152,28 @@ impl ClaudeRuntime {
                 .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
-        if matches!(options.prompt_snapshot, ClaudePromptSnapshot::Rebuild) {
-            command.args(["--system-prompt-snapshot", "off"]);
+        let mut flag_env = serde_json::Map::new();
+        if matches!(options.session_kind, ClaudeSessionKind::ManagedChild) {
+            command
+                .args(["--system-prompt-snapshot", "off"])
+                .env("FORCE_PROMPT_CACHING_5M", "1");
+            flag_env.insert("FORCE_PROMPT_CACHING_5M".to_owned(), json!("1"));
         }
         if let Some(instructions) = options.role_instructions {
             command.arg("--append-system-prompt").arg(instructions);
         }
         if let Some(window) = options.auto_compact_window {
-            // Settings can reapply env after startup; flag settings beat user/project settings.
-            // Native managed policy still has precedence.
             let window = window.to_string();
             command.env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", &window);
+            flag_env.insert("CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_owned(), json!(window));
+            command.arg("--autocompact").arg(window);
+        }
+        if !flag_env.is_empty() {
+            // Settings can reapply env after startup; flag settings beat user/project settings.
+            // Native managed policy still has precedence.
             command
                 .arg("--settings")
-                .arg(json!({"env":{"CLAUDE_CODE_AUTO_COMPACT_WINDOW":window}}).to_string());
-            command.arg("--autocompact").arg(window);
+                .arg(json!({"env": flag_env}).to_string());
         }
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);

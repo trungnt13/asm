@@ -410,8 +410,13 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   requires Claude Code 2.1.257 or later; fail rather than silently retain a snapshot
   on an unsupported CLI. Claude rebuilds the prompt each request, which can affect
   cache reuse and retained thinking. Keep loaded role text fixed during warm turns;
-  preserve native defaults for root and side sessions. Keep runtime-setting and
-  uncertain-turn recovery checks unchanged.
+  preserve native defaults for root and side sessions. Managed Claude children also
+  set `FORCE_PROMPT_CACHING_5M=1` in their process environment and flag settings,
+  requesting five-minute caching for the child and its native helper requests.
+  Apply this on new sessions and cold resume, including children without a role;
+  keep native caching-disable controls and managed policy authoritative. Do not change
+  personal configuration or cache policy for root, side, Cursor, or OpenAI sessions.
+  Keep runtime-setting and uncertain-turn recovery checks unchanged.
   Native main sessions receive no role instruction injection. Cursor children use the
   capability-gated ACP path below, not a CLI prompt flag.
 - Main sessions and sides have no injected ASM communication tools. ASM-managed
