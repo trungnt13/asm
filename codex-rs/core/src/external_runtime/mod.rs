@@ -429,6 +429,11 @@ async fn run_conversation(
                 bridge.as_ref(),
                 disallowed_tools,
                 role_instructions,
+                if thread_spawn_child {
+                    codex_external_runtime::ClaudePromptSnapshot::Rebuild
+                } else {
+                    codex_external_runtime::ClaudePromptSnapshot::NativeDefault
+                },
                 &mut checkpoint,
                 &checkpoint_path,
                 session_start,

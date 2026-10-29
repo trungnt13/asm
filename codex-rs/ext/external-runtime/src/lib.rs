@@ -8,6 +8,7 @@ mod frames;
 mod process;
 
 pub use claude::ClaudeOptions;
+pub use claude::ClaudePromptSnapshot;
 pub use claude::ClaudeRuntime;
 pub use claude::ClaudeSession;
 pub use claude::validate_prompt as validate_claude_prompt;
