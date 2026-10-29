@@ -34,6 +34,7 @@ pub(super) struct ExternalProcess {
     stderr_reader: Option<JoinHandle<()>>,
     stderr: Arc<Mutex<VecDeque<u8>>>,
     exit_status: Option<String>,
+    pre_cleanup_process: Option<Value>,
     frame_policy: frames::FramePolicy,
 }
 
@@ -109,6 +110,7 @@ impl ExternalProcess {
             stderr_reader,
             stderr,
             exit_status: None,
+            pre_cleanup_process: None,
             frame_policy,
         })
     }
@@ -125,6 +127,7 @@ impl ExternalProcess {
             "stderr_tail": String::from_utf8_lossy(&stderr),
             "failure_result": failure_result,
             "exit_status": self.exit_status,
+            "pre_cleanup_process": self.pre_cleanup_process,
         })
     }
 
@@ -150,6 +153,13 @@ impl ExternalProcess {
 
     pub(super) async fn terminate(&mut self) -> Result<()> {
         let pid = self.child.id();
+        if self.pre_cleanup_process.is_none() {
+            self.pre_cleanup_process = Some(match self.child.try_wait() {
+                Ok(Some(status)) => json!({"state": "exited", "exit_status": status.to_string()}),
+                Ok(None) => json!({"state": "running"}),
+                Err(error) => json!({"state": "unknown", "error": error.to_string()}),
+            });
+        }
         let marker = self.marker.clone();
         let birth = self.birth;
         let cleanup = tokio::task::spawn_blocking(move || cleanup::kill_owned(pid, &marker, birth))

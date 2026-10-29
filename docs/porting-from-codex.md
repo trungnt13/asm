@@ -377,6 +377,11 @@ rate. Claude Code gates cache-prefix preservation on its native
 `per_turn_effort_active` feature flag, which the native server can disable.
 ASM child selections use catalog defaults and supported efforts when present; native
 model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
+When a role changes the selected external model, replace only inherited parent effort
+with that model's catalog default, or leave effort unset when native metadata is absent.
+Preserve explicit spawn, role and configured subagent efforts for normal validation;
+never silently discard unsupported explicit choices. Same-model role selection preserves
+inherited effort. OpenAI role effort behavior is unchanged.
 Keep the V2 spawn tool description explicit: `claude-code/*` requires
 `fork_turns="none"` and a self-contained task message, including with custom tool
 descriptions or hidden catalogs. Do not rely on a failed spawn to teach this constraint.
@@ -482,8 +487,10 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   and the confirmed cleanup above. Continue with new input; never replay the interrupted
   input or assume its tools had no side effects. Other execution errors require recovery.
 - Bound framing, stderr and cleanup waits. Kill only owned native processes; preserve
-  primary failures and retain diagnostics only when requested. Give each native CLI a
-  unique inherited process-ownership marker so ordinary detached tools remain identifiable
+  primary failures and retain diagnostics only when requested. Record the first
+  process state before cleanup separately from its final exit status; cleanup must not
+  erase whether the native CLI had already exited or was still running.
+  Give each native CLI a unique inherited process-ownership marker so ordinary detached tools remain identifiable
   after their CLI exits. Combine marker ownership with verified live ancestry. Never
   signal ASM’s own process group. This is lifecycle cleanup, not a sandbox: processes
   that clear the marker and leave observable ancestry can escape cleanup.

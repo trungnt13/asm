@@ -79,7 +79,7 @@ pub(crate) async fn read_frames(
         let frame = match frame {
             Ok(Some(frame)) => Ok(frame),
             Ok(None) => Err(anyhow::anyhow!(
-                "Claude stdout closed before the next result"
+                "native CLI stdout closed before the next result"
             )),
             Err(error) => Err(error),
         };
@@ -96,12 +96,15 @@ async fn read_frame(
 ) -> Result<Option<Value>> {
     let mut bytes = Vec::new();
     loop {
-        let available = reader.fill_buf().await.context("reading Claude stdout")?;
+        let available = reader
+            .fill_buf()
+            .await
+            .context("reading native CLI stdout")?;
         if available.is_empty() {
             if bytes.is_empty() {
                 return Ok(None);
             }
-            bail!("Claude stdout ended inside a JSON frame");
+            bail!("native CLI stdout ended inside a JSON frame");
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let length = newline.map_or(available.len(), |index| index + 1);
