@@ -1221,10 +1221,16 @@
             "in_app_voice": {
               "type": "boolean"
             },
+            "incremental_exec_tools": {
+              "type": "boolean"
+            },
             "incremental_tools": {
               "type": "boolean"
             },
             "instant_interrupt": {
+              "type": "boolean"
+            },
+            "interrupt_on_cancel": {
               "type": "boolean"
             },
             "item_ids": {
@@ -1489,6 +1495,9 @@
               "type": "boolean"
             },
             "tui_app_server": {
+              "type": "boolean"
+            },
+            "tui_extensions_statusline": {
               "type": "boolean"
             },
             "tui_multi_backend": {
@@ -3887,6 +3896,10 @@
         },
         "log_guardian_assessments": {
           "description": "Opt in to logging completed Guardian assessments to an OTLP log exporter. Defaults to false. Rationales can be sensitive and are capped at 64 KiB.",
+          "type": "boolean"
+        },
+        "log_sse_deltas": {
+          "description": "Log successful SSE events whose kind ends in `.delta`. Defaults to true. Disabling this preserves errors, completion events, and metrics.",
           "type": "boolean"
         },
         "log_user_prompt": {
@@ -8086,10 +8099,16 @@
         "in_app_voice": {
           "type": "boolean"
         },
+        "incremental_exec_tools": {
+          "type": "boolean"
+        },
         "incremental_tools": {
           "type": "boolean"
         },
         "instant_interrupt": {
+          "type": "boolean"
+        },
+        "interrupt_on_cancel": {
           "type": "boolean"
         },
         "item_ids": {
@@ -8354,6 +8373,9 @@
           "type": "boolean"
         },
         "tui_app_server": {
+          "type": "boolean"
+        },
+        "tui_extensions_statusline": {
           "type": "boolean"
         },
         "tui_multi_backend": {

@@ -250,6 +250,7 @@ mod transcript_view;
 mod tui;
 mod turn_tip;
 mod ui_consts;
+mod ui_tree;
 mod unarchive_prompt;
 pub(crate) mod update_action;
 mod worktree_startup;
@@ -528,6 +529,7 @@ async fn connect_remote_app_server(
     endpoint: RemoteAppServerEndpoint,
 ) -> color_eyre::Result<AppServerClient> {
     let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+        required_human_approval: true,
         endpoint,
         client_name: "codex-tui".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -748,6 +750,7 @@ where
         })
         .collect();
     let client = start_client(InProcessClientStartArgs {
+        required_human_approval: true,
         arg0_paths,
         config: Arc::new(config),
         cli_overrides: cli_kv_overrides,
