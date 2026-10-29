@@ -153,11 +153,14 @@ impl ClaudeRuntime {
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
         let mut flag_env = serde_json::Map::new();
+        let mut flag_settings = json!({});
         if matches!(options.session_kind, ClaudeSessionKind::ManagedChild) {
             command
                 .args(["--system-prompt-snapshot", "off"])
                 .env("FORCE_PROMPT_CACHING_5M", "1");
             flag_env.insert("FORCE_PROMPT_CACHING_5M".to_owned(), json!("1"));
+            flag_settings["disableClaudeAiConnectors"] = json!(true);
+            flag_settings["syncClaudeAiSkills"] = json!(false);
         }
         if let Some(instructions) = options.role_instructions {
             command.arg("--append-system-prompt").arg(instructions);
@@ -171,9 +174,8 @@ impl ClaudeRuntime {
         if !flag_env.is_empty() {
             // Settings can reapply env after startup; flag settings beat user/project settings.
             // Native managed policy still has precedence.
-            command
-                .arg("--settings")
-                .arg(json!({"env": flag_env}).to_string());
+            flag_settings["env"] = json!(flag_env);
+            command.arg("--settings").arg(flag_settings.to_string());
         }
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
