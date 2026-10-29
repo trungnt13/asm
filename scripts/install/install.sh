@@ -828,6 +828,7 @@ validate_package_manifest() {
       expected["entrypoint"] = "bin/codex"
       expected["resourcesDir"] = "codex-resources"
       expected["pathDir"] = "codex-path"
+      expected["execServer"] = "bin/codex-exec-server"
       rest = document
       skip_space()
       if (substr(rest, 1, 1) != "{") exit 1
@@ -854,7 +855,8 @@ validate_package_manifest() {
       }
       skip_space()
       if (invalid || rest != "" || !seen["layoutVersion"]) exit 1
-      for (key in expected) if (!seen[key]) exit 1
+      for (key in expected) if (key != "execServer" && !seen[key]) exit 1
+      if (seen["execServer"]) print expected["execServer"]
     }
   ' "$manifest_path"
 }
@@ -877,8 +879,15 @@ package_files_are_complete() {
       [ ! -L "$package_dir/$executable" ] &&
       [ -x "$package_dir/$executable" ] || return 1
   done
-  validate_package_manifest "$package_dir/codex-package.json" "$expected_version" "$expected_target" &&
-    [ "$(version_from_binary "$package_dir/bin/codex")" = "$expected_version" ]
+  exec_server_path=$(validate_package_manifest "$package_dir/codex-package.json" "$expected_version" "$expected_target") || return 1
+  if [ -n "$exec_server_path" ]; then
+    [ -f "$package_dir/$exec_server_path" ] &&
+      [ ! -L "$package_dir/$exec_server_path" ] &&
+      [ -x "$package_dir/$exec_server_path" ] || return 1
+  elif [ -e "$package_dir/bin/codex-exec-server" ] || [ -L "$package_dir/bin/codex-exec-server" ]; then
+    return 1
+  fi
+  [ "$(version_from_binary "$package_dir/bin/codex")" = "$expected_version" ]
 }
 
 install_fork_release() {
@@ -898,20 +907,22 @@ install_fork_release() {
       required["codex-package.json"] = "-"
       required["bin/codex"] = "-"
       required["bin/codex-code-mode-host"] = "-"
+      optional["bin/codex-exec-server"] = "-"
       required["codex-path/rg"] = "-"
       if (target == "x86_64-unknown-linux-gnu") required["codex-resources/bwrap"] = "-"
     }
     NR == FNR {
-      if (!($0 in required) || members[$0]++) invalid = 1
+      if ((!($0 in required) && !($0 in optional)) || members[$0]++) invalid = 1
       next
     }
     {
       name = $NF
-      if (!(name in required) || types[name]++ ||
-          substr($1, 1, 1) != required[name]) invalid = 1
+      if ((!(name in required) && !(name in optional)) || types[name]++ ||
+          substr($1, 1, 1) != (name in required ? required[name] : optional[name])) invalid = 1
     }
     END {
       for (name in required) if (members[name] != 1 || types[name] != 1) invalid = 1
+      for (name in optional) if (members[name] != types[name]) invalid = 1
       exit invalid
     }
   ' "$tmp_dir/archive-members" "$tmp_dir/archive-types"; then

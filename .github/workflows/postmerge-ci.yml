@@ -94,7 +94,7 @@ jobs:
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
             export CODEX_BWRAP_SHA256
           fi
-          cargo build --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings
+          cargo build --release --target "$TARGET" --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings
 
       - name: Create archive
         env:
@@ -112,6 +112,7 @@ jobs:
             --target "$TARGET" --cargo-profile release \
             --entrypoint-bin "${release_dir}/codex" \
             --code-mode-host-bin "${release_dir}/codex-code-mode-host" \
+            --exec-server-bin "${release_dir}/codex-exec-server" \
             --package-dir "${RUNNER_TEMP}/asm-package-${TARGET}" \
             --archive-output "$archive" "${resource_args[@]}"
 

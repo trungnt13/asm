@@ -33,9 +33,12 @@ def write_release(
     for name in (
         "bin/codex",
         "bin/codex-code-mode-host",
+        "bin/codex-exec-server",
         "codex-path/rg",
         "codex-resources/bwrap",
     ):
+        if not platform_manifest and name == "bin/codex-exec-server":
+            continue
         if missing_helper and name == "bin/codex-code-mode-host":
             continue
         path = source / name
@@ -51,6 +54,8 @@ def write_release(
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
     }
+    if platform_manifest:
+        package_metadata["execServer"] = "bin/codex-exec-server"
     (source / "codex-package.json").write_text(json.dumps(package_metadata))
     asset = f"codex-{TARGET}.tar.gz"
     archive = root / f"{version}-{asset}"

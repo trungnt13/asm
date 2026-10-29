@@ -187,6 +187,7 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
 5. **Recover.**
    - After interruption, rerun failed jobs. A new resume dispatch uses `main`, `publish_release=true`, `resume_run_id=<original run ID>`.
    - Keep original version/commit despite upstream changes. Never invent versions or replace tags. Report failures needing owner decisions.
+   - With explicit owner approval, a source-defective, failed unpublished candidate may be superseded by a new immutable candidate. Record the exact old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`; preparation must verify that record and reject publication or asset drift. Preserve the old candidate, tag, and assets, and keep its version occupied. This is not permission to modify a published or partially ready release.
 6. **Verify.**
    - A platform is ready when its checked archive and platform checksum manifest are published.
    - Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate.
@@ -234,14 +235,14 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 - Linux minimum: Ubuntu 22.04 / glibc 2.35. Keep builds/native smoke there; a GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the runtime minimum.
 - Use optimized `--release`, not `dev-small`; `CARGO_PROFILE_RELEASE_STRIP=debuginfo`. Retain function symbols and optimization. Fix timeouts without weakening the profile. Upstream tests do not justify further symbol/dependency removal.
 - Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
-- Build `codex` and `codex-code-mode-host` from one commit/target/profile. Each `codex-<target>.tar.gz` contains:
-  - `bin/codex`, `bin/codex-code-mode-host`, `codex-package.json`, `codex-path/rg`.
+- Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile; pass all three prebuilt executables to canonical packaging. Each `codex-<target>.tar.gz` contains:
+  - `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, `codex-path/rg`.
   - Linux: `codex-resources/bwrap`, built from the same source/release profile. Embed its final SHA-256 in the CLI before packaging.
-  - Use existing canonical layout/pinned ripgrep manifest. Include only required resources, with regular executable files and matching version/target metadata. Shared-server startup must validate/recognize the package without host helpers.
+  - Use existing canonical layout/pinned ripgrep manifest. Include only required resources, with regular executable files and matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must validate/recognize the package without host helpers.
 - Final six assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. No source trees/diagnostics.
 - Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if its CLI accepts it. Older candidates keep original contracts.
 - Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before candidate checkout. Never fetch newer controls mid-run. Legacy uses exact tagged SHA; verify tag resolution. Candidate packaging may precede tagging.
-- Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py): CLI version matches Cargo; both binaries' help succeeds with usage; manifest/resources valid; bundled ripgrep/Bubblewrap smoke passes. Helper `--version` is not required. Record binary/archive sizes.
+- Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py): CLI and exec-server versions match Cargo; all three binaries' help succeeds with usage; manifest/resources valid; bundled ripgrep/Bubblewrap smoke passes. Code-mode-host `--version` is not required. Record binary/archive sizes.
 - GNU source-built ELF executables require x86_64 GNU loader and glibc symbols no newer than 2.35. Pinned ripgrep may be static; check architecture and minimum-OS execution. Run version/help in a clean Ubuntu 22.04 container with only declared runtime libraries; build runners alone do not prove compatibility.
 
 Package limits:
@@ -281,7 +282,7 @@ Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. It
 
 ### Installer
 
-- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 GNU. Verify GitHub digests and host `SHA256SUMS-<target>` before complete-package installation. Reject incomplete two-binary archives in the current installer. Do not treat existing two-binary installations as complete; historical releases keep pinned installers. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
+- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 GNU. Verify GitHub digests and host `SHA256SUMS-<target>` before complete-package installation. Reject incomplete two-binary archives in the current installer. Retain compatibility for older complete canonical packages whose metadata does not declare `execServer`; require the exact regular executable when declared, and reject an undeclared exec-server. Historical incomplete releases keep pinned installers. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
 - Reject unsupported targets/Linux without glibc 2.35+ before metadata downloads/state changes. GNU only, no MUSL fallback. Historical MUSL requires original installer. Use separate target-qualified GNU package directories; preserve MUSL packages and shared config/state.
 - Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, locking, and safe `current` selection. Store under `packages/asm-standalone`; keep upstream packages/update markers and shared Codex config/state and `codex` command unchanged.
 - Only the owner installs externally. No OpenAI/CDN/legacy npm downloads, daemon-only installs, or `auto-update-version` writes. Do not port upstream standalone-release pruning; preserve existing fork packages and installation layout.
