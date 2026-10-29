@@ -416,6 +416,13 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Apply this on new sessions and cold resume, including children without a role;
   keep native caching-disable controls and managed policy authoritative. Do not change
   personal configuration or cache policy for root, side, Cursor, or OpenAI sessions.
+  Managed Claude children also set `disableClaudeAiConnectors: true` in the same
+  inline settings object to skip automatically fetched claude.ai connectors. Preserve
+  configured local MCP servers, built-in coding tools, and the ASM communication bridge;
+  do not disable connectors for root or side sessions or change personal settings.
+  Set `syncClaudeAiSkills: false` only in the child's inline settings to skip account-synced
+  skills without deleting their shared cache. Preserve personal, project, plugin and
+  bundled skills, and retain root and side skill defaults.
   Keep runtime-setting and uncertain-turn recovery checks unchanged.
   Native main sessions receive no role instruction injection. Cursor children use the
   capability-gated ACP path below, not a CLI prompt flag.
