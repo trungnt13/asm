@@ -2820,6 +2820,7 @@ dependencies = [
  "codex-protocol",
  "codex-utils-audio",
  "codex-utils-output-truncation",
+ "codex-utils-string",
  "deno_core_icudata",
  "futures",
  "opentelemetry",
@@ -4055,6 +4056,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]
@@ -5914,6 +5916,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "base64 0.22.1",
+ "codex-agent-graph-store",
  "codex-analytics",
  "codex-arg0",
  "codex-attachment-store",

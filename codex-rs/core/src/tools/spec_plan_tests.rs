@@ -430,6 +430,7 @@ fn mcp_runtime(
     RegisteredTool {
         runtime: handler,
         exposure,
+        native_review: Default::default(),
         model_spec: None,
     }
 }
@@ -1803,6 +1804,7 @@ async fn strict_namespace_ownership_requires_tool_namespace_inventory_opt_in() {
             RegisteredTool {
                 runtime: Arc::new(McpHandler::new(tool).expect("MCP tool spec should build")),
                 exposure,
+                native_review: Default::default(),
                 model_spec: None,
             }
         })
@@ -2099,6 +2101,7 @@ async fn strict_tool_collisions_allow_multiple_tools_in_one_namespace() {
                         McpHandler::new(undocumented_tool).expect("MCP tool spec should build"),
                     ),
                     exposure: ToolExposure::Direct,
+                    native_review: Default::default(),
                     model_spec: None,
                 },
                 mcp_runtime("shared", "shared", "lookup", ToolExposure::Direct),
@@ -2141,6 +2144,7 @@ async fn relaxed_tool_collisions_preserve_first_nonempty_namespace_description()
             RegisteredTool {
                 runtime: Arc::new(McpHandler::new(tool).expect("MCP tool spec should build")),
                 exposure: ToolExposure::Direct,
+                native_review: Default::default(),
                 model_spec: None,
             }
         };

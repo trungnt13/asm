@@ -192,6 +192,8 @@ async fn compact_status_line_labels_preserve_model_and_title() {
             .expect("status preview");
         assert_eq!(
             preview
+                .into_hyperlink_line()
+                .line
                 .spans
                 .iter()
                 .map(|span| span.content.as_ref())
@@ -219,6 +221,8 @@ async fn compact_status_line_labels_preserve_model_and_title() {
             /*use_theme_colors*/ false,
         )
         .expect("placeholder preview")
+        .into_hyperlink_line()
+        .line
         .to_string();
     assert_eq!(placeholders, "cod52·med·cod52 med");
     snapshots.push(format!("Placeholder preview\n{placeholders}"));

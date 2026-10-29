@@ -20,7 +20,7 @@ workspace = true
 codex-http-client = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true, features = ["http1", "tokio", "ws"] }
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 codex-code-mode-protocol = { workspace = true }
 codex-code-mode-runtime = { workspace = true }
 codex-otel = { workspace = true }

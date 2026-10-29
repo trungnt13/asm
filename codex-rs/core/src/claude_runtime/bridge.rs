@@ -442,13 +442,18 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
         internal_chat_message_metadata_passthrough: None,
     };
     session
-        .record_conversation_items(&turn.step.turn, &turn.step.settings.model_info, &[item])
+        .record_conversation_items(
+            &turn.step.turn,
+            &turn.step.settings.model_info,
+            std::slice::from_ref(&item),
+        )
         .await;
     let call = ToolCall {
         tool_name: tool.clone(),
         call_id,
         payload,
         encrypted_function_args: None,
+        native_call: Some(Arc::new(item)),
     };
     let runtime = ToolCallRuntime::new(
         Arc::clone(&session),
