@@ -1,11 +1,11 @@
 [package]
 edition.workspace = true
 license.workspace = true
-name = "codex-claude-runtime"
+name = "codex-external-runtime"
 version.workspace = true
 
 [lib]
-name = "codex_claude_runtime"
+name = "codex_external_runtime"
 path = "src/lib.rs"
 doctest = false
 

@@ -207,7 +207,7 @@ impl SessionStartupPrewarmHandle {
 
 impl Session {
     pub(crate) async fn schedule_startup_prewarm(self: &Arc<Self>, input: PrewarmInput) {
-        if crate::claude_runtime::is_native_model(
+        if crate::external_runtime::is_native_model(
             self.state
                 .lock()
                 .await

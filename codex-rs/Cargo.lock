@@ -2496,21 +2496,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-claude-runtime"
-version = "0.166.1-alpha.6.1"
-dependencies = [
- "anyhow",
- "codex-utils-pty",
- "libc",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "codex-cli"
 version = "0.166.1-alpha.6.1"
 dependencies = [
@@ -2969,7 +2954,6 @@ dependencies = [
  "codex-apply-patch",
  "codex-async-utils",
  "codex-attachment-store",
- "codex-claude-runtime",
  "codex-client",
  "codex-code-mode",
  "codex-config",
@@ -2983,6 +2967,7 @@ dependencies = [
  "codex-execpolicy",
  "codex-extension-api",
  "codex-extension-items",
+ "codex-external-runtime",
  "codex-features",
  "codex-feedback",
  "codex-file-system",
@@ -3501,6 +3486,21 @@ dependencies = [
  "tokio",
  "toml 0.9.11+spec-1.1.0",
  "tracing",
+]
+
+[[package]]
+name = "codex-external-runtime"
+version = "0.166.1-alpha.6.1"
+dependencies = [
+ "anyhow",
+ "codex-utils-pty",
+ "libc",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

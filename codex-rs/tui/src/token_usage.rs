@@ -56,9 +56,9 @@ impl TokenUsage {
 pub(crate) fn context_window_remaining_percent(
     usage: &TokenUsage,
     context_window: i64,
-    claude_runtime: bool,
+    external_runtime: bool,
 ) -> i64 {
-    if !claude_runtime {
+    if !external_runtime {
         return usage.percent_of_context_window_remaining(context_window);
     }
     if context_window <= 0 {

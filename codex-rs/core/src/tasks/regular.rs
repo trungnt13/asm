@@ -30,7 +30,7 @@ impl RegularTask {
 
 impl SessionTask for RegularTask {
     async fn abort(&self, session: Arc<Session>, _ctx: Arc<TurnContext>) {
-        crate::claude_runtime::abort(&session).await;
+        crate::external_runtime::abort(&session).await;
     }
 
     fn kind(&self) -> TaskKind {
@@ -48,8 +48,8 @@ impl SessionTask for RegularTask {
         input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
-        if crate::claude_runtime::is_native_model(&ctx.model_info().slug) {
-            return Box::pin(crate::claude_runtime::run_turn(
+        if crate::external_runtime::is_native_model(&ctx.model_info().slug) {
+            return Box::pin(crate::external_runtime::run_turn(
                 sess,
                 ctx,
                 input,

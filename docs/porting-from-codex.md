@@ -294,6 +294,15 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### External runtime boundary
+
+Keep ASM's inference and tool runtime separate from external CLI execution. Use
+`core/src/external_runtime` for ASM session integration and `ext/external-runtime`
+for shared process/framing/cleanup plumbing plus separate Claude and Cursor drivers.
+Shared session starts, prompts, and outcomes use neutral types; each driver owns its
+CLI protocol encoding. Preserve the legacy `claude-runtime` checkpoint directory,
+canonical history encoding, and checkpoint hashes when changing internal names.
+
 ### Catalog-bound model providers
 
 When `load_external_models_json` is true, merge bundled external models into custom

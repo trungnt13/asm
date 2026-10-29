@@ -307,7 +307,7 @@ impl StatusHistoryCell {
         let native_runtime = NativeRuntime::for_model(model_name)
             .or_else(|| config.model.as_deref().and_then(NativeRuntime::for_model))
             .map(|(runtime, _)| runtime);
-        let claude_runtime = native_runtime.is_some();
+        let external_runtime = native_runtime.is_some();
         let approval_policy = AskForApproval::from(config.permissions.approval_policy.value());
         let permission_profile = config.permissions.effective_permission_profile();
         let workspace_roots = config.effective_workspace_roots();
@@ -401,14 +401,14 @@ impl StatusHistoryCell {
         let default_usage = TokenUsage::default();
         let (context_usage, context_window) = match token_info {
             Some(info) => (&info.last_token_usage, info.model_context_window),
-            None if claude_runtime => (&default_usage, None),
+            None if external_runtime => (&default_usage, None),
             None => (&default_usage, config.model_context_window),
         };
         let context_window = context_window.map(|window| StatusContextWindowData {
             percent_remaining: context_window_remaining_percent(
                 context_usage,
                 window,
-                claude_runtime,
+                external_runtime,
             ),
             tokens_in_context: context_usage.tokens_in_context_window(),
             window,

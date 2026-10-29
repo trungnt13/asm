@@ -64,7 +64,7 @@ members = [
     "execpolicy",
     "ext/agent",
     "ext/agent-message-board",
-    "ext/claude-runtime",
+    "ext/external-runtime",
     "ext/connectors",
     "ext/extension-api",
     "ext/multi-env-copy-file",
@@ -237,7 +237,7 @@ codex-exec-server-cli = { path = "exec-server-cli" }
 codex-exec-server-test-support = { path = "exec-server/tests/support" }
 codex-execpolicy = { path = "execpolicy" }
 codex-extension-api = { path = "ext/extension-api" }
-codex-claude-runtime = { path = "ext/claude-runtime" }
+codex-external-runtime = { path = "ext/external-runtime" }
 codex-extension-items = { path = "ext/items" }
 codex-multi-env-copy-file = { path = "ext/multi-env-copy-file" }
 codex-goal-extension = { path = "ext/goal" }

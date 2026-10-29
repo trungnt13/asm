@@ -53,7 +53,7 @@ const ADMITTED_REQUESTS: u32 = 8;
 /// Allowance beyond queued canonical waits for dispatch and result conversion.
 const TOOL_TIMEOUT_MARGIN: Duration = Duration::from_secs(/*secs*/ 30);
 
-pub(super) struct ClaudeMessageBridge {
+pub(super) struct ExternalMessageBridge {
     state: Arc<BridgeState>,
     stop: CancellationToken,
     server: Option<JoinHandle<std::io::Result<()>>>,
@@ -89,7 +89,7 @@ struct MessageTool {
     spec: Value,
 }
 
-impl ClaudeMessageBridge {
+impl ExternalMessageBridge {
     #[tracing::instrument(level = "trace", skip_all, err)]
     pub(super) async fn start(max_wait: Duration) -> anyhow::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
@@ -241,7 +241,7 @@ impl ClaudeMessageBridge {
     }
 }
 
-impl Drop for ClaudeMessageBridge {
+impl Drop for ExternalMessageBridge {
     fn drop(&mut self) {
         self.stop.cancel();
         if let Ok(mut turn) = self.state.turn.try_lock()

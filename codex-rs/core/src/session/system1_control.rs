@@ -71,7 +71,7 @@ impl Session {
             let (config, source, thread_source, model, effort) = {
                 let state = self.state.lock().await;
                 let configuration = &state.session_configuration;
-                if crate::claude_runtime::is_native_model(
+                if crate::external_runtime::is_native_model(
                     configuration.step_settings.collaboration_mode.model(),
                 ) {
                     return Err(CodexErr::InvalidRequest(

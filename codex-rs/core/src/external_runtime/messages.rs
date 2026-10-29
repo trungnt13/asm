@@ -115,29 +115,55 @@ pub(super) fn input_prefix(messages: &[Value]) -> anyhow::Result<String> {
     ))
 }
 
-pub(super) fn prompt_content(messages: &[Value]) -> Value {
+pub(super) fn prompt_content(messages: &[Value]) -> anyhow::Result<codex_external_runtime::Prompt> {
+    use codex_external_runtime::InputBlock;
+    use codex_external_runtime::Prompt;
     if messages.iter().all(Value::is_string) {
-        return Value::String(
+        return Ok(Prompt::Text(
             messages
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>()
                 .join("\n\n"),
-        );
+        ));
     }
     let mut blocks = Vec::new();
     for (index, message) in messages.iter().enumerate() {
         if index > 0 {
-            blocks.push(json!({"type":"text","text":"\n\n"}));
+            blocks.push(InputBlock::Text {
+                text: "\n\n".to_owned(),
+            });
         }
         match message {
             Value::String(text) if text.is_empty() => {}
-            Value::String(text) => blocks.push(json!({"type":"text","text":text})),
-            Value::Array(content) => blocks.extend(content.iter().cloned()),
-            _ => unreachable!("native input messages are strings or content arrays"),
+            Value::String(text) => blocks.push(InputBlock::Text { text: text.clone() }),
+            Value::Array(content) => {
+                for block in content {
+                    blocks.push(match block["type"].as_str() {
+                        Some("text") => InputBlock::Text {
+                            text: block["text"]
+                                .as_str()
+                                .context("invalid saved external text input")?
+                                .to_owned(),
+                        },
+                        Some("image") => InputBlock::Image {
+                            mime_type: block["source"]["media_type"]
+                                .as_str()
+                                .context("invalid saved external image media type")?
+                                .to_owned(),
+                            data: block["source"]["data"]
+                                .as_str()
+                                .context("invalid saved external image data")?
+                                .to_owned(),
+                        },
+                        _ => bail!("unsupported saved external input block"),
+                    });
+                }
+            }
+            _ => bail!("unsupported saved external input message"),
         }
     }
-    Value::Array(blocks)
+    Ok(Prompt::Blocks(blocks))
 }
 
 pub(super) fn validate_pending_prompt(
@@ -145,7 +171,7 @@ pub(super) fn validate_pending_prompt(
     messages: &[Value],
     pending: &[TurnInput],
     boundary: Option<&str>,
-    validate: impl FnOnce(&Value) -> anyhow::Result<()>,
+    validate: impl FnOnce(&codex_external_runtime::Prompt) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     // Preview the same normalized content that admission will record, without
     // changing history or the native delivery checkpoint on validation failure.
@@ -166,5 +192,5 @@ pub(super) fn validate_pending_prompt(
     if let Some(boundary) = boundary {
         messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
     }
-    validate(&prompt_content(&messages))
+    validate(&prompt_content(&messages)?)
 }

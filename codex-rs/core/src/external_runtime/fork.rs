@@ -36,7 +36,7 @@ pub(crate) async fn prepare_temporary_fork(
     history: &[RolloutItem],
 ) -> Result<ForkSeed, CodexErr> {
     let refuse = |message: &str| CodexErr::InvalidRequest(message.to_string());
-    if parent.active_turn.lock().await.is_some() || parent.claude_runtime.is_busy() {
+    if parent.active_turn.lock().await.is_some() || parent.external_runtime.is_busy() {
         return Err(refuse(
             "main is busy or has native background work; wait until it is idle",
         ));

@@ -7,9 +7,9 @@
 
 mod apply_patch;
 mod apps;
-mod claude_runtime;
 mod client;
 mod client_common;
+mod external_runtime;
 mod model_request;
 mod realtime_context;
 mod realtime_conversation;

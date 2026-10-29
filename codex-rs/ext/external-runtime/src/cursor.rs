@@ -3,10 +3,11 @@
 
 mod images;
 
-use super::ClaudeTurnOutcome;
-use super::NativeProcess;
-use super::STOP_TIMEOUT;
-use super::TurnGuard;
+use crate::ExternalTurnOutcome;
+use crate::Prompt;
+use crate::process::ExternalProcess;
+use crate::process::STOP_TIMEOUT;
+use crate::process::TurnGuard;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
@@ -46,7 +47,7 @@ pub struct CursorOptions {
 }
 
 pub struct CursorRuntime {
-    process: NativeProcess,
+    process: ExternalProcess,
     session_id: String,
     next_request_id: u64,
     config_options: Value,
@@ -77,7 +78,7 @@ impl CursorRuntime {
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
         let mut runtime = Self {
-            process: NativeProcess::spawn(command, crate::frames::FramePolicy::CursorImages)
+            process: ExternalProcess::spawn(command, crate::frames::FramePolicy::CursorImages)
                 .context("starting official Cursor agent")?,
             session_id: String::new(),
             next_request_id: 0,
@@ -395,10 +396,10 @@ impl CursorRuntime {
     #[tracing::instrument(skip_all)]
     pub async fn run_turn(
         &mut self,
-        prompt: &Value,
+        prompt: &Prompt,
         events: mpsc::Sender<Value>,
         cancel: CancellationToken,
-    ) -> Result<ClaudeTurnOutcome> {
+    ) -> Result<ExternalTurnOutcome> {
         if !self.usable {
             bail!("Cursor session requires explicit recovery after an unfinished turn");
         }
@@ -439,7 +440,7 @@ impl CursorRuntime {
         frame: Value,
         events: &mpsc::Sender<Value>,
         cancel: CancellationToken,
-    ) -> Result<ClaudeTurnOutcome> {
+    ) -> Result<ExternalTurnOutcome> {
         self.next_request_id += 1;
         let prompt_id = self.next_request_id;
         tokio::select! {
@@ -538,7 +539,7 @@ impl CursorRuntime {
                 self.failure_result = Some(frame);
                 bail!("Cursor did not confirm that its native subagents stopped");
             }
-            return Ok(ClaudeTurnOutcome {
+            return Ok(ExternalTurnOutcome {
                 result: Some(frame["result"].clone()),
                 interrupted,
                 submitted_steering_count: 0,

@@ -1496,7 +1496,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     )
                 })
                 .filter(|model| {
-                    crate::claude_runtime::is_native_model(&model.model)
+                    crate::external_runtime::is_native_model(&model.model)
                         || codex_models_manager::provider_for_model(&model.model).is_some_and(
                             |provider| {
                                 turn_context.config.model_providers.contains_key(provider)
