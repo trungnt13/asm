@@ -133,9 +133,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `133c11db436b89fe93ddfed56e00a46319abc864`.
+- Last incorporated commit: `94d919e31e64fdcd63b37682711389fe9c5fe92b`.
 - Date: 2026-10-28.
-- Subject: Allow model catalogs to customize approval instruction headings (#57581).
+- Subject: Extend the provider OAuth sign-in timeout to ten minutes (#57859).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
@@ -253,13 +253,13 @@ Package limits:
 
 #### V8 dependency release
 
-Build V8 separately only if version/target/baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml), tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35`. The suffix identifies GNU-baseline generation and matching macOS pair. Do not replace/move the old MUSL release.
+Build V8 separately only if version/target/baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml), tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35.2`. The suffix identifies GNU-baseline generation and matching macOS pair. Do not replace/move the old MUSL release.
 
 - Manual branch dispatch defaults to build-only. Explicit `publish=true` builds/smokes, then tags/publishes at that commit. Tag pushes publish too. Tag moves or published asset replacement need approval.
 - Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebase/releases also has standing approval when independent review proves Cargo ABI, bindings, and the full dependency closure remain compatible, and native consumer build/JavaScript/sandbox checks pass. Record omitted source-recipe fixes; do not claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
-  - Existing V8 152.2.0 archives remain approved at glibc 2.35. The ICU relocation preserves effective inputs. Upstream `85de07048c` changes Abseil namespace/C++ runtime isolation: these archives omit that fix. Reuse is accepted for compatible Cargo consumers, not equivalent new-source builds.
+  - The original V8 152.2.0 `glibc2.35` pair has stale CppGC sizes and typed-array threshold bindings. Do not reuse that pair. Generation `glibc2.35.2` rebuilds source-generated matching archives/bindings and includes the Chromium C++ runtime isolation fix; preserve the original assets.
 - Build only optimized sandbox + pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
-- Require both targets' native `codex-v8-poc` sandbox/JavaScript smoke, including Ubuntu 22.04 GNU. Reuse GNU Bazel platform and older glibc sysroot.
+- Require both targets' native `codex-v8-poc` sandbox/JavaScript smoke, including ignored CppGC ABI checks and Ubuntu 22.04 GNU. Reuse GNU Bazel platform and older glibc sysroot.
 - Publish only each target's archive, Rust binding, and two-file manifest. Normal release, **not Latest**, no installer; separate from CLI discovery.
 - Before the first consuming `main` push, publish and verify both new version/generation pairs. CI/CLI releases consume only matching verified fork V8. Verify GitHub SHA-256 digests and exact manifest names/hashes. Missing/bad assets fail; no upstream fallback. Keep upstream action paths for other workflows.
 

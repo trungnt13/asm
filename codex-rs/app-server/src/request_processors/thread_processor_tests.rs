@@ -863,7 +863,10 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, Some("gpt-5.2-codex".to_string()));
-        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("mock_provider".to_string())
+        );
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -875,8 +878,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn merge_persisted_resume_metadata_skips_persisted_values_when_model_overridden() -> Result<()>
-    {
+    fn merge_persisted_resume_metadata_preserves_provider_when_model_overridden() -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model".to_string(),
             serde_json::Value::String("gpt-5.2-codex".to_string()),
@@ -892,7 +894,10 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("mock_provider".to_string())
+        );
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -927,7 +932,7 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
-    fn merge_persisted_resume_metadata_skips_persisted_values_when_reasoning_effort_overridden()
+    fn merge_persisted_resume_metadata_preserves_provider_when_reasoning_effort_overridden()
     -> Result<()> {
         let mut request_overrides = Some(HashMap::from([(
             "model_reasoning_effort".to_string(),
@@ -944,7 +949,10 @@ mod thread_processor_behavior_tests {
         );
 
         assert_eq!(typesafe_overrides.model, None);
-        assert_eq!(typesafe_overrides.model_provider, None);
+        assert_eq!(
+            typesafe_overrides.model_provider,
+            Some("mock_provider".to_string())
+        );
         assert_eq!(
             request_overrides,
             Some(HashMap::from([(
@@ -1241,12 +1249,12 @@ mod thread_processor_behavior_tests {
         manager
             .connection_initialized(connection, ConnectionCapabilities::default())
             .await;
-        manager
-            .try_ensure_connection_subscribed(
-                thread_id, connection, /*experimental_raw_events*/ false,
-            )
-            .await
-            .expect("connection should be live");
+        assert!(
+            manager
+                .try_add_connection_to_thread(thread_id, connection)
+                .await,
+            "connection should be live"
+        );
         {
             let state = manager.thread_state(thread_id).await;
             let mut state = state.lock().await;
@@ -1292,22 +1300,18 @@ mod thread_processor_behavior_tests {
         manager
             .connection_initialized(connection_b, ConnectionCapabilities::default())
             .await;
-        manager
-            .try_ensure_connection_subscribed(
-                thread_id,
-                connection_a,
-                /*experimental_raw_events*/ false,
-            )
-            .await
-            .expect("connection_a should be live");
-        manager
-            .try_ensure_connection_subscribed(
-                thread_id,
-                connection_b,
-                /*experimental_raw_events*/ false,
-            )
-            .await
-            .expect("connection_b should be live");
+        assert!(
+            manager
+                .try_add_connection_to_thread(thread_id, connection_a)
+                .await,
+            "connection_a should be live"
+        );
+        assert!(
+            manager
+                .try_add_connection_to_thread(thread_id, connection_b)
+                .await,
+            "connection_b should be live"
+        );
         {
             let state = manager.thread_state(thread_id).await;
             state.lock().await.cancel_tx = Some(cancel_tx);
@@ -1341,14 +1345,12 @@ mod thread_processor_behavior_tests {
         manager
             .connection_initialized(connection_b, ConnectionCapabilities::default())
             .await;
-        manager
-            .try_ensure_connection_subscribed(
-                thread_id,
-                connection_a,
-                /*experimental_raw_events*/ false,
-            )
-            .await
-            .expect("connection_a should be live");
+        assert!(
+            manager
+                .try_add_connection_to_thread(thread_id, connection_a)
+                .await,
+            "connection_a should be live"
+        );
         let mut has_connections = manager
             .subscribe_to_has_connections(thread_id)
             .await
@@ -1417,12 +1419,9 @@ mod thread_processor_behavior_tests {
         assert_eq!(threads_to_unload, Vec::<ThreadId>::new());
 
         assert!(
-            manager
-                .try_ensure_connection_subscribed(
-                    thread_id, connection, /*experimental_raw_events*/ false
-                )
+            !manager
+                .try_add_connection_to_thread(thread_id, connection)
                 .await
-                .is_none()
         );
         assert!(!manager.has_subscribers(thread_id).await);
         Ok(())

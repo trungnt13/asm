@@ -8,11 +8,15 @@ use crate::elicitation::ElicitationRegistration;
 use crate::session::SessionIo;
 use crate::session::SessionSettingsUpdate;
 use crate::session::Submission;
+use crate::session::emit_subagent_session_started;
 use crate::session::new_submission_id;
+use crate::session::session::AppServerClientMetadata;
 use crate::session::session::Session;
 use crate::session::startup_prewarm::PrewarmInput;
 use crate::session::step_settings::StepSettingsUpdate;
 use crate::thread_startup_metadata::ThreadStartupMetadata;
+use chrono::DateTime;
+use chrono::Utc;
 use codex_diagnostics::Gauge;
 use codex_diagnostics::GaugeGuard;
 use codex_exec_server::SelectedCapabilityRootsStatus;
@@ -45,6 +49,7 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::ThreadSettingsOverrides;
@@ -188,30 +193,8 @@ pub enum ConfigRefreshOutcome {
 
 pub use codex_guardian_context::GuardianRootMessage;
 
-/// Authorization state that changes on genuine user input or history resets.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GuardianAuthorizationVersion {
-    /// User-message/reset revision, preserved across compaction and internal context.
-    pub user_message_revision: u64,
-    /// False when required retained answers or root instructions are unavailable.
-    pub retained_context_complete: bool,
-}
-
-/// Root authorization state, selected messages and request-local originals from one snapshot.
-#[derive(Debug, PartialEq)]
-pub struct GuardianRootSnapshot {
-    /// Authoritative root from which this evidence was captured.
-    pub root_thread_id: ThreadId,
-    /// Distinguishes a history reset from additional authorization in the same history.
-    pub(crate) history_reset_version: u64,
-    pub authorization_version: GuardianAuthorizationVersion,
-    /// Confirmed assistant context is relevant to review but cannot authorize an action.
-    pub review_context_revision: u64,
-    pub messages: Vec<GuardianRootMessage>,
-    /// Request-local originals retained before the bounded compatibility projection.
-    pub(crate) request_candidates: Option<codex_guardian_context::RootConversationInput>,
-    pub trusted_skill_paths: Vec<String>,
-}
+pub use codex_guardian_reviewer::GuardianAuthorizationVersion;
+pub use codex_guardian_reviewer::GuardianRootSnapshot;
 
 pub struct CodexThread {
     pub(crate) session: Arc<Session>,
@@ -295,6 +278,39 @@ impl CodexThread {
         self.session.services.analytics_events_client.is_enabled()
     }
 
+    /// Looks up a live V2 tool invocation on a runtime with [`crate::HostToolInvocationLookup`].
+    pub fn tool_invocation(
+        &self,
+        turn_id: &str,
+        call_id: &str,
+    ) -> CodexResult<crate::ToolInvocationContext> {
+        crate::agent::host::tool_invocation(self, turn_id, call_id)
+    }
+
+    /// Creates an idle V2 child here with the invoking step's environments and live application
+    /// bindings. Compatible children share the parent's exec policy.
+    /// Ending the invocation or dropping this future aborts pending startup.
+    /// [`crate::ThreadManager::create_prepared_child`] defines acceptance and cleanup.
+    pub async fn create_child(
+        &self,
+        invocation: &crate::ToolInvocationContext,
+        request: crate::ThreadCreateRequest,
+        reservation: crate::HostThreadSpawnReservation,
+    ) -> Result<crate::ThreadSpawnResult, crate::ThreadSpawnError> {
+        crate::agent::host::create(self, invocation, request, reservation).await
+    }
+
+    /// Captures inputs from a live invocation for [`crate::ThreadManager::create_prepared_child`].
+    /// The host owns cancellation and snapshot freshness after this returns. Detached preparation
+    /// rejects managed application network, auth, and cloud config bindings.
+    pub async fn prepare_child(
+        &self,
+        invocation: &crate::ToolInvocationContext,
+        request: crate::ThreadCreateRequest,
+    ) -> Result<crate::PreparedThreadSpawn, crate::ThreadSpawnError> {
+        crate::agent::host::prepare(self, invocation, request).await
+    }
+
     /// Returns extension-owned data attached to this thread runtime.
     pub fn thread_extension_data(&self) -> &codex_extension_api::ExtensionData {
         &self.session.services.thread_extension_data
@@ -342,6 +358,29 @@ impl CodexThread {
     /// Wait until the underlying session loop has terminated.
     pub async fn wait_until_terminated(&self) {
         self.io.session_loop_termination.clone().await;
+    }
+
+    pub(crate) async fn emit_subagent_session_started(
+        &self,
+        client_metadata: AppServerClientMetadata,
+        resumed_created_at: Option<DateTime<Utc>>,
+    ) {
+        let SessionSource::SubAgent(source @ SubAgentSource::ThreadSpawn { .. }) =
+            &self.session_source
+        else {
+            return;
+        };
+        let config = self.config_snapshot().await;
+        emit_subagent_session_started(
+            &self.session.services.analytics_events_client,
+            client_metadata,
+            self.session.session_id(),
+            self.session.thread_id(),
+            config.parent_thread_id,
+            config,
+            source.clone(),
+            resumed_created_at,
+        );
     }
 
     pub(crate) async fn emit_thread_ready_lifecycle(&self) {
@@ -823,6 +862,11 @@ impl CodexThread {
 
     pub async fn agent_status(&self) -> AgentStatus {
         self.io.agent_status().await
+    }
+
+    /// Returns whether the runtime has published its shutdown status.
+    pub fn has_shutdown_status(&self) -> bool {
+        matches!(*self.io.agent_status.borrow(), AgentStatus::Shutdown)
     }
 
     pub async fn list_background_terminals(&self) -> Vec<BackgroundTerminalInfo> {

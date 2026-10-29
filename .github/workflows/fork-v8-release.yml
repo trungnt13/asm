@@ -39,13 +39,13 @@ jobs:
           version="$(python3 .github/scripts/rusty_v8_bazel.py resolved-v8-crate-version)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if [[ "$REF" == refs/tags/* ]]; then
-            [[ "$REF_NAME" == "asm-v8-v${version}-glibc2.35" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
+            [[ "$REF_NAME" == "asm-v8-v${version}-glibc2.35.2" ]] || { echo 'V8 tag and resolved crate version differ' >&2; exit 1; }
             [[ "$(git rev-parse "${REF_NAME}^{commit}")" == "$(git rev-parse "${GITHUB_SHA}^{commit}")" ]] || {
               echo 'V8 tag does not point to this workflow commit' >&2; exit 1;
             }
           fi
           if [[ "$REF" == refs/tags/* || "$PUBLISH" == true ]]; then
-            tag="asm-v8-v${version}-glibc2.35"
+            tag="asm-v8-v${version}-glibc2.35.2"
             status="$(curl -sS -o /dev/null -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
@@ -91,9 +91,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-bazel-ci
+      - uses: ./.github/actions/prepare-bazel-ci
         with:
           target: ${{ matrix.target }}
+          cache-scope: fork-v8
       - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
         with:
           targets: ${{ matrix.target }}
@@ -128,7 +129,7 @@ jobs:
           cd codex-rs
           RUSTY_V8_ARCHIVE="$archive" RUSTY_V8_SRC_BINDING_PATH="$binding" \
             just test -p codex-v8-poc --target "$TARGET" --features sandbox \
-              -E 'test(sandbox_feature_matches_linked_v8) | test(evaluates_integer_addition)' --locked
+              --run-ignored all --locked
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: fork-v8-${{ matrix.target }}
@@ -149,7 +150,7 @@ jobs:
       - name: Publish only the six expected files
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: asm-v8-v${{ needs.metadata.outputs.version }}-glibc2.35
+          TAG: asm-v8-v${{ needs.metadata.outputs.version }}-glibc2.35.2
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
