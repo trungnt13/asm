@@ -430,9 +430,9 @@ async fn run_conversation(
                 disallowed_tools,
                 role_instructions,
                 if thread_spawn_child {
-                    codex_external_runtime::ClaudePromptSnapshot::Rebuild
+                    codex_external_runtime::ClaudeSessionKind::ManagedChild
                 } else {
-                    codex_external_runtime::ClaudePromptSnapshot::NativeDefault
+                    codex_external_runtime::ClaudeSessionKind::NativeDefault
                 },
                 &mut checkpoint,
                 &checkpoint_path,
