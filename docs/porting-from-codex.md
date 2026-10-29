@@ -404,8 +404,13 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Keep loaded role instructions during warm turns. On cold reload, recover the role
   through normal child configuration and supply its current text on native startup.
   Do not pin role text to saved linkage or reject changes to the same role. Native
-  prompt snapshots may defer changed instructions until a later context rebuild;
-  accepting reload does not promise immediate application. Keep runtime-setting and
+  prompt snapshots must not retain an older role after cold reload. For managed
+  Claude children, pass `--system-prompt-snapshot off` even when the current role
+  has no instructions, so removing instructions also clears the old role. This
+  requires Claude Code 2.1.257 or later; fail rather than silently retain a snapshot
+  on an unsupported CLI. Claude rebuilds the prompt each request, which can affect
+  cache reuse and retained thinking. Keep loaded role text fixed during warm turns;
+  preserve native defaults for root and side sessions. Keep runtime-setting and
   uncertain-turn recovery checks unchanged.
   Native main sessions receive no role instruction injection. Cursor children use the
   capability-gated ACP path below, not a CLI prompt flag.

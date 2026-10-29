@@ -39,6 +39,12 @@ pub enum ClaudeSession {
     },
 }
 
+/// Controls whether native saved instructions can override current launch instructions.
+pub enum ClaudePromptSnapshot {
+    NativeDefault,
+    Rebuild,
+}
+
 pub struct ClaudeOptions {
     pub executable: PathBuf,
     pub cwd: PathBuf,
@@ -48,6 +54,7 @@ pub struct ClaudeOptions {
     pub auto_compact_window: Option<i64>,
     /// Selected role instructions appended to the native system prompt, including on resume.
     pub role_instructions: Option<String>,
+    pub prompt_snapshot: ClaudePromptSnapshot,
     pub session: ClaudeSession,
     pub bridge_directory: Option<PathBuf>,
     /// Native tool names removed from this session, such as questions for headless children.
@@ -145,7 +152,9 @@ impl ClaudeRuntime {
                 .env("ASM_NATIVE_DESCRIPTOR", directory.join("descriptor.json"))
                 .env("ASM_NATIVE_EXE", std::env::current_exe()?);
         }
-        // Reapply on resume: Claude can rebuild its saved system prompt after compaction.
+        if matches!(options.prompt_snapshot, ClaudePromptSnapshot::Rebuild) {
+            command.args(["--system-prompt-snapshot", "off"]);
+        }
         if let Some(instructions) = options.role_instructions {
             command.arg("--append-system-prompt").arg(instructions);
         }
