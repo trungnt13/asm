@@ -290,7 +290,8 @@ impl CodexThread {
     /// Creates an idle V2 child here with the invoking step's environments and live application
     /// bindings. Compatible children share the parent's exec policy.
     /// Ending the invocation or dropping this future aborts pending startup.
-    /// [`crate::ThreadManager::create_prepared_child`] defines acceptance and cleanup.
+    /// Success publishes the idle child and transfers ownership to the host. An error or dropped
+    /// future schedules cleanup of any provisional child. Already-durable history may remain.
     pub async fn create_child(
         &self,
         invocation: &crate::ToolInvocationContext,
@@ -300,15 +301,13 @@ impl CodexThread {
         crate::agent::host::create(self, invocation, request, reservation).await
     }
 
-    /// Captures inputs from a live invocation for [`crate::ThreadManager::create_prepared_child`].
-    /// The host owns cancellation and snapshot freshness after this returns. Detached preparation
-    /// rejects managed application network, auth, and cloud config bindings.
+    /// Reads the parent settings for this live tool invocation, including the dynamic tools
+    /// currently inheritable by a fresh child. The host chooses the child's name, role, and history.
     pub async fn prepare_child(
         &self,
         invocation: &crate::ToolInvocationContext,
-        request: crate::ThreadCreateRequest,
-    ) -> Result<crate::PreparedThreadSpawn, crate::ThreadSpawnError> {
-        crate::agent::host::prepare(self, invocation, request).await
+    ) -> Result<crate::PreparedChildContext, crate::ThreadSpawnError> {
+        crate::agent::host::prepare(self, invocation).await
     }
 
     /// Returns extension-owned data attached to this thread runtime.
@@ -465,6 +464,20 @@ impl CodexThread {
                 /*residency_guard*/ None, /*message_delivery*/ None,
             )
             .await
+    }
+
+    /// Waits for input activity without consuming input, following native `wait_agent` behavior.
+    ///
+    /// The named turn supplies any already-buffered steering input. Subsequent activity is
+    /// thread-wide: ending or replacing that turn does not end this wait. Mailbox input
+    /// already pending is also observed. Callers own cancellation; dropping this future
+    /// does not consume input or affect execution. Each call observes independently.
+    pub async fn wait_for_input_activity(
+        &self,
+        turn_id: &str,
+        timeout: std::time::Duration,
+    ) -> crate::InputWaitOutcome {
+        crate::thread_input::wait_for_input_activity(&self.session, turn_id, timeout).await
     }
 
     /// Submits turn input without requiring the caller to inspect thread state.

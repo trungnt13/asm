@@ -51,7 +51,7 @@ pub(super) async fn lookup(
     name: &str,
     collections: &[SessionCollection],
     source_kind_filters: &[Vec<ThreadSourceKind>],
-    model_provider: Option<&str>,
+    model_providers: Option<Vec<String>>,
 ) -> Result<Option<Thread>> {
     Ok(find_matches(
         app_server,
@@ -59,7 +59,7 @@ pub(super) async fn lookup(
         name,
         collections,
         source_kind_filters,
-        model_provider,
+        model_providers,
         SessionMatch::Exact,
     )
     .await?
@@ -90,7 +90,7 @@ pub(super) async fn find_matches(
     name: &str,
     collections: &[SessionCollection],
     source_kind_filters: &[Vec<ThreadSourceKind>],
-    model_provider: Option<&str>,
+    model_providers: Option<Vec<String>>,
     match_kind: SessionMatch,
 ) -> Result<Vec<Thread>> {
     let query = match match_kind {
@@ -116,7 +116,7 @@ pub(super) async fn find_matches(
                         // Activity must not move an unread thread ahead of the cursor.
                         sort_key: Some(ThreadSortKey::CreatedAt),
                         sort_direction: None,
-                        model_providers: model_provider.map(|provider| vec![provider.to_string()]),
+                        model_providers: model_providers.clone(),
                         source_kinds: Some(source_kinds.clone()),
                         archived: Some(matches!(collection, SessionCollection::Archived)),
                         section_id: None,

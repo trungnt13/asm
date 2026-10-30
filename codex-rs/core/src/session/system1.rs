@@ -21,6 +21,7 @@ use codex_config::System1Trigger;
 use codex_http_client::ClientRouteClass;
 use codex_http_client::RouteAwareClientPool;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelOrigin;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::System1Error;
@@ -679,7 +680,7 @@ impl Session {
                                 .map(str::trim)
                                 .filter(|description| {
                                     !description.is_empty()
-                                        && !expected.model_info.used_fallback_model_metadata
+                                        && expected.model_info.origin != ModelOrigin::Synthetic
                                 })
                                 .unwrap_or("unavailable");
                             let description = serde_json::json!(
@@ -698,7 +699,9 @@ impl Session {
                                     .supported_reasoning_levels
                                     .iter()
                                     .find(|preset| &preset.effort == effort)
-                                    .filter(|_| !expected.model_info.used_fallback_model_metadata)
+                                    .filter(|_| {
+                                        expected.model_info.origin != ModelOrigin::Synthetic
+                                    })
                                     .map(|preset| preset.description.trim())
                                     .filter(|description| !description.is_empty())
                                     .map(|description| {
@@ -706,9 +709,15 @@ impl Session {
                                             [..description.floor_char_boundary(/*index*/ 1024)]
                                     })
                                     .unwrap_or("unavailable");
-                                let guidance = config
-                                    .calibrated_effort_description(effort, &expected.model_info)
-                                    .expect("System1 choices are ordinary efforts");
+                                let guidance = if expected.model_info.origin
+                                    == ModelOrigin::Synthetic
+                                {
+                                    config.effort_description(effort)
+                                } else {
+                                    config
+                                        .calibrated_effort_description(effort, &expected.model_info)
+                                }
+                                .expect("System1 choices are ordinary efforts");
                                 (
                                     effort.to_string(),
                                     format!(

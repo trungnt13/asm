@@ -400,10 +400,8 @@ fn remote_start_allows_network_access_overrides_before_requiring_terminal() -> R
 }
 
 #[test]
-fn no_daemon_rejects_agents_and_explicit_remote_targets() -> Result<()> {
+fn no_daemon_rejects_queue_and_explicit_remote_targets() -> Result<()> {
     for args in [
-        "--no-daemon agents",
-        "agents --no-daemon",
         "--no-daemon queue --thread example --message hello",
         "--no-daemon --remote ws://localhost:9999 agents",
         "--no-daemon --remote ws://localhost:9999",

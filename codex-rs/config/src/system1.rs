@@ -140,7 +140,6 @@ impl System1Config {
         let Some(index) = supported
             .iter()
             .position(|effort| Some(*effort) == model.default_reasoning_level.as_ref())
-            .filter(|_| !model.used_fallback_model_metadata)
         else {
             return self.effort_description(effort);
         };
