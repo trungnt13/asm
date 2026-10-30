@@ -543,6 +543,7 @@ impl CursorRuntime {
                 result: Some(frame["result"].clone()),
                 interrupted,
                 submitted_steering_count: 0,
+                failure: None,
             });
         }
     }

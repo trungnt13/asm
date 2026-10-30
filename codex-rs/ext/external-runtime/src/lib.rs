@@ -28,8 +28,13 @@ pub enum InputBlock {
     Image { mime_type: String, data: String },
 }
 
+pub enum ExternalTurnFailure {
+    Authentication,
+}
+
 pub struct ExternalTurnOutcome {
     pub result: Option<Value>,
     pub interrupted: bool,
     pub submitted_steering_count: usize,
+    pub failure: Option<ExternalTurnFailure>,
 }

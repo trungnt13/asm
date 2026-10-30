@@ -43,7 +43,7 @@ impl Checkpoint {
         );
         anyhow::ensure!(
             !self.in_flight,
-            "previous native turn has an uncertain outcome; start a new chat to avoid replay"
+            "ASM could not confirm that the native runtime finished the previous turn. This chat is blocked to prevent duplicate execution; start a new chat."
         );
         anyhow::ensure!(
             self.model == model
