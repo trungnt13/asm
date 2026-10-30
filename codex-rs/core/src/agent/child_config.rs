@@ -15,6 +15,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::openai_models::ModelInfo;
+use codex_protocol::openai_models::ModelOrigin;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
@@ -122,10 +123,10 @@ pub(crate) async fn prepare_agent_spawn_config(
             .models_manager
             .get_model_info(model, &config.to_models_manager_config())
             .await;
-        config.model_reasoning_effort = if model_info.used_fallback_model_metadata {
+        config.model_reasoning_effort = if model_info.origin == ModelOrigin::Synthetic {
             None
         } else {
-            model_info.default_reasoning_level
+            model_info.default_reasoning_level.clone()
         };
     }
     validate_spawn_agent_config_effort(session, &config).await?;
@@ -317,10 +318,10 @@ async fn apply_requested_spawn_agent_model_overrides(
             config.model_reasoning_effort = Some(reasoning_effort);
         } else {
             config.model_reasoning_effort =
-                if native_model && selected_model_info.used_fallback_model_metadata {
+                if native_model && selected_model_info.origin == ModelOrigin::Synthetic {
                     None
                 } else {
-                    selected_model_info.default_reasoning_level
+                    selected_model_info.default_reasoning_level.clone()
                 };
         }
 
@@ -347,7 +348,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
     if crate::external_runtime::is_native_model(&model) {
-        if !model_info.used_fallback_model_metadata
+        if model_info.origin != ModelOrigin::Synthetic
             && let Some(effort) = config.model_reasoning_effort.as_ref()
         {
             validate_spawn_agent_reasoning_effort(
@@ -440,7 +441,7 @@ async fn validate_spawn_agent_config_effort(
         .models_manager
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
-    if model_info.used_fallback_model_metadata {
+    if model_info.origin == ModelOrigin::Synthetic {
         return Ok(());
     }
 

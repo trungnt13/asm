@@ -5,4 +5,4 @@ expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))
                                                                            Main
 › Viewing sub-agent — direct input is disabled
 
-  sol61 def·/tmp/project·child-1[worker]
+  sol61 def·/tmp/project·child-1[worker]·← for agents

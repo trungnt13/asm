@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use super::*;
 use codex_tui::DaemonUpdateSource;
 use pretty_assertions::assert_eq;
