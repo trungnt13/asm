@@ -502,7 +502,14 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Native aborted-streaming and aborted-tools results are resumable only after an
   ASM-requested interrupt, for the submitted UUID with its cancelled-command receipt
   and the confirmed cleanup above. Continue with new input; never replay the interrupted
-  input or assume its tools had no side effects. Other execution errors require recovery.
+  input or assume its tools had no side effects. A structured Claude authentication
+  failure may leave the turn failed but resumable only after its submitted commands
+  are reconciled, native idle is confirmed, and no tool work or active child tasks
+  make the outcome uncertain. Persist the consumed input and clean linkage before
+  reporting the authentication failure. Allow only new input after login; never
+  resend the failed prompt automatically. Missing confirmation and other execution
+  errors keep the no-replay guard and require explicit recovery. Do not clear older
+  unfinished checkpoints based on their error text.
 - Bound framing, stderr and cleanup waits. Kill only owned native processes; preserve
   primary failures and retain diagnostics only when requested. Record the first
   process state before cleanup separately from its final exit status; cleanup must not

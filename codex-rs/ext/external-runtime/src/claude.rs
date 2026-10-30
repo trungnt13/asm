@@ -1,3 +1,4 @@
+use crate::ExternalTurnFailure;
 use crate::ExternalTurnOutcome;
 use crate::InputBlock;
 use crate::Prompt;
@@ -350,6 +351,10 @@ impl ClaudeRuntime {
         let mut interrupt_deadline = None;
         let mut interrupt_acknowledged = false;
         let mut interrupted_commands = HashSet::new();
+        let mut authentication_error = false;
+        let mut tool_work_observed = false;
+        let mut pending_failure = None;
+        let mut authentication_deadline = None;
         let mut idle = false;
         // Local agents by task ID, with the latest run ID when Claude reports one.
         let mut active_agents: HashMap<String, Option<String>> = HashMap::new();
@@ -357,6 +362,9 @@ impl ClaudeRuntime {
             let frame = tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if interrupt_id.is_none() => {
+                    if pending_failure.is_some() {
+                        bail!("Claude authentication failure cleanup was cancelled before idle; explicit recovery is required");
+                    }
                     let request_id = Uuid::new_v4().to_string();
                     let deadline = Instant::now() + STOP_TIMEOUT;
                     timeout(STOP_TIMEOUT, self.process.write_frame(json!({
@@ -369,18 +377,23 @@ impl ClaudeRuntime {
                     continue;
                 }
                 _ = async {
-                    if let Some(deadline) = interrupt_deadline {
+                    if let Some(deadline) = interrupt_deadline.or(authentication_deadline) {
                         sleep_until(deadline).await;
                     } else {
                         std::future::pending::<()>().await;
                     }
-                } => bail!("Claude interrupt acknowledgement and idle timed out"),
+                } => {
+                    if pending_failure.is_some() {
+                        bail!("Claude authentication failure did not reach a confirmed idle boundary");
+                    }
+                    bail!("Claude interrupt acknowledgement and idle timed out");
+                },
                 prompt = async {
                     match steering.as_mut() {
                         Some(receiver) => receiver.recv().await,
                         None => std::future::pending().await,
                     }
-                }, if interrupt_id.is_none() => {
+                }, if interrupt_id.is_none() && pending_failure.is_none() => {
                     let Some(prompt) = prompt else {
                         steering = None;
                         continue;
@@ -414,6 +427,28 @@ impl ClaudeRuntime {
             {
                 bail!("Claude returned a different session ID than requested");
             }
+            let tool_block = |block: &Value| {
+                matches!(
+                    block.get("type").and_then(Value::as_str),
+                    Some("tool_use" | "server_tool_use" | "tool_result")
+                )
+            };
+            tool_work_observed |= frame
+                .pointer("/message/content")
+                .and_then(Value::as_array)
+                .is_some_and(|blocks| blocks.iter().any(tool_block))
+                || frame
+                    .pointer("/event/content_block")
+                    .is_some_and(tool_block)
+                || matches!(
+                    frame.get("type").and_then(Value::as_str),
+                    Some("tool_progress" | "tool_use_summary")
+                )
+                || frame
+                    .get("parent_tool_use_id")
+                    .is_some_and(|id| !id.is_null())
+                || (frame.get("type").and_then(Value::as_str) == Some("system")
+                    && frame.get("subtype").and_then(Value::as_str) == Some("task_started"));
             if frame["type"] == "system"
                 && matches!(
                     frame["subtype"].as_str(),
@@ -543,6 +578,17 @@ impl ClaudeRuntime {
                         && (interrupt_id.is_some() || !self.background_work);
                 }
             }
+            if pending_failure.is_some()
+                && (tool_work_observed
+                    || matches!(
+                        frame.get("type").and_then(Value::as_str),
+                        Some("assistant" | "stream_event" | "result")
+                    ))
+            {
+                bail!(
+                    "Claude emitted new activity after its authentication failure; explicit recovery is required"
+                );
+            }
             let is_result = frame.get("type").and_then(Value::as_str) == Some("result");
             let is_idle = frame.get("type").and_then(Value::as_str) == Some("system")
                 && frame.get("subtype").and_then(Value::as_str) == Some("session_state_changed")
@@ -555,15 +601,19 @@ impl ClaudeRuntime {
                 pending_result = None;
                 idle = false;
                 if frame.get("type").and_then(Value::as_str) == Some("assistant") {
+                    authentication_error = frame.get("error").and_then(Value::as_str)
+                        == Some("authentication_failed")
+                        && frame.get("user_message_uuid").and_then(Value::as_str)
+                            == Some(user_message_uuid);
                     self.last_assistant_uuid =
                         frame.get("uuid").and_then(Value::as_str).map(str::to_owned);
                 }
             }
             let send = events.send(frame.clone());
-            if let Some(deadline) = interrupt_deadline {
+            if let Some(deadline) = interrupt_deadline.or(authentication_deadline) {
                 tokio::time::timeout_at(deadline, send)
                     .await
-                    .context("Claude interrupt event delivery timed out")?
+                    .context("Claude bounded cleanup event delivery timed out")?
                     .context("Claude event consumer closed")?;
             } else {
                 send.await.context("Claude event consumer closed")?;
@@ -584,7 +634,15 @@ impl ClaudeRuntime {
                 if interrupted_execution && let Some(id) = result_command {
                     interrupted_commands.insert(id.to_owned());
                 }
+                let authentication_failed = authentication_error
+                    && !tool_work_observed
+                    && interrupt_id.is_none()
+                    && submitted_steering_count == 0
+                    && result_command == Some(user_message_uuid)
+                    && frame.get("is_error").and_then(Value::as_bool) == Some(true)
+                    && frame.get("subtype").and_then(Value::as_str) == Some("success");
                 if !interrupted_execution
+                    && !authentication_failed
                     && (frame.get("is_error").and_then(Value::as_bool) != Some(false)
                         || frame.get("subtype").and_then(Value::as_str) != Some("success"))
                 {
@@ -600,6 +658,12 @@ impl ClaudeRuntime {
                     };
                     self.failure_result = Some(frame);
                     bail!("Claude returned an unsuccessful turn result: {category}");
+                }
+                if authentication_failed {
+                    self.failure_result = Some(frame.clone());
+                    pending_failure = Some(ExternalTurnFailure::Authentication);
+                    authentication_deadline = Some(Instant::now() + STOP_TIMEOUT);
+                    idle = false;
                 }
                 if result_command == Some(latest_command.as_str()) && !interrupted_execution {
                     latest_command_succeeded = true;
@@ -638,17 +702,24 @@ impl ClaudeRuntime {
                         result: pending_result,
                         interrupted: true,
                         submitted_steering_count,
+                        failure: None,
                     });
                 }
             } else if idle
                 && (submitted_steering_count == 0
                     || (latest_command_succeeded && commands.is_empty()))
+                && (pending_failure.is_none()
+                    || (commands.is_empty()
+                        && cancelled_commands.contains(user_message_uuid)
+                        && active_agents.is_empty()
+                        && !self.background_work))
                 && let Some(result) = pending_result.take()
             {
                 return Ok(ExternalTurnOutcome {
                     result: Some(result),
                     interrupted: false,
                     submitted_steering_count,
+                    failure: pending_failure,
                 });
             }
         }

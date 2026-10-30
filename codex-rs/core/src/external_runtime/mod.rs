@@ -677,6 +677,7 @@ async fn run_conversation(
             );
         }
         let interrupted = outcome.interrupted;
+        let failure = outcome.failure;
         let has_result = outcome.result.is_some();
         let result = outcome.result.unwrap_or(Value::Null);
         let cursor = native_runtime == NativeRuntime::CursorAgent;
@@ -741,7 +742,7 @@ async fn run_conversation(
         runtime.checkpoint.in_flight = false;
         // Only a successful turn ends at a native message that later sides can fork at.
         runtime.checkpoint.fork_point = match &runtime.runtime {
-            RuntimeProcess::Claude(process) if !interrupted => {
+            RuntimeProcess::Claude(process) if !interrupted && failure.is_none() => {
                 process.fork_point().map(str::to_owned)
             }
             RuntimeProcess::Claude(_) | RuntimeProcess::Cursor(_) => None,
@@ -758,6 +759,18 @@ async fn run_conversation(
                 tracing::warn!(%error, "Claude interrupted-turn accounting failed");
             }
             return Err(ConfirmedInterrupt.into());
+        }
+        if let Some(failure) = failure {
+            if let Err(error) = budget_result {
+                tracing::warn!(%error, "Claude failed-turn accounting failed");
+            }
+            match failure {
+                codex_external_runtime::ExternalTurnFailure::Authentication => {
+                    bail!(
+                        "Claude authentication failed. Sign in with Claude Code, then send a new message in this chat; the failed message will not be replayed."
+                    );
+                }
+            }
         }
         budget_result?;
         drop(lease);
