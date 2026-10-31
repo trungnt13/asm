@@ -394,13 +394,20 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Skip encrypted injected items with a warning, preserving the actual prompt. Do not
   forward ciphertext or replay previously ignored history. Persist a projection marker
   for newly forwarded context so warm turns and cold resume retain native input accounting.
-  Do not synchronize generated ASM instructions or approval receipts. The one instruction
-  exception is a spawned child's selected role: append only that role's own
+  Do not synchronize generated ASM instructions or approval receipts. The instruction
+  exceptions are root Claude communication guidance and a spawned child's selected role.
+  For children, append only the selected role's own
   `developer_instructions` through `--append-system-prompt`, preserving Claude's
   default prompt. Pass the text as one argument, without shell interpolation or a
   temporary prompt file. Process arguments expose the text and OS argument-size
   limits apply; never truncate or silently fall back to a file. Never forward merged
   or inherited ASM instructions.
+  Root Claude sessions append only the original Claude Code paragraph beginning
+  "Assume users can't see most tool calls or thinking" to request a short update
+  before tools and at material milestones. Do not add this paragraph to ASM subagents,
+  internal sessions or temporary side conversations; child role prompts remain unchanged.
+  Preserve native root prompt snapshots and native internal-agent behavior; this
+  startup policy does not rewrite existing context or guarantee model compliance.
   Keep loaded role instructions during warm turns. On cold reload, recover the role
   through normal child configuration and supply its current text on native startup.
   Do not pin role text to saved linkage or reject changes to the same role. Native
