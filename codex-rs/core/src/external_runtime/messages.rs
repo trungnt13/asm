@@ -23,7 +23,11 @@ pub(super) fn input_messages<'a>(
                 internal_chat_message_metadata_passthrough: Some(metadata),
                 ..
             } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
-                kinds.len() == 1 && kinds[0].as_str() == input::CONTEXT_KIND
+                kinds.len() == 1
+                    && matches!(
+                        kinds[0].as_str(),
+                        input::CONTEXT_KIND | input::SHELL_CONTEXT_KIND
+                    )
             }) =>
             {
                 for part in content {

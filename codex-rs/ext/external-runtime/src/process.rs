@@ -35,6 +35,7 @@ pub(super) struct ExternalProcess {
     stderr: Arc<Mutex<VecDeque<u8>>>,
     exit_status: Option<String>,
     pre_cleanup_process: Option<Value>,
+    cli_version: Option<String>,
     frame_policy: frames::FramePolicy,
 }
 
@@ -111,8 +112,17 @@ impl ExternalProcess {
             stderr,
             exit_status: None,
             pre_cleanup_process: None,
+            cli_version: None,
             frame_policy,
         })
+    }
+
+    pub(super) fn record_cli_version(&mut self, version: &Value) {
+        self.cli_version = version
+            .as_str()
+            .map(str::trim)
+            .filter(|version| !version.is_empty() && version.len() <= 128)
+            .map(str::to_owned);
     }
 
     pub(super) fn diagnostic_snapshot(&self, failure_result: &Option<Value>) -> Value {
@@ -128,6 +138,7 @@ impl ExternalProcess {
             "failure_result": failure_result,
             "exit_status": self.exit_status,
             "pre_cleanup_process": self.pre_cleanup_process,
+            "cli_version": self.cli_version,
         })
     }
 

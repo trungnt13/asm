@@ -153,6 +153,7 @@ pub struct LocalThreadStore {
     state_db: Option<StateDbHandle>,
     thread_history_db: Arc<OnceCell<sqlx::SqlitePool>>,
     thread_data_cleanup: Option<Arc<ThreadDataCleanup>>,
+    deleted_rollout_cleanup: Option<Arc<ThreadDataCleanup>>,
     #[cfg(test)]
     startup_migration_retry_gate: Option<Arc<StartupMigrationRetryGate>>,
 }
@@ -283,9 +284,21 @@ impl LocalThreadStore {
             state_db,
             thread_history_db: Arc::new(OnceCell::new()),
             thread_data_cleanup: None,
+            deleted_rollout_cleanup: None,
             #[cfg(test)]
             startup_migration_retry_gate: None,
         }
+    }
+
+    /// Removes host data that must survive failed rollout deletion.
+    /// Runs under writer ownership after all selected rollouts are removed.
+    /// Cleanup must allow retries after partial removal.
+    pub fn with_deleted_rollout_cleanup(
+        mut self,
+        cleanup: impl Fn(Vec<ThreadId>) -> ThreadStoreFuture<'static, ()> + Send + Sync + 'static,
+    ) -> Self {
+        self.deleted_rollout_cleanup = Some(Arc::new(cleanup));
+        self
     }
 
     /// Adds cleanup for host-owned durable data when threads are permanently deleted.

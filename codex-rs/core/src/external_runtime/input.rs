@@ -17,6 +17,7 @@ use codex_utils_image::load_for_prompt_bytes;
 use crate::session::TurnInput;
 
 pub(super) const CONTEXT_KIND: &str = "asm.native_context";
+pub(super) const SHELL_CONTEXT_KIND: &str = "asm.native_shell_context";
 
 pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize> {
     let mut skipped = 0;
@@ -35,57 +36,7 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                     skipped += 1;
                     continue;
                 }
-                let context = match original {
-                    ResponseItem::Message { role, content, .. } => {
-                        let mut texts = Vec::new();
-                        for part in content {
-                            match part {
-                                ContentItem::InputText { text }
-                                | ContentItem::OutputText { text, .. } => texts.push(text.as_str()),
-                                ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => {
-                                    bail!(
-                                        "only plaintext injected context is supported by the native runtime"
-                                    )
-                                }
-                            }
-                        }
-                        serde_json::json!({"source": "ASM context", "role": role, "text": texts.join("\n")})
-                    }
-                    ResponseItem::FunctionCallOutput {
-                        name,
-                        namespace,
-                        output,
-                        ..
-                    } => {
-                        serde_json::json!({"source": "ASM tool output", "name": name, "namespace": namespace, "text": output_text(&output.body)?})
-                    }
-                    ResponseItem::CustomToolCallOutput { name, output, .. } => {
-                        serde_json::json!({"source": "ASM tool output", "name": name, "text": output_text(&output.body)?})
-                    }
-                    _ => bail!("unsupported injected item for the native runtime"),
-                };
-                // A persisted marker extends native input accounting without replaying old ASM context.
-                envelope.item = ResponseItem::Message {
-                    encrypted_content: None,
-                    status: None,
-                    id: None,
-                    role: "developer".to_owned(),
-                    content: vec![ContentItem::InputText {
-                        text: format!(
-                            "ASM supplied context (not the user's message); JSON data follows:\n{}\nEnd of ASM supplied context.",
-                            serde_json::to_string(&context)?
-                        ),
-                    }],
-                    phase: None,
-                    internal_chat_message_metadata_passthrough: Some(
-                        InternalChatMessageMetadataPassthrough {
-                            content_item_kinds: Some(vec![ContentItemKind(
-                                CONTEXT_KIND.to_owned(),
-                            )]),
-                            ..Default::default()
-                        },
-                    ),
-                };
+                envelope.item = context_item(original)?;
             }
             TurnInput::UserInput { content, .. } => {
                 for part in content {
@@ -126,6 +77,67 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
     }
     *input = prepared;
     Ok(skipped)
+}
+
+pub(crate) fn context_item(original: &ResponseItem) -> anyhow::Result<ResponseItem> {
+    let kind = match original {
+        ResponseItem::Message {
+            internal_chat_message_metadata_passthrough: Some(metadata),
+            ..
+        } if metadata
+            .content_item_kinds
+            .as_ref()
+            .is_some_and(|kinds| kinds.len() == 1 && kinds[0].as_str() == "shell.user_command") =>
+        {
+            SHELL_CONTEXT_KIND
+        }
+        _ => CONTEXT_KIND,
+    };
+    let context = match original {
+        ResponseItem::Message { role, content, .. } => {
+            let mut texts = Vec::new();
+            for part in content {
+                match part {
+                    ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
+                        texts.push(text.as_str())
+                    }
+                    ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => {
+                        bail!("only plaintext injected context is supported by the native runtime")
+                    }
+                }
+            }
+            serde_json::json!({"source": "ASM context", "role": role, "text": texts.join("\n")})
+        }
+        ResponseItem::FunctionCallOutput {
+            name,
+            namespace,
+            output,
+            ..
+        } => {
+            serde_json::json!({"source": "ASM tool output", "name": name, "namespace": namespace, "text": output_text(&output.body)?})
+        }
+        ResponseItem::CustomToolCallOutput { name, output, .. } => {
+            serde_json::json!({"source": "ASM tool output", "name": name, "text": output_text(&output.body)?})
+        }
+        _ => bail!("unsupported injected item for the native runtime"),
+    };
+    Ok(ResponseItem::Message {
+        encrypted_content: None,
+        status: None,
+        id: None,
+        role: "developer".to_owned(),
+        content: vec![ContentItem::InputText {
+            text: format!(
+                "ASM supplied context (not the user's message); JSON data follows:\n{}\nEnd of ASM supplied context.",
+                serde_json::to_string(&context)?
+            ),
+        }],
+        phase: None,
+        internal_chat_message_metadata_passthrough: Some(InternalChatMessageMetadataPassthrough {
+            content_item_kinds: Some(vec![ContentItemKind(kind.to_owned())]),
+            ..Default::default()
+        }),
+    })
 }
 
 fn encrypted_parts(item: &ResponseItem) -> bool {

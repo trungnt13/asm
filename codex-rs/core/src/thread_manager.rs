@@ -564,6 +564,15 @@ pub fn build_models_manager(
     manager
 }
 
+fn native_cleanup_error(err: std::io::Error) -> ThreadStoreError {
+    let message = format!("failed to clean native runtime data: {err}");
+    if err.kind() == std::io::ErrorKind::WouldBlock {
+        ThreadStoreError::Conflict { message }
+    } else {
+        ThreadStoreError::Internal { message }
+    }
+}
+
 pub fn thread_store_from_config(
     config: &Config,
     state_db: Option<StateDbHandle>,
@@ -578,11 +587,19 @@ pub fn thread_store_from_config(
                 .enabled(Feature::BackgroundPaginatedRolloutMigration);
             let has_state_db = state_db.is_some();
             let sqlite = config.sqlite_config().clone();
+            let codex_home = config.codex_home.to_path_buf();
+            let config_home = codex_home.clone();
             let store = Arc::new(
                 LocalThreadStore::new(LocalThreadStoreConfig::from_config(config), state_db)
                     .with_thread_data_cleanup(move |thread_ids| {
                         let sqlite = sqlite.clone();
+                        let codex_home = config_home.clone();
                         Box::pin(async move {
+                            crate::external_runtime::ensure_no_runtime_owner(
+                                &codex_home,
+                                &thread_ids,
+                            )
+                            .map_err(native_cleanup_error)?;
                             let boards = thread_ids.into_iter().map(Into::into).collect::<Vec<_>>();
                             LocalAgentMessageBoard::delete_boards(
                                 &sqlite,
@@ -597,6 +614,13 @@ pub fn thread_store_from_config(
                                     ),
                                 }
                             })
+                        })
+                    })
+                    .with_deleted_rollout_cleanup(move |thread_ids| {
+                        let codex_home = codex_home.clone();
+                        Box::pin(async move {
+                            crate::external_runtime::delete_thread_data(&codex_home, &thread_ids)
+                                .map_err(native_cleanup_error)
                         })
                     }),
             );
