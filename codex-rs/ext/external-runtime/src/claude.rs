@@ -40,11 +40,14 @@ pub enum ClaudeSession {
     },
 }
 
-/// Applies ASM child startup policy without changing native root or side sessions.
+/// Selects ASM root or child startup policy while preserving native side sessions.
 pub enum ClaudeSessionKind {
     NativeDefault,
+    ManagedRoot,
     ManagedChild,
 }
+
+const ROOT_COMMUNICATION_INSTRUCTIONS: &str = "Assume users can't see most tool calls or thinking — only your text output. Before your first tool call, state in one sentence what you're about to do. While working, give short updates at key moments: when you find something, when you change direction, or when you hit a blocker. Brief is good — silent is not. One sentence per update is almost always enough.";
 
 pub struct ClaudeOptions {
     pub executable: PathBuf,
@@ -163,7 +166,13 @@ impl ClaudeRuntime {
             flag_settings["disableClaudeAiConnectors"] = json!(true);
             flag_settings["syncClaudeAiSkills"] = json!(false);
         }
-        if let Some(instructions) = options.role_instructions {
+        let instructions = match options.session_kind {
+            ClaudeSessionKind::ManagedRoot => Some(ROOT_COMMUNICATION_INSTRUCTIONS.to_owned()),
+            ClaudeSessionKind::NativeDefault | ClaudeSessionKind::ManagedChild => {
+                options.role_instructions
+            }
+        };
+        if let Some(instructions) = instructions {
             command.arg("--append-system-prompt").arg(instructions);
         }
         if let Some(window) = options.auto_compact_window {
