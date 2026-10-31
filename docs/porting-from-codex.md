@@ -556,9 +556,13 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Accept only 100000–1000000 tokens; reject unsupported values, never ignore them.
   Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the child environment and flag settings
   so inherited environment and user/project settings cannot override the explicit
-  value. Native managed policy retains precedence. Unmatched children and main
-  sessions retain native defaults and environment settings.
-  Bind the configured window to native linkage; changing it requires a new chat.
+  value. Native managed policy retains precedence. Unmatched children retain native
+  defaults and environment settings.
+  New root sessions use explicit `model_context_window` the same way, with the same
+  range check; when unset, they retain native defaults and environment settings.
+  Catalog metadata never sets this window.
+  Bind the configured window to native linkage. Changing it requires a new child
+  chat; main chats and their forks keep the window saved when the main chat started.
   This is a soft compaction window, not a hard maximum context capacity or an
   exact trigger. Native model capacity still clamps it; Claude subtracts output
   reserve and compaction headroom. Native 2.1.296 uses a 20000-token output reserve

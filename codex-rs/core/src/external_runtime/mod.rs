@@ -225,7 +225,7 @@ async fn run_conversation(
     let child_agent = turn.parent_thread_id.is_some()
         && turn.session_source.is_non_root_agent()
         && turn.multi_agent_version == MultiAgentVersion::V2;
-    // Do not reinterpret inherited scalar limits or model metadata as native settings.
+    // Only root sessions read the scalar: children inherit it, and metadata is never a native setting.
     // Cursor exposes no compaction window, so the Claude window never applies to it.
     let thread_spawn_child = matches!(
         turn.session_source,
@@ -242,6 +242,10 @@ async fn run_conversation(
                 })
                 .flatten()
         })
+    } else if native_runtime == NativeRuntime::ClaudeCode
+        && !turn.session_source.is_non_root_agent()
+    {
+        turn.config.model_context_window
     } else {
         None
     };
@@ -361,6 +365,12 @@ async fn run_conversation(
                     )
                 }
                 (None, Err(error)) => return Err(error.into()),
+            };
+            // Main chats and their forks keep their starting window so config edits cannot break resume.
+            let auto_compact_window = if thread_spawn_child {
+                auto_compact_window
+            } else {
+                checkpoint.auto_compact_window
             };
             checkpoint.validate(
                 &settings.model_info.slug,
