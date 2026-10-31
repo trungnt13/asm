@@ -24,6 +24,12 @@ pub(super) enum ThreadAttachPresentation {
     SessionLineage,
 }
 
+pub(super) struct PreparedFreshSession {
+    pub(super) started: AppServerStartedThread,
+    pub(super) config: Config,
+    pub(super) local_settings: crate::local_settings::LocalSettings,
+}
+
 /// Reports whether a loaded-thread backfill completed and which descendants already had their
 /// liveness metadata refreshed, allowing the picker to skip duplicate `thread/read` requests.
 #[derive(Default)]
@@ -1060,65 +1066,20 @@ impl App {
             )
             .await
         {
-            Ok(mut started) => {
-                if let Some(thread_id) = self.current_displayed_thread_id()
-                    && let Some(blank) = self.agents_overview.blank_sessions.get_mut(&thread_id)
-                {
-                    if let Some(channel) = self.thread_event_channels.get(&thread_id)
-                        && let Some(session) = channel.store.lock().await.session.as_ref()
-                    {
-                        blank.session = session.clone();
-                    }
-                    if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                        self.agents_overview.input_states.insert(thread_id, input);
-                    }
-                }
-                self.detach_current_thread_for_navigation(
+            Ok(started) => {
+                self.adopt_fresh_session(
+                    tui,
                     app_server,
-                    Some(started.session.thread_id),
+                    PreparedFreshSession {
+                        started,
+                        config,
+                        local_settings,
+                    },
+                    ThreadAttachPresentation::Fresh,
+                    initial_user_message,
+                    new_thread_name,
                 )
                 .await;
-                self.local_settings = local_settings;
-                self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
-                self.config = config;
-                self.remember_launch_permissions();
-
-                let name_error = if let Some(name) = new_thread_name {
-                    match app_server
-                        .thread_set_name(started.session.thread_id, name.clone())
-                        .await
-                    {
-                        Ok(()) => {
-                            started.session.thread_name = Some(name);
-                            None
-                        }
-                        Err(err) => Some(format!("Failed to name the new session: {err}")),
-                    }
-                } else {
-                    None
-                };
-                let thread_id = started.session.thread_id;
-                if !self.config.ephemeral {
-                    self.agents_overview
-                        .blank_sessions
-                        .insert(thread_id, started.clone());
-                }
-                if let Err(err) = self
-                    .replace_chat_widget_with_app_server_thread(
-                        tui,
-                        started,
-                        ThreadAttachPresentation::Fresh,
-                        initial_user_message,
-                    )
-                    .await
-                {
-                    self.agents_overview.blank_sessions.remove(&thread_id);
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to attach to fresh app-server thread: {err}"
-                    ));
-                } else if let Some(err) = name_error {
-                    self.chat_widget.add_error_message(err);
-                }
             }
             Err(err) => {
                 self.chat_widget.add_error_message(format!(
@@ -1130,6 +1091,77 @@ impl App {
             }
         }
         tui.frame_requester().schedule_frame();
+    }
+
+    pub(super) async fn adopt_fresh_session(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        prepared: PreparedFreshSession,
+        presentation: ThreadAttachPresentation,
+        initial_user_message: Option<crate::chatwidget::UserMessage>,
+        new_thread_name: Option<String>,
+    ) {
+        let PreparedFreshSession {
+            mut started,
+            config,
+            local_settings,
+        } = prepared;
+        if let Some(thread_id) = self.current_displayed_thread_id()
+            && let Some(blank) = self.agents_overview.blank_sessions.get_mut(&thread_id)
+        {
+            if let Some(channel) = self.thread_event_channels.get(&thread_id)
+                && let Some(session) = channel.store.lock().await.session.as_ref()
+            {
+                blank.session = session.clone();
+            }
+            if let Some(input) = self.chat_widget.capture_thread_input_state() {
+                self.agents_overview.input_states.insert(thread_id, input);
+            }
+        }
+        self.detach_current_thread_for_navigation(app_server, Some(started.session.thread_id))
+            .await;
+        self.local_settings = local_settings;
+        self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
+        self.config = config;
+        self.remember_launch_permissions();
+
+        let name_error = if let Some(name) = new_thread_name {
+            match app_server
+                .thread_set_name(started.session.thread_id, name.clone())
+                .await
+            {
+                Ok(()) => {
+                    started.session.thread_name = Some(name);
+                    None
+                }
+                Err(err) => Some(format!("Failed to name the new session: {err}")),
+            }
+        } else {
+            None
+        };
+        let thread_id = started.session.thread_id;
+        if !self.config.ephemeral {
+            self.agents_overview
+                .blank_sessions
+                .insert(thread_id, started.clone());
+        }
+        if let Err(err) = self
+            .replace_chat_widget_with_app_server_thread(
+                tui,
+                started,
+                presentation,
+                initial_user_message,
+            )
+            .await
+        {
+            self.agents_overview.blank_sessions.remove(&thread_id);
+            self.chat_widget.add_error_message(format!(
+                "Failed to attach to fresh app-server thread: {err}"
+            ));
+        } else if let Some(err) = name_error {
+            self.chat_widget.add_error_message(err);
+        }
     }
 
     pub(super) async fn replace_chat_widget_with_app_server_thread(
