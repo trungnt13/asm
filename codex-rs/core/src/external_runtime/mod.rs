@@ -2,6 +2,7 @@
 mod activity;
 mod bridge;
 mod cursor;
+mod deletion;
 mod delivery;
 mod events;
 mod fork;
@@ -10,10 +11,13 @@ mod messages;
 mod state;
 use bridge::ExternalMessageBridge;
 use cursor::record_cursor_frame;
+pub(crate) use deletion::delete_thread_data;
+pub(crate) use deletion::ensure_no_runtime_owner;
 use events::record_assistant_frame;
 use fork::TEMPORARY_FORK_BOUNDARY;
 use fork::TEMPORARY_FORK_DISALLOWED_TOOLS;
 pub(crate) use fork::prepare_temporary_fork;
+pub(crate) use input::context_item;
 use messages::input_messages;
 use messages::input_prefix;
 use messages::prompt_content;
@@ -64,7 +68,7 @@ pub(crate) async fn abort(session: &Session) {
             .as_ref()
             .is_some_and(|runtime| !runtime.checkpoint.in_flight),
         Err(error) => {
-            tracing::warn!(%error, "Claude abort could not inspect runtime");
+            tracing::warn!(%error, "Native abort could not inspect runtime");
             false
         }
     };
@@ -80,7 +84,7 @@ pub(crate) async fn shutdown(session: &Session) {
     let runtime = match session.external_runtime.take_for_shutdown().await {
         Ok(runtime) => runtime,
         Err(error) => {
-            tracing::warn!(%error, "Claude runtime lease shutdown failed");
+            tracing::warn!(%error, "Native runtime lease shutdown failed");
             return;
         }
     };
@@ -88,10 +92,10 @@ pub(crate) async fn shutdown(session: &Session) {
         if let Some(bridge) = &runtime.bridge
             && let Err(error) = bridge.clear_turn().await
         {
-            tracing::warn!(%error, "Claude messaging drain failed");
+            tracing::warn!(%error, "Native messaging drain failed");
         }
         if let Err(error) = runtime.runtime.shutdown().await {
-            tracing::warn!(%error, "Claude runtime shutdown failed");
+            tracing::warn!(%error, "Native runtime shutdown failed");
         }
         if runtime.diagnostic_capture {
             let path = runtime
@@ -112,13 +116,13 @@ pub(crate) async fn shutdown(session: &Session) {
                 Ok(())
             })();
             if let Err(error) = write {
-                tracing::warn!(%error, "could not retain Claude diagnostics");
+                tracing::warn!(%error, "could not retain native runtime diagnostics");
             }
         }
         if let Some(bridge) = &mut runtime.bridge
             && let Err(error) = bridge.shutdown().await
         {
-            tracing::warn!(%error, "Claude messaging bridge shutdown failed");
+            tracing::warn!(%error, "Native messaging bridge shutdown failed");
         }
     }
 }
@@ -169,7 +173,7 @@ struct ConfirmedInterrupt;
 
 impl std::fmt::Display for ConfirmedInterrupt {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("Claude turn interrupted at a confirmed idle boundary")
+        formatter.write_str("Native turn interrupted at a confirmed idle boundary")
     }
 }
 
@@ -353,7 +357,16 @@ async fn run_conversation(
                     (checkpoint, resume, Linkage::Saved)
                 }
                 (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    if !input_messages(original_history.raw_items())?.is_empty()
+                    // Shell-only history can precede the first native conversation.
+                    // Other native input still requires its saved linkage to prevent replay.
+                    let previous_input = original_history.raw_items().filter(|item| {
+                        !matches!(item, ResponseItem::Message {
+                            internal_chat_message_metadata_passthrough: Some(metadata), ..
+                        } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
+                            kinds.len() == 1 && kinds[0].as_str() == input::SHELL_CONTEXT_KIND
+                        }))
+                    });
+                    if !input_messages(previous_input)?.is_empty()
                         || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
                     {
                         bail!("missing native session linkage for existing history; start a new chat");
@@ -777,13 +790,13 @@ async fn run_conversation(
                 lease.runtime = None;
             }
             if let Err(error) = budget_result {
-                tracing::warn!(%error, "Claude interrupted-turn accounting failed");
+                tracing::warn!(%error, "Native interrupted-turn accounting failed");
             }
             return Err(ConfirmedInterrupt.into());
         }
         if let Some(failure) = failure {
             if let Err(error) = budget_result {
-                tracing::warn!(%error, "Claude failed-turn accounting failed");
+                tracing::warn!(%error, "Native failed-turn accounting failed");
             }
             match failure {
                 codex_external_runtime::ExternalTurnFailure::Authentication => {

@@ -444,9 +444,23 @@ async fn persist_user_shell_output(
     exec_output: &ExecToolCallOutput,
     mode: UserShellCommandMode,
 ) {
-    let output_item = user_shell_command_record_item(raw_command, exec_output, turn_context);
+    let mut output_item = user_shell_command_record_item(raw_command, exec_output, turn_context);
 
     if mode == UserShellCommandMode::StandaloneTurn {
+        if crate::external_runtime::is_native_model(&turn_context.model_info().slug) {
+            output_item = match crate::external_runtime::context_item(&output_item) {
+                Ok(item) => item,
+                Err(error) => {
+                    send_user_shell_error(
+                        session,
+                        turn_context,
+                        &format!("could not prepare shell output for the native runtime: {error}"),
+                    )
+                    .await;
+                    return;
+                }
+            };
+        }
         session
             .record_conversation_items(
                 turn_context,

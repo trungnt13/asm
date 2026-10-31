@@ -302,6 +302,10 @@ for shared process/framing/cleanup plumbing plus separate Claude and Cursor driv
 Shared session starts, prompts, and outcomes use neutral types; each driver owns its
 CLI protocol encoding. Preserve the legacy `claude-runtime` checkpoint directory,
 canonical history encoding, and checkpoint hashes when changing internal names.
+Thread deletion removes ASM-owned linkage and private Cursor configuration only after
+exclusive runtime ownership is available; leave native CLI conversation history untouched.
+Record bounded CLI versions from protocol initialization in opt-in failure diagnostics,
+without extra CLI launches or version-number admission gates. Shared errors use neutral names.
 
 ### Catalog-bound model providers
 
@@ -394,6 +398,8 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Skip encrypted injected items with a warning, preserving the actual prompt. Do not
   forward ciphertext or replay previously ignored history. Persist a projection marker
   for newly forwarded context so warm turns and cold resume retain native input accounting.
+  Persist newly requested idle `!` shell output through that same labeled context projection
+  for the next native turn; do not start inference or backfill older shell history.
   Do not synchronize generated ASM instructions or approval receipts. The instruction
   exceptions are root Claude communication guidance and a spawned child's selected role.
   For children, append only the selected role's own

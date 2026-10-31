@@ -165,19 +165,19 @@ impl ExternalMessageBridge {
         cancel: CancellationToken,
     ) -> anyhow::Result<()> {
         if self.stop.is_cancelled() {
-            bail!("Claude messaging bridge is stopped");
+            bail!("Native messaging bridge is stopped");
         }
         if step.turn.parent_thread_id.is_none()
             || !step.turn.session_source.is_non_root_agent()
             || step.turn.multi_agent_version != MultiAgentVersion::V2
         {
-            bail!("Claude messaging is available only to native V2 child agents");
+            bail!("Native messaging is available only to native V2 child agents");
         }
         let (router, message_tools) = build_message_tools(&session, &step)?;
         // The bridge owns a fresh captured step. Inference metadata must not hide
-        // caller-authorized messaging on a Claude child with no native model catalog.
+        // caller-authorized messaging on a native child with no native model catalog.
         Arc::get_mut(&mut step)
-            .context("Claude messaging requires an exclusively owned captured step")?
+            .context("Native messaging requires an exclusively owned captured step")?
             .tool_router = Arc::new(router);
         let tools = message_tools.iter().map(|tool| tool.name.clone()).collect();
         {
@@ -186,13 +186,13 @@ impl ExternalMessageBridge {
                 .as_ref()
                 .is_some_and(|original| *original != message_tools)
             {
-                bail!("Claude messaging definitions changed; start a new thread");
+                bail!("Native messaging definitions changed; start a new thread");
             }
             *original = Some(message_tools);
         }
         let mut turn = self.state.turn.lock().await;
         if turn.is_some() {
-            bail!("Claude messaging bridge already has an active turn");
+            bail!("Native messaging bridge already has an active turn");
         }
         *turn = Some(Arc::new(BridgeTurn {
             session: Arc::downgrade(&session),
@@ -218,7 +218,7 @@ impl ExternalMessageBridge {
                 .is_err()
             {
                 self.stop.cancel();
-                bail!("Claude messaging cleanup exceeded 5 seconds; bridge cannot be reused");
+                bail!("Native messaging cleanup exceeded 5 seconds; bridge cannot be reused");
             }
         }
         Ok(())
@@ -230,10 +230,10 @@ impl ExternalMessageBridge {
         self.stop.cancel();
         if let Some(mut server) = self.server.take() {
             match tokio::time::timeout(Duration::from_secs(/*secs*/ 5), &mut server).await {
-                Ok(result) => result.context("Claude messaging HTTP task failed")??,
+                Ok(result) => result.context("Native messaging HTTP task failed")??,
                 Err(_) => {
                     server.abort();
-                    bail!("Claude messaging HTTP shutdown exceeded 5 seconds");
+                    bail!("Native messaging HTTP shutdown exceeded 5 seconds");
                 }
             }
         }

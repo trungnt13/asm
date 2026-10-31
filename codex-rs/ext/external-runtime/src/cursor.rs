@@ -106,6 +106,8 @@ impl CursorRuntime {
                     "_meta": {"subagents": {}, "parameterizedModelPicker": true}}}),
             )
             .await?;
+        self.process
+            .record_cli_version(&initialized["agentInfo"]["version"]);
         if initialized["protocolVersion"] != 1 {
             bail!("Cursor agent does not support ACP protocol version 1");
         }

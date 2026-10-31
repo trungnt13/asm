@@ -5,6 +5,7 @@
 //! associated rollout is removed, under the same lifecycle lock, so queued artifact mutations cannot
 //! use deleted thread metadata. Host-owned data is cleaned after reference and writer checks,
 //! before removing rollouts, so cleanup failures remain retryable even without a state DB.
+//! Replay-sensitive host data is removed only after all selected rollouts are gone.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -112,6 +113,9 @@ pub(super) async fn delete_thread(
             Err(ThreadStoreError::ThreadNotFound { .. }) => false,
             Err(err) => return Err(err),
         };
+    if let Some(cleanup) = &store.deleted_rollout_cleanup {
+        cleanup(vec![thread_id]).await?;
+    }
     let deleted_state_rows = delete_state_rows(store, &[thread_id]).await?;
     if found_rollout || deleted_state_rows > 0 {
         Ok(())
@@ -158,6 +162,9 @@ pub(super) async fn delete_threads(
             Ok(()) | Err(ThreadStoreError::ThreadNotFound { .. }) => {}
             Err(err) => return Err(err),
         }
+    }
+    if let Some(cleanup) = &store.deleted_rollout_cleanup {
+        cleanup(thread_ids.clone()).await?;
     }
     // Retain the complete retry graph until every rollout has been removed.
     delete_state_rows(store, &thread_ids).await?;

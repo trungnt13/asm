@@ -470,6 +470,8 @@ impl ClaudeRuntime {
             if frame.get("type").and_then(Value::as_str) == Some("system")
                 && frame.get("subtype").and_then(Value::as_str) == Some("init")
             {
+                self.process
+                    .record_cli_version(&frame["claude_code_version"]);
                 // Send now is never requested. This capability only identifies the verified
                 // CLI generation whose UUID command lifecycle lets queued input be reconciled.
                 self.mid_turn_delivery.send_replace(
