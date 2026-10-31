@@ -175,6 +175,19 @@ impl std::fmt::Display for ConfirmedInterrupt {
 
 impl std::error::Error for ConfirmedInterrupt {}
 
+/// Main chats and their forks keep their starting window so config edits cannot break resume.
+fn bound_auto_compact_window(
+    thread_spawn_child: bool,
+    configured: Option<i64>,
+    checkpoint: &Checkpoint,
+) -> Option<i64> {
+    if thread_spawn_child {
+        configured
+    } else {
+        checkpoint.auto_compact_window
+    }
+}
+
 #[tracing::instrument(skip_all)]
 async fn run_conversation(
     session: &Arc<Session>,
@@ -366,15 +379,9 @@ async fn run_conversation(
                 }
                 (None, Err(error)) => return Err(error.into()),
             };
-            // Main chats and their forks keep their starting window so config edits cannot break resume.
-            let auto_compact_window = if thread_spawn_child {
-                auto_compact_window
-            } else {
-                checkpoint.auto_compact_window
-            };
             checkpoint.validate(
                 &settings.model_info.slug,
-                auto_compact_window,
+                bound_auto_compact_window(thread_spawn_child, auto_compact_window, &checkpoint),
                 &cwd,
                 messaging,
                 &messages,
@@ -466,7 +473,7 @@ async fn run_conversation(
             .context("native session was not initialized")?;
         runtime.checkpoint.validate(
             &settings.model_info.slug,
-            auto_compact_window,
+            bound_auto_compact_window(thread_spawn_child, auto_compact_window, &runtime.checkpoint),
             &cwd,
             messaging,
             &messages,
