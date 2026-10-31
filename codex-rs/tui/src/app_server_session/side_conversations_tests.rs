@@ -25,7 +25,7 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
     server.thread_read(parent, /*include_turns*/ false).await?;
     let request_id = server.next_request_id();
     let _: ThreadMetadataUpdateResponse = server
-        .client
+        .request_handle
         .request_typed(ClientRequest::ThreadMetadataUpdate {
             request_id,
             params: ThreadMetadataUpdateParams {
