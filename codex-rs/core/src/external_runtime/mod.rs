@@ -448,6 +448,10 @@ async fn run_conversation(
                 role_instructions,
                 if thread_spawn_child {
                     codex_external_runtime::ClaudeSessionKind::ManagedChild
+                } else if !turn.session_source.is_non_root_agent()
+                    && !matches!(linkage, Linkage::Temporary)
+                {
+                    codex_external_runtime::ClaudeSessionKind::ManagedRoot
                 } else {
                     codex_external_runtime::ClaudeSessionKind::NativeDefault
                 },
