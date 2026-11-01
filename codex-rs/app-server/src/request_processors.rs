@@ -545,6 +545,7 @@ pub(crate) mod config_processor;
 #[cfg(test)]
 #[path = "request_processors/config_reload_tests.rs"]
 mod config_reload_tests;
+mod desktop_side;
 mod diagnostics;
 mod environment_processor;
 mod feedback_doctor_report;
@@ -557,6 +558,7 @@ mod initialize_processor;
 mod marketplace_processor;
 mod mcp_event_stream;
 mod mcp_processor;
+pub(crate) use desktop_side::SideSettingsInitialization;
 mod memory_status;
 mod persisted_resume_settings;
 mod plugins;
