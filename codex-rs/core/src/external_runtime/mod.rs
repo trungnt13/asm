@@ -800,8 +800,12 @@ async fn run_conversation(
             }
             match failure {
                 codex_external_runtime::ExternalTurnFailure::Authentication => {
+                    session
+                        .external_runtime
+                        .authentication_required
+                        .store(/*val*/ true, std::sync::atomic::Ordering::Release);
                     bail!(
-                        "Claude authentication failed. Sign in with Claude Code, then send a new message in this chat; the failed message will not be replayed."
+                        "Claude authentication failed. Send `claude login` in this chat to sign in to your Claude subscription; the failed message will not be replayed."
                     );
                 }
             }
@@ -836,4 +840,13 @@ async fn record_frame(
         NativeRuntime::ClaudeCode => record_assistant_frame(session, turn, frame, stream).await,
         NativeRuntime::CursorAgent => record_cursor_frame(session, turn, frame, stream).await,
     }
+}
+
+#[tracing::instrument(skip_all)]
+pub(crate) async fn stop_for_login(session: &Session) -> bool {
+    if session.external_runtime.is_busy() {
+        return false;
+    }
+    shutdown(session).await;
+    true
 }

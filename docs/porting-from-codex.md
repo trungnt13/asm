@@ -489,6 +489,15 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   must not inflate a currently active ancestor turn's count.
 - Use native Claude Code settings and subscription login; resolve `claude` through
   PATH. Do not extract subscription credentials or enable API billing implicitly.
+  Provide deterministic conversational subscription login through the shared
+  app-server path, using existing chat requests and responses without Desktop changes.
+  Intercept login replies before normal turn ingestion, history, hooks, or inference;
+  send one-time authorization codes only to the official Claude login subprocess.
+  Never include codes in model requests, backend logs, or rollouts. Client-local
+  drafts and prompt recall are accepted. Keep login output private and errors fixed;
+  verify subscription authentication rather than falling back to Console, API keys,
+  or cloud providers. Login does not authorize replaying failed input or clearing an
+  uncertain execution checkpoint.
   Do not disable native tools, skills or instructions to emulate ASM inference. The one
   exception: ASM thread-spawned children (V1 and V2) launch with
   `--disallowedTools AskUserQuestion`, because nobody can answer a headless child's
