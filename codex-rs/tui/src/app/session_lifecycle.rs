@@ -1051,7 +1051,7 @@ impl App {
             session_start_source,
             initial_user_message,
             new_thread_name,
-            None,
+            /*model_selection*/ None,
         )
         .await;
     }

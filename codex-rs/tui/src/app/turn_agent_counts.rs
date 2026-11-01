@@ -107,7 +107,7 @@ impl TurnAgentCounts {
     pub(super) fn record_native_turns(&mut self, thread_id: ThreadId, turns: &[Turn]) {
         for turn in turns {
             for item in &turn.items {
-                self.record_native_item(thread_id, &turn.id, item, false);
+                self.record_native_item(thread_id, &turn.id, item, /*live*/ false);
             }
         }
     }
@@ -140,10 +140,10 @@ impl App {
         let refresh_id = self.agents_overview.request_id;
         let state = &mut self.turn_agent_counts;
         if let ServerNotification::ItemStarted(item) = notification {
-            state.record_native_item(thread_id, &item.turn_id, &item.item, true);
+            state.record_native_item(thread_id, &item.turn_id, &item.item, /*live*/ true);
         }
         if let ServerNotification::ItemCompleted(item) = notification {
-            state.record_native_item(thread_id, &item.turn_id, &item.item, true);
+            state.record_native_item(thread_id, &item.turn_id, &item.item, /*live*/ true);
         }
         let activity = match notification {
             ServerNotification::ItemStarted(item) => Some((&item.turn_id, &item.item)),
