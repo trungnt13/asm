@@ -6,7 +6,14 @@ use codex_utils_template::Template;
 use std::sync::LazyLock;
 
 /// Review thread system prompt.
-pub const REVIEW_PROMPT: &str = include_str!("../templates/review/rubric.md");
+pub const REVIEW_PROMPT: &str = concat!(
+    include_str!("../templates/review/guidelines.md"),
+    "\n",
+    include_str!("../templates/review/rubric.md"),
+);
+
+/// Shared review standards without slash-command output requirements.
+pub const REVIEW_GUIDELINES: &str = include_str!("../templates/review/guidelines.md");
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedReviewRequest {

@@ -657,6 +657,7 @@ pub struct Config {
 
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
+    pub reviewer_subagent: codex_config::ReviewerSubagentConfig,
 
     /// Size of the context window for the model, in tokens.
     pub model_context_window: Option<i64>,
@@ -4429,6 +4430,8 @@ impl Config {
         .await?;
         let compact_prompt = compact_prompt.or(file_compact_prompt);
         let review_model = override_review_model.or(cfg.review_model);
+        let reviewer_subagent = cfg.reviewer_subagent.unwrap_or_default();
+        reviewer_subagent.validate().map_err(std::io::Error::other)?;
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
@@ -4652,6 +4655,7 @@ impl Config {
             service_tier,
             subagent_service_tiers: cfg.subagent_service_tiers,
             review_model,
+            reviewer_subagent,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,
             role_developer_instructions: None,

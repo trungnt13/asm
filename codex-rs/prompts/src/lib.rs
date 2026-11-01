@@ -29,6 +29,7 @@ pub use realtime::END_INSTRUCTIONS;
 pub use realtime::START_INSTRUCTIONS;
 pub use review_exit::render_review_exit_interrupted;
 pub use review_exit::render_review_exit_success;
+pub use review_request::REVIEW_GUIDELINES;
 pub use review_request::REVIEW_PROMPT;
 pub use review_request::ResolvedReviewRequest;
 pub use review_request::resolve_review_request;

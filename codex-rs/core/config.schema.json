@@ -4681,6 +4681,67 @@
         }
       ]
     },
+    "ReviewerSubagentConfig": {
+      "additionalProperties": false,
+      "description": "Stores trusted defaults for protected review sessions, not ordinary role overrides.",
+      "properties": {
+        "developer_instructions": {
+          "default": null,
+          "type": "string"
+        },
+        "max_concurrent_reviews": {
+          "default": 1,
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "max_explorers": {
+          "default": 2,
+          "description": "Limits total explorer creations per review, not concurrent ordinary agents.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "model": {
+          "default": null,
+          "type": "string"
+        },
+        "model_reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "high"
+        },
+        "root_session_id": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ThreadId"
+            }
+          ],
+          "default": null,
+          "description": "Omission selects the caller's actual root, without granting cross-tree access."
+        },
+        "system1_max_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "xhigh"
+        },
+        "system1_min_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "high"
+        }
+      },
+      "type": "object"
+    },
     "RightClickPaste": {
       "description": "Right-click text paste when the fullscreen TUI has no selection.",
       "oneOf": [
@@ -5139,6 +5200,9 @@
         "turn_start",
         "tool_result"
       ],
+      "type": "string"
+    },
+    "ThreadId": {
       "type": "string"
     },
     "ThreadStoreToml": {
@@ -8890,6 +8954,14 @@
     "review_model": {
       "description": "Review model override used by the `/review` feature.",
       "type": "string"
+    },
+    "reviewer_subagent": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/ReviewerSubagentConfig"
+        }
+      ],
+      "description": "Defaults reserved for protected reviewer sessions, not ordinary agent roles."
     },
     "sandbox_mode": {
       "allOf": [
