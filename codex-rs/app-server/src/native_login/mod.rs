@@ -109,7 +109,7 @@ impl NativeLogin {
         };
         if !pending
             && !start
-            && !(provider.is_some() && (start || code || thread.claude_login_required()))
+            && !(provider.is_some() && (start || code || thread.native_login_required()))
             && !(config.model.starts_with("claude-code/") && authorization_code)
         {
             return Ok(false);
@@ -260,7 +260,7 @@ impl NativeLogin {
             .await;
         let message = if cancel {
             session.process = None;
-            if !thread.claude_login_required() {
+            if !thread.native_login_required() {
                 self.sessions.lock().await.remove(&thread_id);
             }
             "Native login cancelled. Send `claude login` or `cursor login` to sign in again."
@@ -301,7 +301,7 @@ impl NativeLogin {
         } else if session.process.is_none() {
             "No active native login. Send `claude login` or `cursor login` to obtain a new sign-in link. Nothing from this exchange is sent to a model.".to_owned()
         } else if !code {
-            "Login is pending. Send only `done` for Cursor or the one-time Claude authorization code, `claude login` to restart, or `cancel`. Nothing from this login exchange is sent to a model.".to_owned()
+            "Login is pending. Send only `done` for Cursor or the one-time Claude authorization code, `claude login` or `cursor login` to restart, or `cancel`. Nothing from this login exchange is sent to a model.".to_owned()
         } else if let Some(process) = session.process.take().filter(|process| !process.expired()) {
             let result = tokio::select! {
                 result = process.submit(text.unwrap_or_default()) => result,

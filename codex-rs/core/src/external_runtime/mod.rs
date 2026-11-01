@@ -147,6 +147,15 @@ pub(crate) async fn run_turn(
         return Err(CodexErr::TurnAborted);
     }
     let result = run_conversation(&session, &turn, &mut input, &cancellation).await;
+    let authentication_required = result
+        .as_ref()
+        .is_err_and(|error| error.is::<codex_external_runtime::ExternalTurnFailure>());
+    if authentication_required {
+        session
+            .external_runtime
+            .authentication_required
+            .store(/*val*/ true, std::sync::atomic::Ordering::Release);
+    }
     if result
         .as_ref()
         .is_err_and(|error| !error.is::<ConfirmedInterrupt>())
@@ -157,6 +166,18 @@ pub(crate) async fn run_turn(
         Ok(text) => Ok(text),
         Err(error) if error.is::<ConfirmedInterrupt>() || cancellation.is_cancelled() => {
             Err(CodexErr::TurnAborted)
+        }
+        Err(_) if authentication_required => {
+            let message = match NativeRuntime::for_model(&turn.model_info().slug) {
+                Some((NativeRuntime::ClaudeCode, _)) => {
+                    "Claude authentication failed. Send `claude login` in this chat to sign in to your Claude subscription; the failed message will not be replayed."
+                }
+                Some((NativeRuntime::CursorAgent, _)) => {
+                    "Cursor authentication failed. Send `cursor login` in this chat to sign in to your Cursor account; the failed message will not be replayed."
+                }
+                None => "Native authentication failed; the failed message will not be replayed.",
+            };
+            Err(CodexErr::InvalidRequest(message.to_owned()))
         }
         Err(error) => {
             let runtime = NativeRuntime::for_model(&turn.model_info().slug)
@@ -798,17 +819,7 @@ async fn run_conversation(
             if let Err(error) = budget_result {
                 tracing::warn!(%error, "Native failed-turn accounting failed");
             }
-            match failure {
-                codex_external_runtime::ExternalTurnFailure::Authentication => {
-                    session
-                        .external_runtime
-                        .authentication_required
-                        .store(/*val*/ true, std::sync::atomic::Ordering::Release);
-                    bail!(
-                        "Claude authentication failed. Send `claude login` in this chat to sign in to your Claude subscription; the failed message will not be replayed."
-                    );
-                }
-            }
+            return Err(failure.into());
         }
         budget_result?;
         drop(lease);

@@ -651,7 +651,15 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
   Browser authentication stays with the native CLI; accept only `done` to check completion,
   never keys or tokens. Keep pending replies fail-closed across expiry and backend restart,
   and never replay the failed prompt or bypass dirty-session safeguards.
-- Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. By user
+- Use Cursor's native authenticated ACP bootstrap and detect typed auth-required errors
+  (`error.code = -32000`) during setup and turns. Route them into the shared login-required
+  guard and fixed provider-specific instructions; never classify arbitrary assistant prose
+  or generic provider errors as expired authentication. Do not invoke ACP `authenticate`,
+  which can open its own browser flow outside shared interception. Preserve dirty checkpoints
+  on uncertain prompt failures. Installed Cursor versions that swallow established-turn auth
+  failures into ordinary assistant text cannot provide reliable automatic expiry detection;
+  those sessions still require explicit `cursor login` until the native protocol exposes it.
+- Remove `CURSOR_API_KEY` and `CURSOR_AUTH_TOKEN` from the child. By user
   decision, every Cursor session, main and children, launches as `agent --force acp`
   (native run-everything mode). Explicit Cursor denies and team auto-run controls still
   apply; never pass `--approve-mcps`, `--trust` or `--sandbox`. Cursor ACP has no supported

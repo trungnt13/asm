@@ -1111,7 +1111,7 @@ impl CodexThread {
         self.session.state_db()
     }
 
-    pub fn claude_login_required(&self) -> bool {
+    pub fn native_login_required(&self) -> bool {
         self.session
             .external_runtime
             .authentication_required
