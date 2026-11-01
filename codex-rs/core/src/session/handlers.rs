@@ -464,6 +464,21 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
+    if sess
+        .services
+        .thread_extension_data
+        .get::<crate::protected_reviewer::ReviewRun>()
+        .is_some()
+    {
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Warning(WarningEvent {
+                message: "Protected reviewers do not accept review-mode replacement".to_string(),
+            }),
+        })
+        .await;
+        return;
+    }
     if reject_native_operation(sess, &sub_id, "native review mode").await {
         return;
     }
@@ -685,6 +700,9 @@ pub(super) async fn submission_loop(
                         turn_extension_init: sub.turn_extension_init,
                     };
                     let result = async {
+                        if sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewRun>().is_some() {
+                            return Err(CodexErr::InvalidRequest("Protected reviewer settings are frozen".to_string()));
+                        }
                         if system1_enabled.is_some() && persistent {
                             return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
                         }
