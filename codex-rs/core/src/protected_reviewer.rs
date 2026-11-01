@@ -59,6 +59,7 @@ pub(crate) fn configure(config: &mut Config) -> Result<(), String> {
         .features
         .disable(codex_features::Feature::MultiAgentV2DynamicTools);
     config.allow_persistent_dynamic_tool_updates = false;
+    config.multi_agent_v2.hide_spawn_agent_metadata = false;
     config.multi_agent_v2.subagent_usage_hint_text = Some("You are an independent protected reviewer, not an ordinary team worker. Only the configured trusted explorer helpers may assist with evidence gathering; no arbitrary roles, helper delegation, steering or follow-up assignments are allowed. Helper creations consume a lifetime budget even after closing. Close helpers when finished; report evidence and uncertainty in your strict review result.".to_string());
     config.multi_agent_v2.multi_agent_mode_hint_text = Some("For this protected review you may delegate narrow evidence gathering to your configured trusted explorers without additional parent authorization. The harness enforces the total helper budget; a zero budget allows no helpers. Never delegate policy, conclusions or authority. Parent assignments cannot weaken these restrictions.".to_string());
 

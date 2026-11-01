@@ -1574,7 +1574,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                                 .features
                                 .enabled(Feature::ModelCatalogInContext),
                             agent_type_description,
-                            expose_agent_type: !turn_context.config.agent_roles.is_empty(),
+                            expose_agent_type: true,
                             hide_agent_type_model_reasoning: hide_spawn_agent_metadata,
                             expose_spawn_agent_model_overrides: turn_context
                                 .config
