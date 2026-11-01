@@ -175,7 +175,7 @@ pub(crate) struct MessageProcessor {
     thread_queue_processor: ThreadQueueRequestProcessor,
     thread_processor: ThreadRequestProcessor,
     turn_processor: TurnRequestProcessor,
-    claude_login: crate::claude_login::ClaudeLogin,
+    native_login: crate::native_login::NativeLogin,
     windows_sandbox_processor: WindowsSandboxRequestProcessor,
     request_serialization_queues: RequestSerializationQueues,
 }
@@ -643,7 +643,7 @@ impl MessageProcessor {
             thread_queue_processor,
             thread_processor,
             turn_processor,
-            claude_login: crate::claude_login::ClaudeLogin::default(),
+            native_login: crate::native_login::NativeLogin::default(),
             windows_sandbox_processor,
             request_serialization_queues,
         }
@@ -1125,7 +1125,7 @@ impl MessageProcessor {
             ClientRequest::TurnStart { params, .. } => Some((
                 &params.thread_id,
                 &params.input,
-                crate::claude_login::LoginReply::Start {
+                crate::native_login::LoginReply::Start {
                     model: params
                         .collaboration_mode
                         .as_ref()
@@ -1136,7 +1136,7 @@ impl MessageProcessor {
             ClientRequest::TurnSteer { params, .. } => Some((
                 &params.thread_id,
                 &params.input,
-                crate::claude_login::LoginReply::Steer,
+                crate::native_login::LoginReply::Steer,
             )),
             _ => None,
         };
@@ -1147,7 +1147,7 @@ impl MessageProcessor {
                 .thread_manager
                 .get_thread(thread_id)
                 .await
-            && Box::pin(self.claude_login.intercept(
+            && Box::pin(self.native_login.intercept(
                 thread_id,
                 thread.as_ref(),
                 input,

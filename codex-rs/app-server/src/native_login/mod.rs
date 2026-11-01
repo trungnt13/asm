@@ -23,15 +23,20 @@ use codex_protocol::ThreadId;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::claude_login_process::LoginProcess;
-use crate::claude_login_process::LoginProvider;
+mod claude;
+mod cursor;
+mod process;
+mod provider;
+
+use self::process::LoginProcess;
+use self::provider::LoginProvider;
 use crate::error_code::invalid_request;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
 use crate::outgoing_message::OutgoingMessageSender;
 
 #[derive(Default)]
-pub(crate) struct ClaudeLogin {
+pub(crate) struct NativeLogin {
     sessions: Arc<Mutex<HashMap<ThreadId, Arc<Mutex<LoginSession>>>>>,
 }
 
@@ -50,7 +55,7 @@ pub(crate) enum LoginReply<'a> {
     Steer,
 }
 
-impl ClaudeLogin {
+impl NativeLogin {
     #[tracing::instrument(skip_all)]
     pub(crate) async fn intercept(
         &self,
@@ -66,13 +71,9 @@ impl ClaudeLogin {
             [UserInput::Text { text, .. }] => Some(text.trim()),
             _ => None,
         };
-        let start = text.is_some_and(|text| {
-            matches!(
-                text.to_ascii_lowercase().as_str(),
-                "claude login" | "cursor login"
-            )
-        });
-        let authorization_code = text.is_some_and(is_authorization_code);
+        let requested_provider = text.and_then(LoginProvider::from_command);
+        let start = requested_provider.is_some();
+        let authorization_code = text.is_some_and(claude::is_authorization_code);
         let pending_entry = self.sessions.lock().await.get(&thread_id).cloned();
         let guard_path = thread
             .config()
@@ -99,25 +100,24 @@ impl ClaudeLogin {
                 None => config.model.clone(),
             },
         };
-        let cursor = selected_model.starts_with("cursor-agent/");
-        let claude = selected_model.starts_with("claude-code/");
-        let native = claude || cursor;
-        let code = if cursor {
-            pending && text.is_some_and(|text| text.eq_ignore_ascii_case("done"))
-        } else {
-            authorization_code
+        let provider = LoginProvider::from_model(&selected_model);
+        let code = match provider {
+            Some(LoginProvider::Cursor) => {
+                pending && text.is_some_and(|text| LoginProvider::Cursor.accepts_reply(text))
+            }
+            Some(LoginProvider::Claude) | None => authorization_code,
         };
         if !pending
             && !start
-            && !(native && (start || code || thread.claude_login_required()))
+            && !(provider.is_some() && (start || code || thread.claude_login_required()))
             && !(config.model.starts_with("claude-code/") && authorization_code)
         {
             return Ok(false);
         }
-        if !native {
+        let Some(provider) = provider else {
             if pending && !cancel {
                 return Err(invalid_request(
-                    "No active native login. Send `claude login` or `cursor login` with a Claude runtime to restart, or `cancel`. Nothing from this exchange is sent to a model.",
+                    "No active native login. Send `claude login` or `cursor login` with the matching native runtime to restart, or `cancel`. Nothing from this exchange is sent to a model.",
                 ));
             }
             if let Some(entry) = pending_entry {
@@ -141,13 +141,10 @@ impl ClaudeLogin {
                 ));
             }
             return Err(invalid_request(
-                "Native login requires a Claude native-runtime chat.",
+                "Native login requires a Claude or Cursor native-runtime chat.",
             ));
-        }
-        if start
-            && ((cursor && !text.is_some_and(|text| text.eq_ignore_ascii_case("cursor login")))
-                || (claude && !text.is_some_and(|text| text.eq_ignore_ascii_case("claude login"))))
-        {
+        };
+        if requested_provider.is_some_and(|requested| requested != provider) {
             return Err(invalid_request(
                 "Login command must match the selected native runtime: `cursor login` or `claude login`. Nothing from this exchange was sent to a model.",
             ));
@@ -193,38 +190,11 @@ impl ClaudeLogin {
                 "Native login configuration changed. Send `claude login` or `cursor login` to restart.",
             ));
         }
-        if !cancel
-            && cursor
-            && ([
-                "CURSOR_AUTH_TOKEN",
-                "CURSOR_API_ENDPOINT",
-                "CURSOR_WEBSITE_URL",
-            ]
-            .iter()
-            .any(|name| std::env::var_os(name).is_some())
-                || std::env::var("AGENT_CLI_CREDENTIAL_STORE").is_ok_and(|value| value == "memory"))
-        {
+        if !cancel && let Some(message) = provider.environment_error() {
             session.process = None;
-            return Err(invalid_request(
-                "Cursor login is unavailable with authentication or endpoint overrides, or a memory-only credential store. Remove those overrides and retry.",
-            ));
+            return Err(invalid_request(message));
         }
-        if !cancel
-            && claude
-            && [
-                "CLAUDE_CODE_OAUTH_TOKEN",
-                "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
-                "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
-            ]
-            .into_iter()
-            .any(|name| std::env::var_os(name).is_some())
-        {
-            session.process = None;
-            return Err(invalid_request(
-                "Native login is unavailable while native OAuth environment overrides are set. Remove those overrides from the backend environment and retry.",
-            ));
-        }
-        if !thread.stop_claude_for_login().await {
+        if !thread.stop_native_for_login().await {
             return Err(invalid_request(
                 "Wait for native work to finish before login.",
             ));
@@ -303,7 +273,7 @@ impl ClaudeLogin {
             session.cwd = config.cwd().as_path().to_path_buf();
             session.generation = uuid::Uuid::new_v4();
             let result = tokio::select! {
-                result = LoginProcess::start(config.cwd().as_path(), if cursor { LoginProvider::Cursor } else { LoginProvider::Claude }) => result,
+                result = LoginProcess::start(config.cwd().as_path(), provider) => result,
                 _ = disconnect.cancelled() => Err(()),
             };
             match result {
@@ -321,11 +291,7 @@ impl ClaudeLogin {
                             session.process = None;
                         }
                     });
-                    if cursor {
-                        format!("Sign in to your Cursor account: [Open Cursor sign-in]({url}). Complete authentication in your browser, then send `done`. Do not send any key, code, or token. Send `cancel` to cancel. The failed prompt will not be replayed.")
-                    } else { format!(
-                        "Sign in to your Claude subscription: [Open Claude sign-in]({url}).\nCopy the one-time authorization code from the browser and send it as your next message. Do not send an API key or access token. Send `cancel` to cancel. The failed prompt will not be replayed."
-                    ) }
+                    provider.instructions(&url)
                 }
                 Err(()) => {
                     "Native subscription login could not start. Send `claude login` or `cursor login` to try again."
@@ -344,7 +310,7 @@ impl ClaudeLogin {
             match result {
                 Ok(()) => match clear_login_guard(&guard_path).await {
                     Ok(()) => {
-                        thread.finish_claude_login();
+                        thread.finish_native_login();
                         self.sessions.lock().await.remove(&thread_id);
                         "Native account sign-in completed. The subscription runtime remains selected. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
                     }
@@ -409,18 +375,6 @@ impl ClaudeLogin {
             .await;
         Ok(true)
     }
-}
-
-fn is_authorization_code(text: &str) -> bool {
-    text.len() <= 4096
-        && text.split_once('#').is_some_and(|(code, state)| {
-            [code, state].into_iter().all(|part| {
-                part.len() >= 16
-                    && part
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-            })
-        })
 }
 
 fn login_guard_error() -> JSONRPCErrorError {
