@@ -1111,6 +1111,29 @@ impl CodexThread {
         self.session.state_db()
     }
 
+    pub fn claude_login_required(&self) -> bool {
+        self.session
+            .external_runtime
+            .authentication_required
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn stop_claude_for_login(&self) -> bool {
+        let active = self.session.active_turn.lock().await;
+        if active.is_some() {
+            return false;
+        }
+        crate::external_runtime::stop_for_login(&self.session).await
+    }
+
+    pub fn finish_claude_login(&self) {
+        self.session
+            .external_runtime
+            .authentication_required
+            .store(/*val*/ false, std::sync::atomic::Ordering::Release);
+    }
+
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
         self.session.thread_config_snapshot().await
     }

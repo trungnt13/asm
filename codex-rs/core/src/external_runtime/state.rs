@@ -328,6 +328,7 @@ impl ExternalSession {
 
 #[derive(Default)]
 pub(crate) struct RuntimeSlot {
+    pub(crate) authentication_required: std::sync::atomic::AtomicBool,
     state: std::sync::Mutex<SlotState>,
     returned: tokio::sync::Notify,
 }

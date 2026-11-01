@@ -175,6 +175,7 @@ pub(crate) struct MessageProcessor {
     thread_queue_processor: ThreadQueueRequestProcessor,
     thread_processor: ThreadRequestProcessor,
     turn_processor: TurnRequestProcessor,
+    claude_login: crate::claude_login::ClaudeLogin,
     windows_sandbox_processor: WindowsSandboxRequestProcessor,
     request_serialization_queues: RequestSerializationQueues,
 }
@@ -642,6 +643,7 @@ impl MessageProcessor {
             thread_queue_processor,
             thread_processor,
             turn_processor,
+            claude_login: crate::claude_login::ClaudeLogin::default(),
             windows_sandbox_processor,
             request_serialization_queues,
         }
@@ -1019,11 +1021,6 @@ impl MessageProcessor {
             return Err(invalid_request(experimental_required_message(reason)));
         }
         let connection_id = connection_request_id.connection_id;
-        self.initialize_processor.track_initialized_request(
-            connection_id,
-            connection_request_id.request_id.clone(),
-            &codex_request,
-        );
 
         let (turn_admission, recheck_turn_admission) = match &codex_request {
             ClientRequest::ThreadStart { .. }
@@ -1124,6 +1121,50 @@ impl MessageProcessor {
             connection_id,
             request_id: codex_request.id().clone(),
         };
+        let login_input = match &codex_request {
+            ClientRequest::TurnStart { params, .. } => Some((
+                &params.thread_id,
+                &params.input,
+                crate::claude_login::LoginReply::Start {
+                    model: params
+                        .collaboration_mode
+                        .as_ref()
+                        .map(|mode| mode.model())
+                        .or(params.model.as_deref()),
+                },
+            )),
+            ClientRequest::TurnSteer { params, .. } => Some((
+                &params.thread_id,
+                &params.input,
+                crate::claude_login::LoginReply::Steer,
+            )),
+            _ => None,
+        };
+        if let Some((thread_id, input, reply)) = login_input
+            && let Ok(thread_id) = ThreadId::from_string(thread_id)
+            && let Ok(thread) = self
+                .thread_processor
+                .thread_manager
+                .get_thread(thread_id)
+                .await
+            && Box::pin(self.claude_login.intercept(
+                thread_id,
+                thread.as_ref(),
+                input,
+                &request_id,
+                reply,
+                &self.outgoing,
+                session.disconnect.clone(),
+            ))
+            .await?
+        {
+            return Ok(());
+        }
+        self.initialize_processor.track_initialized_request(
+            connection_id,
+            connection_request_id.request_id.clone(),
+            &codex_request,
+        );
         let result: Result<Option<ClientResponsePayload>, JSONRPCErrorError> = match codex_request {
             ClientRequest::Initialize { .. } => {
                 panic!("Initialize should be handled before initialized request dispatch");
