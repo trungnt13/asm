@@ -1455,6 +1455,8 @@ impl ThreadRequestProcessor {
         initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
     ) -> Result<(), JSONRPCErrorError> {
         let thread_start_started_at = std::time::Instant::now();
+        let side_instructions = typesafe_overrides.developer_instructions.clone();
+        let side_inherited_tier = typesafe_overrides.service_tier.clone();
         let requested_cwd = typesafe_overrides.cwd.clone();
         let mut config = config_manager
             .load_with_overrides(config_overrides.clone(), typesafe_overrides.clone())
@@ -1585,6 +1587,16 @@ impl ThreadRequestProcessor {
         if !selected_capability_roots.is_empty() {
             thread_extension_init.insert(selected_capability_roots);
         }
+        let mut side_settings_initialization = super::desktop_side::apply_defaults(
+            side_instructions.as_deref(),
+            &mut config,
+            super::desktop_side::SideOrigin::Start,
+        );
+        if let Some(initialization) = side_settings_initialization.as_mut()
+            && let Some(tier) = &side_inherited_tier
+        {
+            initialization.inherited_tier = tier.clone();
+        }
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
             None
@@ -1659,6 +1671,13 @@ impl ThreadRequestProcessor {
                 });
             }
         };
+        listener_task_context
+            .thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .side_settings_initialization = side_settings_initialization;
         let session_telemetry = thread.session_telemetry();
         session_telemetry.record_startup_phase(
             "thread_start_create_thread",
@@ -5359,6 +5378,9 @@ impl ThreadRequestProcessor {
             exclude_turns,
             defer_goal_continuation,
         } = params;
+        let side_instructions = (!experimental_prediction_mode && (ephemeral || attach_to_source))
+            .then(|| developer_instructions.clone())
+            .flatten();
         let include_turns = !exclude_turns;
         if attach_to_source {
             if ephemeral || defer_goal_continuation {
@@ -5722,7 +5744,7 @@ impl ThreadRequestProcessor {
             );
         }
         let (inherited_options, inherited_settings) = inherited_fork.unzip();
-        let options = if let Some(options) = inherited_options {
+        let mut options = if let Some(options) = inherited_options {
             *options
         } else {
             // Derive a Config using the same logic as new conversation, honoring overrides if provided.
@@ -5810,6 +5832,11 @@ impl ThreadRequestProcessor {
             .await?
         };
 
+        let side_settings_initialization = super::desktop_side::apply_defaults(
+            side_instructions.as_deref(),
+            &mut options.config,
+            super::desktop_side::SideOrigin::Fork,
+        );
         let fork_options = StartThreadOptions {
             attached_thread: attach_to_source,
             thread_source,
@@ -6034,6 +6061,12 @@ impl ThreadRequestProcessor {
         };
 
         let notif = thread_started_notification(thread);
+        self.thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .side_settings_initialization = side_settings_initialization;
         let connection_id = request_id.connection_id;
         self.outgoing
             .send_response_with_thread_originator(request_id, response, thread_originator)

@@ -553,7 +553,7 @@ impl TurnRequestProcessor {
     async fn turn_start_inner(
         &self,
         request_id: ConnectionRequestId,
-        params: TurnStartParams,
+        mut params: TurnStartParams,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
     ) -> Result<TurnStartResponse, JSONRPCErrorError> {
@@ -609,7 +609,7 @@ impl TurnRequestProcessor {
             return Err(error);
         }
         // Validate before changing the thread's live MCP policy.
-        let additional_context = map_additional_context(params.additional_context);
+        let additional_context = map_additional_context(params.additional_context.take());
         additional_context
             .values()
             .try_for_each(CoreAdditionalContextEntry::validate)
@@ -626,6 +626,25 @@ impl TurnRequestProcessor {
         .inspect_err(|error| {
             self.track_error_response(&request_id, error, /*error_type*/ None);
         })?;
+        let side_state = self.thread_state_manager.thread_state(thread_id).await;
+        let pending_first_turn = side_state
+            .lock()
+            .await
+            .side_settings_initialization
+            .as_ref()
+            .is_some_and(|initialization| initialization.pending_first_turn);
+        if pending_first_turn {
+            let (mut snapshot, selected_service_tier) = thread.resume_config_snapshot().await;
+            snapshot.service_tier = selected_service_tier;
+            if let Some(initialization) = side_state
+                .lock()
+                .await
+                .side_settings_initialization
+                .as_mut()
+            {
+                initialization.normalize_first_turn(&mut params, &snapshot);
+            }
+        }
         let runtime_workspace_roots = params
             .runtime_workspace_roots
             .map(resolve_runtime_workspace_roots);
@@ -741,6 +760,15 @@ impl TurnRequestProcessor {
             }
         };
 
+        if started
+            && let Some(initialization) = side_state
+                .lock()
+                .await
+                .side_settings_initialization
+                .as_mut()
+        {
+            initialization.pending_first_turn = false;
+        }
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
             if config_snapshot.is_primary_environment_configured()
@@ -986,9 +1014,14 @@ impl TurnRequestProcessor {
         request_id: &ConnectionRequestId,
         params: ThreadSettingsUpdateParams,
     ) -> Result<ThreadSettingsUpdateResponse, JSONRPCErrorError> {
-        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        let (thread_id, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
+        let picker_fields = (
+            params.model.is_some() || params.collaboration_mode.is_some(),
+            params.effort.is_some() || params.collaboration_mode.is_some(),
+            params.service_tier.is_some(),
+        );
         let cwd = resolve_request_cwd(params.cwd)?;
         let environment_override = self
             .build_environment_override(
@@ -1020,7 +1053,16 @@ impl TurnRequestProcessor {
             .await?;
 
         thread_settings.system1_enabled = params.system1_enabled;
-        if params.system1_enabled.is_some() {
+        let pending_side_initialization = self
+            .thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .side_settings_initialization
+            .as_ref()
+            .is_some_and(|initialization| initialization.pending_first_turn);
+        if params.system1_enabled.is_some() || pending_side_initialization {
             thread
                 .update_thread_settings(thread_settings)
                 .await
@@ -1038,6 +1080,19 @@ impl TurnRequestProcessor {
             .map_err(|err| internal_error(format!("failed to update thread settings: {err}")))?;
         }
 
+        if let Some(initialization) = self
+            .thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .side_settings_initialization
+            .as_mut()
+        {
+            initialization.normalize_model |= picker_fields.0;
+            initialization.normalize_effort |= picker_fields.1;
+            initialization.normalize_tier |= picker_fields.2;
+        }
         let system1 = if params.system1_enabled.is_some() {
             let snapshot = thread.config_snapshot().await;
             Some((
@@ -1062,7 +1117,7 @@ impl TurnRequestProcessor {
         request_id: &ConnectionRequestId,
         params: ThreadInjectItemsParams,
     ) -> Result<ThreadInjectItemsResponse, JSONRPCErrorError> {
-        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        let (thread_id, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
 
@@ -1078,6 +1133,7 @@ impl TurnRequestProcessor {
             .map_err(invalid_request)?;
         validate_response_item_image_urls(&items)?;
 
+        let side_boundary = super::desktop_side::is_boundary(&items);
         thread
             .inject_response_items(items)
             .await
@@ -1085,6 +1141,38 @@ impl TurnRequestProcessor {
                 CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
                 _ => internal_error(format!("failed to inject response items: {err}")),
             })?;
+        {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            let synchronize = {
+                let mut state = thread_state.lock().await;
+                state
+                    .side_settings_initialization
+                    .as_mut()
+                    .is_some_and(|initialization| {
+                        (side_boundary || initialization.pending_first_turn)
+                            && std::mem::take(&mut initialization.pending_sync)
+                    })
+            };
+            if synchronize {
+                // Desktop creates its local conversation after the start/fork response.
+                // Synchronize here even if the listener already observed identical settings.
+                let (mut snapshot, selected_service_tier) = thread.resume_config_snapshot().await;
+                snapshot.service_tier = selected_service_tier;
+                let thread_settings = thread_settings_from_config_snapshot(&snapshot);
+                thread_state
+                    .lock()
+                    .await
+                    .note_thread_settings(thread_settings.clone());
+                self.outgoing
+                    .send_server_notification(ServerNotification::ThreadSettingsUpdated(
+                        codex_app_server_protocol::ThreadSettingsUpdatedNotification {
+                            thread_id: params.thread_id,
+                            thread_settings,
+                        },
+                    ))
+                    .await;
+            }
+        }
         Ok(ThreadInjectItemsResponse {})
     }
 

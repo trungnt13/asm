@@ -4,6 +4,8 @@ load("//bazel/rules:runtime_package.bzl", "release_binary")
 codex_rust_crate(
     name = "app-server",
     crate_name = "codex_app_server",
+    compile_data = glob(["src/request_processors/desktop_side_*.txt"]),
+    test_data_extra = glob(["src/request_processors/desktop_side_*.txt"]),
     extra_binaries = [
         "//codex-rs/bwrap:bwrap",
         "//codex-rs/code-mode-host:codex-code-mode-host",

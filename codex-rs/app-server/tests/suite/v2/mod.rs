@@ -56,6 +56,10 @@ mod current_time;
 mod cyber_access_program;
 mod daemon_update_recovery;
 mod daybreak_access;
+#[path = "desktop_side_tests.rs"]
+mod desktop_side;
+#[path = "desktop_side_isolation_tests.rs"]
+mod desktop_side_isolation;
 mod dynamic_tools;
 mod environment_add;
 mod environment_info;
