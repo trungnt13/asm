@@ -260,10 +260,20 @@ fn linux_sandbox_exe_path(
         .or(current_exe)
 }
 
+// Tokio defaults to one worker per CPU. On many-core hosts the extra workers add RSS and idle
+// wake-up CPU without helping this I/O-bound workload.
+#[cfg(target_os = "linux")]
+const MAX_DEFAULT_WORKER_THREADS: usize = 8;
+
 fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     builder.thread_stack_size(THREAD_STACK_SIZE_BYTES);
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
+        let cpus = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+        builder.worker_threads(cpus.min(MAX_DEFAULT_WORKER_THREADS));
+    }
     Ok(builder.build()?)
 }
 
