@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from wrapper_common import (
+    TOOLCHAIN_CHANNEL,
     build_final_args,
     exec_command,
     fetch_packaged_entrypoint,
-    find_packaged_cargo_dylint,
     normalize_packaged_library,
     parse_wrapper_args,
     prefer_rustup_shims,
@@ -34,7 +35,27 @@ def main() -> "Never":
         root / "tools" / "argument-comment-lint" / "argument-comment-lint",
         env,
     )
-    cargo_dylint = find_packaged_cargo_dylint(package_entrypoint)
+    # Dylint 6.1's driver bootstrap requires Clippy's removed master branch.
+    cache = root / ".agents" / "argument-comment-lint" / "6.3.2"
+    cargo_dylint = (
+        cache / "bin" / ("cargo-dylint.exe" if os.name == "nt" else "cargo-dylint")
+    )
+    if not cargo_dylint.is_file():
+        subprocess.run(
+            [
+                "rustup",
+                "run",
+                TOOLCHAIN_CHANNEL,
+                "cargo",
+                "install",
+                "--locked",
+                "--root",
+                str(cache),
+                "cargo-dylint@6.3.2",
+            ],
+            env={**env, "CARGO_TARGET_DIR": str(cache / "target")},
+            check=True,
+        )
     library_path = normalize_packaged_library(package_entrypoint)
 
     command = [str(cargo_dylint), "dylint", "--lib-path", str(library_path)]

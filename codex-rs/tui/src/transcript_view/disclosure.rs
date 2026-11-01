@@ -90,6 +90,9 @@ impl TranscriptView {
     }
 
     pub(super) fn activity_ids(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Vec<String> {
+        if let Some(ids) = self.turn_group_ids(cells, index) {
+            return ids;
+        }
         if let Some(ids) = self.tool_group_ids(cells, index) {
             return ids;
         }
@@ -352,33 +355,44 @@ impl TranscriptView {
         }
         // Source offsets only survive an unchanged cell. Regrouped/retired live entries resolve
         // through their member IDs and anchor at their header, never a stale positional index.
-        let anchor = previous_top
+        let (mut anchor, header_anchor) = previous_top
             .and_then(|(key, top_ids, offset, row_bias)| {
                 let unchanged = cells.iter().position(|cell| EntryKey::cell(cell) == key);
                 let top = unchanged.or_else(|| self.canonical_activity_index(cells, &top_ids))?;
                 let preserve_offset = unchanged.is_some() && top != index;
-                Some(Anchor {
-                    key: cells.get(top).map_or(EntryKey::Live, EntryKey::cell),
-                    index: top,
-                    offset: if preserve_offset { offset } else { 0 },
-                    row_bias: if preserve_offset { row_bias } else { 0 },
-                })
+                Some((
+                    Anchor {
+                        key: cells.get(top).map_or(EntryKey::Live, EntryKey::cell),
+                        index: top,
+                        offset: if preserve_offset { offset } else { 0 },
+                        row_bias: if preserve_offset { row_bias } else { 0 },
+                    },
+                    !preserve_offset,
+                ))
             })
-            .unwrap_or(Anchor {
-                key: cells.get(index).map_or(EntryKey::Live, EntryKey::cell),
-                index,
-                offset: 0,
-                row_bias: 0,
-            });
+            .unwrap_or((
+                Anchor {
+                    key: cells.get(index).map_or(EntryKey::Live, EntryKey::cell),
+                    index,
+                    offset: 0,
+                    row_bias: 0,
+                },
+                true,
+            ));
         if matched || self.disclosure.is_expanded(&ids) {
             self.disclosure.expanded.retain(|id| !ids.contains(id));
         } else {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
         self.disclosure.focused = Some(ids);
-        self.position = Position::Reading(anchor);
         self.cache.clear();
         self.collapsed_tools.invalidate_layouts();
+        if header_anchor {
+            anchor.row_bias = self
+                .layout(cells, anchor.index)
+                .map_or(/*default*/ 0, |layout| layout.header_row_bias());
+        }
+        self.position = Position::Reading(anchor);
         self.live_key = None;
         self.live_separated = None;
         if matched {

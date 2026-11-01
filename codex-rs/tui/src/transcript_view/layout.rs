@@ -136,17 +136,17 @@ struct CachedLayout {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct CellPresentation {
-    separated: bool,
+    pub(super) separated: bool,
     shares_prompt_background: bool,
     turn_tip_space: bool,
-    expanded: bool,
-    disclosure: bool,
+    pub(super) expanded: bool,
+    pub(super) disclosure: bool,
     detailed: bool,
     image_protocol: Option<crate::pets::ImageProtocol>,
 }
 
 impl TranscriptView {
-    fn content_presentation(
+    pub(super) fn content_presentation(
         &mut self,
         cell: &dyn HistoryCell,
         full_content: bool,
@@ -247,6 +247,9 @@ impl TranscriptView {
             && cell.as_any().is::<crate::history_cell::SessionInfoCell>()
         {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
+        }
+        if !full_content && let Some(layout) = self.turn_group_layout(cells, index) {
+            return Some(layout);
         }
         if !full_content && let Some(layout) = self.tool_group_layout(cells, index) {
             return Some(layout);

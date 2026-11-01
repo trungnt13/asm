@@ -22,6 +22,7 @@ mod selection;
 mod snapshot;
 mod text;
 mod tool_groups;
+mod turn_groups;
 mod turn_tip;
 
 use std::sync::Arc;
@@ -129,6 +130,7 @@ pub(crate) struct TranscriptView {
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
     collapsed_tools: tool_groups::CollapsedToolGroups,
+    turn_groups: std::cell::RefCell<turn_groups::TurnGroups>,
 }
 
 impl Default for TranscriptView {
@@ -172,6 +174,7 @@ impl Default for TranscriptView {
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
             collapsed_tools: tool_groups::CollapsedToolGroups::default(),
+            turn_groups: std::cell::RefCell::default(),
         }
     }
 }
@@ -539,11 +542,14 @@ impl TranscriptView {
         self.release_live_reading();
         let snapshot = self.snapshot_cells();
         let cells = snapshot.as_deref().unwrap_or(cells);
+        let row_bias = self
+            .layout(cells, index)
+            .map_or(/*default*/ 0, |layout| layout.header_row_bias());
         self.position = Position::Reading(Anchor {
             key: self.entry_key(cells, index),
             index,
             offset: 0,
-            row_bias: 0,
+            row_bias,
         });
     }
 
@@ -588,7 +594,9 @@ impl TranscriptView {
         if distance > threshold {
             return false;
         }
-        for previous in (0..index).rev() {
+        let mut previous = index;
+        while previous > 0 {
+            previous = self.skip_collapsed_turn(cells, previous - 1, /*direction*/ -1);
             distance = distance.saturating_add(
                 self.layout(cells, previous)
                     .map_or(/*default*/ 0, |layout| layout.row_count()),
@@ -673,7 +681,7 @@ impl TranscriptView {
                     return (index, 0);
                 }
                 remaining -= row;
-                index -= 1;
+                index = self.skip_collapsed_turn(cells, index - 1, /*direction*/ -1);
                 row = self
                     .layout(cells, index)
                     .map_or(/*default*/ 0, |l| l.row_count());
@@ -690,7 +698,11 @@ impl TranscriptView {
             return (index, row.saturating_sub(remaining));
         }
         let mut remaining = row.saturating_add(rows as usize);
-        while let Some(layout) = self.layout(cells, index) {
+        loop {
+            index = self.skip_collapsed_turn(cells, index, /*direction*/ 1);
+            let Some(layout) = self.layout(cells, index) else {
+                break;
+            };
             if remaining < layout.row_count() {
                 break;
             }
@@ -701,7 +713,11 @@ impl TranscriptView {
     }
 
     fn next_nonempty(&mut self, cells: &[Arc<dyn HistoryCell>], mut index: usize) -> Option<usize> {
-        while let Some(layout) = self.layout(cells, index) {
+        loop {
+            index = self.skip_collapsed_turn(cells, index, /*direction*/ 1);
+            let Some(layout) = self.layout(cells, index) else {
+                break;
+            };
             if layout.row_count() > 0 {
                 return Some(index);
             }

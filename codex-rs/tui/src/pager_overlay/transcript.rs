@@ -338,6 +338,7 @@ impl TranscriptOverlay {
 
     pub(crate) fn insert_cell(&mut self, cell: Arc<dyn HistoryCell>) {
         self.cells.push(cell);
+        crate::history_cell::TurnActivityBoundary::position_header(&mut self.cells);
     }
 
     /// Insert old history after the session header; stable viewport anchors keep their content.

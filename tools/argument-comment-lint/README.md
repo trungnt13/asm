@@ -118,8 +118,12 @@ library filename to the nightly channel without the host triple when
 needed, and then invokes `cargo-dylint dylint --lib-path <that-library>` with
 the repo's default `DYLINT_RUSTFLAGS` and `CARGO_INCREMENTAL=0` settings.
 
-The repository's `run-prebuilt-linter.py` wrapper invokes the bundled
-`cargo-dylint` and normalizes the library filename itself. It makes sure
+The repository's `run-prebuilt-linter.py` wrapper uses the packaged lint library
+with a pinned `cargo-dylint` 6.3.2 frontend, installed on first use under
+`.agents/argument-comment-lint/6.3.2` with the pinned nightly toolchain and
+`cargo install --locked`. This avoids the bundled 6.1 driver's bootstrap,
+which still requires Clippy's removed `master` branch. No global tools are
+replaced. The wrapper normalizes the library filename itself. It makes sure
 the `rustup` shims stay ahead of any direct toolchain
 `cargo` binary on `PATH`, and sets `RUSTUP_HOME` from `rustup show home` when
 the environment does not already provide it. That extra `RUSTUP_HOME` export is

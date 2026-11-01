@@ -12,6 +12,8 @@
 
 mod activity_group;
 pub(crate) use activity_group::ActivityGroup;
+mod turn_activity;
+pub(crate) use turn_activity::TurnActivityBoundary;
 mod tool_summary;
 pub(crate) use tool_summary::ToolCallSummary;
 pub(crate) use tool_summary::command_names;

@@ -495,6 +495,16 @@ impl TranscriptView {
         if width == self.area.width {
             return;
         }
+        if let Position::Reading(anchor) = &mut self.position
+            && anchor.offset == 0
+            && let Some(visible) = self.visible.iter().find(|visible| {
+                visible.key == anchor.key
+                    && visible.layout.disclosure_header.is_some()
+                    && visible.layout.header_row_bias() == anchor.row_bias
+            })
+        {
+            anchor.row_bias = visible.layout.rewrap(width).header_row_bias();
+        }
         self.rewrap_snapshot(width);
         if let Some(found) = &mut self.search.current {
             found.layout = Arc::new(found.layout.rewrap(width));

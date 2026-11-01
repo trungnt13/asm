@@ -35,6 +35,7 @@ impl TranscriptView {
         range: Range<usize>,
         replacement: &Arc<dyn HistoryCell>,
     ) {
+        *self.turn_groups.borrow_mut() = Default::default();
         if range.is_empty() {
             return;
         }
@@ -82,6 +83,7 @@ impl TranscriptView {
         range: Range<usize>,
         replacement: &Arc<dyn HistoryCell>,
     ) {
+        *self.turn_groups.borrow_mut() = Default::default();
         if range.is_empty() {
             return;
         }

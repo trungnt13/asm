@@ -40,6 +40,7 @@ impl App {
                 self.native_history.defer(&cell);
             }
             self.transcript_cells.push(cell);
+            history_cell::TurnActivityBoundary::position_header(&mut self.transcript_cells);
         }
 
         // Walk backward to find the contiguous run of streaming AgentMessageCells that

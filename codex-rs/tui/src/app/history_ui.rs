@@ -82,6 +82,7 @@ impl App {
             tui.frame_requester().schedule_frame();
         }
         self.transcript_cells.push(cell.clone());
+        history_cell::TurnActivityBoundary::position_header(&mut self.transcript_cells);
         let deferred = tui.is_owned_screen() || self.native_history.insert(&cell);
         self.render_inserted_history_cell(tui, &cell, deferred);
         // A committed cell can unblock a settled /usage card that was waiting

@@ -226,7 +226,7 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 if confirmed {
-                    self.start_model_session(tui, app_server, None, None, None, Some((model, effort))).await;
+                    self.start_model_session(tui, app_server, /*session_start_source*/ None, /*initial_user_message*/ None, /*new_thread_name*/ None, Some((model, effort))).await;
                 } else {
                     self.chat_widget.confirm_model_session(model, effort);
                 }

@@ -139,7 +139,8 @@ async fn older_tool_projection_matches_initial_replay() {
     let replayed = std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::InsertHistoryCell(cell)
-                if !cell.as_any().is::<history_cell::FinalMessageSeparator>() =>
+                if !cell.as_any().is::<history_cell::FinalMessageSeparator>()
+                    && !cell.as_any().is::<history_cell::TurnActivityBoundary>() =>
             {
                 Some(cell)
             }
