@@ -1069,6 +1069,15 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
+    // glibc allows up to 8 malloc arenas per CPU, which retains idle heap on many-core hosts.
+    // Cap them before any thread starts, unless the user chose a limit.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if std::env::var_os("MALLOC_ARENA_MAX").is_none() {
+        // SAFETY: `mallopt` only changes allocator tunables, and no other thread exists yet.
+        unsafe {
+            libc::mallopt(libc::M_ARENA_MAX, /*value*/ 4)
+        };
+    }
     if std::env::args_os().nth(/*n*/ 1).as_deref()
         == Some(std::ffi::OsStr::new("--asm-native-tools"))
     {

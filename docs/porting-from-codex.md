@@ -1292,3 +1292,7 @@ Top-level `subagent_model_list` optionally selects advertised model IDs in user 
 Show all model-supported reasoning efforts, including Max and Ultra, in one list.
 Do not gate them behind a “More reasoning…” submenu. Preserve selection persistence,
 Plan-mode scope, and the explicit picker requirement for raising into Ultra by shortcut.
+
+### GNU malloc arena cap
+
+At the start of `main`, the Linux GNU `codex` calls `mallopt(M_ARENA_MAX, 4)` before any thread starts. A set `MALLOC_ARENA_MAX` takes precedence. glibc otherwise allows up to 8 arenas per CPU, and many-core hosts keep idle heap in them. Keep the GNU system allocator: upstream uses jemalloc only on musl, to replace the musl allocator. Mock-model runs (64 CPUs, 32 conversations × 4 turns, 3 runs) measured 6–15% lower RSS and 10–28% lower anonymous memory after unload, with no measurable wall or CPU cost. The effect on real sessions is unmeasured. Drop this drift if upstream caps glibc arenas itself.
