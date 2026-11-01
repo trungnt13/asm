@@ -494,7 +494,12 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   Intercept login replies before normal turn ingestion, history, hooks, or inference;
   send one-time authorization codes only to the official Claude login subprocess.
   Never include codes in model requests, backend logs, or rollouts. Client-local
-  drafts and prompt recall are accepted. Keep login output private and errors fixed;
+  drafts and prompt recall are accepted. Expired or interrupted login exchanges stay
+  fail-closed: unrecognized replies receive fixed restart instructions, never normal
+  turn ingestion. Only explicit non-secret actions may exit or restart login mode.
+  Retain a code-free pending-login marker across backend restart and thread resume;
+  never store authorization codes or OAuth state in that marker or alter checkpoints.
+  Keep login output private and errors fixed;
   verify subscription authentication rather than falling back to Console, API keys,
   or cloud providers. Login does not authorize replaying failed input or clearing an
   uncertain execution checkpoint.

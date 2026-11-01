@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -67,7 +68,19 @@ impl ClaudeLogin {
         let start = text.is_some_and(|text| text.eq_ignore_ascii_case("claude login"));
         let code = text.is_some_and(is_authorization_code);
         let pending_entry = self.sessions.lock().await.get(&thread_id).cloned();
-        let pending = pending_entry.is_some();
+        let guard_path = thread
+            .config()
+            .await
+            .codex_home
+            .join("claude-runtime")
+            .join(format!("{thread_id}.login-pending"));
+        let durable_pending = match tokio::fs::symlink_metadata(&guard_path).await {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(_) => return Err(login_guard_error()),
+        };
+        let pending = pending_entry.is_some() || durable_pending;
+        let cancel = text.is_some_and(|text| text.eq_ignore_ascii_case("cancel"));
         let config = thread.config_snapshot().await;
         let requested_model = match reply {
             LoginReply::Start { model } => model,
@@ -88,6 +101,11 @@ impl ClaudeLogin {
             return Ok(false);
         }
         if !claude {
+            if pending && !cancel {
+                return Err(invalid_request(
+                    "No active Claude login. Send `claude login` with a Claude runtime to restart, or `cancel`. Nothing from this exchange is sent to a model.",
+                ));
+            }
             if let Some(entry) = pending_entry {
                 let mut session = entry.lock().await;
                 if session.owner != request_id.connection_id && session.process.is_some() {
@@ -95,10 +113,17 @@ impl ClaudeLogin {
                         "Claude login belongs to another connection.",
                     ));
                 }
+                clear_login_guard(&guard_path).await?;
                 session.process = None;
                 self.sessions.lock().await.remove(&thread_id);
                 return Err(invalid_request(
                     "Claude login cancelled because the selected runtime changed. Send a new message to continue.",
+                ));
+            }
+            if durable_pending {
+                clear_login_guard(&guard_path).await?;
+                return Err(invalid_request(
+                    "Claude login cancelled. Send a new message to continue with the selected runtime.",
                 ));
             }
             return Err(invalid_request(
@@ -134,15 +159,7 @@ impl ClaudeLogin {
                 "Claude login belongs to another connection.",
             ));
         }
-        if pending
-            && session.process.is_none()
-            && !start
-            && !code
-            && !thread.claude_login_required()
-        {
-            self.sessions.lock().await.remove(&thread_id);
-            return Ok(false);
-        }
+        persist_login_guard(&guard_path).await?;
         if !start
             && (session.model != config.model
                 || session.selected_model != selected_model
@@ -182,6 +199,9 @@ impl ClaudeLogin {
                     invalid_request("Claude login model selection could not be applied.")
                 })?;
             session.model = selected_model.clone();
+        }
+        if cancel {
+            clear_login_guard(&guard_path).await?;
         }
         let started_at_ms: i64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -227,7 +247,6 @@ impl ClaudeLogin {
                 }),
             )
             .await;
-        let cancel = text.is_some_and(|text| text.eq_ignore_ascii_case("cancel"));
         let message = if cancel {
             session.process = None;
             if !thread.claude_login_required() {
@@ -279,11 +298,14 @@ impl ClaudeLogin {
                 _ = disconnect.cancelled() => Err(()),
             };
             match result {
-                Ok(()) => {
-                    thread.finish_claude_login();
-                    self.sessions.lock().await.remove(&thread_id);
-                    "Claude account sign-in completed. The subscription runtime remains selected. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
-                }
+                Ok(()) => match clear_login_guard(&guard_path).await {
+                    Ok(()) => {
+                        thread.finish_claude_login();
+                        self.sessions.lock().await.remove(&thread_id);
+                        "Claude account sign-in completed. The subscription runtime remains selected. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
+                    }
+                    Err(_) => login_guard_error().message,
+                },
                 Err(()) => "Claude subscription login did not complete. Send `claude login` to restart; do not resend this code.".to_owned(),
             }
         } else {
@@ -355,4 +377,37 @@ fn is_authorization_code(text: &str) -> bool {
                         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
             })
         })
+}
+
+fn login_guard_error() -> JSONRPCErrorError {
+    invalid_request(
+        "Claude login safety state is unavailable. Nothing from this exchange was sent to a model. Retry after local storage is available.",
+    )
+}
+
+#[tracing::instrument(skip_all)]
+async fn persist_login_guard(path: &Path) -> Result<(), JSONRPCErrorError> {
+    let result = async {
+        let directory = path.parent().expect("login marker has a parent");
+        tokio::fs::create_dir_all(directory).await?;
+        let mut options = tokio::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        options.mode(/*mode*/ 0o600);
+        options.open(path).await?.sync_all().await?;
+        #[cfg(unix)]
+        tokio::fs::File::open(directory).await?.sync_all().await?;
+        std::io::Result::Ok(())
+    }
+    .await;
+    result.map_err(|_| login_guard_error())
+}
+
+#[tracing::instrument(skip_all)]
+async fn clear_login_guard(path: &Path) -> Result<(), JSONRPCErrorError> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(login_guard_error()),
+    }
 }
