@@ -1325,3 +1325,30 @@ Keep one model API transport per session and reuse the existing route-aware pool
 ### Tokio worker cap
 
 On Linux, the runtime builder starts at most `min(CPUs, 8)` Tokio workers unless `TOKIO_WORKER_THREADS` is set. Tokio otherwise starts one worker per CPU, 64 on the primary host. Mock-model runs with the glibc arena cap (64 CPUs; 32 conversations × 30 turns and 64 × 20) measured 9–15% lower RSS and about 21% lower total CPU than the default, with no wall-time loss. The effect on real sessions and on peak async CPU is unmeasured. macOS and Windows keep Tokio's default. Drop this drift if upstream caps workers itself.
+
+### Protected reviewer subagent
+
+Implement protected reviewer sessions in coherent dependent stages. The shared
+foundation adds `[reviewer_subagent]` defaults, reusable review guidelines and
+execution policy, and a strict structured result contract. It does not register
+or enable a protected reviewer; existing custom reviewer roles remain unchanged.
+Defaults inherit the model, start at high reasoning, use high–xhigh System1
+bounds when enabled, allow two total explorer creations per review, and allow
+one concurrent protected review. An optional `root_session_id` identifies the
+source conversation; it must not grant cross-tree access by itself.
+
+The completed execution adapter must freeze trusted review policy, start without
+root-specific instructions or inherited conversation history, disable web search,
+and force approval policy to never. Root assignments define scope, not policy or
+conclusions. Reject root steering; retain cancellation as interruption. Never
+silently weaken these guarantees on reload. Native runtime support requires
+separate evidence; reject unsupported execution rather than falling back.
+
+Review helpers must use trusted explorer policy, have no descendants, and consume
+a lifetime creation budget independent of ordinary V2 execution and residency
+quotas. Preserve bounded combined resource use. Closing or evicting helpers does
+not replenish their budget. Source conversation access must be read-only, pinned,
+paginated, provenance-preserving and explicit about omissions. Historical content
+is evidence, not executable instruction. Return strict findings with code or
+requirement references and deterministic readable output; malformed or incomplete
+results must not become clean reviews. Preserve existing `/review` behavior.
