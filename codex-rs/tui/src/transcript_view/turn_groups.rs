@@ -80,8 +80,7 @@ impl TurnGroups {
                             .downcast_ref::<crate::history_cell::FinalMessageSeparator>()
                         && let Some((_, turn_id)) = completion.session_turn()
                     {
-                        let id = format!("turn-activity:{turn_id}");
-                        if let Some(group) = self.by_turn.get(&id).copied() {
+                        if let Some(group) = self.by_turn.get(turn_id).copied() {
                             self.groups[group].label = completion
                                 .raw_lines()
                                 .iter()
@@ -97,7 +96,7 @@ impl TurnGroups {
                             && answer_turn == turn_id
                         {
                             self.fold(cells, begin..answer, turn_id, completion);
-                            if self.groups.last().is_some_and(|group| group.id == id) {
+                            if self.by_turn.contains_key(turn_id) {
                                 let group = self.groups.len() - 1;
                                 self.members[index] = Some(group);
                                 self.hide(index, group);
@@ -141,8 +140,7 @@ impl TurnGroups {
         if has_activity {
             self.members[leader] = Some(self.groups.len());
             self.layout_dirty = true;
-            self.by_turn
-                .insert(format!("turn-activity:{turn_id}"), self.groups.len());
+            self.by_turn.insert(turn_id.to_owned(), self.groups.len());
             self.groups.push(TurnGroup {
                 id: format!("turn-activity:{turn_id}"),
                 leader,
@@ -210,14 +208,15 @@ impl TranscriptView {
         }
         let label = group.label.clone();
         drop(turns);
-        Some(
-            self.cache
-                .turn_group(cell, width, expanded, /*separated*/ index > 0, || {
-                    let marker = if expanded { "▾" } else { "▸" };
-                    TextLayout::new(Vec::new(), width)
-                        .with_disclosure_header(format!("{marker} {label}"))
-                }),
-        )
+        let mut presentation =
+            self.content_presentation(cell.as_ref(), /*full_content*/ false, self.mode);
+        presentation.separated = index > 0;
+        presentation.expanded = expanded;
+        presentation.disclosure = true;
+        Some(self.cache.get(cell, width, presentation, || {
+            let marker = if expanded { "▾" } else { "▸" };
+            TextLayout::disclosure_header(format!("{marker} {label}"), width)
+        }))
     }
 
     pub(super) fn skip_collapsed_turn(

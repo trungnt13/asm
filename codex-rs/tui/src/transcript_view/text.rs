@@ -165,7 +165,7 @@ impl TextLayout {
                 layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
         }
         if let Some(header) = &self.disclosure_header {
-            layout = layout.with_disclosure_header(header.clone());
+            layout = Self::disclosure_header(header.clone(), width);
         }
         layout.disclosure |= self.disclosure;
         layout.image = self.image.clone();
@@ -179,23 +179,23 @@ impl TextLayout {
         }
     }
 
-    pub(super) fn with_disclosure_header(mut self, label: String) -> Self {
-        let header = TextLayout::new(
+    pub(super) fn disclosure_header(label: String, width: u16) -> Self {
+        let mut layout = Self::new(
             crate::terminal_hyperlinks::plain_hyperlink_lines(crate::wrapping::word_wrap_lines(
                 [Line::from(label.clone()).dim()],
-                usize::from(self.width),
+                usize::from(width),
             )),
-            self.width,
+            width,
         );
-        let rows = header.rows.into_iter().map(|mut row| {
+        layout.logical = Vec::new();
+        layout.text = String::new();
+        for row in &mut layout.rows {
             row.source = 0..0;
             row.line_end = None;
-            row
-        });
-        self.rows.splice(0..0, rows);
-        self.disclosure = true;
-        self.disclosure_header = Some(label);
-        self
+        }
+        layout.disclosure = true;
+        layout.disclosure_header = Some(label);
+        layout
     }
 
     /// Append a clipped interaction row outside the copied and searched source text.
