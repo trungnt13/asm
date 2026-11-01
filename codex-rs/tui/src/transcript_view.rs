@@ -196,9 +196,7 @@ impl TranscriptView {
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         self.composer_tip = None;
         self.prompt_header_target = None;
-        if self.cache.begin_frame() {
-            self.turn_groups.borrow_mut().clear_layouts();
-        }
+        self.cache.begin_frame();
         self.sync_history_tail(cells);
         let current_cells = cells;
         let snapshot = self.snapshot_cells();
@@ -593,7 +591,9 @@ impl TranscriptView {
         if distance > threshold {
             return false;
         }
-        for previous in (0..index).rev() {
+        let mut previous = index;
+        while previous > 0 {
+            previous = self.skip_collapsed_turn(cells, previous - 1, /*direction*/ -1);
             distance = distance.saturating_add(
                 self.layout(cells, previous)
                     .map_or(/*default*/ 0, |layout| layout.row_count()),
@@ -678,7 +678,7 @@ impl TranscriptView {
                     return (index, 0);
                 }
                 remaining -= row;
-                index -= 1;
+                index = self.skip_collapsed_turn(cells, index - 1, /*direction*/ -1);
                 row = self
                     .layout(cells, index)
                     .map_or(/*default*/ 0, |l| l.row_count());
@@ -695,7 +695,11 @@ impl TranscriptView {
             return (index, row.saturating_sub(remaining));
         }
         let mut remaining = row.saturating_add(rows as usize);
-        while let Some(layout) = self.layout(cells, index) {
+        loop {
+            index = self.skip_collapsed_turn(cells, index, /*direction*/ 1);
+            let Some(layout) = self.layout(cells, index) else {
+                break;
+            };
             if remaining < layout.row_count() {
                 break;
             }
@@ -706,7 +710,11 @@ impl TranscriptView {
     }
 
     fn next_nonempty(&mut self, cells: &[Arc<dyn HistoryCell>], mut index: usize) -> Option<usize> {
-        while let Some(layout) = self.layout(cells, index) {
+        loop {
+            index = self.skip_collapsed_turn(cells, index, /*direction*/ 1);
+            let Some(layout) = self.layout(cells, index) else {
+                break;
+            };
             if layout.row_count() > 0 {
                 return Some(index);
             }

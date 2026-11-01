@@ -13,7 +13,8 @@ pub(super) struct TurnGroups {
     groups: Vec<TurnGroup>,
     by_turn: HashMap<String, usize>,
     legacy_answer: Option<(String, usize)>,
-    layouts: HashMap<(EntryKey, u16, bool), Arc<TextLayout>>,
+    hidden: Vec<(std::ops::Range<usize>, usize)>,
+    layout_dirty: bool,
     empty_layout: Option<Arc<TextLayout>>,
 }
 
@@ -24,10 +25,6 @@ struct TurnGroup {
 }
 
 impl TurnGroups {
-    pub(super) fn clear_layouts(&mut self) {
-        self.layouts.clear();
-    }
-
     fn sync(&mut self, cells: &[Arc<dyn HistoryCell>]) {
         let count = self.members.len();
         if count > cells.len()
@@ -91,7 +88,8 @@ impl TurnGroups {
                                 .collect::<Vec<_>>()
                                 .join(" ");
                             self.members[index] = Some(group);
-                            self.layouts.clear();
+                            self.layout_dirty = true;
+                            self.hide(index, group);
                         } else if let Some((pending_id, begin)) = self.pending.take()
                             && pending_id == turn_id
                             && let Some((answer_turn, answer)) = self.legacy_answer.take()
@@ -99,7 +97,9 @@ impl TurnGroups {
                         {
                             self.fold(cells, begin..answer, turn_id, completion);
                             if self.groups.last().is_some_and(|group| group.id == id) {
-                                self.members[index] = Some(self.groups.len() - 1);
+                                let group = self.groups.len() - 1;
+                                self.members[index] = Some(group);
+                                self.hide(index, group);
                             }
                         }
                     }
@@ -108,6 +108,17 @@ impl TurnGroups {
         }
         self.first = cells.first().map(EntryKey::cell);
         self.last = cells.last().map(EntryKey::cell);
+    }
+
+    fn hide(&mut self, index: usize, group: usize) {
+        if let Some((range, previous_group)) = self.hidden.last_mut()
+            && range.end == index
+            && *previous_group == group
+        {
+            range.end += 1;
+        } else {
+            self.hidden.push((index..index + 1, group));
+        }
     }
 
     fn fold(
@@ -127,11 +138,15 @@ impl TurnGroups {
                     .is::<crate::history_cell::ReasoningSummaryCell>()
                 || cell.tool_call_summary().is_some()
             {
+                if leader.is_some() {
+                    self.hide(index, self.groups.len());
+                }
                 leader.get_or_insert(index);
                 self.members[index] = Some(self.groups.len());
             }
         }
         if let Some(leader) = leader {
+            self.layout_dirty = true;
             self.by_turn
                 .insert(format!("turn-activity:{turn_id}"), self.groups.len());
             self.groups.push(TurnGroup {
@@ -166,7 +181,7 @@ impl TranscriptView {
     }
 
     pub(super) fn turn_group_layout(
-        &self,
+        &mut self,
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Arc<TextLayout>> {
@@ -175,6 +190,9 @@ impl TranscriptView {
         }
         let mut turns = self.turn_groups.borrow_mut();
         turns.sync(cells);
+        if std::mem::take(&mut turns.layout_dirty) {
+            self.cache.clear();
+        }
         let group = turns.groups.get(*turns.members.get(index)?.as_ref()?)?;
         let expanded = self.disclosure.expanded.contains(&group.id);
         let leader = index == group.leader;
@@ -191,47 +209,78 @@ impl TranscriptView {
                 .get_or_insert_with(|| Arc::new(TextLayout::new(Vec::new(), width)));
             return Some(Arc::clone(layout));
         }
-        let key = (EntryKey::cell(cell), width, expanded);
-        if let Some(layout) = turns.layouts.get(&key) {
-            return Some(Arc::clone(layout));
-        }
-        let lines = if expanded
-            && !cell
-                .as_any()
-                .is::<crate::history_cell::FinalMessageSeparator>()
+        let label = group.label.clone();
+        drop(turns);
+        Some(
+            self.cache
+                .turn_group(cell, width, expanded, /*separated*/ index > 0, || {
+                    let lines = if expanded
+                        && !cell
+                            .as_any()
+                            .is::<crate::history_cell::FinalMessageSeparator>()
+                    {
+                        cell.compact_hyperlink_lines(width)
+                    } else {
+                        Vec::new()
+                    };
+                    let empty = lines.is_empty();
+                    let mut layout = TextLayout::new(lines, width);
+                    if leader {
+                        let marker = if expanded { "▾" } else { "▸" };
+                        let label = format!("{marker} {}", label);
+                        if empty {
+                            layout = TextLayout::new(
+                                crate::terminal_hyperlinks::plain_hyperlink_lines(
+                                    crate::wrapping::word_wrap_lines(
+                                        [Line::from(label).dim()],
+                                        usize::from(width),
+                                    ),
+                                ),
+                                width,
+                            );
+                            layout.disclosure = true;
+                        } else {
+                            layout =
+                                layout.with_disclosure_control_at(label, /*source_offset*/ 0);
+                        }
+                    }
+                    layout
+                }),
+        )
+    }
+
+    pub(super) fn skip_collapsed_turn(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        direction: isize,
+    ) -> usize {
+        if self.detailed
+            || self.mode != HistoryRenderMode::Rich
+            || self.snapshot().is_some()
+            || self.search.has_active_query()
         {
-            cell.compact_hyperlink_lines(width)
-        } else {
-            Vec::new()
+            return index;
+        }
+        let mut turns = self.turn_groups.borrow_mut();
+        turns.sync(cells);
+        let next = turns
+            .hidden
+            .partition_point(|(range, _)| range.start <= index);
+        let Some((range, group)) = next
+            .checked_sub(1)
+            .and_then(|previous| turns.hidden.get(previous))
+        else {
+            return index;
         };
-        let empty = lines.is_empty();
-        let mut layout = TextLayout::new(lines, width);
-        if leader {
-            let marker = if expanded { "▾" } else { "▸" };
-            let label = format!("{marker} {}", group.label);
-            if empty {
-                layout = TextLayout::new(
-                    crate::terminal_hyperlinks::plain_hyperlink_lines(
-                        crate::wrapping::word_wrap_lines(
-                            [Line::from(label).dim()],
-                            usize::from(width),
-                        ),
-                    ),
-                    width,
-                );
-                layout.disclosure = true;
+        if range.contains(&index) && !self.disclosure.expanded.contains(&turns.groups[*group].id) {
+            if direction < 0 {
+                range.start.saturating_sub(1)
             } else {
-                layout = layout.with_disclosure_control_at(label, /*source_offset*/ 0);
+                range.end
             }
+        } else {
+            index
         }
-        if index > 0 {
-            layout = layout.with_leading_separator();
-        }
-        let layout = Arc::new(layout);
-        if turns.layouts.len() >= 64 {
-            turns.layouts.clear();
-        }
-        turns.layouts.insert(key, Arc::clone(&layout));
-        Some(layout)
     }
 }

@@ -137,6 +137,7 @@ struct CachedLayout {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct CellPresentation {
     separated: bool,
+    turn_group: bool,
     shares_prompt_background: bool,
     turn_tip_space: bool,
     expanded: bool,
@@ -164,6 +165,7 @@ impl TranscriptView {
         }
         CellPresentation {
             separated: false,
+            turn_group: false,
             shares_prompt_background: false,
             turn_tip_space: false,
             expanded: disclosure && (full_content || manually_expanded),
@@ -368,6 +370,31 @@ impl LayoutCache {
         layout
     }
 
+    pub(super) fn turn_group(
+        &mut self,
+        cell: &Arc<dyn HistoryCell>,
+        width: u16,
+        expanded: bool,
+        separated: bool,
+        render: impl FnOnce() -> TextLayout,
+    ) -> Arc<TextLayout> {
+        self.get(
+            cell,
+            width,
+            CellPresentation {
+                separated,
+                turn_group: true,
+                shares_prompt_background: false,
+                turn_tip_space: false,
+                expanded,
+                disclosure: true,
+                detailed: false,
+                image_protocol: None,
+            },
+            render,
+        )
+    }
+
     fn has_visible_content(
         &mut self,
         cell: &Arc<dyn HistoryCell>,
@@ -379,6 +406,7 @@ impl LayoutCache {
         let animation_tick = cell.transcript_animation_tick();
         if let Some(index) = self.entries.iter().position(|entry| {
             entry.width == width
+                && entry.presentation.turn_group == presentation.turn_group
                 && entry.presentation.expanded == presentation.expanded
                 && entry.presentation.disclosure == presentation.disclosure
                 && entry.presentation.detailed == presentation.detailed
