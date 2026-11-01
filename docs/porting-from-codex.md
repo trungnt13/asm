@@ -643,6 +643,11 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
+- Support `cursor login` through the same deterministic backend chat interception as Claude,
+  using official `agent login` with browser opening disabled and an allowlisted sign-in URL.
+  Browser authentication stays with the native CLI; accept only `done` to check completion,
+  never keys or tokens. Keep pending replies fail-closed across expiry and backend restart,
+  and never replay the failed prompt or bypass dirty-session safeguards.
 - Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. By user
   decision, every Cursor session, main and children, launches as `agent --force acp`
   (native run-everything mode). Explicit Cursor denies and team auto-run controls still

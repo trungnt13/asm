@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::claude_login_process::LoginProcess;
+use crate::claude_login_process::LoginProvider;
 use crate::error_code::invalid_request;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
@@ -65,8 +66,13 @@ impl ClaudeLogin {
             [UserInput::Text { text, .. }] => Some(text.trim()),
             _ => None,
         };
-        let start = text.is_some_and(|text| text.eq_ignore_ascii_case("claude login"));
-        let code = text.is_some_and(is_authorization_code);
+        let start = text.is_some_and(|text| {
+            matches!(
+                text.to_ascii_lowercase().as_str(),
+                "claude login" | "cursor login"
+            )
+        });
+        let authorization_code = text.is_some_and(is_authorization_code);
         let pending_entry = self.sessions.lock().await.get(&thread_id).cloned();
         let guard_path = thread
             .config()
@@ -93,48 +99,64 @@ impl ClaudeLogin {
                 None => config.model.clone(),
             },
         };
+        let cursor = selected_model.starts_with("cursor-agent/");
         let claude = selected_model.starts_with("claude-code/");
+        let native = claude || cursor;
+        let code = if cursor {
+            pending && text.is_some_and(|text| text.eq_ignore_ascii_case("done"))
+        } else {
+            authorization_code
+        };
         if !pending
-            && !(claude && (start || code || thread.claude_login_required()))
-            && !(config.model.starts_with("claude-code/") && code)
+            && !start
+            && !(native && (start || code || thread.claude_login_required()))
+            && !(config.model.starts_with("claude-code/") && authorization_code)
         {
             return Ok(false);
         }
-        if !claude {
+        if !native {
             if pending && !cancel {
                 return Err(invalid_request(
-                    "No active Claude login. Send `claude login` with a Claude runtime to restart, or `cancel`. Nothing from this exchange is sent to a model.",
+                    "No active native login. Send `claude login` or `cursor login` with a Claude runtime to restart, or `cancel`. Nothing from this exchange is sent to a model.",
                 ));
             }
             if let Some(entry) = pending_entry {
                 let mut session = entry.lock().await;
                 if session.owner != request_id.connection_id && session.process.is_some() {
                     return Err(invalid_request(
-                        "Claude login belongs to another connection.",
+                        "Native login belongs to another connection.",
                     ));
                 }
                 clear_login_guard(&guard_path).await?;
                 session.process = None;
                 self.sessions.lock().await.remove(&thread_id);
                 return Err(invalid_request(
-                    "Claude login cancelled because the selected runtime changed. Send a new message to continue.",
+                    "Native login cancelled because the selected runtime changed. Send a new message to continue.",
                 ));
             }
             if durable_pending {
                 clear_login_guard(&guard_path).await?;
                 return Err(invalid_request(
-                    "Claude login cancelled. Send a new message to continue with the selected runtime.",
+                    "Native login cancelled. Send a new message to continue with the selected runtime.",
                 ));
             }
             return Err(invalid_request(
-                "Claude login requires a Claude native-runtime chat.",
+                "Native login requires a Claude native-runtime chat.",
+            ));
+        }
+        if start
+            && ((cursor && !text.is_some_and(|text| text.eq_ignore_ascii_case("cursor login")))
+                || (claude && !text.is_some_and(|text| text.eq_ignore_ascii_case("claude login"))))
+        {
+            return Err(invalid_request(
+                "Login command must match the selected native runtime: `cursor login` or `claude login`. Nothing from this exchange was sent to a model.",
             ));
         }
         if matches!(
             config.session_source,
             codex_protocol::protocol::SessionSource::SubAgent(_)
         ) {
-            return Err(invalid_request("Sign in from a main Claude chat."));
+            return Err(invalid_request("Sign in from a main native-runtime chat."));
         }
         let owner = request_id.connection_id;
         let entry = self
@@ -156,36 +178,55 @@ impl ClaudeLogin {
         let mut session = entry.lock().await;
         if session.owner != owner && session.process.is_some() {
             return Err(invalid_request(
-                "Claude login belongs to another connection.",
+                "Native login belongs to another connection.",
             ));
         }
         persist_login_guard(&guard_path).await?;
         if !start
+            && !cancel
             && (session.model != config.model
                 || session.selected_model != selected_model
                 || session.cwd != config.cwd().as_path())
         {
             session.process = None;
             return Err(invalid_request(
-                "Claude login configuration changed. Send `claude login` to restart.",
+                "Native login configuration changed. Send `claude login` or `cursor login` to restart.",
             ));
         }
-        if [
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
-            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
-        ]
-        .into_iter()
-        .any(|name| std::env::var_os(name).is_some())
+        if !cancel
+            && cursor
+            && ([
+                "CURSOR_AUTH_TOKEN",
+                "CURSOR_API_ENDPOINT",
+                "CURSOR_WEBSITE_URL",
+            ]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some())
+                || std::env::var("AGENT_CLI_CREDENTIAL_STORE").is_ok_and(|value| value == "memory"))
         {
             session.process = None;
             return Err(invalid_request(
-                "Claude login is unavailable while native OAuth environment overrides are set. Remove those overrides from the backend environment and retry.",
+                "Cursor login is unavailable with authentication or endpoint overrides, or a memory-only credential store. Remove those overrides and retry.",
+            ));
+        }
+        if !cancel
+            && claude
+            && [
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+                "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+            ]
+            .into_iter()
+            .any(|name| std::env::var_os(name).is_some())
+        {
+            session.process = None;
+            return Err(invalid_request(
+                "Native login is unavailable while native OAuth environment overrides are set. Remove those overrides from the backend environment and retry.",
             ));
         }
         if !thread.stop_claude_for_login().await {
             return Err(invalid_request(
-                "Wait for native work to finish before Claude login.",
+                "Wait for native work to finish before login.",
             ));
         }
         if selected_model != config.model {
@@ -196,7 +237,7 @@ impl ClaudeLogin {
                 })
                 .await
                 .map_err(|_| {
-                    invalid_request("Claude login model selection could not be applied.")
+                    invalid_request("Native login model selection could not be applied.")
                 })?;
             session.model = selected_model.clone();
         }
@@ -252,7 +293,8 @@ impl ClaudeLogin {
             if !thread.claude_login_required() {
                 self.sessions.lock().await.remove(&thread_id);
             }
-            "Claude login cancelled. Send `claude login` to sign in again.".to_owned()
+            "Native login cancelled. Send `claude login` or `cursor login` to sign in again."
+                .to_owned()
         } else if start || (!pending && !code) {
             session.process = None;
             session.owner = owner;
@@ -261,7 +303,7 @@ impl ClaudeLogin {
             session.cwd = config.cwd().as_path().to_path_buf();
             session.generation = uuid::Uuid::new_v4();
             let result = tokio::select! {
-                result = LoginProcess::start(config.cwd().as_path()) => result,
+                result = LoginProcess::start(config.cwd().as_path(), if cursor { LoginProvider::Cursor } else { LoginProvider::Claude }) => result,
                 _ = disconnect.cancelled() => Err(()),
             };
             match result {
@@ -279,19 +321,21 @@ impl ClaudeLogin {
                             session.process = None;
                         }
                     });
-                    format!(
+                    if cursor {
+                        format!("Sign in to your Cursor account: [Open Cursor sign-in]({url}). Complete authentication in your browser, then send `done`. Do not send any key, code, or token. Send `cancel` to cancel. The failed prompt will not be replayed.")
+                    } else { format!(
                         "Sign in to your Claude subscription: [Open Claude sign-in]({url}).\nCopy the one-time authorization code from the browser and send it as your next message. Do not send an API key or access token. Send `cancel` to cancel. The failed prompt will not be replayed."
-                    )
+                    ) }
                 }
                 Err(()) => {
-                    "Claude subscription login could not start. Send `claude login` to try again."
+                    "Native subscription login could not start. Send `claude login` or `cursor login` to try again."
                         .to_owned()
                 }
             }
         } else if session.process.is_none() {
-            "No active Claude login. Send `claude login` to obtain a new sign-in link. Nothing from this exchange is sent to a model.".to_owned()
+            "No active native login. Send `claude login` or `cursor login` to obtain a new sign-in link. Nothing from this exchange is sent to a model.".to_owned()
         } else if !code {
-            "Login is pending. Send only the one-time authorization code, `claude login` to restart, or `cancel`. Nothing from this login exchange is sent to a model.".to_owned()
+            "Login is pending. Send only `done` for Cursor or the one-time Claude authorization code, `claude login` to restart, or `cancel`. Nothing from this login exchange is sent to a model.".to_owned()
         } else if let Some(process) = session.process.take().filter(|process| !process.expired()) {
             let result = tokio::select! {
                 result = process.submit(text.unwrap_or_default()) => result,
@@ -302,14 +346,14 @@ impl ClaudeLogin {
                     Ok(()) => {
                         thread.finish_claude_login();
                         self.sessions.lock().await.remove(&thread_id);
-                        "Claude account sign-in completed. The subscription runtime remains selected. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
+                        "Native account sign-in completed. The subscription runtime remains selected. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
                     }
                     Err(_) => login_guard_error().message,
                 },
-                Err(()) => "Claude subscription login did not complete. Send `claude login` to restart; do not resend this code.".to_owned(),
+                Err(()) => "Native subscription login did not complete. Send `claude login` or `cursor login` to restart; do not resend this code.".to_owned(),
             }
         } else {
-            "No active Claude login. Send `claude login` to obtain a new sign-in link. This code was not sent to a model.".to_owned()
+            "No active native login. Send `claude login` or `cursor login` to obtain a new sign-in link. This code was not sent to a model.".to_owned()
         };
         drop(session);
         let completed_at_ms: i64 = SystemTime::now()
@@ -381,7 +425,7 @@ fn is_authorization_code(text: &str) -> bool {
 
 fn login_guard_error() -> JSONRPCErrorError {
     invalid_request(
-        "Claude login safety state is unavailable. Nothing from this exchange was sent to a model. Retry after local storage is available.",
+        "Native login safety state is unavailable. Nothing from this exchange was sent to a model. Retry after local storage is available.",
     )
 }
 

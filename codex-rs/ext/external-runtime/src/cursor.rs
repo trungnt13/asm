@@ -126,7 +126,7 @@ impl CursorRuntime {
             .unwrap_or(false);
         self.request("authenticate", json!({"methodId": "cursor_login"}))
             .await
-            .context("Cursor login is required; run `agent login`")?;
+            .context("Cursor login is required; send `cursor login` in this chat (or run `agent login` on the backend host); the failed prompt will not be replayed")?;
         let mut params = json!({"cwd": options.cwd, "mcpServers": []});
         if let Some(instructions) = options.role_instructions {
             params["systemPrompt"] = json!({

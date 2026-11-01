@@ -17,9 +17,15 @@ use url::Url;
 const OUTPUT_LIMIT: usize = 64 * 1024;
 const LOGIN_LIFETIME: Duration = Duration::from_secs(300);
 
+pub(crate) enum LoginProvider {
+    Claude,
+    Cursor,
+}
+
 pub(crate) struct LoginProcess {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
+    cursor: bool,
     stdout: ChildStdout,
     cwd: PathBuf,
     output_bytes: usize,
@@ -28,13 +34,18 @@ pub(crate) struct LoginProcess {
 
 impl LoginProcess {
     #[tracing::instrument(skip_all)]
-    pub(crate) async fn start(cwd: &Path) -> Result<(Self, String), ()> {
-        let mut child = command(cwd)
-            .args(["auth", "login", "--claudeai"])
+    pub(crate) async fn start(cwd: &Path, provider: LoginProvider) -> Result<(Self, String), ()> {
+        let cursor = matches!(provider, LoginProvider::Cursor);
+        let mut child = command(cwd, cursor)
+            .args(if cursor {
+                vec!["login"]
+            } else {
+                vec!["auth", "login", "--claudeai"]
+            })
             .stdin(Stdio::piped())
             .spawn()
             .map_err(|_| ())?;
-        let stdin = child.stdin.take().ok_or(())?;
+        let stdin = child.stdin.take();
         let mut stdout = child.stdout.take().ok_or(())?;
         let mut output = Vec::new();
         let auth_url = timeout(Duration::from_secs(20), async {
@@ -45,7 +56,7 @@ impl LoginProcess {
                     return Err(());
                 }
                 output.extend_from_slice(&chunk[..count]);
-                if let Some(url) = subscription_url(&output) {
+                if let Some(url) = subscription_url(&output, cursor) {
                     return Ok(url);
                 }
             }
@@ -56,6 +67,7 @@ impl LoginProcess {
             Self {
                 child,
                 stdin,
+                cursor,
                 stdout,
                 cwd: cwd.to_path_buf(),
                 output_bytes: output.len(),
@@ -72,26 +84,26 @@ impl LoginProcess {
     #[tracing::instrument(skip_all)]
     pub(crate) async fn submit(mut self, code: &str) -> Result<(), ()> {
         if self.expired()
-            || code.len() > 4096
-            || !code.split_once('#').is_some_and(|(code, state)| {
-                !code.is_empty()
-                    && !state.is_empty()
-                    && code
-                        .bytes()
-                        .chain(state.bytes())
-                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-            })
+            || (!self.cursor
+                && (code.len() > 4096
+                    || !code.split_once('#').is_some_and(|(code, state)| {
+                        !code.is_empty()
+                            && !state.is_empty()
+                            && code.bytes().chain(state.bytes()).all(|byte| {
+                                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+                            })
+                    })))
         {
             return Err(());
         }
         let deadline = self.deadline.min(Instant::now() + Duration::from_secs(30));
         timeout_at(deadline, async {
-            self.stdin
-                .write_all(code.as_bytes())
-                .await
-                .map_err(|_| ())?;
-            self.stdin.write_all(b"\n").await.map_err(|_| ())?;
-            self.stdin.flush().await.map_err(|_| ())?;
+            if !self.cursor {
+                let stdin = self.stdin.as_mut().ok_or(())?;
+                stdin.write_all(code.as_bytes()).await.map_err(|_| ())?;
+                stdin.write_all(b"\n").await.map_err(|_| ())?;
+                stdin.flush().await.map_err(|_| ())?;
+            }
             let mut chunk = [0_u8; 1024];
             loop {
                 let count = self.stdout.read(&mut chunk).await.map_err(|_| ())?;
@@ -113,8 +125,12 @@ impl LoginProcess {
         timeout_at(
             deadline.min(Instant::now() + Duration::from_secs(10)),
             async {
-                let mut child = command(&self.cwd)
-                    .args(["auth", "status"])
+                let mut child = command(&self.cwd, self.cursor)
+                    .args(if self.cursor {
+                        vec!["status", "--format", "json"]
+                    } else {
+                        vec!["auth", "status"]
+                    })
                     .spawn()
                     .map_err(|_| ())?;
                 let stdout = child.stdout.take().ok_or(())?;
@@ -128,6 +144,16 @@ impl LoginProcess {
                     return Err(());
                 }
                 let status: serde_json::Value = serde_json::from_slice(&output).map_err(|_| ())?;
+                if self.cursor {
+                    return if status["isAuthenticated"] == true
+                        && status["hasAccessToken"] == true
+                        && status["hasRefreshToken"] == true
+                    {
+                        Ok(())
+                    } else {
+                        Err(())
+                    };
+                }
                 if status["loggedIn"] != true
                     || status["authMethod"] != "claude.ai"
                     || status["apiProvider"] != "firstParty"
@@ -142,7 +168,7 @@ impl LoginProcess {
     }
 }
 
-fn subscription_url(output: &[u8]) -> Option<String> {
+fn subscription_url(output: &[u8], cursor: bool) -> Option<String> {
     let output = std::str::from_utf8(output).ok()?;
     for (start, _) in output.match_indices("https://") {
         let candidate = &output[start..];
@@ -159,17 +185,39 @@ fn subscription_url(output: &[u8]) -> Option<String> {
             || url.password().is_some()
             || url.port().is_some()
             || url.fragment().is_some()
-            || !matches!(
-                (url.host_str(), url.path()),
-                (Some("claude.com"), "/cai/oauth/authorize")
-                    | (Some("claude.ai"), "/oauth/authorize")
-            )
+            || (!cursor
+                && !matches!(
+                    (url.host_str(), url.path()),
+                    (Some("claude.com"), "/cai/oauth/authorize")
+                        | (Some("claude.ai"), "/oauth/authorize")
+                ))
+            || (cursor
+                && (url.host_str() != Some("cursor.com") || url.path() != "/loginDeepControl"))
         {
             continue;
         }
         let params = url
             .query_pairs()
             .collect::<std::collections::HashMap<_, _>>();
+        if cursor {
+            if !params.keys().all(|key| {
+                matches!(
+                    key.as_ref(),
+                    "challenge" | "uuid" | "mode" | "redirectTarget" | "supportsSelectedTeamLogin"
+                )
+            }) {
+                continue;
+            }
+            if params.get("mode").map(|v| v.as_ref()) == Some("login")
+                && params.get("redirectTarget").map(|v| v.as_ref()) == Some("cli")
+                && ["challenge", "uuid"]
+                    .iter()
+                    .all(|key| params.get(*key).is_some_and(|v| !v.is_empty()))
+            {
+                return Some(url.into());
+            }
+            continue;
+        }
         if params.get("response_type").map(|value| value.as_ref()) == Some("code")
             && params.get("redirect_uri").map(|value| value.as_ref())
                 == Some("https://platform.claude.com/oauth/code/callback")
@@ -183,9 +231,13 @@ fn subscription_url(output: &[u8]) -> Option<String> {
     None
 }
 
-fn command(cwd: &Path) -> Command {
-    let mut command = Command::new("claude");
+fn command(cwd: &Path, cursor: bool) -> Command {
+    let mut command = Command::new(if cursor { "agent" } else { "claude" });
     for name in [
+        "CURSOR_API_KEY",
+        "CURSOR_AUTH_TOKEN",
+        "CURSOR_API_ENDPOINT",
+        "CURSOR_WEBSITE_URL",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_AUTH_TOKEN",
         "ANTHROPIC_BASE_URL",
@@ -232,6 +284,7 @@ fn command(cwd: &Path) -> Command {
     }
     command
         .env("BROWSER", "true")
+        .env("NO_OPEN_BROWSER", "1")
         .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
         .env("DISABLE_TELEMETRY", "1")
         .env("DISABLE_ERROR_REPORTING", "1")
