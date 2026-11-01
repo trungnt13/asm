@@ -160,6 +160,11 @@ impl ChatWidget {
                     ThreadItemPayload::Reasoning { id, .. } => Some(id.clone()),
                     _ => None,
                 });
+            if status != TurnStatus::InProgress {
+                self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::TurnActivityBoundary::Begin(turn_id.clone()),
+                )));
+            }
             let mut replaying_delegation = false;
             for item in items.into_iter().map(|entry| entry.payload) {
                 if matches!(&item, ThreadItemPayload::UserMessage { content, .. }

@@ -120,6 +120,10 @@ pub(crate) fn thread_to_transcript_cells(
                     error.message,
                 )));
             }
+            cells.insert(
+                /*index*/ 0,
+                Arc::new(crate::history_cell::TurnActivityBoundary::Begin(turn.id)),
+            );
             cells
         })
         .collect::<TranscriptCells>();
@@ -291,8 +295,19 @@ fn item_to_cells(
             cells.push(Arc::new(cell.with_async_replies(replies, cwd.as_path())));
         }
         ThreadItemPayload::AgentMessage {
-            text, questions, ..
+            text,
+            questions,
+            phase,
+            ..
         } => {
+            if phase == Some(codex_protocol::models::MessagePhase::FinalAnswer) {
+                cells.push(Arc::new(
+                    crate::history_cell::TurnActivityBoundary::FinalAnswer {
+                        turn_id: None,
+                        elapsed_seconds: None,
+                    },
+                ));
+            }
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
                 cells.push(Arc::new(
@@ -302,6 +317,11 @@ fn item_to_cells(
                         inline_visualization_context,
                     )
                     .with_questions(questions.as_deref().unwrap_or_default()),
+                ));
+            }
+            if phase.is_none() {
+                cells.push(Arc::new(
+                    crate::history_cell::TurnActivityBoundary::LegacyAnswer { turn_id: None },
                 ));
             }
         }

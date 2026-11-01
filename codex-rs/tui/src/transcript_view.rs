@@ -22,6 +22,7 @@ mod selection;
 mod snapshot;
 mod text;
 mod tool_groups;
+mod turn_groups;
 mod turn_tip;
 
 use std::sync::Arc;
@@ -129,6 +130,7 @@ pub(crate) struct TranscriptView {
     last_click: Option<(std::time::Instant, u16, u16, u8)>,
     disclosure: disclosure::Disclosure,
     collapsed_tools: tool_groups::CollapsedToolGroups,
+    turn_groups: std::cell::RefCell<turn_groups::TurnGroups>,
 }
 
 impl Default for TranscriptView {
@@ -172,6 +174,7 @@ impl Default for TranscriptView {
             last_click: None,
             disclosure: disclosure::Disclosure::default(),
             collapsed_tools: tool_groups::CollapsedToolGroups::default(),
+            turn_groups: std::cell::RefCell::default(),
         }
     }
 }
@@ -193,7 +196,9 @@ impl TranscriptView {
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         self.composer_tip = None;
         self.prompt_header_target = None;
-        self.cache.begin_frame();
+        if self.cache.begin_frame() {
+            self.turn_groups.borrow_mut().clear_layouts();
+        }
         self.sync_history_tail(cells);
         let current_cells = cells;
         let snapshot = self.snapshot_cells();

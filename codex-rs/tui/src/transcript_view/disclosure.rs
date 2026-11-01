@@ -90,6 +90,9 @@ impl TranscriptView {
     }
 
     pub(super) fn activity_ids(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Vec<String> {
+        if let Some(ids) = self.turn_group_ids(cells, index) {
+            return ids;
+        }
         if let Some(ids) = self.tool_group_ids(cells, index) {
             return ids;
         }

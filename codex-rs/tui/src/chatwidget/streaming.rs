@@ -28,6 +28,22 @@ fn latest_summary_line(text: &str) -> Option<String> {
 }
 
 impl ChatWidget {
+    pub(super) fn fold_turn_activity(&mut self, turn_id: &str) {
+        self.flush_answer_and_plan_streams();
+        self.flush_interrupt_activity();
+        self.finish_dynamic_activity();
+        self.prepare_assistant_message();
+        self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+            history_cell::TurnActivityBoundary::FinalAnswer {
+                turn_id: Some(turn_id.to_owned()),
+                elapsed_seconds: self
+                    .bottom_pane
+                    .status_elapsed()
+                    .map(|elapsed| elapsed.as_secs()),
+            },
+        )));
+    }
+
     pub(super) fn on_reasoning_item_started(&mut self, id: String) {
         if self.status_state.reasoning_resume_turn_id.take().is_some()
             && self.status_state.reasoning_item_id.as_ref() != Some(&id)
@@ -438,6 +454,9 @@ impl ChatWidget {
         turn_id: &str,
         from_replay: bool,
     ) {
+        if from_replay && item.phase == Some(MessagePhase::FinalAnswer) {
+            self.fold_turn_activity(turn_id);
+        }
         if !from_replay && let Some(questions) = &item.questions {
             self.add_async_questions(&item.id, questions);
         }
@@ -501,6 +520,13 @@ impl ChatWidget {
                     });
                 }
             });
+        }
+        if item.phase.is_none() {
+            self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                history_cell::TurnActivityBoundary::LegacyAnswer {
+                    turn_id: Some(turn_id.to_owned()),
+                },
+            )));
         }
         self.status_state.pending_status_indicator_restore = item.questions.is_some()
             || match item.phase {

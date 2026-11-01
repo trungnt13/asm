@@ -248,6 +248,9 @@ impl TranscriptView {
         {
             return Some(Arc::new(TextLayout::new(Vec::new(), width)));
         }
+        if !full_content && let Some(layout) = self.turn_group_layout(cells, index) {
+            return Some(layout);
+        }
         if !full_content && let Some(layout) = self.tool_group_layout(cells, index) {
             return Some(layout);
         }
@@ -300,7 +303,7 @@ impl TranscriptView {
 }
 
 impl LayoutCache {
-    pub(super) fn begin_frame(&mut self) {
+    pub(super) fn begin_frame(&mut self) -> bool {
         self.frame = self.frame.wrapping_add(/*rhs*/ 1);
         let state = RenderState {
             theme: crate::render::highlight::syntax_theme_revision(),
@@ -312,7 +315,9 @@ impl LayoutCache {
         if self.render_state.as_ref() != Some(&state) {
             self.entries.clear();
             self.render_state = Some(state);
+            return true;
         }
+        false
     }
 
     pub(super) fn get(

@@ -1138,6 +1138,12 @@ Keep Markdown paragraphs/code blocks/list items adjacent while streaming and com
 - Interruptions, other activity, and chat messages split groups. Keep active tool in a separate short row until committed history includes it.
 - Expansion restores original previews/order. Keep failures/approvals visible. Preserve execution/model history/raw output/full transcript. Disabled keeps existing rendering.
 
+### Completed turn activity
+
+- In the rich owned transcript, show commentary and tools live. When the final answer starts, fold that turn's commentary, reasoning, and successful tool previews under an expandable `Worked for …` row. Unphased legacy output folds at successful completion, excluding the last answer.
+- Keep user messages, notices, failures, approvals, and final answers visible. Interrupted turns without a final answer remain unfolded. Raw/full transcript, copy sources, execution and model history retain their original cells. Native terminal scrollback is unchanged.
+- Reuse activity disclosure controls. Index appended cells once; rebuild only after structural history changes. Bound rendered fold layouts to 64 entries; do not format hidden output.
+
 ### Compact status line
 
 - Join with `·`, no spaces. Use `CtxN%` for used context, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode.
