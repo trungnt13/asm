@@ -270,6 +270,35 @@ pub fn create_client_for_route(
     create_client_for_route_with_builder(http_client_factory, request_url, route_class, builder)
 }
 
+/// Retains routed connections with the default client’s TLS and custom-CA behavior.
+/// Route selection and destination policy checks still run for each request.
+pub fn create_client_pool_for_routes(
+    http_client_factory: HttpClientFactory,
+    route_class: ClientRouteClass,
+    redirect_policy: ClientRedirectPolicy,
+    headers: HeaderMap,
+) -> RouteAwareClientPool {
+    let builder = HttpClientBuilder::new()
+        .default_headers(headers)
+        .with_chatgpt_cloudflare_cookie_store();
+    let builder = match redirect_policy {
+        ClientRedirectPolicy::Default => builder,
+        ClientRedirectPolicy::Reject => builder.without_redirects(),
+    };
+    let transport_default_proxy = matches!(
+        http_client_factory.outbound_proxy_policy(),
+        OutboundProxyPolicy::ReqwestDefault
+    );
+    let pool = RouteAwareClientPool::with_builder(http_client_factory, route_class, builder);
+    if is_sandboxed() {
+        pool.with_legacy_direct_proxy_and_custom_ca_fallback()
+    } else if transport_default_proxy {
+        pool.with_legacy_custom_ca_fallback()
+    } else {
+        pool
+    }
+}
+
 fn create_client_for_route_with_builder(
     http_client_factory: &HttpClientFactory,
     request_url: &str,

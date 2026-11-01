@@ -1296,3 +1296,7 @@ Plan-mode scope, and the explicit picker requirement for raising into Ultra by s
 ### GNU malloc arena cap
 
 At the start of `main`, the Linux GNU `codex` calls `mallopt(M_ARENA_MAX, 4)` before any thread starts. A set `MALLOC_ARENA_MAX` takes precedence. glibc otherwise allows up to 8 arenas per CPU, and many-core hosts keep idle heap in them. Keep the GNU system allocator: upstream uses jemalloc only on musl, to replace the musl allocator. Mock-model runs (64 CPUs, 32 conversations × 4 turns, 3 runs) measured 6–15% lower RSS and 10–28% lower anonymous memory after unload, with no measurable wall or CPU cost. The effect on real sessions is unmeasured. Drop this drift if upstream caps glibc arenas itself.
+
+### Session HTTP transport reuse
+
+Keep one model API transport per session and reuse the existing route-aware pool. Rebuild it when the resolved client factory, endpoint, redirect policy, authentication owner, runtime, or default headers change. Resolve provider authentication for every request; token refresh alone does not discard connections. Preserve existing TLS, CA, proxy, cookie, redirect, and managed destination-policy behavior. Route selection and policy checks still run for every request. This change covers model HTTP requests, not auxiliary clients or WebSocket lifetime.
