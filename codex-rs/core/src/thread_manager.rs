@@ -2577,7 +2577,18 @@ impl ThreadManagerState {
             if crate::protected_reviewer::is_reviewer(&session_source) {
                 crate::protected_reviewer::configure(&mut config)
                     .map_err(CodexErr::InvalidRequest)?;
-                thread_extension_init.insert(crate::protected_reviewer::ReviewRun::default());
+                if thread_extension_init
+                    .get::<crate::review_context::ReviewContext>()
+                    .is_none()
+                {
+                    return Err(CodexErr::InvalidRequest(
+                        "reviewer requires a pinned associated root snapshot".to_string(),
+                    ));
+                }
+                thread_extension_init.insert(crate::protected_reviewer::ReviewRun {
+                    report_home: config.codex_home.as_path().to_path_buf(),
+                    ..Default::default()
+                });
             } else {
                 thread_extension_init.insert(crate::protected_reviewer::ReviewHelper::default());
             }

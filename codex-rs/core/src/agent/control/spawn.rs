@@ -886,6 +886,32 @@ impl LocalAgentControl {
         };
         // Fork startup can persist copied history before returning a live child.
         // Publish its deletion relationship before any child storage is created.
+        if notification_source
+            .as_ref()
+            .is_some_and(crate::protected_reviewer::is_reviewer)
+        {
+            let root = self
+                .runtime
+                .registry
+                .agent_id_for_path(&AgentPath::root())
+                .ok_or_else(|| {
+                    CodexErr::InvalidRequest("reviewer has no associated tree root".to_string())
+                })?;
+            if config
+                .reviewer_subagent
+                .root_session_id
+                .is_some_and(|requested| requested != root)
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "reviewer root_session_id must match its associated tree root".to_string(),
+                ));
+            }
+            let root_thread = state.get_thread(root).await?;
+            let history = root_thread.session.clone_history().await;
+            start_options.thread_extension_init.insert(
+                crate::review_context::ReviewContext::capture(root, &history),
+            );
+        }
         let child_thread_id = self.runtime.generate_thread_id();
         if state.threads.read().await.contains_key(&child_thread_id) {
             return Err(CodexErr::InvalidRequest(format!(

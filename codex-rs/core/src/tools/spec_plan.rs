@@ -1302,6 +1302,15 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     let turn_context = context.turn_context;
     let features = turn_context.config.features.get();
     let environment_mode = tool_environment_mode(context.environments);
+    if turn_context.multi_agent_version == MultiAgentVersion::V2
+        && (!turn_context.session_source.is_non_root_agent()
+            || crate::protected_reviewer::is_reviewer(&turn_context.session_source))
+    {
+        registry.add(crate::tools::handlers::CloseReviewAgentHandler);
+    }
+    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
+        registry.add(crate::tools::handlers::ReadReviewContextHandler);
+    }
 
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);

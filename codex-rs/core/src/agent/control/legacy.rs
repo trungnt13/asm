@@ -107,6 +107,29 @@ impl LocalAgentControl {
         }
     }
 
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn close_review_agent(
+        &self,
+        caller: ThreadId,
+        target: ThreadId,
+    ) -> CodexResult<()> {
+        let owner = self.runtime.review_quota.owner(target).ok_or_else(|| {
+            CodexErr::InvalidRequest("target is not a protected review member".to_string())
+        })?;
+        let allowed = if owner == target {
+            self.runtime.registry.agent_id_for_path(&AgentPath::root()) == Some(caller)
+        } else {
+            owner == caller
+        };
+        if !allowed {
+            return Err(CodexErr::InvalidRequest(
+                "only the tree root can close a reviewer; only its reviewer can close a helper"
+                    .to_string(),
+            ));
+        }
+        self.shutdown_agent_tree(target).await.map(|_| ())
+    }
+
     /// Shut down `agent_id` and any live descendants reachable from the in-memory spawn tree.
     pub(crate) async fn shutdown_agent_tree(&self, agent_id: ThreadId) -> CodexResult<String> {
         let protected_close = self.runtime.review_quota.begin_close(agent_id);
