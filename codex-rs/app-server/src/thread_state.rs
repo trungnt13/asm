@@ -144,6 +144,7 @@ pub(crate) struct ThreadState {
     listener_command_tx: Option<mpsc::UnboundedSender<ThreadListenerCommand>>,
     current_turn_history: ThreadHistoryBuilder,
     history_mode: ThreadHistoryMode,
+    evict_superseded_agent_text: bool,
     listener_thread: Option<Weak<CodexThread>>,
     watch_registration: WatchRegistration,
 }
@@ -186,6 +187,8 @@ impl ThreadState {
         self.listener_generation = self.listener_generation.wrapping_add(1);
         self.last_thread_settings = Some(thread_settings_baseline);
         self.history_mode = history_mode;
+        self.evict_superseded_agent_text =
+            history_mode == ThreadHistoryMode::Paginated && conversation.rollout_path().is_some();
         let (listener_command_tx, listener_command_rx) = mpsc::unbounded_channel();
         self.listener_command_tx = Some(listener_command_tx);
         self.listener_thread = Some(Arc::downgrade(conversation));
@@ -258,8 +261,12 @@ impl ThreadState {
                 .get_or_insert_default()
                 .add_assign(usage);
         }
-        self.current_turn_history
-            .handle_event_for_history_mode(event, self.history_mode);
+        if self.evict_superseded_agent_text {
+            self.current_turn_history.handle_live_paginated_event(event);
+        } else {
+            self.current_turn_history
+                .handle_event_for_history_mode(event, self.history_mode);
+        }
         if matches!(event, EventMsg::TurnAborted(_) | EventMsg::TurnComplete(_)) {
             self.last_terminal_turn_id = Some(event_turn_id.to_string());
             if !self.current_turn_history.has_active_turn() {
