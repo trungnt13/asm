@@ -72,7 +72,7 @@ Local profile rules:
 
 Verify the intended outcome with suitable evidence. Select checks from changed inputs, fork interactions, and conflicts, not sync size. Do not default to retesting upstream behavior untouched by the fork. Use focused checks when fork interactions, failures, or unresolved concerns require them. Record the selected checks, reused evidence, and uncertainty. Never label unchecked behavior as verified. Narrow scope does not reduce required evidence.
 
-- **Documentation:** review wording/links; run `git diff --check`. No builds or tests.
+- **Documentation:** review wording/links; run `git diff --check`. Documentation-only changes do not require a rebuild, but every PR still requires the real-provider check below.
 - **Behavior:** use the built binary in a small real user scenario to accept changed fork behavior. Mocked or simulated responses are not acceptance evidence. Do not add mock tests or run them by default. Preserve inherited tests and assertions; do not delete, ignore, or weaken them to follow this rule.
 - **Rust:** run existing non-mock checks only when needed: `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting below and targeted Clippy when needed. Update affected assertions/snapshots together. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
 - **Workflows/scripts:** run `actionlint` on changed workflows and small checks of the actual script. Build natively only for affected packaging or approved experiments.
@@ -86,7 +86,7 @@ After approved integration, reuse PR checks and the verified binary pair only wh
 
 ### Real-session checks
 
-- Select the smallest real scenario for the changed behavior and affected fork interactions. State the expected result. Prefer offline binary use when no model response is needed. Use a live session only when the behavior needs one; do not replay unchanged upstream features or whole sessions. The release smoke turn remains required.
+- Every PR requires a successful live check against a real provider before it is ready for review or merge. Select the smallest scenario for the changed behavior and affected fork interactions; state the expected result. Mocked responses, builds, and offline checks do not replace this requirement. If credentials, budget, or a compatible test setup are missing, keep the PR blocked, not ready. Do not replay unrelated upstream features or whole sessions. The release smoke turn remains separately required.
 - Before model calls, set a request/turn count and time limit. Keep input and requested output small; set supported token limits. Stop at the expected proof or first failure, then inspect evidence before another call. Do not run broad replays, model matrices, benchmarks, or repeated cold builds by default.
 - Control cost:
   - Use existing sign-in only as authorized. New paid API/provider/model tests require approval for the endpoint, model, request/token limits, and spend cap. Do not invent a dollar budget.
@@ -1296,3 +1296,7 @@ Plan-mode scope, and the explicit picker requirement for raising into Ultra by s
 ### GNU malloc arena cap
 
 At the start of `main`, the Linux GNU `codex` calls `mallopt(M_ARENA_MAX, 4)` before any thread starts. A set `MALLOC_ARENA_MAX` takes precedence. glibc otherwise allows up to 8 arenas per CPU, and many-core hosts keep idle heap in them. Keep the GNU system allocator: upstream uses jemalloc only on musl, to replace the musl allocator. Mock-model runs (64 CPUs, 32 conversations × 4 turns, 3 runs) measured 6–15% lower RSS and 10–28% lower anonymous memory after unload, with no measurable wall or CPU cost. The effect on real sessions is unmeasured. Drop this drift if upstream caps glibc arenas itself.
+
+### Session HTTP transport reuse
+
+Keep one model API transport per session and reuse the existing route-aware pool. Rebuild it when the resolved client factory, endpoint, redirect policy, authentication owner, runtime, or default headers change. Resolve provider authentication for every request; token refresh alone does not discard connections. Preserve existing TLS, CA, proxy, cookie, redirect, and managed destination-policy behavior. Route selection and policy checks still run for every request. This change covers model HTTP requests, not auxiliary clients or WebSocket lifetime.

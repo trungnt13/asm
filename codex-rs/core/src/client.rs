@@ -80,7 +80,8 @@ use codex_login::RefreshTokenError;
 use codex_login::UnauthorizedRecovery;
 use codex_login::default_client::ClientRedirectPolicy;
 use codex_login::default_client::add_originator_header;
-use codex_login::default_client::create_client_for_route;
+use codex_login::default_client::create_client_pool_for_routes;
+use codex_login::default_client::default_headers;
 use codex_otel::SessionTelemetry;
 use codex_otel::WEBSOCKET_CONTINUATION_COUNT_METRIC;
 use codex_otel::current_span_w3c_trace_context;
@@ -226,6 +227,7 @@ struct ModelClientState {
     disable_websockets: AtomicBool,
     agent_identity_session_fallback: AgentIdentitySessionFallback,
     cached_websocket_session: StdMutex<WebsocketSession>,
+    cached_api_transport: StdMutex<Option<CachedApiTransport>>,
     /// Last full tool list used for sampling, retained across turns and connection resets.
     last_inference_tools: StdMutex<Option<Arc<[ToolSpec]>>>,
 }
@@ -251,8 +253,35 @@ struct CurrentClientSetup {
     runtime_id: Option<String>,
 }
 
+#[derive(PartialEq, Eq)]
+struct ApiTransportKey {
+    factory: HttpClientFactory,
+    url: String,
+    redirect_policy: ClientRedirectPolicy,
+    auth_owner_generation: Option<u64>,
+    runtime_id: Option<String>,
+    headers: ApiHeaderMap,
+}
+
+struct CachedApiTransport {
+    key: ApiTransportKey,
+    transport: ReqwestTransport,
+}
+
+impl std::fmt::Debug for CachedApiTransport {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CachedApiTransport")
+            .finish_non_exhaustive()
+    }
+}
+
 impl CurrentClientSetup {
-    fn build_api_transport(&self, endpoint: &str) -> Result<ReqwestTransport> {
+    fn build_api_transport(
+        &self,
+        endpoint: &str,
+        cache: &StdMutex<Option<CachedApiTransport>>,
+    ) -> ReqwestTransport {
         let api_provider = &self.api_provider;
         let redirect_policy = if api_provider
             .headers
@@ -262,14 +291,34 @@ impl CurrentClientSetup {
         } else {
             self.redirect_policy
         };
-        let client = create_client_for_route(
-            &self.http_client_factory,
-            &api_provider.url_for_path(endpoint),
+        let key = ApiTransportKey {
+            factory: self.http_client_factory.clone(),
+            url: api_provider.url_for_path(endpoint),
+            redirect_policy,
+            auth_owner_generation: self.auth_owner_generation,
+            runtime_id: self.runtime_id.clone(),
+            headers: default_headers(),
+        };
+        let mut cached = cache.lock().unwrap_or_else(|error| {
+            panic!("API transport cache lock should not be poisoned: {error}")
+        });
+        if let Some(cached) = cached.as_ref()
+            && cached.key == key
+        {
+            return cached.transport.clone();
+        }
+        let pool = create_client_pool_for_routes(
+            key.factory.clone(),
             ClientRouteClass::Api,
             redirect_policy,
-        )
-        .map_err(std::io::Error::from)?;
-        Ok(ReqwestTransport::from_http_client(client))
+            key.headers.clone(),
+        );
+        let transport = ReqwestTransport::from_route_aware_client_pool(pool);
+        *cached = Some(CachedApiTransport {
+            key,
+            transport: transport.clone(),
+        });
+        transport
     }
 }
 
@@ -636,6 +685,7 @@ impl ModelClient {
                 disable_websockets: AtomicBool::new(false),
                 agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
+                cached_api_transport: StdMutex::new(None),
                 last_inference_tools: StdMutex::new(None),
             }),
             agent_identity_policy,
@@ -834,7 +884,8 @@ impl ModelClient {
         if let Some(api_provider) = api_provider_override {
             client_setup.api_provider = api_provider;
         }
-        let transport = client_setup.build_api_transport(REALTIME_CALLS_ENDPOINT)?;
+        let transport = client_setup
+            .build_api_transport(REALTIME_CALLS_ENDPOINT, &self.state.cached_api_transport);
         let response =
             ApiRealtimeCallClient::new(transport, client_setup.api_provider, client_setup.api_auth)
                 .create_with_session_and_headers(sdp, session_config, extra_headers)
@@ -882,7 +933,10 @@ impl ModelClient {
         let client_setup = self
             .current_client_setup(ClientRouting::ConfiguredProvider)
             .await?;
-        let transport = client_setup.build_api_transport(MEMORIES_SUMMARIZE_ENDPOINT)?;
+        let transport = client_setup.build_api_transport(
+            MEMORIES_SUMMARIZE_ENDPOINT,
+            &self.state.cached_api_transport,
+        );
         let request_telemetry = Self::build_request_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(
@@ -1945,7 +1999,8 @@ impl ResponsesHttpExecutor<'_> {
                 .client
                 .responses_headers(client_setup.auth.as_ref(), &model_info.slug);
             tracing::Span::current().record("api.path", "/responses");
-            let transport = client_setup.build_api_transport("/responses")?;
+            let transport = client_setup
+                .build_api_transport("/responses", &self.client.state.cached_api_transport);
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
