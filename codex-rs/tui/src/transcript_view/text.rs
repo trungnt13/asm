@@ -51,6 +51,7 @@ pub(crate) struct TextLayout {
     pub(super) disclosure: bool,
     leading_blank_hidden: bool,
     disclosure_control: Option<DisclosureControl>,
+    pub(super) disclosure_header: Option<String>,
 }
 
 struct DisclosureControl {
@@ -163,6 +164,9 @@ impl TextLayout {
             layout =
                 layout.with_disclosure_control_at(control.label.clone(), control.source_offset);
         }
+        if let Some(header) = &self.disclosure_header {
+            layout = layout.with_disclosure_header(header.clone());
+        }
         layout.disclosure |= self.disclosure;
         layout.image = self.image.clone();
         if self.leading_blank_hidden {
@@ -173,6 +177,25 @@ impl TextLayout {
         } else {
             layout
         }
+    }
+
+    pub(super) fn with_disclosure_header(mut self, label: String) -> Self {
+        let header = TextLayout::new(
+            crate::terminal_hyperlinks::plain_hyperlink_lines(crate::wrapping::word_wrap_lines(
+                [Line::from(label.clone()).dim()],
+                usize::from(self.width),
+            )),
+            self.width,
+        );
+        let rows = header.rows.into_iter().map(|mut row| {
+            row.source = 0..0;
+            row.line_end = None;
+            row
+        });
+        self.rows.splice(0..0, rows);
+        self.disclosure = true;
+        self.disclosure_header = Some(label);
+        self
     }
 
     /// Append a clipped interaction row outside the copied and searched source text.
@@ -430,6 +453,14 @@ impl TextLayout {
                 .map_or(/*default*/ 0, str::len)
     }
 
+    pub(super) fn header_row_bias(&self) -> isize {
+        if self.disclosure_header.is_some() {
+            self.row_for_offset(/*offset*/ 0) as isize - usize::from(self.separated) as isize
+        } else {
+            0
+        }
+    }
+
     /// Find the display row containing a source position, including omitted wrapping whitespace.
     pub(super) fn row_for_offset(&self, offset: usize) -> usize {
         if self.visible_image().is_some() && offset >= self.text.len() {
@@ -583,6 +614,7 @@ impl TextLayout {
             disclosure: false,
             leading_blank_hidden: false,
             disclosure_control: None,
+            disclosure_header: None,
         }
     }
 }

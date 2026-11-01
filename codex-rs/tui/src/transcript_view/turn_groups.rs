@@ -223,26 +223,10 @@ impl TranscriptView {
                     } else {
                         Vec::new()
                     };
-                    let empty = lines.is_empty();
                     let mut layout = TextLayout::new(lines, width);
                     if leader {
                         let marker = if expanded { "▾" } else { "▸" };
-                        let label = format!("{marker} {}", label);
-                        if empty {
-                            layout = TextLayout::new(
-                                crate::terminal_hyperlinks::plain_hyperlink_lines(
-                                    crate::wrapping::word_wrap_lines(
-                                        [Line::from(label).dim()],
-                                        usize::from(width),
-                                    ),
-                                ),
-                                width,
-                            );
-                            layout.disclosure = true;
-                        } else {
-                            layout =
-                                layout.with_disclosure_control_at(label, /*source_offset*/ 0);
-                        }
+                        layout = layout.with_disclosure_header(format!("{marker} {label}"));
                     }
                     layout
                 }),

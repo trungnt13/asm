@@ -542,11 +542,14 @@ impl TranscriptView {
         self.release_live_reading();
         let snapshot = self.snapshot_cells();
         let cells = snapshot.as_deref().unwrap_or(cells);
+        let row_bias = self
+            .layout(cells, index)
+            .map_or(/*default*/ 0, |layout| layout.header_row_bias());
         self.position = Position::Reading(Anchor {
             key: self.entry_key(cells, index),
             index,
             offset: 0,
-            row_bias: 0,
+            row_bias,
         });
     }
 
