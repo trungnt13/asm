@@ -312,6 +312,11 @@ impl LocalAgentControl {
         let (session_source, _) = initial_history
             .get_resumed_session_sources()
             .unwrap_or((stored_source, None));
+        if crate::protected_reviewer::is_reviewer(&session_source) {
+            return Err(CodexErr::InvalidRequest(
+                "protected reviewer state cannot be reloaded; start a new review".to_string(),
+            ));
+        }
         if let Some(parent_thread_id) = owner_thread_id {
             if session_source.parent_thread_id() != Some(parent_thread_id)
                 || initial_history
@@ -679,6 +684,17 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        if let Some(parent_id) = session_source
+            .as_ref()
+            .and_then(SessionSource::parent_thread_id)
+            && self.get_agent_metadata(parent_id).is_some_and(|metadata| {
+                metadata.agent_role.as_deref() == Some(crate::protected_reviewer::ROLE)
+            })
+        {
+            return Err(CodexErr::InvalidRequest(
+                "protected reviewer helper admission is not available yet".to_string(),
+            ));
+        }
         config.system1_initial_revision = 0;
         config.system1_initial_error = None;
         config.system1_initial_failure_episode = 0;

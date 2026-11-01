@@ -2578,7 +2578,7 @@ impl Session {
         }
     }
 
-    pub(crate) async fn reload_user_config_layer(&self) {
+    pub(crate) async fn reload_user_config_layer(self: &Arc<Self>) {
         // Refresh layer-backed runtime state for an existing session, including enabled plugin,
         // skill, hook, and MCP feature state. Other feature gates and legacy notify settings
         // remain session-static.
@@ -2836,12 +2836,27 @@ impl Session {
                     error_info = error.codex_error_info.clone();
                     AgentStatus::Errored(error.message.clone())
                 } else {
-                    let Some(status) = agent_status_from_event(msg) else {
+                    let next_status =
+                        if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
+                            crate::protected_reviewer::terminal_status(msg)
+                        } else {
+                            agent_status_from_event(msg)
+                        };
+                    let Some(status) = next_status else {
                         return;
                     };
                     status
                 }
             }
+        };
+        let status = if crate::protected_reviewer::is_reviewer(&turn_context.session_source)
+            && matches!(status, AgentStatus::Interrupted)
+        {
+            AgentStatus::Errored(
+                "Review incomplete: interrupted; this review cannot be resumed".to_string(),
+            )
+        } else {
+            status
         };
         if !is_final(&status) {
             return;
@@ -3022,7 +3037,17 @@ impl Session {
             }
         }
         // Record the last known agent status.
-        if let Some(status) = agent_status_from_event(&event.msg) {
+        let status = if self
+            .services
+            .thread_extension_data
+            .get::<crate::protected_reviewer::ReviewRun>()
+            .is_some()
+        {
+            crate::protected_reviewer::terminal_status(&event.msg)
+        } else {
+            agent_status_from_event(&event.msg)
+        };
+        if let Some(status) = status {
             self.agent_status.send_replace(status);
         }
         if let Err(e) = self.tx_event.send(event).await {

@@ -339,7 +339,7 @@ fn recommended_plugin_metadata_retryable() -> FunctionCallError {
 impl CoreToolRuntime for RequestPluginInstallHandler {}
 
 async fn maybe_persist_disabled_install_request(
-    session: &crate::session::session::Session,
+    session: &std::sync::Arc<crate::session::session::Session>,
     turn: &crate::session::turn_context::TurnContext,
     tool: &DiscoverableTool,
     response: &ElicitationResponse,

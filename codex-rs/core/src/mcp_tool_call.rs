@@ -2399,7 +2399,7 @@ async fn remember_mcp_tool_approval(sess: &Session, key: McpToolApprovalKey) {
 }
 
 async fn apply_mcp_tool_approval_decision(
-    sess: &Session,
+    sess: &Arc<Session>,
     turn_context: &TurnContext,
     decision: &ReviewDecision,
     session_approval_key: Option<McpToolApprovalKey>,
@@ -2428,7 +2428,7 @@ async fn apply_mcp_tool_approval_decision(
 }
 
 async fn maybe_persist_mcp_tool_approval(
-    sess: &Session,
+    sess: &Arc<Session>,
     turn_context: &TurnContext,
     key: McpToolApprovalKey,
 ) {

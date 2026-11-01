@@ -60,6 +60,36 @@ pub(crate) async fn prepare_agent_spawn_config(
     let turn = step_context.turn.as_ref();
     let mut config =
         build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
+    if crate::protected_reviewer::is_reviewer(&turn.session_source) {
+        return Err("protected reviewer helper admission is not available yet".to_string());
+    }
+    if options.role_name == Some(crate::protected_reviewer::ROLE) {
+        if options.version != SpawnConfigVersion::V2 {
+            return Err("protected reviewers require multi-agent v2".to_string());
+        }
+        if options.full_history_fork
+            || options.model.is_some()
+            || options.reasoning_effort.is_some()
+        {
+            return Err(
+                "protected reviewers require fresh context and trusted reviewer_subagent settings"
+                    .to_string(),
+            );
+        }
+        apply_spawn_agent_runtime_overrides(&mut config, turn)?;
+        crate::protected_reviewer::configure(&mut config)?;
+        validate_spawn_agent_config_effort(session, &config).await?;
+        config
+            .apply_external_model_provider()
+            .map_err(|err| err.to_string())?;
+        config
+            .validate_external_subagent_model()
+            .map_err(|err| err.to_string())?;
+        return Ok(PreparedSpawnConfig {
+            config,
+            role_name: Some(crate::protected_reviewer::ROLE.to_string()),
+        });
+    }
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
         config.role_model_context_window = turn.config.role_model_context_window;
