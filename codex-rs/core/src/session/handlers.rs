@@ -469,6 +469,11 @@ pub async fn review(
         .thread_extension_data
         .get::<crate::protected_reviewer::ReviewRun>()
         .is_some()
+        || sess
+            .services
+            .thread_extension_data
+            .get::<crate::protected_reviewer::ReviewHelper>()
+            .is_some()
     {
         sess.send_event_raw(Event {
             id: sub_id,
@@ -700,7 +705,7 @@ pub(super) async fn submission_loop(
                         turn_extension_init: sub.turn_extension_init,
                     };
                     let result = async {
-                        if sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewRun>().is_some() {
+                        if sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewRun>().is_some() || sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewHelper>().is_some() {
                             return Err(CodexErr::InvalidRequest("Protected reviewer settings are frozen".to_string()));
                         }
                         if system1_enabled.is_some() && persistent {

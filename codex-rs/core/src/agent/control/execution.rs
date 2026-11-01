@@ -39,8 +39,15 @@ impl LocalAgentControl {
         if !is_execution_limited(multi_agent_version, session_source) {
             return Ok(());
         }
-        let max_threads = self.runtime.agent_execution_limiter.max_threads();
-        if self.runtime.agent_execution_limiter.has_capacity() {
+        let limiter = if crate::protected_reviewer::is_reviewer(session_source)
+            || crate::protected_reviewer::is_helper(session_source)
+        {
+            &self.runtime.review_execution
+        } else {
+            &self.runtime.agent_execution_limiter
+        };
+        let max_threads = limiter.max_threads();
+        if limiter.has_capacity() {
             Ok(())
         } else {
             Err(
@@ -55,8 +62,16 @@ impl LocalAgentControl {
         multi_agent_version: MultiAgentVersion,
         session_source: &SessionSource,
     ) -> Option<AgentExecutionGuard> {
-        is_execution_limited(multi_agent_version, session_source)
-            .then(|| Arc::clone(&self.runtime.agent_execution_limiter).guard())
+        is_execution_limited(multi_agent_version, session_source).then(|| {
+            let limiter = if crate::protected_reviewer::is_reviewer(session_source)
+                || crate::protected_reviewer::is_helper(session_source)
+            {
+                &self.runtime.review_execution
+            } else {
+                &self.runtime.agent_execution_limiter
+            };
+            Arc::clone(limiter).guard()
+        })
     }
 }
 

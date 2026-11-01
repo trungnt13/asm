@@ -110,7 +110,10 @@ impl AgentControl for LocalAgentControl {
             } = request;
             let target = self.resolve_target(caller, &target)?;
             if self.get_agent_metadata(target).is_some_and(|metadata| {
-                metadata.agent_role.as_deref() == Some(crate::protected_reviewer::ROLE)
+                matches!(
+                    metadata.agent_role.as_deref(),
+                    Some(crate::protected_reviewer::ROLE | crate::protected_reviewer::HELPER_ROLE)
+                )
             }) {
                 return Err(CodexErr::InvalidRequest(
                     "protected reviewers do not accept steering or follow-up messages".to_string(),

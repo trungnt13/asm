@@ -65,6 +65,17 @@ impl Session {
             self.interrupt_task().await;
             return ConfigRefreshOutcome::Rejected;
         }
+        if let Some(helper) = self
+            .services
+            .thread_extension_data
+            .get::<crate::protected_reviewer::ReviewHelper>()
+        {
+            helper
+                .started
+                .store(/*val*/ true, std::sync::atomic::Ordering::Release);
+            self.interrupt_task().await;
+            return ConfigRefreshOutcome::Rejected;
+        }
         let (mut config, mut outcome, rejection_kind) =
             match expected_config.resolve_runtime_refresh(&next_config, scope) {
                 Ok(config) => (config, ConfigRefreshOutcome::Published, None),

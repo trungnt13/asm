@@ -312,7 +312,9 @@ impl LocalAgentControl {
         let (session_source, _) = initial_history
             .get_resumed_session_sources()
             .unwrap_or((stored_source, None));
-        if crate::protected_reviewer::is_reviewer(&session_source) {
+        if crate::protected_reviewer::is_reviewer(&session_source)
+            || crate::protected_reviewer::is_helper(&session_source)
+        {
             return Err(CodexErr::InvalidRequest(
                 "protected reviewer state cannot be reloaded; start a new review".to_string(),
             ));
@@ -684,16 +686,45 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
-        if let Some(parent_id) = session_source
-            .as_ref()
-            .and_then(SessionSource::parent_thread_id)
-            && self.get_agent_metadata(parent_id).is_some_and(|metadata| {
-                metadata.agent_role.as_deref() == Some(crate::protected_reviewer::ROLE)
-            })
-        {
-            return Err(CodexErr::InvalidRequest(
-                "protected reviewer helper admission is not available yet".to_string(),
-            ));
+        use super::review_quota::ReviewReservationKind;
+        let mut review_reservation = if let Some(source) = session_source.as_ref() {
+            let parent_id = source.parent_thread_id();
+            if parent_id.is_some_and(|parent| self.runtime.review_quota.is_helper(parent)) {
+                return Err(CodexErr::InvalidRequest(
+                    "protected explorer helpers cannot create descendants".to_string(),
+                ));
+            }
+            let parent_is_reviewer = parent_id.is_some_and(|parent| {
+                self.runtime.review_quota.owner(parent) == Some(parent)
+                    && !self.runtime.review_quota.is_helper(parent)
+            });
+            let kind = if crate::protected_reviewer::is_helper(source) {
+                if !parent_is_reviewer {
+                    return Err(CodexErr::InvalidRequest(
+                        "protected explorer requires trusted reviewer owner".to_string(),
+                    ));
+                }
+                Some(ReviewReservationKind::Explorer {
+                    owner: parent_id.expect("validated reviewer parent"),
+                })
+            } else if parent_is_reviewer {
+                return Err(CodexErr::InvalidRequest(
+                    "protected reviewers may create only trusted explorers".to_string(),
+                ));
+            } else if crate::protected_reviewer::is_reviewer(source) {
+                Some(ReviewReservationKind::Reviewer)
+            } else {
+                None
+            };
+            kind.map(|kind| self.runtime.review_quota.reserve(&config, kind))
+                .transpose()?
+        } else {
+            None
+        };
+        if review_reservation.is_some() {
+            self.runtime
+                .review_execution
+                .initialize(self.runtime.review_quota.capacity());
         }
         config.system1_initial_revision = 0;
         config.system1_initial_error = None;
@@ -738,14 +769,18 @@ impl LocalAgentControl {
                 .is_some_and(is_v2_resident_session_source);
         let (residency_slot, residency_reservation) = if spawn_uses_v2_residency {
             let residency_reservation_started_at = Instant::now();
-            let residency_slot = self
-                .reserve_v2_residency_slot(
+            let residency_slot = if review_reservation.is_some() {
+                self.reserve_review_residency_slot(&state, &membership)
+                    .await?
+            } else {
+                self.reserve_v2_residency_slot(
                     &state,
                     &config,
                     &membership,
                     /*protected_thread_id*/ None,
                 )
-                .await?;
+                .await?
+            };
             (
                 Some(residency_slot),
                 Some(residency_reservation_started_at.elapsed()),
@@ -858,6 +893,9 @@ impl LocalAgentControl {
             ))
             .with_agent_context(AgentErrorContext::ChildStartup));
         }
+        if let Some(reservation) = review_reservation.as_mut() {
+            reservation.bind(child_thread_id);
+        }
         start_options.reserved_thread_id = Some(child_thread_id);
         let mut pending_spawn = PendingSpawn::new(
             Arc::clone(&state),
@@ -865,6 +903,9 @@ impl LocalAgentControl {
             membership,
             SpawnOwner::Local,
         );
+        if let Some(lease) = pending_spawn.set_review_reservation(review_reservation.take()) {
+            start_options.thread_extension_init.insert(lease);
+        }
         let edge_write_started_at = Instant::now();
         let control = self.clone();
         let source = notification_source.clone();
@@ -959,6 +1000,7 @@ impl LocalAgentControl {
             Some(config) => config,
             None => new_thread.thread.config_snapshot().await,
         };
+        pending_spawn.commit_review_reservation()?;
         reservation.commit(agent_metadata.clone());
         if let Some(residency_slot) = residency_slot {
             residency_slot.commit(new_thread.thread_id);
