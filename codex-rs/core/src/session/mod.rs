@@ -2821,7 +2821,12 @@ impl Session {
         let mut error_info = None;
         let status = match turn_context.terminal_error.lock().await.take() {
             Some(error) => {
-                let status = AgentStatus::Errored(error.message);
+                let status = if crate::protected_reviewer::is_reviewer(&turn_context.session_source)
+                {
+                    AgentStatus::Errored("Review incomplete: execution failed; inspect the reviewer rollout for diagnostics".to_string())
+                } else {
+                    AgentStatus::Errored(error.message)
+                };
                 self.agent_status.send_replace(status.clone());
                 status
             }
@@ -2834,11 +2839,21 @@ impl Session {
                     // Report the safety stop to the parent without changing the child's
                     // interrupted status or notifying for ordinary interruptions.
                     error_info = error.codex_error_info.clone();
-                    AgentStatus::Errored(error.message.clone())
+                    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
+                        AgentStatus::Errored("Review incomplete: execution stopped after denials; inspect the reviewer rollout for diagnostics".to_string())
+                    } else {
+                        AgentStatus::Errored(error.message.clone())
+                    }
                 } else {
                     let next_status =
                         if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
-                            crate::protected_reviewer::terminal_status(msg)
+                            crate::protected_reviewer::terminal_status(
+                                msg,
+                                self.services
+                                    .thread_extension_data
+                                    .get::<crate::protected_reviewer::ReviewRun>()
+                                    .as_deref(),
+                            )
                         } else {
                             agent_status_from_event(msg)
                         };
@@ -2961,6 +2976,13 @@ impl Session {
     }
 
     async fn send_event_raw_with_persistence(&self, event: Event, persist: bool) {
+        if let Some(run) = self
+            .services
+            .thread_extension_data
+            .get::<crate::protected_reviewer::ReviewRun>()
+        {
+            crate::protected_reviewer::persist_report(&run, &event.msg, self.thread_id).await;
+        }
         let flush_guardian_completion = persist
             && matches!(event.msg, EventMsg::TurnComplete(_))
             && self.is_private_guardian_reviewer().await;
@@ -3043,7 +3065,13 @@ impl Session {
             .get::<crate::protected_reviewer::ReviewRun>()
             .is_some()
         {
-            crate::protected_reviewer::terminal_status(&event.msg)
+            crate::protected_reviewer::terminal_status(
+                &event.msg,
+                self.services
+                    .thread_extension_data
+                    .get::<crate::protected_reviewer::ReviewRun>()
+                    .as_deref(),
+            )
         } else {
             agent_status_from_event(&event.msg)
         };

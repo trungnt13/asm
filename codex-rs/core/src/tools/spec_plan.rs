@@ -1302,6 +1302,15 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     let turn_context = context.turn_context;
     let features = turn_context.config.features.get();
     let environment_mode = tool_environment_mode(context.environments);
+    if turn_context.multi_agent_version == MultiAgentVersion::V2
+        && (!turn_context.session_source.is_non_root_agent()
+            || crate::protected_reviewer::is_reviewer(&turn_context.session_source))
+    {
+        registry.add(crate::tools::handlers::CloseReviewAgentHandler);
+    }
+    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
+        registry.add(crate::tools::handlers::ReadReviewContextHandler);
+    }
 
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);
@@ -1565,7 +1574,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                                 .features
                                 .enabled(Feature::ModelCatalogInContext),
                             agent_type_description,
-                            expose_agent_type: !turn_context.config.agent_roles.is_empty(),
+                            expose_agent_type: true,
                             hide_agent_type_model_reasoning: hide_spawn_agent_metadata,
                             expose_spawn_agent_model_overrides: turn_context
                                 .config

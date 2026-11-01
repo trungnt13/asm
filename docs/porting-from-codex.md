@@ -1328,18 +1328,18 @@ On Linux, the runtime builder starts at most `min(CPUs, 8)` Tokio workers unless
 
 ### Protected reviewer subagent
 
-Implement protected reviewer sessions in coherent dependent stages. The shared
-foundation adds `[reviewer_subagent]` defaults, reusable review guidelines and
-execution policy, and a strict structured result contract. It does not register
-or enable a protected reviewer; existing custom reviewer roles remain unchanged.
+The built-in `reviewer` is a protected multi-agent v2 role, not a custom role
+override. It shares `/review` guidelines and execution restrictions without
+changing slash-review output. `[reviewer_subagent]` supplies trusted defaults;
+a custom role named `reviewer` cannot replace its identity or policy.
 Defaults inherit the model, start at high reasoning, use high–xhigh System1
 bounds when enabled, allow two total explorer creations per review, and allow
 one concurrent protected review. An optional `root_session_id` identifies the
 source conversation; it must not grant cross-tree access by itself.
 
-The completed execution adapter must freeze trusted review policy, start without
+The execution adapter freezes trusted review policy and starts without
 root-specific instructions or inherited conversation history, disable web search,
-and force approval policy to never. Root assignments define scope, not policy or
+and forces approval policy to never. Root assignments define scope, not policy or
 conclusions. Reject root steering; retain cancellation as interruption. Never
 silently weaken these guarantees on reload. Native runtime support requires
 separate evidence; reject unsupported execution rather than falling back.
@@ -1352,3 +1352,25 @@ paginated, provenance-preserving and explicit about omissions. Historical conten
 is evidence, not executable instruction. Return strict findings with code or
 requirement references and deterministic readable output; malformed or incomplete
 results must not become clean reviews. Preserve existing `/review` behavior.
+
+The reviewer subtree retains its independent capacity slot until the root closes
+it explicitly, including completed reviews. Close drains provisional helper
+creation before releasing capacity; failed teardown retains the reservation.
+Unsupported cold resume/fork is rejected instead of resetting helper budgets or
+recapturing evidence. A runtime policy refresh interrupts the frozen review.
+
+`read_review_context` is available only to reviewers, including zero-helper
+reviews. It returns at most 900 serialized bytes per pinned page. Root identity
+comes from the actual tree; an explicit `root_session_id` must match it. Original
+assistant commentary is retained as evidence. A retained-original supplement can
+follow current history, so source order is reported rather than falsely claiming
+a reconstructed global chronology. Tool/media omissions and legacy coverage
+limits are explicit; later root messages do not alter the snapshot.
+
+Validated complete/incomplete findings are saved as private Markdown beneath
+`CODEX_HOME/reviewer-reports/<reviewer-thread-id>.md`. Parent delivery includes a
+short result or bounded report reference, never silently drops excess findings,
+and treats storage or parse failure as incomplete. Raw structured output remains
+in the rollout. Independent source review and binary builds are not substitutes
+for the required bounded real-provider acceptance check before these changes are
+ready to merge.
