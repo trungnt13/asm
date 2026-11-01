@@ -3,6 +3,7 @@
 
 mod images;
 
+use crate::ExternalTurnFailure;
 use crate::ExternalTurnOutcome;
 use crate::Prompt;
 use crate::process::ExternalProcess;
@@ -68,6 +69,7 @@ impl CursorRuntime {
         // Keep login in the official CLI, without accidental API-key billing.
         command
             .env_remove("CURSOR_API_KEY")
+            .env_remove("CURSOR_AUTH_TOKEN")
             .env("CURSOR_CONFIG_DIR", &options.config_dir)
             .current_dir(&options.cwd)
             // Native run-everything mode; explicit denies and team auto-run controls still apply.
@@ -124,9 +126,8 @@ impl CursorRuntime {
         self.supports_images = initialized["agentCapabilities"]["promptCapabilities"]["image"]
             .as_bool()
             .unwrap_or(false);
-        self.request("authenticate", json!({"methodId": "cursor_login"}))
-            .await
-            .context("Cursor login is required; run `agent login`")?;
+        // ACP bootstrap checks native credentials. Session setup reports typed auth-required;
+        // authenticate would instead open a browser and wait outside ASM's private login flow.
         let mut params = json!({"cwd": options.cwd, "mcpServers": []});
         if let Some(instructions) = options.role_instructions {
             params["systemPrompt"] = json!({
@@ -339,7 +340,12 @@ impl CursorRuntime {
                     self.refuse_request(&frame).await?;
                 } else if frame["id"] == id {
                     if !frame["error"].is_null() {
+                        let authentication_required =
+                            frame["error"]["code"].as_i64() == Some(-32000);
                         self.failure_result = Some(frame);
+                        if authentication_required {
+                            return Err(ExternalTurnFailure::Authentication.into());
+                        }
                         bail!("Cursor rejected {method}");
                     }
                     return Ok(frame["result"].clone());
@@ -512,6 +518,10 @@ impl CursorRuntime {
             // Agent request IDs are a separate namespace; only responses complete the prompt.
             if frame.get("method").is_some() || frame["id"] != prompt_id {
                 continue;
+            }
+            if frame["error"]["code"].as_i64() == Some(-32000) {
+                self.failure_result = Some(frame);
+                return Err(ExternalTurnFailure::Authentication.into());
             }
             let stop_reason = frame["result"]["stopReason"].as_str();
             let interrupted = cancel_deadline.is_some();

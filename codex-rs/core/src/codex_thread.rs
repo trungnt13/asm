@@ -1111,7 +1111,7 @@ impl CodexThread {
         self.session.state_db()
     }
 
-    pub fn claude_login_required(&self) -> bool {
+    pub fn native_login_required(&self) -> bool {
         self.session
             .external_runtime
             .authentication_required
@@ -1119,7 +1119,7 @@ impl CodexThread {
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn stop_claude_for_login(&self) -> bool {
+    pub async fn stop_native_for_login(&self) -> bool {
         let active = self.session.active_turn.lock().await;
         if active.is_some() {
             return false;
@@ -1127,7 +1127,7 @@ impl CodexThread {
         crate::external_runtime::stop_for_login(&self.session).await
     }
 
-    pub fn finish_claude_login(&self) {
+    pub fn finish_native_login(&self) {
         self.session
             .external_runtime
             .authentication_required

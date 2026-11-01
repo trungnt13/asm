@@ -643,7 +643,23 @@ codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
 - The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
   switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
   checkpoint path and format, storing the session ID that Cursor assigns.
-- Use native Cursor login (`cursor_login`); remove `CURSOR_API_KEY` from the child. By user
+- Keep conversational login orchestration and process safety in provider-neutral `native_login`;
+  separate Claude and Cursor adapters own their CLI, environment, URL, reply and status policies.
+  Preserve the legacy `claude-runtime` pending-marker path for interrupted exchange compatibility.
+- Support `cursor login` through the same deterministic backend chat interception as Claude,
+  using official `agent login` with browser opening disabled and an allowlisted sign-in URL.
+  Browser authentication stays with the native CLI; accept only `done` to check completion,
+  never keys or tokens. Keep pending replies fail-closed across expiry and backend restart,
+  and never replay the failed prompt or bypass dirty-session safeguards.
+- Use Cursor's native authenticated ACP bootstrap and detect typed auth-required errors
+  (`error.code = -32000`) during setup and turns. Route them into the shared login-required
+  guard and fixed provider-specific instructions; never classify arbitrary assistant prose
+  or generic provider errors as expired authentication. Do not invoke ACP `authenticate`,
+  which can open its own browser flow outside shared interception. Preserve dirty checkpoints
+  on uncertain prompt failures. Installed Cursor versions that swallow established-turn auth
+  failures into ordinary assistant text cannot provide reliable automatic expiry detection;
+  those sessions still require explicit `cursor login` until the native protocol exposes it.
+- Remove `CURSOR_API_KEY` and `CURSOR_AUTH_TOKEN` from the child. By user
   decision, every Cursor session, main and children, launches as `agent --force acp`
   (native run-everything mode). Explicit Cursor denies and team auto-run controls still
   apply; never pass `--approve-mcps`, `--trust` or `--sandbox`. Cursor ACP has no supported
