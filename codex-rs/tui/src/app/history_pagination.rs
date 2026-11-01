@@ -232,6 +232,7 @@ impl App {
         self.turn_agent_counts.record_native_turns(thread_id, turns);
         let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
         for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
+            let start = cells.len();
             if let Some(turn) = turns.iter().find(|turn| {
                 items
                     .first()
@@ -255,6 +256,9 @@ impl App {
                         .agent_role
                         .as_deref(),
                 ));
+            }
+            for end in start + 1..=cells.len() {
+                history_cell::TurnActivityBoundary::position_header(&mut cells[start..end]);
             }
             if let Some(turn) = completed_turn
                 && let Some(mut completion) = self

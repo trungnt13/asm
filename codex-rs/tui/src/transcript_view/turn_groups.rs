@@ -39,11 +39,12 @@ impl TurnGroups {
             let cell = &cells[index];
             match cell.as_any().downcast_ref::<TurnActivityBoundary>() {
                 Some(TurnActivityBoundary::Begin(id)) => {
-                    if self
-                        .pending
-                        .as_ref()
-                        .is_none_or(|(pending, _)| pending != id)
-                    {
+                    if self.pending.as_ref().is_none_or(|(pending, begin)| {
+                        pending != id
+                            || !cells[*begin..index]
+                                .iter()
+                                .any(|cell| TurnActivityBoundary::is_activity(cell.as_ref()))
+                    }) {
                         self.pending = Some((id.clone(), index + 1));
                     }
                 }
@@ -128,24 +129,17 @@ impl TurnGroups {
         turn_id: &str,
         completion: &crate::history_cell::FinalMessageSeparator,
     ) {
-        let mut leader = None;
+        let leader = range.start - 1;
+        let mut has_activity = false;
         for index in range {
-            let cell = &cells[index];
-            if cell.as_any().is::<crate::history_cell::AgentMarkdownCell>()
-                || cell.as_any().is::<crate::history_cell::AgentMessageCell>()
-                || cell
-                    .as_any()
-                    .is::<crate::history_cell::ReasoningSummaryCell>()
-                || cell.tool_call_summary().is_some()
-            {
-                if leader.is_some() {
-                    self.hide(index, self.groups.len());
-                }
-                leader.get_or_insert(index);
+            if TurnActivityBoundary::is_activity(cells[index].as_ref()) {
+                has_activity = true;
+                self.hide(index, self.groups.len());
                 self.members[index] = Some(self.groups.len());
             }
         }
-        if let Some(leader) = leader {
+        if has_activity {
+            self.members[leader] = Some(self.groups.len());
             self.layout_dirty = true;
             self.by_turn
                 .insert(format!("turn-activity:{turn_id}"), self.groups.len());
@@ -173,11 +167,13 @@ impl TranscriptView {
         let mut turns = self.turn_groups.borrow_mut();
         turns.sync(cells);
         let group = turns.groups.get(*turns.members.get(index)?.as_ref()?)?;
-        Some(if index == group.leader {
-            vec![group.id.clone()]
+        if index == group.leader {
+            Some(vec![group.id.clone()])
+        } else if self.disclosure.expanded.contains(&group.id) {
+            None
         } else {
-            Vec::new()
-        })
+            Some(Vec::new())
+        }
     }
 
     pub(super) fn turn_group_layout(
@@ -209,26 +205,17 @@ impl TranscriptView {
                 .get_or_insert_with(|| Arc::new(TextLayout::new(Vec::new(), width)));
             return Some(Arc::clone(layout));
         }
+        if !leader {
+            return None;
+        }
         let label = group.label.clone();
         drop(turns);
         Some(
             self.cache
                 .turn_group(cell, width, expanded, /*separated*/ index > 0, || {
-                    let lines = if expanded
-                        && !cell
-                            .as_any()
-                            .is::<crate::history_cell::FinalMessageSeparator>()
-                    {
-                        cell.compact_hyperlink_lines(width)
-                    } else {
-                        Vec::new()
-                    };
-                    let mut layout = TextLayout::new(lines, width);
-                    if leader {
-                        let marker = if expanded { "▾" } else { "▸" };
-                        layout = layout.with_disclosure_header(format!("{marker} {label}"));
-                    }
-                    layout
+                    let marker = if expanded { "▾" } else { "▸" };
+                    TextLayout::new(Vec::new(), width)
+                        .with_disclosure_header(format!("{marker} {label}"))
                 }),
         )
     }

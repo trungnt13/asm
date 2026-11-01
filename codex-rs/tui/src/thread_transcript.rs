@@ -124,6 +124,9 @@ pub(crate) fn thread_to_transcript_cells(
                 /*index*/ 0,
                 Arc::new(crate::history_cell::TurnActivityBoundary::Begin(turn.id)),
             );
+            for end in 1..=cells.len() {
+                crate::history_cell::TurnActivityBoundary::position_header(&mut cells[..end]);
+            }
             cells
         })
         .collect::<TranscriptCells>();
