@@ -141,6 +141,7 @@ impl App {
             }
         }
 
+        self.sync_active_agent_label();
         let has_non_primary_agent_thread = self
             .agent_navigation
             .has_non_primary_thread(self.primary_thread_id);
@@ -158,15 +159,8 @@ impl App {
             return;
         }
 
-        let selected = self
-            .chat_widget
-            .selected_index_for_present_view(AGENT_PICKER_VIEW_ID);
-        let params = self.agent_picker_selection_view_params(selected);
-        if !self
-            .chat_widget
-            .replace_selection_view_if_present(AGENT_PICKER_VIEW_ID, params)
-        {
-            let params = self.agent_picker_selection_view_params(selected);
+        if !self.refresh_agent_picker() {
+            let params = self.agent_picker_selection_view_params(/*selected*/ None);
             self.chat_widget.show_selection_view(params);
         }
         if let Some(primary_thread_id) = self.primary_thread_id {
@@ -175,42 +169,39 @@ impl App {
     }
 
     pub(super) fn agent_picker_selection_view_params(
-        &self,
-        selected: Option<usize>,
+        &mut self,
+        selected: Option<ThreadId>,
     ) -> SelectionViewParams {
-        let mut initial_selected_idx = selected;
-        let items: Vec<SelectionItem> = self
-            .agent_navigation
-            .visible_threads()
+        let mut threads = self.agent_navigation.visible_threads();
+        let pending = &self.agent_navigation.pending_approvals;
+        threads.sort_by_key(|(id, _)| !pending.contains(id));
+        let mut row_ids = Vec::with_capacity(threads.len());
+        let mut initial_selected_idx = None;
+        let items: Vec<SelectionItem> = threads
             .into_iter()
             .enumerate()
             .map(|(idx, (thread_id, entry))| {
-                if initial_selected_idx.is_none() && self.active_thread_id == Some(thread_id) {
+                row_ids.push(thread_id);
+                let is_pending = pending.contains(&thread_id);
+                let is_current = self.active_thread_id == Some(thread_id);
+                if selected == Some(thread_id)
+                    || initial_selected_idx.is_none() && (is_pending || is_current)
+                {
                     initial_selected_idx = Some(idx);
                 }
-                let id = thread_id;
-                let is_primary = self.primary_thread_id == Some(thread_id);
-                let name = entry
-                    .agent_path
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|agent_path| !is_primary && !agent_path.is_empty())
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_else(|| {
-                        format_agent_picker_item_name(
-                            entry.agent_nickname.as_deref(),
-                            entry.agent_role.as_deref(),
-                            is_primary,
-                        )
-                    });
+                let name = self.thread_label(thread_id);
                 let uuid = thread_id.to_string();
                 SelectionItem {
-                    name: name.clone(),
+                    name: if is_pending {
+                        format!("{name} (needs approval)")
+                    } else {
+                        name.clone()
+                    },
                     name_prefix_spans: agent_picker_status_dot_spans(entry.is_closed),
                     description: Some(uuid.clone()),
-                    is_current: self.active_thread_id == Some(thread_id),
+                    is_current,
                     actions: vec![Box::new(move |tx| {
-                        tx.send(AppEvent::SelectAgentThread(id));
+                        tx.send(AppEvent::SelectAgentThread(thread_id));
                     })],
                     dismiss_on_select: true,
                     search_value: Some(format!("{name} {uuid}")),
@@ -218,6 +209,7 @@ impl App {
                 }
             })
             .collect();
+        self.agent_navigation.picker_row_ids = row_ids;
 
         SelectionViewParams {
             view_id: Some(AGENT_PICKER_VIEW_ID),
@@ -251,10 +243,7 @@ impl App {
         })
     }
 
-    /// Updates cached picker metadata and then mirrors any visible-label change into the footer.
-    ///
-    /// These two writes stay paired so the picker rows and contextual footer continue to describe
-    /// the same displayed thread after nickname or role updates.
+    /// Cache metadata in both the picker and transcript. Callers refresh the UI after a batch.
     pub(super) fn upsert_agent_picker_thread(
         &mut self,
         thread_id: ThreadId,
@@ -269,7 +258,14 @@ impl App {
         );
         self.agent_navigation
             .upsert(thread_id, agent_nickname, agent_role, is_closed);
-        self.sync_active_agent_label();
+    }
+
+    pub(super) fn sync_agent_picker_thread(&mut self, thread_id: ThreadId) {
+        if self.agent_navigation.pending_approvals.contains(&thread_id) {
+            self.refresh_agent_picker();
+        } else {
+            self.sync_active_agent_label();
+        }
     }
 
     /// Persists the app-server's authoritative ownership flag and updates the active composer.
@@ -327,6 +323,7 @@ impl App {
                     self.agent_navigation.mark_parent_owned(thread_id);
                 }
                 self.agent_navigation.set_agent_path(thread_id, agent_path);
+                self.sync_agent_picker_thread(thread_id);
                 if is_running {
                     self.agent_navigation.mark_running(thread_id);
                 } else {
@@ -359,6 +356,7 @@ impl App {
                 }
                 self.agent_navigation
                     .set_running(thread_id, /*is_running*/ false);
+                self.sync_agent_picker_thread(thread_id);
                 true
             }
         }
@@ -400,6 +398,7 @@ impl App {
                         entry.agent_role,
                         /*is_closed*/ false,
                     );
+                    self.sync_agent_picker_thread(thread_id);
                 }
                 if started.blocks_direct_input {
                     self.agent_navigation.mark_parent_owned(thread_id);
@@ -541,7 +540,7 @@ impl App {
             previous.park_voice();
             self.background_voice = Some(Box::new(previous));
         }
-        self.sync_active_agent_label();
+        self.refresh_agent_picker();
     }
 
     pub(super) async fn select_agent_thread(
@@ -1321,7 +1320,7 @@ impl App {
                 refreshed_thread_ids.insert(thread.thread_id);
             }
         }
-        self.sync_active_agent_label();
+        self.refresh_agent_picker();
 
         LoadedSubagentBackfill {
             completed: !had_read_error,
