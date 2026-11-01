@@ -115,6 +115,7 @@ impl ThreadManagerState {
             );
             let removed = threads.remove(&thread_id).is_some();
             runtime.residency.remove(thread_id);
+            runtime.review_residency.remove(thread_id);
             teardown.complete();
             Ok(if removed {
                 ThreadEvictionOutcome::Evicted
@@ -173,8 +174,24 @@ impl LocalAgentControl {
             .await
     }
 
+    pub(super) async fn reserve_review_residency_slot(
+        &self,
+        state: &Arc<ThreadManagerState>,
+        membership: &AgentTreeMembership,
+    ) -> CodexResult<V2ResidencySlot> {
+        Arc::clone(&self.runtime.review_residency)
+            .reserve_slot(
+                state,
+                self.runtime.review_quota.capacity(),
+                membership,
+                None,
+            )
+            .await
+    }
+
     pub(super) fn forget_v2_residency(&self, thread_id: ThreadId) {
         self.runtime.residency.remove(thread_id);
+        self.runtime.review_residency.remove(thread_id);
     }
 }
 
@@ -193,7 +210,11 @@ impl LocalAgentRuntime {
         if !Arc::ptr_eq(thread, &state.get_thread(thread_id).await?) {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
-        self.residency.touch(thread_id);
+        if self.review_quota.owner(thread_id).is_some() {
+            self.review_residency.touch(thread_id);
+        } else {
+            self.residency.touch(thread_id);
+        }
         Ok(Some(guard))
     }
 }

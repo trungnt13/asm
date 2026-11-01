@@ -24,9 +24,20 @@ use super::session::Session;
 #[derive(Default)]
 pub(crate) struct SessionStartup {
     teardown: StdMutex<Option<AgentTreeTeardownGuard>>,
+    pub(crate) review_quota: StdMutex<Option<Arc<crate::agent::control::ReviewStartupQuota>>>,
     pub(crate) persistence: Mutex<LiveThreadInitGuard>,
     pub(crate) session: OnceLock<Arc<Session>>,
     pub(crate) io: OnceLock<SessionIo>,
+}
+
+struct CleanupQuotaGuard(Option<Arc<crate::agent::control::ReviewStartupQuota>>);
+
+impl Drop for CleanupQuotaGuard {
+    fn drop(&mut self) {
+        if let Some(lease) = self.0.as_ref() {
+            lease.fail_closed();
+        }
+    }
 }
 
 impl SessionStartup {
@@ -63,6 +74,12 @@ impl SessionStartup {
     }
 
     pub(crate) async fn cleanup(&self) {
+        let mut quota_cleanup = CleanupQuotaGuard(
+            self.review_quota
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
+        );
         let mut teardown = self.lock_teardown().take();
         if let Some(teardown) = teardown.as_mut()
             && let Some(session) = self.session.get()
@@ -82,6 +99,14 @@ impl SessionStartup {
                     );
                 }
                 tracing::warn!("failed to stop cancelled session init: {error}");
+                if let Some(lease) = self
+                    .review_quota
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                {
+                    lease.fail_closed();
+                }
             }
         } else {
             if let Some(session) = self.session.get() {
@@ -105,6 +130,11 @@ impl SessionStartup {
                 );
             }
         }
+        self.review_quota
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        quota_cleanup.0 = None;
         if let Some(teardown) = teardown {
             teardown.complete();
         }
@@ -124,13 +154,24 @@ impl SessionStartupGuard {
     }
 
     pub(crate) fn disarm(mut self) {
-        self.startup = None;
+        if let Some(startup) = self.startup.take() {
+            startup
+                .review_quota
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+        }
     }
 
     pub(crate) fn cleanup(mut self) -> BoxFuture<'static, ()> {
         Box::pin(async move {
             if let Some(startup) = self.startup.take() {
-                startup.cleanup().await;
+                let cleanup = tokio::spawn(async move {
+                    startup.cleanup().await;
+                });
+                if let Err(error) = cleanup.await {
+                    tracing::warn!("session startup cleanup task failed: {error}");
+                }
             }
         })
     }
