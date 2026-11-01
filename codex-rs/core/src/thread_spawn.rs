@@ -148,7 +148,15 @@ pub(crate) async fn prepare(
 ) -> Result<(ChildSpawnSettings, AgentPath), ThreadSpawnError> {
     let turn = &step_context.turn;
     let child_depth = next_thread_spawn_depth(&turn.session_source);
-    if exceeds_thread_spawn_depth_limit(child_depth, turn.config.agent_max_depth) {
+    let protected_reviewer = crate::protected_reviewer::is_reviewer(&turn.session_source)
+        && session
+            .services
+            .thread_extension_data
+            .get::<crate::protected_reviewer::ReviewRun>()
+            .is_some();
+    if !protected_reviewer
+        && exceeds_thread_spawn_depth_limit(child_depth, turn.config.agent_max_depth)
+    {
         return Err(ThreadSpawnError::Preparation(
             "Agent depth limit reached. Solve the task yourself.".to_string(),
         ));
@@ -177,6 +185,13 @@ pub(crate) async fn prepare(
     )
     .await
     .map_err(ThreadSpawnError::Preparation)?;
+    if protected_reviewer
+        && prepared.role_name.as_deref() != Some(crate::protected_reviewer::HELPER_ROLE)
+    {
+        return Err(ThreadSpawnError::Preparation(
+            "protected reviewer depth admission requires its trusted explorer policy".to_string(),
+        ));
+    }
     let config = prepared.config;
     let task_name = turn
         .session_source
