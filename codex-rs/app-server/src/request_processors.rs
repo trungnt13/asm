@@ -537,6 +537,7 @@ use uuid::Uuid;
 use codex_app_server_protocol::ServerRequest;
 
 pub(crate) mod account_processor;
+mod app_context_filter;
 mod apps_processor;
 mod bedrock_auth;
 mod catalog_processor;
