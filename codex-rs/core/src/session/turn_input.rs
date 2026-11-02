@@ -253,6 +253,20 @@ pub(super) async fn handle(
             ));
         }
     }
+    if let Some(helper) = session
+        .services
+        .thread_extension_data
+        .get::<crate::protected_reviewer::ReviewHelper>()
+    {
+        if helper
+            .started
+            .swap(/*val*/ true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "protected explorer helpers accept only their initial assignment".to_string(),
+            ));
+        }
+    }
     if let SubmittedTurnInput::ResponseItem(item)
     | SubmittedTurnInput::AnnotatedResponseItem(AnnotatedResponseItem { item, .. }) =
         &request.request.input
@@ -340,6 +354,16 @@ pub(super) async fn handle_recovery(
     {
         return Err(CodexErr::InvalidRequest(
             "protected reviewers cannot start a recovery turn; start a new review".to_string(),
+        ));
+    }
+    if session
+        .services
+        .thread_extension_data
+        .get::<crate::protected_reviewer::ReviewHelper>()
+        .is_some()
+    {
+        return Err(CodexErr::InvalidRequest(
+            "protected explorer helpers cannot be recovered or continued".to_string(),
         ));
     }
     let WithTurnExtensionData {

@@ -253,6 +253,9 @@ impl MessageBoardHost for LocalBoardHost {
                 }
                 Err(error) => return Err(error),
             };
+            if crate::protected_reviewer::is_protected(&recipient.session_source) {
+                return Ok(NotificationDelivery::SkippedInactive);
+            }
             let recipient_path = self.registered_path(&recipient).await?;
             let notice = AgentMessageBoardNotification(post);
             let communication = InterAgentCommunication::new(
