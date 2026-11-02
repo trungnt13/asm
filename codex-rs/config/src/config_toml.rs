@@ -264,6 +264,10 @@ pub struct ConfigToml {
     #[serde(default)]
     pub developer_instructions: Option<String>,
 
+    /// Exact section headings to remove from Desktop `<app-context>` instructions.
+    #[serde(default)]
+    pub app_context_filter: Vec<String>,
+
     /// Whether to inject the `<permissions instructions>` developer block.
     pub include_permissions_instructions: Option<bool>,
 
