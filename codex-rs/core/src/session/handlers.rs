@@ -472,17 +472,7 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
-    if sess
-        .services
-        .thread_extension_data
-        .get::<crate::protected_reviewer::ReviewRun>()
-        .is_some()
-        || sess
-            .services
-            .thread_extension_data
-            .get::<crate::protected_reviewer::ReviewHelper>()
-            .is_some()
-    {
+    if crate::protected_reviewer::is_protected_session(&sess.services.thread_extension_data) {
         sess.send_event_raw(Event {
             id: sub_id,
             msg: EventMsg::Warning(WarningEvent {
@@ -745,7 +735,7 @@ pub(super) async fn submission_loop(
                         turn_extension_init: sub.turn_extension_init,
                     };
                     let result = async {
-                        if sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewRun>().is_some() || sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewHelper>().is_some() {
+                        if crate::protected_reviewer::is_protected_session(&sess.services.thread_extension_data) {
                             return Err(CodexErr::InvalidRequest("Protected reviewer settings are frozen".to_string()));
                         }
                         if system1_enabled.is_some() && persistent {
@@ -806,8 +796,7 @@ pub(super) async fn submission_loop(
                     update,
                     reply,
                 } => {
-                    let outcome = if sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewRun>().is_some()
-                        || sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewHelper>().is_some()
+                    let outcome = if crate::protected_reviewer::is_protected_session(&sess.services.thread_extension_data)
                     {
                         codex_protocol::protocol::TurnSettingsUpdateOutcome::Rejected {
                             reason: "Protected reviewer settings are frozen".to_string(),

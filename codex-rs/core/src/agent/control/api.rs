@@ -109,16 +109,7 @@ impl AgentControl for LocalAgentControl {
                 mut start_options,
             } = request;
             let target = self.resolve_target(caller, &target)?;
-            if self.get_agent_metadata(target).is_some_and(|metadata| {
-                matches!(
-                    metadata.agent_role.as_deref(),
-                    Some(crate::protected_reviewer::ROLE | crate::protected_reviewer::HELPER_ROLE)
-                )
-            }) {
-                return Err(CodexErr::InvalidRequest(
-                    "protected reviewers do not accept steering or follow-up messages".to_string(),
-                ));
-            }
+            let protected = self.admit_review_message(caller, target, &input).await?;
             let (metadata, submission_id) = match input {
                 AgentInput::UserInput(input) => {
                     let receiver = self.get_agent_metadata(target);
@@ -154,13 +145,14 @@ impl AgentControl for LocalAgentControl {
                     // locally evicted recipients can retain mail without reloading.
                     // Loaded recipients go straight to delivery, which rejects sends
                     // racing an in-progress eviction when it acquires the residency pin.
-                    let _residency_pin = if mode == MessageDeliveryMode::TriggerTurn
-                        || (self.runtime.upgrade()?.get_thread(target).await.is_err()
-                            && self
-                                .runtime
-                                .registry
-                                .evicted_runtime_state(target)
-                                .is_none())
+                    let _residency_pin = if !protected
+                        && (mode == MessageDeliveryMode::TriggerTurn
+                            || (self.runtime.upgrade()?.get_thread(target).await.is_err()
+                                && self
+                                    .runtime
+                                    .registry
+                                    .evicted_runtime_state(target)
+                                    .is_none()))
                     {
                         self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
                             .await?

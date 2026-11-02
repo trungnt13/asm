@@ -55,24 +55,7 @@ impl Session {
         next_config: Config,
         scope: RuntimeConfigRefresh,
     ) -> ConfigRefreshOutcome {
-        if let Some(run) = self
-            .services
-            .thread_extension_data
-            .get::<crate::protected_reviewer::ReviewRun>()
-        {
-            run.started
-                .store(true, std::sync::atomic::Ordering::Release);
-            self.interrupt_task().await;
-            return ConfigRefreshOutcome::Rejected;
-        }
-        if let Some(helper) = self
-            .services
-            .thread_extension_data
-            .get::<crate::protected_reviewer::ReviewHelper>()
-        {
-            helper
-                .started
-                .store(/*val*/ true, std::sync::atomic::Ordering::Release);
+        if crate::protected_reviewer::freeze(&self.services.thread_extension_data) {
             self.interrupt_task().await;
             return ConfigRefreshOutcome::Rejected;
         }

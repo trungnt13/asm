@@ -321,9 +321,7 @@ impl LocalAgentControl {
         let (session_source, _) = initial_history
             .get_resumed_session_sources()
             .unwrap_or((stored_source, None));
-        if crate::protected_reviewer::is_reviewer(&session_source)
-            || crate::protected_reviewer::is_helper(&session_source)
-        {
+        if crate::protected_reviewer::is_protected(&session_source) {
             return Err(CodexErr::InvalidRequest(
                 "protected reviewer state cannot be reloaded; start a new review".to_string(),
             ));

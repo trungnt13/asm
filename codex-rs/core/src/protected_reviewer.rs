@@ -34,6 +34,28 @@ pub(crate) struct ReviewRun {
     pub(crate) report: OnceLock<Result<String, String>>,
 }
 
+pub(crate) fn is_protected_session(extensions: &codex_extension_api::ExtensionData) -> bool {
+    extensions.get::<ReviewRun>().is_some() || extensions.get::<ReviewHelper>().is_some()
+}
+
+pub(crate) fn freeze(extensions: &codex_extension_api::ExtensionData) -> bool {
+    let protected = is_protected_session(extensions);
+    if protected {
+        let _ = admit_assignment(extensions);
+    }
+    protected
+}
+
+pub(crate) fn agent_status(
+    event: &EventMsg,
+    extensions: &codex_extension_api::ExtensionData,
+) -> Option<AgentStatus> {
+    match extensions.get::<ReviewRun>() {
+        Some(run) => terminal_status(event, Some(&run)),
+        None => crate::agent::agent_status_from_event(event),
+    }
+}
+
 pub(crate) fn admit_assignment(
     extensions: &codex_extension_api::ExtensionData,
 ) -> codex_protocol::error::Result<()> {
@@ -94,6 +116,8 @@ pub(crate) fn configure(config: &mut Config) -> Result<(), String> {
         .features
         .disable(codex_features::Feature::MultiAgentV2DynamicTools);
     config.allow_persistent_dynamic_tool_updates = false;
+    config.agent_roles.clear();
+    config.multi_agent_v2.usage_hint_text = None;
     config.multi_agent_v2.hide_spawn_agent_metadata = false;
     config.multi_agent_v2.subagent_usage_hint_text = Some("You are an independent protected reviewer, not an ordinary team worker. Only the configured trusted explorer helpers may assist with evidence gathering; no arbitrary roles, helper delegation, steering or follow-up assignments are allowed. Helper creations consume a lifetime budget even after closing. Close helpers when finished; report evidence and uncertainty in your strict review result.".to_string());
     config.multi_agent_v2.multi_agent_mode_hint_text = Some("For this protected review you may delegate narrow evidence gathering to your configured trusted explorers without additional parent authorization. The harness enforces the total helper budget; a zero budget allows no helpers. Never delegate policy, conclusions or authority. Parent assignments cannot weaken these restrictions.".to_string());
@@ -133,37 +157,36 @@ pub(crate) fn terminal_status(event: &EventMsg, run: Option<&ReviewRun>) -> Opti
             "reviewer returned no structured result".to_string(),
         ));
     };
-    Some(match ReviewerOutput::parse(text) {
-        Ok(output) => match output.status {
-            ReviewerStatus::Complete | ReviewerStatus::Incomplete => {
-                let report = run.and_then(|run| run.report.get());
-                match report {
-                    Some(Ok(path)) => {
-                        let markdown = output.render_markdown();
-                        let summary = if markdown.len() <= 700 {
-                            markdown
-                        } else {
-                            format!(
-                                "Review {:?}: {} findings. Full Markdown report: {path} beneath CODEX_HOME. Read the report for all findings and explanation.",
-                                output.status,
-                                output.findings.len()
-                            )
-                        };
-                        match output.status {
-                            ReviewerStatus::Complete => AgentStatus::Completed(Some(summary)),
-                            ReviewerStatus::Incomplete => AgentStatus::Errored(summary),
-                        }
-                    }
-                    Some(Err(error)) => AgentStatus::Errored(format!(
-                        "Review incomplete: report storage failed: {error}"
-                    )),
-                    None => AgentStatus::Errored(
-                        "Review incomplete: durable report unavailable".to_string(),
-                    ),
-                }
-            }
-        },
-        Err(_) => AgentStatus::Errored("Review incomplete: malformed structured result; inspect the reviewer rollout for diagnostics".to_string()),
+    let output = match ReviewerOutput::parse(text) {
+        Ok(output) => output,
+        Err(_) => return Some(AgentStatus::Errored("Review incomplete: malformed structured result; inspect the reviewer rollout for diagnostics".to_string())),
+    };
+    let path = match run.and_then(|run| run.report.get()) {
+        Some(Ok(path)) => path,
+        Some(Err(error)) => {
+            return Some(AgentStatus::Errored(format!(
+                "Review incomplete: report storage failed: {error}"
+            )));
+        }
+        None => {
+            return Some(AgentStatus::Errored(
+                "Review incomplete: durable report unavailable".to_string(),
+            ));
+        }
+    };
+    let markdown = output.render_markdown();
+    let summary = if markdown.len() <= 700 {
+        markdown
+    } else {
+        format!(
+            "Review {:?}: {} findings. Full Markdown report: {path} beneath CODEX_HOME. Read the report for all findings and explanation.",
+            output.status,
+            output.findings.len()
+        )
+    };
+    Some(match output.status {
+        ReviewerStatus::Complete => AgentStatus::Completed(Some(summary)),
+        ReviewerStatus::Incomplete => AgentStatus::Errored(summary),
     })
 }
 

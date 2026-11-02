@@ -41,51 +41,28 @@ pub(super) enum ReviewerLocation {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(super) enum ReviewerOutputError {
-    #[error("invalid reviewer JSON: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("invalid reviewer result: {0}")]
-    Invalid(&'static str),
-}
-
 impl ReviewerOutput {
     /// Rejects malformed results instead of converting failures into empty findings.
-    pub(super) fn parse(text: &str) -> Result<Self, ReviewerOutputError> {
-        let output: Self = serde_json::from_str(text)?;
+    pub(super) fn parse(text: &str) -> Result<Self, &'static str> {
+        let output: Self = serde_json::from_str(text).map_err(|_| "invalid reviewer JSON")?;
         if output.explanation.trim().is_empty() {
-            return Err(ReviewerOutputError::Invalid(
-                "explanation must not be blank",
-            ));
+            return Err("explanation must not be blank");
         }
         for finding in &output.findings {
-            if finding.title.trim().is_empty() || finding.body.trim().is_empty() {
-                return Err(ReviewerOutputError::Invalid(
-                    "finding text must not be blank",
-                ));
-            }
-            if finding.priority > 3 {
-                return Err(ReviewerOutputError::Invalid(
-                    "priority must be between 0 and 3",
-                ));
-            }
-            match &finding.location {
+            let valid_location = match &finding.location {
                 ReviewerLocation::Code {
                     start_line,
                     end_line,
                     ..
-                } => {
-                    if *start_line == 0 || end_line < start_line {
-                        return Err(ReviewerOutputError::Invalid("invalid inclusive line range"));
-                    }
-                }
-                ReviewerLocation::Requirement { reference } => {
-                    if reference.trim().is_empty() {
-                        return Err(ReviewerOutputError::Invalid(
-                            "requirement reference must not be blank",
-                        ));
-                    }
-                }
+                } => *start_line > 0 && end_line >= start_line,
+                ReviewerLocation::Requirement { reference } => !reference.trim().is_empty(),
+            };
+            if finding.title.trim().is_empty()
+                || finding.body.trim().is_empty()
+                || finding.priority > 3
+                || !valid_location
+            {
+                return Err("invalid reviewer finding");
             }
         }
         Ok(output)

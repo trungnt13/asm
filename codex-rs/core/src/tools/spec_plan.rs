@@ -874,6 +874,9 @@ fn agent_type_description(
     turn_context: &TurnContext,
     default_agent_type_description: &str,
 ) -> String {
+    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
+        return "Available roles:\nexplorer: Trusted read-only evidence gathering; no descendants or model overrides.".to_string();
+    }
     let agent_type_description =
         crate::agent::role::spawn_tool_spec::build(&turn_context.config.agent_roles);
     if agent_type_description.is_empty() {
@@ -1341,6 +1344,18 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     }
     if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
         registry.add(crate::tools::handlers::ReadReviewContextHandler);
+    }
+
+    if crate::protected_reviewer::is_helper(&turn_context.session_source) {
+        registry.register_trusted_with_exposure(
+            multi_agent_v2_handler(
+                SendMessageHandlerV2,
+                turn_context.config.multi_agent_v2.tool_namespace.as_deref(),
+                /*description_override*/ None,
+                /*parameters_override*/ None,
+            ),
+            ToolExposure::Direct,
+        );
     }
 
     if turn_context.config.update_plan_enabled {

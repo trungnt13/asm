@@ -2965,18 +2965,10 @@ impl Session {
                         AgentStatus::Errored(error.message.clone())
                     }
                 } else {
-                    let next_status =
-                        if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
-                            crate::protected_reviewer::terminal_status(
-                                msg,
-                                self.services
-                                    .thread_extension_data
-                                    .get::<crate::protected_reviewer::ReviewRun>()
-                                    .as_deref(),
-                            )
-                        } else {
-                            agent_status_from_event(msg)
-                        };
+                    let next_status = crate::protected_reviewer::agent_status(
+                        msg,
+                        &self.services.thread_extension_data,
+                    );
                     let Some(status) = next_status else {
                         return;
                     };
@@ -3186,22 +3178,10 @@ impl Session {
             }
         }
         // Record the last known agent status.
-        let status = if self
-            .services
-            .thread_extension_data
-            .get::<crate::protected_reviewer::ReviewRun>()
-            .is_some()
-        {
-            crate::protected_reviewer::terminal_status(
-                &event.msg,
-                self.services
-                    .thread_extension_data
-                    .get::<crate::protected_reviewer::ReviewRun>()
-                    .as_deref(),
-            )
-        } else {
-            agent_status_from_event(&event.msg)
-        };
+        let status = crate::protected_reviewer::agent_status(
+            &event.msg,
+            &self.services.thread_extension_data,
+        );
         if let Some(status) = status {
             self.agent_status.send_replace(status);
         }
