@@ -764,6 +764,9 @@ fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
 }
 
 fn collab_tools_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
+    if crate::protected_reviewer::is_helper(&turn_context.session_source) {
+        return false;
+    }
     match turn_context.multi_agent_version {
         MultiAgentVersion::Disabled => false,
         MultiAgentVersion::V1 => !exceeds_thread_spawn_depth_limit(
