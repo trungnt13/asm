@@ -277,6 +277,7 @@ mod session_lifecycle;
 mod session_picker;
 mod side;
 mod side_actions;
+mod side_pane;
 mod side_persistence;
 mod startup;
 pub(crate) mod startup_bootstrap;
@@ -309,6 +310,7 @@ use self::parallel::CompanionKind;
 use self::pending_interactive_replay::PendingInteractiveReplayState;
 pub(crate) use self::platform_actions::WindowsSandboxHost;
 use self::platform_actions::*;
+use self::side::SideCompanion;
 use self::side::SideParentStatus;
 use self::side::SideParentStatusChange;
 use self::side::SideThreadState;
@@ -656,6 +658,8 @@ pub(crate) struct App {
     turn_agent_counts: turn_agent_counts::TurnAgentCounts,
     agents_overview: agents_overview::AgentsOverviewState,
     side_threads: HashMap<ThreadId, SideThreadState>,
+    /// A parked parent view survives child cleanup until its own replay finishes.
+    side_companions: HashMap<ThreadId, SideCompanion>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,

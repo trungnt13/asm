@@ -652,7 +652,7 @@ impl ChatWidget {
 
     pub(crate) fn capture_thread_input_state(&mut self) -> Option<ThreadInputState> {
         self.cancel_image_submission();
-        let draft = self.bottom_pane.composer_draft_snapshot();
+        let draft = self.bottom_pane.composer_recovery_snapshot();
         let composer = ThreadComposerState {
             quotes: draft.quotes,
             quote_comments: draft.quote_comments,
