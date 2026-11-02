@@ -170,7 +170,9 @@ Port useful upstream action/toolchain/security/build fixes without broad matrice
    - Publication does not authorize installation or shared-server restart.
 2. **Check CI.**
    - Inspect failures; fix relevant code/package errors.
-   - For runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not infer code defects or change build settings from runner failure alone.
+   - Diagnose the exact workflow, run revision, job, and resolved `runs-on` label before declaring a release blocked. A failed inherited V8 canary is not evidence that `fork-rust-release.yml` cannot run; establish an actual required dependency or failure in the release workflow itself. Do not cancel a healthy release because an unrelated canary failed.
+   - Standard GitHub-hosted runners are free for public repositories; larger runners are paid even there. A generic payment/spending-limit annotation does not prove a failed payment or an account-wide block. Check the runner class and job-specific evidence before recommending any billing change. Keep the $0 budget; never enable paid runners or increase spending without explicit owner approval. See [GitHub's billing rules](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+   - For transient runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not repeatedly retry a paid-runner job against a $0 budget. Reruns retain the old workflow revision and runner labels; a runner-label fix needs a new run using the corrected revision. Do not infer code defects or change build settings from runner failure alone.
    - If the owner requires recovery first, verify successful retry before dispatch.
    - Read prior candidate job logs in memory with the GitHub CLI raw-output opt-in when supported; never render untrusted log escapes to a terminal.
 3. **Check live use.**
@@ -223,7 +225,7 @@ These govern release code, not another manual procedure.
 
 #### Build and package
 
-Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
+Keep fork/upstream release workflows separate. Use only [standard GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) for public-repository CI and releases unless the owner explicitly approves paid infrastructure. Verify effective matrix labels in the workflow revision being dispatched; do not substitute `-large` or `-xlarge` runners for the standard labels below.
 
 | Platform | Target | Runner | Build timeout |
 | --- | --- | --- | --- |
