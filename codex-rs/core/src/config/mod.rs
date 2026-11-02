@@ -762,6 +762,9 @@ pub struct Config {
     /// Overall Guardian review budget. None means unlimited; cancellation still applies.
     pub guardian_review_timeout: Option<Duration>,
 
+    /// Exact section headings to remove from Desktop `<app-context>` instructions.
+    pub app_context_filter: Vec<String>,
+
     /// Whether to inject the `<permissions instructions>` developer block.
     pub include_permissions_instructions: bool,
 
@@ -4690,6 +4693,7 @@ impl Config {
             base_instructions_provenance,
             personality,
             developer_instructions,
+            app_context_filter: cfg.app_context_filter,
             compact_prompt,
             include_permissions_instructions,
             include_apps_instructions,

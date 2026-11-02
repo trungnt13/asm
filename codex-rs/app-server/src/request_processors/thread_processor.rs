@@ -1597,6 +1597,7 @@ impl ThreadRequestProcessor {
         {
             initialization.inherited_tier = tier.clone();
         }
+        super::app_context_filter::apply(&mut config);
         let mut start_options = StartThreadOptions::new(config);
         let reserved_thread_id = if start_options.config.ephemeral {
             None
@@ -4387,6 +4388,7 @@ impl ThreadRequestProcessor {
                 config.personality = settings.personality;
             }
         }
+        super::app_context_filter::apply(&mut config);
         let response_history = thread_history.clone();
 
         match self
@@ -5757,6 +5759,7 @@ impl ThreadRequestProcessor {
                 ..StartThreadOptions::new(config)
             }
         };
+        super::app_context_filter::apply(&mut options.config);
         let goals_enabled = options.config.features.enabled(Feature::Goals);
 
         let fallback_model_provider = options.config.model_provider_id.clone();
