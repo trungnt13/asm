@@ -207,8 +207,6 @@ pub(crate) struct LocalAgentRuntime {
         Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
     pub(super) registry: Arc<AgentRegistry>,
     pub(super) residency: Arc<V2Residency>,
-    pub(super) review_residency: Arc<V2Residency>,
-    pub(super) review_execution: Arc<AgentExecutionLimiter>,
     pub(super) review_quota: Arc<super::review_quota::ReviewQuota>,
     pub(super) mailboxes: Arc<super::mailbox::Mailboxes>,
     /// Shared by every session in this tree, including private delegates.
@@ -229,8 +227,6 @@ impl LocalAgentRuntime {
             context_window_id_generator: Arc::new(codex_protocol::ContextWindowId::new_uuid_v7),
             registry: Arc::default(),
             residency: Arc::default(),
-            review_residency: Arc::default(),
-            review_execution: Arc::default(),
             review_quota: Arc::default(),
             mailboxes: Arc::default(),
             shutdown: CancellationToken::new(),

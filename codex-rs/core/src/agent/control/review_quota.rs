@@ -131,13 +131,6 @@ impl ReviewQuota {
         }
     }
 
-    pub(super) fn capacity(&self) -> usize {
-        let state = self.lock();
-        state
-            .limits
-            .map_or(0, |(reviews, helpers)| reviews * (1 + helpers))
-    }
-
     pub(super) fn begin_close(&self, owner: ThreadId) -> bool {
         let mut state = self.lock();
         let Some(review) = state.reviews.get_mut(&owner) else {
@@ -251,16 +244,15 @@ impl LocalAgentControl {
                 Some(crate::protected_reviewer::ROLE | crate::protected_reviewer::HELPER_ROLE)
             )
         });
-        let helper_owner = self
-            .runtime
-            .review_quota
-            .owner(caller)
-            .filter(|owner| *owner != caller);
-        if !protected && helper_owner.is_none() {
+        let caller_owner = self.runtime.review_quota.owner(caller);
+        let target_owner = self.runtime.review_quota.owner(target);
+        if !protected && caller_owner.is_none() {
             return Ok(false);
         }
-        if helper_owner != Some(target)
-            || self.runtime.review_quota.owner(target) != Some(target)
+        let owned_pair = caller != target
+            && ((caller_owner == Some(target) && target_owner == Some(target))
+                || (caller_owner == Some(caller) && target_owner == Some(caller)));
+        if !owned_pair
             || !matches!(
                 input,
                 crate::agent::api::AgentInput::Message {

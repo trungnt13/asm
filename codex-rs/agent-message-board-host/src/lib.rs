@@ -61,6 +61,9 @@ pub fn install_agent_message_board(
         MULTI_AGENT_V2_NAMESPACE_DESCRIPTION,
         |config: &Config| config.multi_agent_v2.tool_namespace.clone(),
         move |input: &ThreadStartInput<'_, Config>, tree, caller| {
+            if crate::protected_reviewer::is_protected(input.session_source) {
+                return Box::pin(async { Ok(None) });
+            }
             let config = input.config;
             let connection = input.thread_store.get::<LocalBoardConnection>();
             let in_memory = config.multi_agent_v2.message_board_in_memory;

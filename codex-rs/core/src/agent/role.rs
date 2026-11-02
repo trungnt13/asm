@@ -330,13 +330,21 @@ pub(crate) mod spawn_tool_spec {
 
     /// Builds the spawn-agent tool description text from built-in and configured roles.
     pub(crate) fn build(user_defined_agent_roles: &BTreeMap<String, AgentRoleConfig>) -> String {
-        let built_in_roles = built_in::configs();
-        build_from_configs(built_in_roles, user_defined_agent_roles)
+        let roles = built_in::configs()
+            .iter()
+            .filter(|(name, _)| name.as_str() != crate::protected_reviewer::ROLE);
+        build_from_configs(roles, user_defined_agent_roles)
+    }
+
+    pub(crate) fn build_for_root(
+        user_defined_agent_roles: &BTreeMap<String, AgentRoleConfig>,
+    ) -> String {
+        build_from_configs(built_in::configs(), user_defined_agent_roles)
     }
 
     // This function is not inlined for testing purpose.
-    fn build_from_configs(
-        built_in_roles: &BTreeMap<String, AgentRoleConfig>,
+    fn build_from_configs<'a>(
+        built_in_roles: impl IntoIterator<Item = (&'a String, &'a AgentRoleConfig)>,
         user_defined_roles: &BTreeMap<String, AgentRoleConfig>,
     ) -> String {
         let mut seen = BTreeSet::new();

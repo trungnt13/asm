@@ -1,6 +1,5 @@
 pub(crate) mod apply_patch;
 pub(crate) mod apply_patch_spec;
-mod close_review_agent;
 mod current_time;
 mod dynamic;
 pub(crate) mod extension_tools;
@@ -19,7 +18,7 @@ mod new_context_window;
 pub(crate) mod new_context_window_spec;
 mod plan;
 pub(crate) mod plan_spec;
-mod read_review_context;
+mod protected_review;
 mod request_permissions;
 mod request_plugin_install;
 pub(crate) mod request_plugin_install_spec;
@@ -74,7 +73,7 @@ pub use mcp_resource::ListMcpResourcesHandler;
 pub use mcp_resource::ReadMcpResourceHandler;
 pub use new_context_window::NewContextWindowHandler;
 pub use plan::PlanHandler;
-pub(crate) use read_review_context::ReadReviewContextHandler;
+pub(crate) use protected_review::ProtectedReviewTool;
 pub(crate) use request_permissions::PreparedPermissionRequest;
 pub use request_permissions::RequestPermissionsHandler;
 pub use request_plugin_install::RequestPluginInstallHandler;
@@ -664,5 +663,3 @@ mod tests {
         );
     }
 }
-
-pub(crate) use close_review_agent::CloseReviewAgentHandler;

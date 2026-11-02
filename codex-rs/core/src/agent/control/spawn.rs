@@ -715,11 +715,6 @@ impl LocalAgentControl {
             session_source.as_ref(),
             self.runtime.registry.agent_id_for_path(&AgentPath::root()),
         )?;
-        if review_reservation.is_some() {
-            self.runtime
-                .review_execution
-                .initialize(self.runtime.review_quota.capacity());
-        }
         config.system1_initial_revision = 0;
         config.system1_initial_error = None;
         config.system1_initial_failure_episode = 0;
@@ -756,24 +751,21 @@ impl LocalAgentControl {
             self.ensure_execution_capacity(multi_agent_version, session_source)?;
         }
         let agent_max_threads = config.effective_agent_max_threads(multi_agent_version);
-        let spawn_uses_v2_residency = multi_agent_version == MultiAgentVersion::V2
+        let spawn_uses_v2_residency = review_reservation.is_none()
+            && multi_agent_version == MultiAgentVersion::V2
             && session_source
                 .as_ref()
                 .is_some_and(is_v2_resident_session_source);
         let (residency_slot, residency_reservation) = if spawn_uses_v2_residency {
             let residency_reservation_started_at = Instant::now();
-            let residency_slot = if review_reservation.is_some() {
-                self.reserve_review_residency_slot(&state, &membership)
-                    .await?
-            } else {
-                self.reserve_v2_residency_slot(
+            let residency_slot = self
+                .reserve_v2_residency_slot(
                     &state,
                     &config,
                     &membership,
                     /*protected_thread_id*/ None,
                 )
-                .await?
-            };
+                .await?;
             (
                 Some(residency_slot),
                 Some(residency_reservation_started_at.elapsed()),

@@ -39,11 +39,7 @@ impl LocalAgentControl {
         if !is_execution_limited(multi_agent_version, session_source) {
             return Ok(());
         }
-        let limiter = if crate::protected_reviewer::is_protected(session_source) {
-            &self.runtime.review_execution
-        } else {
-            &self.runtime.agent_execution_limiter
-        };
+        let limiter = &self.runtime.agent_execution_limiter;
         let max_threads = limiter.max_threads();
         if limiter.has_capacity() {
             Ok(())
@@ -61,11 +57,7 @@ impl LocalAgentControl {
         session_source: &SessionSource,
     ) -> Option<AgentExecutionGuard> {
         is_execution_limited(multi_agent_version, session_source).then(|| {
-            let limiter = if crate::protected_reviewer::is_protected(session_source) {
-                &self.runtime.review_execution
-            } else {
-                &self.runtime.agent_execution_limiter
-            };
+            let limiter = &self.runtime.agent_execution_limiter;
             Arc::clone(limiter).guard()
         })
     }
@@ -95,6 +87,7 @@ fn is_execution_limited(
     session_source: &SessionSource,
 ) -> bool {
     multi_agent_version == MultiAgentVersion::V2
+        && !crate::protected_reviewer::is_protected(session_source)
         && matches!(session_source, SessionSource::SubAgent(_))
 }
 

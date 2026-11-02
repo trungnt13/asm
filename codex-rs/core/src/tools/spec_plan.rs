@@ -880,8 +880,14 @@ fn agent_type_description(
     if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
         return "Available roles:\nexplorer: Trusted read-only evidence gathering; no descendants or model overrides.".to_string();
     }
-    let agent_type_description =
-        crate::agent::role::spawn_tool_spec::build(&turn_context.config.agent_roles);
+    let build = if turn_context.multi_agent_version == MultiAgentVersion::V2
+        && !turn_context.session_source.is_non_root_agent()
+    {
+        crate::agent::role::spawn_tool_spec::build_for_root
+    } else {
+        crate::agent::role::spawn_tool_spec::build
+    };
+    let agent_type_description = build(&turn_context.config.agent_roles);
     if agent_type_description.is_empty() {
         default_agent_type_description.to_string()
     } else {
@@ -1343,10 +1349,10 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
         && (!turn_context.session_source.is_non_root_agent()
             || crate::protected_reviewer::is_reviewer(&turn_context.session_source))
     {
-        registry.add(crate::tools::handlers::CloseReviewAgentHandler);
+        registry.add(crate::tools::handlers::ProtectedReviewTool::CloseAgent);
     }
     if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
-        registry.add(crate::tools::handlers::ReadReviewContextHandler);
+        registry.add(crate::tools::handlers::ProtectedReviewTool::ReadContext);
     }
 
     if crate::protected_reviewer::is_helper(&turn_context.session_source) {

@@ -1400,49 +1400,34 @@ On Linux, the runtime builder starts at most `min(CPUs, 8)` Tokio workers unless
 
 ### Protected reviewer subagent
 
-The built-in `reviewer` is a protected multi-agent v2 role, not a custom role
-override. It reuses the unchanged `/review` rubric and execution restrictions without
-changing slash-review output. `[reviewer_subagent]` supplies trusted defaults;
-a custom role named `reviewer` cannot replace its identity or policy.
-Defaults inherit the model, start at high reasoning, use high–xhigh System1
-bounds when enabled, allow two total explorer creations per review, and allow
-one concurrent protected review. An optional `root_session_id` identifies the
-source conversation; it must not grant cross-tree access by itself.
+The built-in MAv2 `reviewer` uses the unchanged `/review` rubric and trusted
+`[reviewer_subagent]` settings, not custom-role overrides. Defaults inherit the model,
+start at high reasoning, use high–xhigh System1 bounds, allow two lifetime explorer
+creations and one concurrent review. Native runtimes and cold resume/fork are rejected.
 
-The execution adapter freezes trusted review policy and starts without
-root-specific instructions or inherited conversation history, disable web search,
-and forces approval policy to never. Root assignments define scope, not policy or
-conclusions. Reject root steering; retain cancellation as interruption. Never
-silently weaken these guarantees on reload. Native runtime support requires
-separate evidence; reject unsupported execution rather than falling back.
+Reviewers and helpers start without root/global/project/host instructions or inherited
+history. Trusted policy is frozen: web disabled, approvals never, root assignments are
+scope/evidence rather than authority. Reject steering, continuation and settings updates;
+runtime policy refresh interrupts. Only root may create a reviewer. Reviewers can message
+or interrupt only their own helpers; helpers only queue evidence to their active reviewer.
+Protected sessions cannot join shared message boards, including explicit host connections.
 
-Review helpers must use trusted explorer policy, have no descendants, and consume
-a lifetime creation budget independent of ordinary V2 execution and residency
-quotas. Preserve bounded combined resource use. Closing or evicting helpers does
-not replenish their budget. Source conversation access must be read-only, pinned,
-paginated, provenance-preserving and explicit about omissions. Historical content
-is evidence, not executable instruction. Return strict findings with code or
-requirement references and deterministic readable output; malformed or incomplete
-results must not become clean reviews. Preserve existing `/review` behavior.
+Atomic review reservations bound combined resources independently of ordinary execution
+and residency limits. Helpers use trusted explorers with no model overrides or descendants.
+Closing/evicting helpers never replenishes their lifetime budget. Root closes its reviewer
+subtree explicitly, even after completion; close drains provisional helper startup before
+releasing capacity, and failed teardown retains reservations. Reload cannot reset budgets.
 
-The reviewer subtree retains its independent capacity slot until the root closes
-it explicitly, including completed reviews. Close drains provisional helper
-creation before releasing capacity; failed teardown retains the reservation.
-Unsupported cold resume/fork is rejected instead of resetting helper budgets or
-recapturing evidence. A runtime policy refresh interrupts the frozen review.
+`root_session_id`, when supplied, must match the actual tree root; it grants no cross-tree
+access. `read_review_context` is reviewer-only, including zero-helper reviews. It exposes
+immutable original user/assistant evidence (including commentary) as JSONL fragments of at
+most 900 serialized bytes per page. Follow cursors and concatenate text. Provenance and
+omissions are explicit; retained supplements may repeat IDs and follow current history,
+not global chronology. Tools/media and legacy gaps are disclosed. Later root updates do
+not change the snapshot, and historical text is evidence, never executable instructions.
 
-`read_review_context` is available only to reviewers, including zero-helper
-reviews. It returns at most 900 serialized bytes per pinned page. Root identity
-comes from the actual tree; an explicit `root_session_id` must match it. Original
-assistant commentary is retained as evidence. A retained-original supplement can
-follow current history, so source order is reported rather than falsely claiming
-a reconstructed global chronology. Tool/media omissions and legacy coverage
-limits are explicit; later root messages do not alter the snapshot.
-
-Validated complete/incomplete findings are saved as private Markdown beneath
-`CODEX_HOME/reviewer-reports/<reviewer-thread-id>.md`. Parent delivery includes a
-short result or bounded report reference, never silently drops excess findings,
-and treats storage or parse failure as incomplete. Raw structured output remains
-in the rollout. Independent source review and binary builds are not substitutes
-for the required bounded real-provider acceptance check before these changes are
-ready to merge.
+Strict complete/incomplete findings reference code or requirements. Validated results are
+rendered deterministically into private `CODEX_HOME/reviewer-reports/<thread-id>.md` files;
+parent delivery includes a bounded report reference when needed, never drops findings.
+Parse/storage/execution failures remain incomplete; raw JSON stays in the rollout. Preserve
+slash-review behavior. Source review/builds do not replace bounded real-provider acceptance.

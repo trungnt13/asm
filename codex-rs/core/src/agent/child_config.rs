@@ -83,6 +83,8 @@ pub(crate) async fn prepare_agent_spawn_config(
         let _ = config
             .features
             .disable(codex_features::Feature::MultiAgentV2);
+        config.multi_agent_v2.subagent_usage_hint_text = Some(String::new());
+        config.multi_agent_v2.multi_agent_mode_hint_text = Some(String::new());
         config.developer_instructions =
             turn.config.reviewer_subagent.developer_instructions.clone();
         return Ok(PreparedSpawnConfig {
