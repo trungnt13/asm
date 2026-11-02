@@ -5444,6 +5444,8 @@ impl ThreadRequestProcessor {
             let now = chrono::Utc::now();
             StoredThread {
                 originator: Some(snapshot.originator),
+                creator_account_id: None,
+                creator_user_id: None,
                 thread_id: source_id,
                 extra_config: None,
                 rollout_path: None,
