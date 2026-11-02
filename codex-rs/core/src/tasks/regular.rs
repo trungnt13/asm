@@ -23,8 +23,8 @@ use super::SessionTaskResult;
 
 /// The last answer and the MCP requirements needed if a steer reopens sampling.
 pub(crate) struct RegularTaskOutput {
-    pub(super) last_agent_message: Option<String>,
-    pub(super) mcp_startup_requirements: McpStartupRequirements,
+    pub(crate) last_agent_message: Option<String>,
+    pub(crate) mcp_startup_requirements: McpStartupRequirements,
 }
 
 #[derive(Default)]

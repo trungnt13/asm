@@ -128,7 +128,9 @@ pub(super) async fn history_base_at_boundary(
         ForkBoundary::Latest => latest_position,
         ForkBoundary::ThroughTurn(turn_id) => {
             let visible = lineage.for_history_page().await?;
-            let row = find_materialized_turn(pool, visible.segments().iter().rev(), turn_id.as_str()).await?;
+            let row =
+                find_materialized_turn(pool, visible.segments().iter().rev(), turn_id.as_str())
+                    .await?;
             if row.status == "inProgress" {
                 return Err(ThreadStoreError::InvalidRequest {
                     message: format!("lastTurnId '{turn_id}' identifies an in-progress turn"),
@@ -152,7 +154,8 @@ pub(super) async fn history_base_at_boundary(
         }
         ForkBoundary::BeforeTurn(turn_id) => {
             let visible = lineage.for_history_page().await?;
-            let row = find_materialized_turn(pool, visible.segments().iter(), turn_id.as_str()).await?;
+            let row =
+                find_materialized_turn(pool, visible.segments().iter(), turn_id.as_str()).await?;
             if row.rollout_end_ordinal == Some(row.rollout_ordinal) {
                 return Err(ThreadStoreError::InvalidRequest {
                     message: format!("turn {turn_id} does not have a persisted start boundary"),

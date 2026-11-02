@@ -16,8 +16,8 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::client_common::Prompt;
 use crate::ThreadStoreBuilder;
+use crate::client_common::Prompt;
 use crate::config::Config;
 use crate::resolve_installation_id;
 use crate::responses_metadata::CodexResponsesRequestKind;

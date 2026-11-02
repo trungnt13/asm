@@ -67,6 +67,7 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 pub(crate) use compact::CompactTask;
 pub(crate) use regular::RegularTask;
+pub(crate) use regular::RegularTaskOutput;
 pub(crate) use review::ReviewTask;
 pub(crate) use user_shell::UserShellCommandMode;
 pub(crate) use user_shell::UserShellCommandTask;
@@ -709,8 +710,9 @@ impl Session {
                 (None, None, Some(err))
             }
         };
-        let can_continue =
-            regular_output.is_some() && turn_context.terminal_error.lock().await.is_none();
+        let can_continue = regular_output.is_some()
+            && !crate::external_runtime::is_native_model(&turn_context.model_info().slug)
+            && turn_context.terminal_error.lock().await.is_none();
         let finishing = CancellationToken::new();
         let finish_recording = finishing.clone().drop_guard();
         let (turn_state, unadmitted_task, mut pending_input) = {
