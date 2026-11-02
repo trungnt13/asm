@@ -1646,7 +1646,11 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     // Spawn composes the selected description with inheritance and usage guidance.
                     /*description_override*/
                     None,
-                    model_messages.multi_agent_tool_parameters_override("spawn_agent"),
+                    model_messages
+                        .multi_agent_tool_parameters_override("spawn_agent")
+                        .filter(|_| {
+                            !crate::protected_reviewer::is_reviewer(&turn_context.session_source)
+                        }),
                 ),
                 exposure,
                 native_review,

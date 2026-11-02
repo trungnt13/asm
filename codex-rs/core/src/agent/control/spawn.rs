@@ -773,7 +773,7 @@ impl LocalAgentControl {
         } else {
             (None, None)
         };
-        let reservation_max_threads = if spawn_uses_v2_residency {
+        let reservation_max_threads = if spawn_uses_v2_residency || review_reservation.is_some() {
             None
         } else {
             agent_max_threads
