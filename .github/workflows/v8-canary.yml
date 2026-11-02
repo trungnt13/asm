@@ -121,13 +121,13 @@ jobs:
             sandbox: true
             target: x86_64-apple-darwin
             variant: ptrcomp-sandbox
-          - runner: macos-15-xlarge
+          - runner: macos-15
             bazel_config: ci-macos
             platform: macos_arm64
             sandbox: false
             target: aarch64-apple-darwin
             variant: release
-          - runner: macos-15-xlarge
+          - runner: macos-15
             bazel_config: ci-macos
             platform: macos_arm64
             sandbox: true
@@ -198,15 +198,19 @@ jobs:
 
           bazel_args=(
             build
+            "--config=${{ matrix.bazel_config }}"
             "--platforms=@llvm//platforms:${PLATFORM}"
             "${pair_target}"
-            --build_metadata=COMMIT_SHA=$(git rev-parse HEAD)
+            "--build_metadata=COMMIT_SHA=$(git rev-parse HEAD)"
           )
+          if [[ "${PLATFORM}" == "macos_arm64" ]]; then
+            # Standard Apple Silicon runners have 7 GB RAM; match the fork V8 build budget.
+            bazel_args+=(--jobs=2)
+          fi
 
           ./.github/scripts/run_bazel_with_buildbuddy.py \
             --noexperimental_remote_repo_contents_cache \
-            "${bazel_args[@]}" \
-            "--config=${{ matrix.bazel_config }}"
+            "${bazel_args[@]}"
 
       - name: Stage release pair
         env:
