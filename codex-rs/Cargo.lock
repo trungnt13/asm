@@ -1960,8 +1960,10 @@ dependencies = [
 name = "codex-agent-message-board-extension"
 version = "0.167.1-alpha.1"
 dependencies = [
+ "codex-config",
  "codex-extension-api",
  "codex-message-board",
+ "codex-message-board-mcp",
  "codex-protocol",
  "codex-state",
  "codex-tools",
@@ -2091,6 +2093,7 @@ dependencies = [
  "codex-git-utils",
  "codex-goal-extension",
  "codex-guardian-v2",
+ "codex-guardian-v3",
  "codex-history-notes-extension",
  "codex-home",
  "codex-hooks",
@@ -2101,6 +2104,7 @@ dependencies = [
  "codex-mcp-extension",
  "codex-memories-extension",
  "codex-memories-write",
+ "codex-message-board",
  "codex-model-provider",
  "codex-model-provider-info",
  "codex-models-manager",
@@ -2985,6 +2989,7 @@ dependencies = [
  "codex-mcp-extension",
  "codex-memories-read",
  "codex-message-board",
+ "codex-message-board-mcp",
  "codex-model-provider",
  "codex-model-provider-info",
  "codex-models-manager",
@@ -3210,6 +3215,7 @@ dependencies = [
  "codex-cloud-config",
  "codex-config",
  "codex-core",
+ "codex-exec-server",
  "codex-features",
  "codex-feedback",
  "codex-git-utils",
@@ -4205,13 +4211,27 @@ dependencies = [
 name = "codex-message-board-mcp"
 version = "0.167.1-alpha.1"
 dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "clap",
  "codex-attachment-store",
  "codex-message-board",
  "codex-protocol",
+ "codex-state",
  "codex-tools",
+ "codex-utils-absolute-path",
+ "codex-utils-cargo-bin",
  "codex-utils-output-truncation",
+ "codex-utils-process",
+ "futures",
  "rmcp",
+ "serde",
  "serde_json",
+ "sqlx",
+ "tempfile",
+ "tokio",
+ "tokio-util",
  "uuid",
 ]
 

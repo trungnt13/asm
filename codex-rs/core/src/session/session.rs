@@ -8,6 +8,7 @@ use super::step_settings::StepSettingsConstraints;
 use super::step_settings::StepSettingsUpdate;
 use super::*;
 use crate::agent::api::AgentControl;
+use crate::agent::host::AgentRuntimeServices;
 use crate::agents_md_manager::AgentsMdManager;
 use crate::agents_md_manager::SessionInstructions;
 use crate::config::ConstraintError;
@@ -61,6 +62,7 @@ type McpToolApprovalMetadataMap =
 pub(crate) struct Session {
     pub(crate) external_runtime: crate::external_runtime::RuntimeSlot,
     pub(crate) thread_id: ThreadId,
+    pub(crate) agent_runtime: AgentRuntimeServices,
     pub(crate) installation_id: String,
     pub(super) tx_event: Sender<Event>,
     /// Installed by Guardian before its first review; forwards items and cancellation without
@@ -160,6 +162,8 @@ pub(crate) struct SessionConfiguration {
     pub(super) trusted_guardian_reviewer: bool,
     /// Source of the session (cli, vscode, exec, mcp, ...)
     pub(super) session_source: SessionSource,
+    /// Whether native lineage or the trusted host restricts this session's root-only capabilities.
+    pub(super) root_capabilities_restricted: bool,
     /// Persisted thread history contract selected when this thread was created.
     pub(super) history_mode: ThreadHistoryMode,
     /// Immediate history source copied into this thread, when this thread was forked.
@@ -1614,7 +1618,7 @@ impl Session {
                 session_configuration.clone(),
                 initial_auto_compact_window_ids,
                 ContextManager::for_session(
-                    &session_configuration.session_source,
+                    session_configuration.root_capabilities_restricted,
                     &config.features,
                 ),
             );
@@ -1797,6 +1801,12 @@ impl Session {
                     .await;
             }
 
+            let (agent_runtime, mut startup_error) =
+                match AgentRuntimeServices::from_extensions(&thread_extension_data) {
+                    Ok(runtime) => (runtime, None),
+                    // This placeholder is used only for teardown, before the session is published.
+                    Err(err) => (AgentRuntimeServices::Controller, Some(err)),
+                };
             let executed_tool_calls =
                 crate::state::ExecutedToolCalls::new(&config.features, &initial_history);
             let codex_responses_headers =
@@ -1828,12 +1838,12 @@ impl Session {
             } else {
                 ThreadTraceContext::start_root(trace_metadata)
             };
-            // Extensions have already started. On error, finish constructing the
-            // session so normal teardown can release everything they registered.
-            let (rollout_thread_trace, trace_error) = match rollout_thread_trace {
-                Ok(trace) => (trace, None),
-                Err(err) => (ThreadTraceContext::disabled(), Some(err)),
-            };
+            let rollout_thread_trace = rollout_thread_trace.unwrap_or_else(|err| {
+                startup_error.get_or_insert_with(|| {
+                    CodexErr::Fatal(format!("failed to start rollout recording: {err:#}"))
+                });
+                ThreadTraceContext::disabled()
+            });
             let services = SessionServices {
                 // Start with an empty connection set. The initialized set is
                 // published after SessionConfigured so MCP events follow it.
@@ -1941,6 +1951,7 @@ impl Session {
             let (mcp_prewarm_tx, mcp_prewarm_rx) = async_channel::bounded(1);
             let sess = Arc::new(Session {
                 thread_id,
+                agent_runtime,
                 installation_id,
                 tx_event: tx_event.clone(),
                 parent_observer_event_tx: OnceLock::new(),
@@ -2002,13 +2013,11 @@ impl Session {
             if let Some(startup) = &startup {
                 startup.set_session(Arc::clone(&sess));
             }
-            if let Some(err) = trace_error {
+            if let Some(err) = startup_error {
                 if startup.is_none() {
                     super::handlers::shutdown_session_runtime(&sess).await;
                 }
-                return Err(
-                    CodexErr::Fatal(format!("failed to start rollout recording: {err:#}")).into(),
-                );
+                return Err(err.into());
             }
             if let Some(network_policy_decider_session) = network_policy_decider_session {
                 let mut guard = network_policy_decider_session.write().await;

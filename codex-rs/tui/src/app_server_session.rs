@@ -328,8 +328,8 @@ pub(crate) struct AppServerBootstrap {
 
 pub(crate) struct AppServerSession {
     backend_id: crate::backend_id::BackendId,
-    /// Owns events and the connection lifetime for live sessions. Picker views borrow only the
-    /// request handle below and deliberately have no connection owner.
+    /// Owns events and the connection lifetime for live sessions. Request-only views share the
+    /// request handle below and have no connection owner.
     connection_owner: Option<AppServerClient>,
     request_handle: AppServerRequestHandle,
     request_id_namespace: Option<Uuid>,
@@ -539,8 +539,8 @@ impl AppServerSession {
         self.backend_id
     }
 
-    /// Creates a request-only picker view without transferring the live connection's events.
-    pub(crate) fn picker_view(&self) -> Self {
+    /// Creates a request-only view without transferring the live connection's events.
+    pub(crate) fn request_view(&self) -> Self {
         let mut view = Self::from_parts(
             self.backend_id,
             /*connection_owner*/ None,
@@ -2963,8 +2963,8 @@ mod tests {
             AppServerClient::Cloud(client),
             ThreadParamsMode::Cloud,
         );
-        let mut first = session.picker_view();
-        let mut second = session.picker_view();
+        let mut first = session.request_view();
+        let mut second = session.request_view();
 
         let first_id = first.next_request_id();
         assert_ne!(session.next_request_id(), first_id);
@@ -2982,7 +2982,7 @@ mod tests {
             ThreadParamsMode::Cloud,
         );
 
-        session.picker_view().shutdown().await.unwrap();
+        session.request_view().shutdown().await.unwrap();
         events
             .send(codex_app_server_client::AppServerEvent::Disconnected {
                 message: "still live".to_string(),

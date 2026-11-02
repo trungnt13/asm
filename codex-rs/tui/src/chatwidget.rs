@@ -1278,31 +1278,31 @@ impl ChatWidget {
         &mut self,
         cell: &dyn HistoryCell,
     ) -> Option<Box<dyn HistoryCell>> {
+        let active = self.transcript.active_cell.as_ref()?;
         // Keep the placeholder session header as the active cell until real session info arrives,
         // so we can merge headers instead of committing a duplicate box to history.
-        let keep_placeholder_header_active = !self.is_session_configured()
-            && self
-                .transcript
-                .active_cell
-                .as_ref()
-                .is_some_and(|c| c.as_any().is::<history_cell::SessionHeaderHistoryCell>());
+        if !self.is_session_configured()
+            && active
+                .as_any()
+                .is::<history_cell::SessionHeaderHistoryCell>()
+        {
+            return None;
+        }
         let history_width = self
             .last_rendered_width
             .get()
             .map(|width| self.history_wrap_width(width))
             .unwrap_or(u16::MAX);
 
-        if !keep_placeholder_header_active
-            && !cell
-                .display_lines_for_mode(history_width, self.history_render_mode())
-                .is_empty()
+        if !cell
+            .display_lines_for_mode(history_width, self.history_render_mode())
+            .is_empty()
         {
             // Only break exec grouping if the cell renders visible lines.
             if !self.has_active_stream_tail() {
                 return self.transcript.take_active_cell();
             }
-        } else if !keep_placeholder_header_active
-            && self.has_completed_tool_activity()
+        } else if self.has_completed_tool_activity()
             && !cell.transcript_lines(history_width).is_empty()
         {
             return self.transcript.take_active_cell();
@@ -1756,6 +1756,17 @@ impl ChatWidget {
         if !had_rendered_width {
             self.request_redraw();
         }
+    }
+
+    /// Reflow at the allocated conversation width and report any presentation-only revision change.
+    pub(crate) fn resize_owned_conversation(&mut self, width: u16) -> Option<(u64, u64)> {
+        if self.last_rendered_width.get() == Some(width) {
+            return None;
+        }
+        let previous = self.transcript.active_cell_revision;
+        self.on_terminal_resize(width);
+        let reflowed = self.transcript.active_cell_revision;
+        (previous != reflowed).then_some((previous, reflowed))
     }
 
     /// Whether an agent message stream is active (not a plan stream).

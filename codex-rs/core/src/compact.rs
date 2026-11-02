@@ -20,6 +20,7 @@ use crate::hook_runtime::run_pre_compact_hooks;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CompactionTurnMetadata;
 use crate::responses_retry::ModelCapacityRetryState;
+use crate::responses_retry::ResponsesRequestTransport;
 use crate::session::RequestEffortUsage;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -297,6 +298,7 @@ async fn run_compact_task_inner_impl(
     let max_retries = turn_context.provider.info().stream_max_retries();
     let mut retries = 0;
     let mut capacity_retry = ModelCapacityRetryState::default();
+    let mut transport = ResponsesRequestTransport::Auto;
     // Reuse one client session so turn-scoped state (sticky routing and websocket incremental
     // request tracking) survives retries within this compact turn.
     let mut client_session = sess.services.model_client.new_session();
@@ -337,6 +339,7 @@ async fn run_compact_task_inner_impl(
             &sess,
             turn_context.as_ref(),
             &mut client_session,
+            &mut transport,
             &responses_metadata,
             &prompt,
             compaction_metadata.phase(),
@@ -360,6 +363,7 @@ async fn run_compact_task_inner_impl(
                     e.details(),
                     CodexErrorDetails::SessionBudgetExceeded
                         | CodexErrorDetails::ResponseIncomplete(_)
+                        | CodexErrorDetails::Fatal(_)
                 ) =>
             {
                 return Err(e);
@@ -378,6 +382,9 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) => {
+                if transport.retry_failed_recovery(&e).await {
+                    continue;
+                }
                 let e = match capacity_retry
                     .wait_for_capacity(e, &sess, &turn_context, RetryOperation::Sampling)
                     .await
@@ -838,6 +845,7 @@ async fn drain_to_completed(
     sess: &Session,
     turn_context: &TurnContext,
     client_session: &mut ModelClientSession,
+    transport: &mut ResponsesRequestTransport,
     responses_metadata: &CodexResponsesMetadata,
     prompt: &Prompt,
     phase: CompactionPhase,
@@ -861,7 +869,7 @@ async fn drain_to_completed(
     };
     let mut includes_reasoning = turn_context.model_info().use_responses_lite;
     let mut stream = client_session
-        .stream(
+        .stream_attempt(
             prompt,
             turn_context.model_info(),
             &turn_context.session_telemetry,
@@ -876,6 +884,7 @@ async fn drain_to_completed(
             // Rollout tracing currently models remote compaction only; local compaction streams
             // are left untraced until the reducer has a first-class local compaction lifecycle.
             &InferenceTraceContext::disabled(),
+            transport,
         )
         .await?;
     let mut output = Vec::new();

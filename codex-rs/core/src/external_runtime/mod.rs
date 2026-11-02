@@ -163,7 +163,10 @@ pub(crate) async fn run_turn(
         shutdown(&session).await;
     }
     match result {
-        Ok(text) => Ok(text),
+        Ok(text) => Ok(Some(crate::tasks::RegularTaskOutput {
+            last_agent_message: text,
+            mcp_startup_requirements: Default::default(),
+        })),
         Err(error) if error.is::<ConfirmedInterrupt>() || cancellation.is_cancelled() => {
             Err(CodexErr::TurnAborted)
         }

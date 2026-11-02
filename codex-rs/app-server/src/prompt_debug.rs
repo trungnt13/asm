@@ -58,7 +58,8 @@ pub async fn build_prompt_request(
     } else {
         Some(codex_rollout::state_db::try_init(&config).await?)
     };
-    let thread_store = codex_core::thread_store_from_config(&config, state_db.clone());
+    let thread_store =
+        codex_core::ThreadStoreBuilder::from_config(&config, state_db.clone()).build();
     let installation_id = codex_core::resolve_installation_id(&config.codex_home).await?;
     let executor_skill_provider = Arc::new(
         codex_skills_extension::ExecutorSkillProvider::new_with_restriction_product(
