@@ -2416,6 +2416,14 @@ impl ThreadManagerState {
                 "thread store resume preparation requires a persisted resumed thread".to_string(),
             ));
         }
+        if initial_history
+            .get_resumed_session_sources()
+            .is_some_and(|(source, _)| crate::protected_reviewer::is_reviewer(&source))
+        {
+            return Err(CodexErr::InvalidRequest(
+                "protected reviewer sessions cannot be restored; start a new review".to_string(),
+            ));
+        }
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         // Older callers and saved reviewers identify isolation through their source.
@@ -2552,7 +2560,20 @@ impl ThreadManagerState {
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
                 .await;
         }
+        if crate::protected_reviewer::is_reviewer(&session_source) {
+            if !matches!(&initial_history, InitialHistory::New) {
+                return Err(CodexErr::InvalidRequest(
+                    "protected reviewer sessions cannot be restored; start a new review"
+                        .to_string(),
+                ));
+            }
+            crate::protected_reviewer::configure(&mut config).map_err(CodexErr::InvalidRequest)?;
+            thread_extension_init.insert(crate::protected_reviewer::ReviewRun::default());
+        }
         let mut instructions = match inherited_instructions {
+            _ if crate::protected_reviewer::is_reviewer(&session_source) => {
+                SessionInstructions::default()
+            }
             Some(instructions) => instructions,
             None if isolation == SessionIsolation::Isolated => SessionInstructions::default(),
             None => {
@@ -2575,10 +2596,12 @@ impl ThreadManagerState {
         }
         // Resolve only the global contribution here, after host and inherited snapshots.
         // Forked history keeps its baseline so normal context updates replace the active text.
-        if matches!(
-            session_source,
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-        ) {
+        if !crate::protected_reviewer::is_reviewer(&session_source)
+            && matches!(
+                session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            )
+        {
             let path = config.codex_home.join("SUBAGENTS.md");
             match tokio::fs::read(&path).await {
                 Ok(contents) => {
@@ -2591,6 +2614,12 @@ impl ThreadManagerState {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
+        }
+        if crate::protected_reviewer::is_reviewer(&session_source) {
+            instructions = SessionInstructions {
+                project_snapshot: Some(Arc::new(crate::agents_md::LoadedAgentsMd::default())),
+                ..Default::default()
+            };
         }
         let (exec_policy, multi_agent_version) = match isolation {
             SessionIsolation::Isolated => (None, Some(MultiAgentVersion::Disabled)),

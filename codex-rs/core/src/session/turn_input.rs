@@ -238,6 +238,21 @@ pub(super) async fn handle(
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
     let request = request.into();
+    if let Some(run) = session
+        .services
+        .thread_extension_data
+        .get::<crate::protected_reviewer::ReviewRun>()
+    {
+        if run
+            .started
+            .swap(/*val*/ true, std::sync::atomic::Ordering::AcqRel)
+        {
+            return Err(CodexErr::InvalidRequest(
+                "protected reviewers accept one assignment and no steering or continuation"
+                    .to_string(),
+            ));
+        }
+    }
     if let SubmittedTurnInput::ResponseItem(item)
     | SubmittedTurnInput::AnnotatedResponseItem(AnnotatedResponseItem { item, .. }) =
         &request.request.input
@@ -317,6 +332,16 @@ pub(super) async fn handle_recovery(
     start_options: TurnStartOptions,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
+    if session
+        .services
+        .thread_extension_data
+        .get::<crate::protected_reviewer::ReviewRun>()
+        .is_some()
+    {
+        return Err(CodexErr::InvalidRequest(
+            "protected reviewers cannot start a recovery turn; start a new review".to_string(),
+        ));
+    }
     let WithTurnExtensionData {
         request: thread_settings,
         turn_extension_init,

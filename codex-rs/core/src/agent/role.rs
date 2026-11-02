@@ -210,6 +210,9 @@ pub(crate) fn resolve_role_config<'a>(
     config: &'a Config,
     role_name: &str,
 ) -> Option<&'a AgentRoleConfig> {
+    if role_name == crate::protected_reviewer::ROLE {
+        return built_in::configs().get(role_name);
+    }
     config
         .agent_roles
         .get(role_name)
@@ -358,6 +361,9 @@ pub(crate) mod spawn_tool_spec {
         let mut seen = BTreeSet::new();
         let mut formatted_roles = Vec::new();
         for (name, declaration) in user_defined_roles {
+            if name == crate::protected_reviewer::ROLE {
+                continue;
+            }
             if seen.insert(name.as_str()) {
                 formatted_roles.push(format_role(name, declaration));
             }
@@ -421,6 +427,14 @@ mod built_in {
     pub(super) fn configs() -> &'static BTreeMap<String, AgentRoleConfig> {
         static CONFIG: LazyLock<BTreeMap<String, AgentRoleConfig>> = LazyLock::new(|| {
             BTreeMap::from([
+                (
+                    crate::protected_reviewer::ROLE.to_string(),
+                    AgentRoleConfig {
+                        description: Some("Independent protected review. Uses fresh context and trusted reviewer_subagent settings; cannot be steered or continued. Native runtimes are unsupported.".to_string()),
+                        config_file: None,
+                        nickname_candidates: None,
+                    },
+                ),
                 (
                     DEFAULT_ROLE_NAME.to_string(),
                     AgentRoleConfig {

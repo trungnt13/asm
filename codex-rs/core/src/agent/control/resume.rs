@@ -17,6 +17,15 @@ impl LocalAgentControl {
         thread_id: ThreadId,
         source: SessionSource,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        if crate::protected_reviewer::is_reviewer(&source)
+            || self.get_agent_metadata(thread_id).is_some_and(|metadata| {
+                metadata.agent_role.as_deref() == Some(crate::protected_reviewer::ROLE)
+            })
+        {
+            return Err(codex_protocol::error::CodexErr::InvalidRequest(
+                "protected reviewers cannot be continued; start a new review".to_string(),
+            ));
+        }
         let manager = self.runtime.upgrade()?;
         let thread = match manager.get_thread(thread_id).await {
             Ok(thread) => thread,
