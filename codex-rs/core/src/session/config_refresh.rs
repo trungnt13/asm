@@ -32,7 +32,7 @@ impl Session {
     }
 
     pub(crate) async fn refresh_runtime_config(
-        &self,
+        self: &Arc<Self>,
         expected_config: Arc<Config>,
         next_config: Config,
     ) -> ConfigRefreshOutcome {
@@ -41,7 +41,7 @@ impl Session {
     }
 
     pub(crate) async fn refresh_mcp_config(
-        &self,
+        self: &Arc<Self>,
         expected_config: Arc<Config>,
         next_config: Config,
     ) -> ConfigRefreshOutcome {
@@ -50,11 +50,21 @@ impl Session {
     }
 
     pub(super) async fn refresh_config(
-        &self,
+        self: &Arc<Self>,
         expected_config: Arc<Config>,
         next_config: Config,
         scope: RuntimeConfigRefresh,
     ) -> ConfigRefreshOutcome {
+        if let Some(run) = self
+            .services
+            .thread_extension_data
+            .get::<crate::protected_reviewer::ReviewRun>()
+        {
+            run.started
+                .store(true, std::sync::atomic::Ordering::Release);
+            self.interrupt_task().await;
+            return ConfigRefreshOutcome::Rejected;
+        }
         let (mut config, mut outcome, rejection_kind) =
             match expected_config.resolve_runtime_refresh(&next_config, scope) {
                 Ok(config) => (config, ConfigRefreshOutcome::Published, None),
