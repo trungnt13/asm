@@ -17,9 +17,12 @@ impl LocalAgentControl {
         thread_id: ThreadId,
         source: SessionSource,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
-        if crate::protected_reviewer::is_reviewer(&source)
+        if crate::protected_reviewer::is_protected(&source)
             || self.get_agent_metadata(thread_id).is_some_and(|metadata| {
-                metadata.agent_role.as_deref() == Some(crate::protected_reviewer::ROLE)
+                matches!(
+                    metadata.agent_role.as_deref(),
+                    Some(crate::protected_reviewer::ROLE | crate::protected_reviewer::HELPER_ROLE)
+                )
             })
         {
             return Err(codex_protocol::error::CodexErr::InvalidRequest(

@@ -109,8 +109,27 @@ impl LocalAgentControl {
 
     /// Shut down `agent_id` and any live descendants reachable from the in-memory spawn tree.
     pub(crate) async fn shutdown_agent_tree(&self, agent_id: ThreadId) -> CodexResult<String> {
-        let descendant_ids = self.runtime.live_thread_spawn_descendants(agent_id).await?;
+        let protected_close = self.runtime.review_quota.begin_close(agent_id);
+        let descendant_ids = if protected_close {
+            Vec::new()
+        } else {
+            self.runtime.live_thread_spawn_descendants(agent_id).await?
+        };
         let result = self.shutdown_live_agent(agent_id).await;
+        let descendant_ids = if protected_close {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            while self.runtime.review_quota.pending_helpers(agent_id) {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(CodexErr::InvalidRequest(
+                        "reviewer startup cleanup did not drain; review quota retained".to_string(),
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            self.runtime.review_quota.helper_ids(agent_id)
+        } else {
+            descendant_ids
+        };
         for descendant_id in descendant_ids {
             match self.shutdown_live_agent(descendant_id).await {
                 Ok(_) => {}
@@ -121,6 +140,9 @@ impl LocalAgentControl {
                     ) => {}
                 Err(err) => return Err(err),
             }
+        }
+        if result.is_ok() {
+            self.runtime.review_quota.subtree_closed(agent_id);
         }
         result
     }

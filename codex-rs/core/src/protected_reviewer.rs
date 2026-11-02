@@ -9,6 +9,20 @@ use output::ReviewerStatus;
 use std::sync::atomic::AtomicBool;
 
 pub(crate) const ROLE: &str = "reviewer";
+pub(crate) const HELPER_ROLE: &str = "_reviewer_explorer";
+
+#[derive(Default)]
+pub(crate) struct ReviewHelper {
+    pub(crate) started: AtomicBool,
+}
+
+pub(crate) fn is_protected(source: &SessionSource) -> bool {
+    is_reviewer(source) || is_helper(source)
+}
+
+pub(crate) fn is_helper(source: &SessionSource) -> bool {
+    source.get_agent_role().as_deref() == Some(HELPER_ROLE)
+}
 
 #[derive(Default)]
 pub(crate) struct ReviewRun {
@@ -21,9 +35,6 @@ pub(crate) fn is_reviewer(source: &SessionSource) -> bool {
 
 pub(crate) fn configure(config: &mut Config) -> Result<(), String> {
     let settings = config.reviewer_subagent.clone();
-    if settings.max_explorers != 0 {
-        return Err("protected reviewer explorer admission is not available yet; set reviewer_subagent.max_explorers = 0".to_string());
-    }
     if settings.root_session_id.is_some() {
         return Err(
             "protected reviewer source conversation access is not available yet".to_string(),
@@ -53,6 +64,12 @@ pub(crate) fn configure(config: &mut Config) -> Result<(), String> {
         Some(codex_protocol::models::BaseInstructionsProvenance::Custom);
     config.permissions.approval_policy =
         crate::config::Constrained::allow_only(codex_protocol::protocol::AskForApproval::Never);
+    if settings.max_explorers > 0 {
+        config
+            .features
+            .enable(codex_features::Feature::MultiAgentV2)
+            .map_err(|error| error.to_string())?;
+    }
     let _ = config
         .features
         .disable(codex_features::Feature::MultiAgentV2DynamicTools);

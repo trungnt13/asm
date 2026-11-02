@@ -2362,6 +2362,13 @@ impl ThreadManagerState {
                 .get_or_insert_with(|| Arc::new(SessionStartup::default())),
         );
         startup_state.hold_membership(membership);
+        *startup_state
+            .review_quota
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = request
+            .options
+            .thread_extension_init
+            .remove::<crate::agent::control::ReviewStartupQuota>();
         let startup_guard =
             owns_startup.then(|| SessionStartupGuard::new(Arc::clone(&startup_state)));
         let ThreadSpawnRequest {
@@ -2431,7 +2438,7 @@ impl ThreadManagerState {
         }
         if initial_history
             .get_resumed_session_sources()
-            .is_some_and(|(source, _)| crate::protected_reviewer::is_reviewer(&source))
+            .is_some_and(|(source, _)| crate::protected_reviewer::is_protected(&source))
         {
             return Err(CodexErr::InvalidRequest(
                 "protected reviewer sessions cannot be restored; start a new review".to_string(),
@@ -2582,18 +2589,23 @@ impl ThreadManagerState {
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
                 .await;
         }
-        if crate::protected_reviewer::is_reviewer(&session_source) {
+        if crate::protected_reviewer::is_protected(&session_source) {
             if !matches!(&initial_history, InitialHistory::New) {
                 return Err(CodexErr::InvalidRequest(
                     "protected reviewer sessions cannot be restored; start a new review"
                         .to_string(),
                 ));
             }
-            crate::protected_reviewer::configure(&mut config).map_err(CodexErr::InvalidRequest)?;
-            thread_extension_init.insert(crate::protected_reviewer::ReviewRun::default());
+            if crate::protected_reviewer::is_reviewer(&session_source) {
+                crate::protected_reviewer::configure(&mut config)
+                    .map_err(CodexErr::InvalidRequest)?;
+                thread_extension_init.insert(crate::protected_reviewer::ReviewRun::default());
+            } else {
+                thread_extension_init.insert(crate::protected_reviewer::ReviewHelper::default());
+            }
         }
         let mut instructions = match inherited_instructions {
-            _ if crate::protected_reviewer::is_reviewer(&session_source) => {
+            _ if crate::protected_reviewer::is_protected(&session_source) => {
                 SessionInstructions::default()
             }
             Some(instructions) => instructions,
@@ -2618,7 +2630,7 @@ impl ThreadManagerState {
         }
         // Resolve only the global contribution here, after host and inherited snapshots.
         // Forked history keeps its baseline so normal context updates replace the active text.
-        if !crate::protected_reviewer::is_reviewer(&session_source)
+        if !crate::protected_reviewer::is_protected(&session_source)
             && matches!(
                 session_source,
                 SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
@@ -2637,7 +2649,7 @@ impl ThreadManagerState {
                 Err(error) => return Err(error.into()),
             }
         }
-        if crate::protected_reviewer::is_reviewer(&session_source) {
+        if crate::protected_reviewer::is_protected(&session_source) {
             instructions = SessionInstructions {
                 project_snapshot: Some(Arc::new(crate::agents_md::LoadedAgentsMd::default())),
                 ..Default::default()

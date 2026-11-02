@@ -2974,7 +2974,7 @@ impl Session {
                 }
             }
         };
-        let status = if crate::protected_reviewer::is_reviewer(&turn_context.session_source)
+        let status = if crate::protected_reviewer::is_protected(&turn_context.session_source)
             && matches!(status, AgentStatus::Interrupted)
         {
             AgentStatus::Errored(

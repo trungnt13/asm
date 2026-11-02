@@ -25,6 +25,7 @@ pub(in crate::agent) struct PendingSpawn {
     edge_write: Option<JoinHandle<CodexResult<bool>>>,
     close_spawn_edge: bool,
     owner: SpawnOwner,
+    review_reservation: Option<super::review_quota::ReviewStartupQuota>,
 }
 
 impl PendingSpawn {
@@ -40,7 +41,23 @@ impl PendingSpawn {
             edge_write: None,
             close_spawn_edge: false,
             owner,
+            review_reservation: None,
         }
+    }
+
+    pub(super) fn set_review_reservation(
+        &mut self,
+        reservation: Option<super::review_quota::ReviewReservation>,
+    ) -> Option<super::review_quota::ReviewStartupQuota> {
+        self.review_reservation = reservation.map(super::review_quota::ReviewStartupQuota::new);
+        self.review_reservation.clone()
+    }
+
+    pub(super) fn commit_review_reservation(&mut self) -> CodexResult<()> {
+        if let Some(reservation) = self.review_reservation.as_mut() {
+            reservation.commit()?;
+        }
+        Ok(())
     }
 
     pub(super) fn set_edge_write(&mut self, edge_write: JoinHandle<CodexResult<bool>>) {
@@ -78,12 +95,16 @@ impl Drop for PendingSpawn {
         let edge_write = self.edge_write.take();
         let close_spawn_edge = self.close_spawn_edge;
         let local_owner = matches!(self.owner, SpawnOwner::Local);
+        let mut review_reservation = self.review_reservation.take();
         drop(tokio::spawn(async move {
             if let Some(thread) = state.remove_thread(&child).await {
                 if let Err(error) = thread.shutdown_and_wait().await {
                     teardown
                         .record_shutdown_failure("stop_child", CodexErrKind::from(&error).into());
                     warn!("failed to stop cancelled child spawn: {error}");
+                    if let Some(reservation) = review_reservation.as_mut() {
+                        reservation.fail_closed();
+                    }
                 }
                 if let Some(live_thread) = thread.session.live_thread() {
                     match live_thread.discard().await {
@@ -119,6 +140,7 @@ impl Drop for PendingSpawn {
                 teardown.record_shutdown_failure("close_spawn_edge", error_kind);
                 warn!("failed to close cancelled child spawn edge: {error}");
             }
+            drop(review_reservation);
             teardown.complete();
         }));
     }
