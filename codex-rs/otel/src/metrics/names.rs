@@ -35,6 +35,9 @@ pub const RESPONSES_API_ENGINE_SERVICE_TBT_DURATION_METRIC: &str =
 pub const TURN_E2E_DURATION_METRIC: &str = "codex.turn.e2e_duration_ms";
 pub const TURN_TTFT_DURATION_METRIC: &str = "codex.turn.ttft.duration_ms";
 pub const TURN_TTFM_DURATION_METRIC: &str = "codex.turn.ttfm.duration_ms";
+pub const TURN_CRITICAL_PATH_CAPTURE_METRIC: &str = "codex.turn.critical_path.capture";
+pub const TURN_CRITICAL_PATH_DURATION_METRIC: &str = "codex.turn.critical_path.duration_ms";
+pub const TURN_CRITICAL_PATH_COMPONENT_METRIC: &str = "codex.turn.critical_path.component_ms";
 pub const TURN_NETWORK_PROXY_METRIC: &str = "codex.turn.network_proxy";
 pub const TURN_MEMORY_METRIC: &str = "codex.turn.memory";
 pub const TURN_TOOL_CALL_METRIC: &str = "codex.turn.tool.call";
@@ -75,23 +78,16 @@ pub const THREAD_STARTED_METRIC: &str = "codex.thread.started";
 pub const ADDITIONAL_CONTEXT_COUNT_METRIC: &str = "codex.additional_context";
 /// UTF-8 value bytes before/after truncation, excluding message wrappers; after includes the marker.
 pub const ADDITIONAL_CONTEXT_VALUE_BYTES_METRIC: &str = "codex.additional_context.value_bytes";
-pub const ADDITIONAL_CONTEXT_VALUE_BYTES_BUCKETS: &[f64] = &[
-    0.0,
-    256.0,
-    512.0,
-    1_000.0,
-    2_000.0,
-    4_000.0,
-    8_000.0,
-    16_000.0,
-    32_000.0,
-    64_000.0,
-    128_000.0,
-    256_000.0,
-    512_000.0,
-    1_024_000.0,
-    4_096_000.0,
-];
+/// Logarithmic byte buckets through 4 MiB, with a 4 KiB boundary near the truncation cap.
+pub static ADDITIONAL_CONTEXT_VALUE_BYTES_BUCKETS: LazyLock<Vec<f64>> = LazyLock::new(|| {
+    let mut buckets = context_log_buckets(/*max_exponent*/ 22.0)
+        .into_iter()
+        .chain([4096.0])
+        .collect::<Vec<_>>();
+    buckets.sort_by(f64::total_cmp);
+    buckets.dedup();
+    buckets
+});
 pub const THREAD_SKILLS_ENABLED_TOTAL_METRIC: &str = "codex.thread.skills.enabled_total";
 pub const THREAD_SKILLS_KEPT_TOTAL_METRIC: &str = "codex.thread.skills.kept_total";
 pub const THREAD_SKILLS_DESCRIPTION_TRUNCATED_CHARS_METRIC: &str =

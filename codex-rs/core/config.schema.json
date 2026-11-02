@@ -938,6 +938,9 @@
             "agent_message_board": {
               "type": "boolean"
             },
+            "agent_message_board_mcp": {
+              "type": "boolean"
+            },
             "analytics_plan_history": {
               "type": "boolean"
             },
@@ -1012,6 +1015,9 @@
               "type": "boolean"
             },
             "cli_daybreak": {
+              "type": "boolean"
+            },
+            "cli_resume_account_check": {
               "type": "boolean"
             },
             "code_mode": {
@@ -7862,6 +7868,9 @@
         "agent_message_board": {
           "type": "boolean"
         },
+        "agent_message_board_mcp": {
+          "type": "boolean"
+        },
         "analytics_plan_history": {
           "type": "boolean"
         },
@@ -7936,6 +7945,9 @@
           "type": "boolean"
         },
         "cli_daybreak": {
+          "type": "boolean"
+        },
+        "cli_resume_account_check": {
           "type": "boolean"
         },
         "code_mode": {

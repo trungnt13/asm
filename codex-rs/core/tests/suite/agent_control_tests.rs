@@ -21,6 +21,12 @@ use codex_core::SpawnRequest;
 use codex_core::StartThreadOptions;
 use codex_core::ThreadConfigSnapshot;
 use codex_core::TurnInputRequest;
+use codex_core::config::Config;
+use codex_extension_api::ExtensionFuture;
+use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::ThreadLifecycleContributor;
+use codex_extension_api::ThreadStartInput;
+use codex_extension_api::ThreadStopInput;
 use codex_features::Feature;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
@@ -50,6 +56,32 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use test_case::test_case;
 use wiremock::MockServer;
+
+pub(super) struct HostRuntime;
+
+impl codex_core::AgentTurnAdmission for HostRuntime {
+    fn admit_turn(
+        &self,
+        _: codex_core::AgentTurnAdmissionRequest,
+    ) -> BoxFuture<'_, CodexResult<AgentExecutionGuard>> {
+        Box::pin(async { Ok(AgentExecutionGuard::new(())) })
+    }
+}
+
+pub(super) fn install_host_runtime(data: &codex_extension_api::ExtensionData) {
+    data.insert(codex_core::AgentRuntimeOwnership::Host);
+    data.get_or_init(|| Arc::new(HostRuntime) as Arc<dyn codex_core::AgentTurnAdmission>);
+}
+
+impl codex_extension_api::ThreadLifecycleContributor<codex_core::config::Config> for HostRuntime {
+    fn on_thread_start<'a>(
+        &'a self,
+        input: codex_extension_api::ThreadStartInput<'a, codex_core::config::Config>,
+    ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+        install_host_runtime(input.thread_store);
+        Box::pin(async {})
+    }
+}
 
 pub(super) struct TestAgentControl {
     thread_id: ThreadId,
@@ -697,5 +729,47 @@ async fn agent_mail_wakes_completed_root_when_enabled(
         json!([{"type": "input_text", "text": "Late agent update"}])
     );
     assert!(controller.mail.lock().expect("mail lock").is_empty());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn host_start_requires_turn_admission() -> anyhow::Result<()> {
+    struct HostWithoutAdmission(Mutex<Vec<&'static str>>);
+
+    impl ThreadLifecycleContributor<Config> for HostWithoutAdmission {
+        fn on_thread_start<'a>(
+            &'a self,
+            input: ThreadStartInput<'a, Config>,
+        ) -> ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push("start");
+                input
+                    .thread_store
+                    .insert(codex_core::AgentRuntimeOwnership::Host);
+            })
+        }
+
+        fn on_thread_stop<'a>(&'a self, _input: ThreadStopInput<'a>) -> ExtensionFuture<'a, ()> {
+            Box::pin(async move { self.0.lock().unwrap().push("stop") })
+        }
+    }
+
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let host = Arc::new(HostWithoutAdmission(Mutex::default()));
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(host.clone());
+    let error = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .build_with_auto_env(&server)
+        .await
+        .err()
+        .expect("missing admission")
+        .downcast::<CodexErr>()?;
+    assert!(
+        matches!(error.details(), CodexErrorDetails::InvalidRequest(message) if message.contains("AgentTurnAdmission")),
+        "{error:?}"
+    );
+    assert_eq!(*host.0.lock().unwrap(), ["start", "stop"]);
     Ok(())
 }

@@ -12,6 +12,7 @@ use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use crate::RestrictRootCapabilities;
 use crate::agent::AgentStatus;
 use crate::agent::agent_status_from_event;
 use crate::agent::api::AgentConfigUpdate;
@@ -377,6 +378,7 @@ use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Settings;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::mcp::ClientMcpExtensions;
+use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
 use codex_protocol::models::LocalImagePreparation;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
@@ -487,6 +489,7 @@ pub(crate) enum CompactedHistoryInstallation<'a> {
         prefix: CompactionPrefix,
         prefix_context: Vec<ResponseItem>,
         initial_context: Vec<ResponseItemEnvelope>,
+        reset_world_state_sections: Vec<&'static str>,
         model_info: &'a ModelInfo,
         compaction_response_id: String,
         reviewer_compaction_hash: Option<String>,
@@ -1082,6 +1085,13 @@ impl Session {
             &model_info,
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&originator);
+        let root_capabilities_restricted = session_source.is_non_root_agent()
+            || thread_extension_init
+                .get::<RestrictRootCapabilities>()
+                .is_some();
+        let enable_full_access_form_input = !root_capabilities_restricted
+            && matches!(thread_source.as_ref(), Some(ThreadSource::User))
+            && client_mcp_extensions.contains(OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID);
         let session_configuration = SessionConfiguration {
             turn_extension_init,
             provider: create_model_provider(
@@ -1117,6 +1127,7 @@ impl Session {
             app_server_client_version: None,
             trusted_guardian_reviewer,
             session_source,
+            root_capabilities_restricted,
             history_mode,
             forked_from_thread_id,
             parent_thread_id,
@@ -1217,6 +1228,10 @@ impl Session {
         if let Some(startup) = startup {
             let _ = startup.io.set(io.clone());
             startup.persistence.lock().await.commit();
+        }
+        // A required MCP server must not block startup waiting for form input.
+        if enable_full_access_form_input {
+            session.services.mcp_runtime.enable_full_access_form_input();
         }
         Ok((session, io))
     }
@@ -2703,6 +2718,13 @@ impl Session {
     }
 
     pub(crate) async fn emit_turn_started(&self, turn_context: &TurnContext, task_kind: TaskKind) {
+        if turn_context
+            .extension_data
+            .get::<crate::tasks::HostTurnStarted>()
+            .is_some()
+        {
+            return;
+        }
         let model_context_window =
             if crate::external_runtime::is_native_model(&turn_context.model_info().slug) {
                 self.token_usage_info()
@@ -4767,6 +4789,7 @@ impl Session {
                     prefix,
                     prefix_context,
                     initial_context,
+                    reset_world_state_sections,
                     model_info,
                     compaction_response_id,
                     reviewer_compaction_hash,
@@ -4802,6 +4825,11 @@ impl Session {
                     // The unchanged suffix already contains updates through this baseline.
                     if let Some(checkpoint) = state.history.world_state_checkpoint() {
                         world_state_baseline = WorldStateSnapshot::from(&checkpoint.state);
+                    }
+                    // Volatile sections must refresh in the new window even if their
+                    // previous messages and comparison state survived in the suffix.
+                    for section_id in reset_world_state_sections {
+                        world_state_baseline.remove_section(section_id);
                     }
                     // Prefix replacement already retains all edits in the live suffix.
                     let input_goal_ids = Default::default();
@@ -5214,7 +5242,13 @@ impl Session {
             if next_item.is_none()
                 && let Some(recommended_plugins) = recommended_plugin_candidates
                     .as_deref()
-                    .and_then(RecommendedPluginsInstructions::from_plugins)
+                    .and_then(|plugins| {
+                        RecommendedPluginsInstructions::from_plugins(
+                            plugins,
+                            &ResolvedModelMessages::from_model(&step_context.settings.model_info)
+                                .plugin_recommendations(),
+                        )
+                    })
             {
                 developer_sections.push(recommended_plugins.render_fragment());
             }
@@ -5677,7 +5711,9 @@ impl Session {
                     token_usage,
                 );
             }
-            let budget_result = self.record_rollout_budget_usage(token_usage).await;
+            let budget_result = self
+                .record_rollout_budget_usage(&turn_context.sub_id, token_usage)
+                .await;
             if let Some(token_info) = token_info.as_ref() {
                 for contributor in self.services.extensions.token_usage_contributors() {
                     contributor

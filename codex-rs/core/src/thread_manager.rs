@@ -19,7 +19,6 @@ use crate::agents_md_manager::SessionInstructions;
 use crate::attestation::AttestationProvider;
 use crate::codex_thread::CodexThread;
 use crate::config::Config;
-use crate::config::ThreadStoreConfig;
 use crate::current_time::TimeProvider;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::environment_selection::default_thread_environment_requests;
@@ -41,7 +40,6 @@ use crate::tasks::interrupted_turn_history_marker;
 use crate::thread_startup_metadata::ThreadStartupMetadata;
 use codex_agent_graph_store::AgentGraphStore;
 use codex_agent_graph_store::LocalAgentGraphStore;
-use codex_agent_message_board_extension::local_board_options;
 use codex_analytics::AnalyticsEventsClient;
 use codex_app_server_protocol::ThreadHistoryBuilder;
 use codex_app_server_protocol::TurnStatus;
@@ -73,7 +71,6 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
 use codex_login::default_client::originator;
-use codex_message_board::LocalAgentMessageBoard;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
@@ -84,7 +81,6 @@ use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::mcp::ClientMcpExtensions;
-use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::protocol::Event;
@@ -104,7 +100,6 @@ use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_rollout::state_db::StateDbHandle;
 use codex_skills_extension::HostSkillsService;
-use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::LocalThreadStore;
 use codex_thread_store::LocalThreadStoreConfig;
@@ -527,6 +522,7 @@ pub(crate) struct ThreadManagerState {
     agent_control_factory: Option<AgentControlFactory>,
     auth_manager: Arc<AuthManager>,
     pub(crate) models_manager: SharedModelsManager,
+    models_manager_provider: ModelProviderInfo,
     git_root_discovery: Arc<GitRootDiscovery>,
     environment_manager: Arc<EnvironmentManager>,
     starting_mcp_runtimes: std::sync::Mutex<Vec<std::sync::Weak<AtomicBool>>>,
@@ -562,94 +558,6 @@ pub fn build_models_manager(
         config.features.enabled(Feature::ApiKeyModelDiscovery),
     );
     manager
-}
-
-fn native_cleanup_error(err: std::io::Error) -> ThreadStoreError {
-    let message = format!("failed to clean native runtime data: {err}");
-    if err.kind() == std::io::ErrorKind::WouldBlock {
-        ThreadStoreError::Conflict { message }
-    } else {
-        ThreadStoreError::Internal { message }
-    }
-}
-
-pub fn thread_store_from_config(
-    config: &Config,
-    state_db: Option<StateDbHandle>,
-) -> Arc<dyn ThreadStore> {
-    match &config.experimental_thread_store {
-        ThreadStoreConfig::Local => {
-            let compression_enabled = config
-                .features
-                .enabled(Feature::LocalThreadStoreCompression);
-            let background_migration_enabled = config
-                .features
-                .enabled(Feature::BackgroundPaginatedRolloutMigration);
-            let has_state_db = state_db.is_some();
-            let sqlite = config.sqlite_config().clone();
-            let codex_home = config.codex_home.to_path_buf();
-            let config_home = codex_home.clone();
-            let store = Arc::new(
-                LocalThreadStore::new(LocalThreadStoreConfig::from_config(config), state_db)
-                    .with_thread_data_cleanup(move |thread_ids| {
-                        let sqlite = sqlite.clone();
-                        let codex_home = config_home.clone();
-                        Box::pin(async move {
-                            crate::external_runtime::ensure_no_runtime_owner(
-                                &codex_home,
-                                &thread_ids,
-                            )
-                            .map_err(native_cleanup_error)?;
-                            let boards = thread_ids.into_iter().map(Into::into).collect::<Vec<_>>();
-                            LocalAgentMessageBoard::delete_boards(
-                                &sqlite,
-                                &local_board_options(),
-                                &boards,
-                            )
-                            .await
-                            .map_err(|err| {
-                                ThreadStoreError::Internal {
-                                    message: format!(
-                                        "failed to delete agent message boards: {err}"
-                                    ),
-                                }
-                            })
-                        })
-                    })
-                    .with_deleted_rollout_cleanup(move |thread_ids| {
-                        let codex_home = codex_home.clone();
-                        Box::pin(async move {
-                            crate::external_runtime::delete_thread_data(&codex_home, &thread_ids)
-                                .map_err(native_cleanup_error)
-                        })
-                    }),
-            );
-            if has_state_db && background_migration_enabled {
-                let startup_store = Arc::clone(&store);
-                let codex_home = config.codex_home.to_path_buf();
-                tokio::spawn(async move {
-                    if let Err(err) = startup_store.migrate_rollouts_on_startup().await {
-                        warn!("failed to migrate legacy rollouts on startup: {err}");
-                    }
-                    if compression_enabled {
-                        codex_rollout::spawn_rollout_compression_worker(
-                            codex_home,
-                            codex_rollout::RolloutCompressionTrigger::Startup,
-                        );
-                    }
-                });
-            } else if compression_enabled {
-                codex_rollout::spawn_rollout_compression_worker(
-                    config.codex_home.to_path_buf(),
-                    codex_rollout::RolloutCompressionTrigger::Startup,
-                );
-            }
-            store
-        }
-        ThreadStoreConfig::InMemory { id } => {
-            Arc::new(InMemoryThreadStore::for_id(id).with_state_db(state_db))
-        }
-    }
 }
 
 /// Constructs the default image store that preserves inline images.
@@ -723,6 +631,7 @@ impl ThreadManager {
                 thread_id_generator: default_thread_id_generator(),
                 agent_control_factory: None,
                 models_manager,
+                models_manager_provider: config.model_provider.clone(),
                 git_root_discovery: Arc::default(),
                 environment_manager,
                 starting_mcp_runtimes: std::sync::Mutex::new(Vec::new()),
@@ -933,6 +842,7 @@ impl ThreadManager {
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 agent_control_factory: None,
+                models_manager_provider: provider.clone(),
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
                     .models_manager(codex_home, /*config_model_catalog*/ None),
                 git_root_discovery: Arc::default(),
@@ -992,7 +902,7 @@ impl ThreadManager {
 
     /// Starts the local rollout migration path after a runtime feature enablement.
     ///
-    /// Startup config handles the initial launch in [`thread_store_from_config`]. This covers
+    /// Startup config handles the initial launch in [`crate::ThreadStoreBuilder::build`]. This covers
     /// clients that decide to enable background migration after constructing the app-server.
     pub fn start_background_rollout_migration(&self) {
         let Some(store) = self
@@ -2668,6 +2578,14 @@ impl ThreadManagerState {
         } else {
             codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile
         };
+        let models_manager = if config.model_provider == self.models_manager_provider {
+            Arc::clone(&self.models_manager)
+        } else {
+            build_models_manager(&config, Arc::clone(&auth_manager))
+        };
+        let models_manager = models_manager
+            .for_originator(&startup_context.originator)
+            .unwrap_or(models_manager);
         let spawn_result = Session::spawn(SessionSpawnArgs {
             attached_thread,
             startup,
@@ -2677,10 +2595,7 @@ impl ThreadManagerState {
             instructions: startup_context.instructions,
             installation_id: self.installation_id.clone(),
             auth_manager,
-            models_manager: self
-                .models_manager
-                .for_originator(&startup_context.originator)
-                .unwrap_or_else(|| Arc::clone(&self.models_manager)),
+            models_manager,
             git_root_discovery: Arc::clone(&self.git_root_discovery),
             environment_manager: Arc::clone(&self.environment_manager),
             skills_service: Arc::clone(&self.skills_service),
@@ -2706,7 +2621,7 @@ impl ThreadManagerState {
             },
             forked_from_thread_id,
             parent_thread_id,
-            thread_source: thread_source.clone(),
+            thread_source,
             originator: startup_context.originator,
             agent_control,
             dynamic_tools,
@@ -2761,17 +2676,6 @@ impl ThreadManagerState {
             {
                 warn!(%thread_id, %source_thread_id, %error, "failed to copy fork attachments");
             }
-        }
-        // Enable Full Access form input only after session startup so a required MCP server cannot
-        // block startup while waiting for form input.
-        if session
-            .services
-            .client_mcp_extensions
-            .contains(OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID)
-            && matches!(thread_source.as_ref(), Some(ThreadSource::User))
-            && !tracked_session_source.is_non_root_agent()
-        {
-            session.services.mcp_runtime.enable_full_access_form_input();
         }
         let finalize_result = self
             .finalize_thread_spawn(session, io, tracked_session_source, initial_host_config)
