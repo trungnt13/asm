@@ -294,6 +294,14 @@ Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### Desktop app-context filtering
+
+`app_context_filter` defaults to an empty list. App-server removes only exact named
+`###` sections inside Desktop `<app-context>` instructions before session creation.
+Keep unknown sections, surrounding instructions, per-turn additional context, and
+existing rollout history unchanged. Filtered session instructions remain consistent
+when rebuilding initial context. Use a fresh chat after changing the filter.
+
 ### External runtime boundary
 
 Keep ASM's inference and tool runtime separate from external CLI execution. Use

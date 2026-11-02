@@ -278,6 +278,7 @@ async fn new_config(
         guardian_circuit_break_action: Default::default(),
         guardian_review_timeout: Some(std::time::Duration::from_secs(90)),
         include_permissions_instructions: false,
+        app_context_filter: Vec::new(),
         include_apps_instructions: false,
         include_collaboration_mode_instructions: false,
         include_model_catalog_in_spawn_agent_list: true,
