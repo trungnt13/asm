@@ -32,7 +32,6 @@ use core_test_support::responses;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
-use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 use tokio::sync::mpsc::unbounded_channel;
@@ -183,7 +182,6 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         );
 
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        let automatic = app_server.automatic_thread_name_writer(thread_id);
         if switch_threads {
             let second = app_server.start_thread(&app.config).await?;
             let second_id = second.session.thread_id;
@@ -202,9 +200,6 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
                 .await?;
         }
         let displayed_thread = (app.chat_widget.thread_id(), app.chat_widget.thread_name());
-        automatic
-            .save("Generated title".into(), &CancellationToken::new())
-            .await;
         app.handle_event(
             &mut tui,
             &mut app_server,
@@ -218,8 +213,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
                 result: Ok(r#"{"title":"Generated title"}"#.to_string()),
             },
         )
-        .now_or_never()
-        .expect("title dispatch must return to keyboard polling")?;
+        .await?;
         let expected_name = Some(manual_name.unwrap_or("Generated title").to_string());
         assert_eq!(
             app_server
@@ -616,13 +610,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                 renamed = true;
             }
         }
-        if generated && automatic && !cancel {
-            app.drain_active_thread_events(&mut tui).await?;
-        }
-        if generated
-            && (!cancel || interrupted)
-            && (!automatic || app.chat_widget.thread_name().is_some())
-        {
+        if generated && (!cancel || interrupted) {
             break;
         }
     }
@@ -687,20 +675,12 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
     app.pending_thread_titles
         .insert((thread_id, destination), cancellation.clone());
 
-    let writer = app_server.automatic_thread_name_writer(thread_id);
-    let token = cancellation.clone();
-    let mut automatic = std::pin::pin!(writer.save("Stale title".into(), &token));
-    assert!(automatic.as_mut().now_or_never().is_none());
-
     app.try_submit_active_thread_op_via_app_server(
         &mut app_server,
         thread_id,
         &AppCommand::set_thread_name("Keep this title".to_string()),
     )
     .await?;
-    automatic
-        .now_or_never()
-        .expect("canceled metadata read must finish");
     assert!(cancellation.is_cancelled());
     assert!(app.pending_thread_titles.is_empty());
 
@@ -709,7 +689,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
     app.pending_thread_titles
         .insert((thread_id, destination), replacement.clone());
     app.on_thread_title_started(
-        &mut app_server,
+        &app_server,
         thread_id,
         destination,
         "prompt".to_string(),
@@ -748,57 +728,6 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         Some("Keep this title".to_string()),
     );
     app_server.shutdown().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn manual_rename_waits_for_an_in_flight_automatic_write() -> color_eyre::Result<()> {
-    let thread_id = ThreadId::new();
-    let (client, mut requests, _events) =
-        codex_app_server_client::CloudClient::channel(/*capacity*/ 1);
-    let mut session = crate::app_server_session::AppServerSession::new(
-        crate::backend_id::BackendId::new(),
-        codex_app_server_client::AppServerClient::Cloud(client),
-        crate::app_server_session::ThreadParamsMode::Remote,
-    );
-    let writer = session.automatic_thread_name_writer(thread_id);
-    let token = CancellationToken::new();
-    let mut automatic = std::pin::pin!(writer.save("Generated".into(), &token));
-    assert!(automatic.as_mut().now_or_never().is_none());
-    let mut thread = crate::app::agents_overview::tests::overview_thread(
-        thread_id,
-        /*parent_thread_id*/ None,
-        "",
-        codex_app_server_protocol::ThreadStatus::Idle,
-    );
-    thread.name = None;
-    requests
-        .try_recv()?
-        .response
-        .send(Ok(Ok(serde_json::json!({"thread": thread}))))
-        .unwrap();
-    assert!(automatic.as_mut().now_or_never().is_none());
-    let write = requests.try_recv()?;
-
-    let mut manual = std::pin::pin!(session.thread_set_name(thread_id, "Manual".into()));
-    assert!(manual.as_mut().now_or_never().is_none());
-    assert!(
-        requests.try_recv().is_err(),
-        "manual rename raced the automatic write"
-    );
-    let acknowledge = |request: codex_app_server_client::CloudCommand| {
-        request
-            .response
-            .send(Ok(Ok(serde_json::json!({}))))
-            .unwrap();
-    };
-    acknowledge(write);
-    automatic
-        .now_or_never()
-        .expect("automatic write acknowledged");
-    assert!(manual.as_mut().now_or_never().is_none());
-    acknowledge(requests.try_recv()?);
-    manual.await?;
     Ok(())
 }
 
@@ -1088,7 +1017,7 @@ async fn failed_thread_title_requests_are_removed() -> color_eyre::Result<()> {
     ]);
 
     app.on_thread_title_started(
-        &mut app_server,
+        &app_server,
         thread_id,
         ThreadTitleDestination::Automatic,
         "prompt".to_string(),
@@ -1099,7 +1028,7 @@ async fn failed_thread_title_requests_are_removed() -> color_eyre::Result<()> {
         CancellationToken::new(),
     );
     app.on_thread_title_started(
-        &mut app_server,
+        &app_server,
         thread_id,
         suggestion,
         "prompt".to_string(),
