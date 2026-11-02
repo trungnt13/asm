@@ -693,6 +693,25 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        let state = self.runtime.upgrade()?;
+        if session_source
+            .as_ref()
+            .is_some_and(crate::protected_reviewer::is_reviewer)
+            && self
+                .runtime
+                .registry
+                .agent_id_for_path(&AgentPath::root())
+                .is_none()
+            && let Some(parent_id) = session_source
+                .as_ref()
+                .and_then(SessionSource::parent_thread_id)
+        {
+            let parent = state.get_thread(parent_id).await?.config_snapshot().await;
+            if !parent.session_source.is_non_root_agent() {
+                self.runtime
+                    .register_session_root(parent_id, parent.parent_thread_id);
+            }
+        }
         let mut review_reservation = self.runtime.review_quota.reserve_for_source(
             &config,
             session_source.as_ref(),
@@ -708,7 +727,6 @@ impl LocalAgentControl {
         config.system1_initial_failure_episode = 0;
         let membership = self.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
-        let state = self.runtime.upgrade()?;
         // Resolve the parent before inheriting settings or copying attachments.
         // Recovering it later from history only repairs the child's metadata.
         let parent_thread_id = session_source
