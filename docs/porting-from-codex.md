@@ -152,6 +152,8 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 Focus on macOS and Linux (Ubuntu). Preserve other inherited code/workflows unless removal is requested; do not add them to fork CI/releases. Other inherited workflow changes need approval. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs with expensive builds conditional on relevant changes; [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
 
+Use standard GitHub-hosted runners for fork CI; paid larger runners require explicit approval. The V8 canary's Apple Silicon variants use `macos-15` with two Bazel jobs to fit the standard runner's memory budget.
+
 - **[Blocking CI](../.github/workflows/blocking-ci.yml):** manual-only `workflow_dispatch`; never automatic or required. Keep workspace formatting, production Clippy, and result collector. Cover `codex-cli`, `codex-tui`, `codex-core`, `codex-config` on both release targets. Preserve `--lib --bin codex -- -D warnings`. No test-target matrix, `cargo shear`, or warning suppression. Check other affected packages narrowly as needed.
 - **[Postmerge CI](../.github/workflows/postmerge-ci.yml):** automatic optimized builds, packaging, smoke checks, uploads, diagnostics, and results. Push `paths-ignore` covers only root `AGENTS.md` and this guide. Filtered pushes cannot cancel active builds. Other paths remain eligible; never exclude all Markdown or `docs/`. Publication does not require blocking CI. Report existing failures separately.
 
