@@ -105,6 +105,8 @@ pub enum Feature {
     ApiKeyCyberAccessPrograms,
     /// Enable Daybreak controls and automatic access-program selection in CLI clients.
     CliDaybreak,
+    /// Restrict CLI resume of attributed local threads to their creator.
+    CliResumeAccountCheck,
     /// Removed no-op; use `tui.fullscreen_transcript` instead.
     TranscriptV2,
     // Stable.
@@ -119,7 +121,7 @@ pub enum Feature {
     /// Store CLI auth in the encrypted local secrets backend when keyring storage is selected.
     SecretAuthStorage,
 
-    /// Automatically start the shared local daemon for eligible interactive launches.
+    /// Removed compatibility flag. Eligible interactive launches always start or reuse the daemon.
     DaemonAutoStart,
     /// Allow the TUI to discover and select among multiple conversation backends.
     TuiMultiBackend,
@@ -261,6 +263,8 @@ pub enum Feature {
     InterruptOnCancel,
     /// Enable shared discussion tools for an agent tree.
     AgentMessageBoard,
+    /// Expose a tree-scoped in-memory message board through HTTP MCP.
+    AgentMessageBoardMcp,
     /// Removed compatibility flag retained as a no-op.
     MultiAgentMode,
     /// Removed compatibility flag for the deleted agent-job tools.
@@ -718,6 +722,13 @@ impl Features {
                     );
                     continue;
                 }
+                "daemon_auto_start" => {
+                    self.record_legacy_usage_force(
+                        "features.daemon_auto_start",
+                        Feature::DaemonAutoStart,
+                    );
+                    continue;
+                }
                 "transcript_v2" => {
                     self.record_legacy_usage_force("features.transcript_v2", Feature::TranscriptV2);
                     continue;
@@ -840,6 +851,10 @@ fn legacy_usage_notice(alias: &str, feature: Feature) -> (String, Option<String>
         Feature::GuardianThreadContext => (
             "`[features.guardianv2].thread_context` is deprecated and ignored.".to_string(),
             Some("Thread-owned Guardian context is always enabled. Remove `thread_context` from [features.guardianv2] in config.toml, including profile overrides.".to_string()),
+        ),
+        Feature::DaemonAutoStart => (
+            "`[features].daemon_auto_start` is deprecated and ignored.".to_string(),
+            Some("Remove `daemon_auto_start` from [features] in config.toml or profile configuration files. Use `--no-daemon` to run without the shared background server.".to_string()),
         ),
         Feature::TranscriptV2 => (
             "`[features].transcript_v2` is deprecated and ignored.".to_string(),
@@ -1097,9 +1112,15 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::CliResumeAccountCheck,
+        key: "cli_resume_account_check",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::DaemonAutoStart,
         key: "daemon_auto_start",
-        stage: Stage::Stable,
+        stage: Stage::Removed,
         default_enabled: true,
     },
     FeatureSpec {
@@ -1640,6 +1661,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::AgentMessageBoard,
         key: "agent_message_board",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::AgentMessageBoardMcp,
+        key: "agent_message_board_mcp",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
@@ -2300,8 +2327,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::RetainClientToolOutputs,
         key: "retain_client_tool_outputs",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
+        stage: Stage::Stable,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::UseAgentIdentity,

@@ -182,7 +182,7 @@ impl App {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn on_thread_title_started(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
         prompt: String,
@@ -243,6 +243,8 @@ impl App {
         self.temporary_structured_requests
             .insert(temporary_thread_id, sender);
 
+        let save_name = (destination == ThreadTitleDestination::Automatic)
+            .then(|| app_server.automatic_thread_name_writer(thread_id));
         let request_handle = app_server.request_handle();
         let event_sender = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -258,6 +260,12 @@ impl App {
             .await
             .map_err(|error| error.to_string());
 
+            if let Some(save_name) = save_name
+                && let Ok(response) = &result
+                && let Some(title) = parse_thread_title(response, max_title_chars)
+            {
+                save_name.save(title, &cancellation).await;
+            }
             event_sender.send(AppEvent::GeneratedThreadTitle {
                 auto_rename,
                 max_title_chars,

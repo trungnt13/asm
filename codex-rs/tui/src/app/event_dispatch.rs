@@ -3166,15 +3166,7 @@ impl App {
                 }
                 self.finish_thread_title_generation(thread_id, destination);
                 match destination {
-                    ThreadTitleDestination::Automatic => {
-                        if let Ok(response) = result
-                            && let Some(title) = super::thread_title::parse_thread_title(
-                                &response, max_title_chars,
-                            )
-                        {
-                            self.save_automatic_thread_title(app_server, thread_id, title, auto_rename).await;
-                        }
-                    }
+                    ThreadTitleDestination::Automatic => {}
                     ThreadTitleDestination::ExplicitAutoRename => {
                         Box::pin(self.apply_autorename_result(app_server, thread_id, result, max_title_chars, auto_rename)).await;
                     }

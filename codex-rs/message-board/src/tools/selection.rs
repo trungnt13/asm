@@ -34,7 +34,14 @@ impl MessageBoardTool {
         Self::Post,
     ];
 
-    /// The tool's name within its consumer's namespace.
+    /// Bundled schema for discovery before a caller has been bound to a board.
+    pub fn spec(self) -> codex_tools::ToolSpec {
+        super::spec::tool(
+            self, /*namespace*/ None, /*namespace_description*/ "",
+            /*description_override*/ None,
+        )
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::CreateChannel => "create_channel",
