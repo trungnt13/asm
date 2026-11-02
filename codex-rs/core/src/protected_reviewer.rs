@@ -34,6 +34,26 @@ pub(crate) struct ReviewRun {
     pub(crate) report: OnceLock<Result<String, String>>,
 }
 
+pub(crate) fn admit_assignment(
+    extensions: &codex_extension_api::ExtensionData,
+) -> codex_protocol::error::Result<()> {
+    let run = extensions.get::<ReviewRun>();
+    let helper = extensions.get::<ReviewHelper>();
+    let started = run
+        .as_ref()
+        .map(|run| &run.started)
+        .or_else(|| helper.as_ref().map(|helper| &helper.started));
+    if started
+        .is_some_and(|started| started.swap(/*val*/ true, std::sync::atomic::Ordering::AcqRel))
+    {
+        return Err(codex_protocol::error::CodexErr::InvalidRequest(
+            "protected reviewers and helpers accept one assignment and no steering or continuation"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn is_reviewer(source: &SessionSource) -> bool {
     source.get_agent_role().as_deref() == Some(ROLE)
 }

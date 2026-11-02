@@ -245,35 +245,7 @@ pub(super) async fn handle(
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
     let request = request.into();
-    if let Some(run) = session
-        .services
-        .thread_extension_data
-        .get::<crate::protected_reviewer::ReviewRun>()
-    {
-        if run
-            .started
-            .swap(/*val*/ true, std::sync::atomic::Ordering::AcqRel)
-        {
-            return Err(CodexErr::InvalidRequest(
-                "protected reviewers accept one assignment and no steering or continuation"
-                    .to_string(),
-            ));
-        }
-    }
-    if let Some(helper) = session
-        .services
-        .thread_extension_data
-        .get::<crate::protected_reviewer::ReviewHelper>()
-    {
-        if helper
-            .started
-            .swap(/*val*/ true, std::sync::atomic::Ordering::AcqRel)
-        {
-            return Err(CodexErr::InvalidRequest(
-                "protected explorer helpers accept only their initial assignment".to_string(),
-            ));
-        }
-    }
+    crate::protected_reviewer::admit_assignment(&session.services.thread_extension_data)?;
     if let SubmittedTurnInput::ResponseItem(item)
     | SubmittedTurnInput::AnnotatedResponseItem(AnnotatedResponseItem { item, .. }) =
         &request.request.input
@@ -806,6 +778,7 @@ impl Session {
         {
             return None;
         }
+        crate::protected_reviewer::admit_assignment(&self.services.thread_extension_data).ok()?;
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
         let previous_options = if has_trigger_turn {
             Default::default()

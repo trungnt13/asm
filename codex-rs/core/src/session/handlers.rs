@@ -806,7 +806,15 @@ pub(super) async fn submission_loop(
                     update,
                     reply,
                 } => {
-                    let outcome = sess.apply_turn_settings(&turn_id, update).await;
+                    let outcome = if sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewRun>().is_some()
+                        || sess.services.thread_extension_data.get::<crate::protected_reviewer::ReviewHelper>().is_some()
+                    {
+                        codex_protocol::protocol::TurnSettingsUpdateOutcome::Rejected {
+                            reason: "Protected reviewer settings are frozen".to_string(),
+                        }
+                    } else {
+                        sess.apply_turn_settings(&turn_id, update).await
+                    };
                     let _ = reply.send(outcome);
                     false
                 }

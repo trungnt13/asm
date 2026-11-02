@@ -693,10 +693,11 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
-        let mut review_reservation = self
-            .runtime
-            .review_quota
-            .reserve_for_source(&config, session_source.as_ref())?;
+        let mut review_reservation = self.runtime.review_quota.reserve_for_source(
+            &config,
+            session_source.as_ref(),
+            self.runtime.registry.agent_id_for_path(&AgentPath::root()),
+        )?;
         if review_reservation.is_some() {
             self.runtime
                 .review_execution

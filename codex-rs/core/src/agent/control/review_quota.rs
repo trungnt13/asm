@@ -44,6 +44,7 @@ impl ReviewQuota {
         self: &Arc<Self>,
         config: &Config,
         session_source: Option<&codex_protocol::protocol::SessionSource>,
+        root_thread_id: Option<ThreadId>,
     ) -> Result<Option<ReviewReservation>> {
         if let Some(source) = session_source {
             let parent_id = source.parent_thread_id();
@@ -69,6 +70,11 @@ impl ReviewQuota {
                     "protected reviewers may create only trusted explorers".to_string(),
                 ));
             } else if crate::protected_reviewer::is_reviewer(source) {
+                if parent_id.is_none() || parent_id != root_thread_id {
+                    return Err(CodexErr::InvalidRequest(
+                        "only the tree root can create protected reviewers".to_string(),
+                    ));
+                }
                 Some(ReviewReservationKind::Reviewer)
             } else {
                 None
@@ -353,7 +359,17 @@ impl LocalAgentControl {
 
     #[tracing::instrument(skip_all)]
     pub(super) async fn shutdown_review_tree(&self, agent_id: ThreadId) -> Result<String> {
-        let result = self.shutdown_live_agent(agent_id).await;
+        let result = match self.shutdown_live_agent(agent_id).await {
+            Err(err)
+                if matches!(
+                    err.details(),
+                    CodexErrorDetails::ThreadNotFound(_) | CodexErrorDetails::InternalAgentDied
+                ) =>
+            {
+                Ok(String::new())
+            }
+            result => result,
+        };
         let descendant_ids = {
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
             while self.runtime.review_quota.pending_helpers(agent_id) {
