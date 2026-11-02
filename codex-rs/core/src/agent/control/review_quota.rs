@@ -322,3 +322,64 @@ impl ReviewStartupQuota {
             .fail_closed();
     }
 }
+
+use super::LocalAgentControl;
+use codex_protocol::AgentPath;
+use codex_protocol::error::CodexErrorDetails;
+
+impl LocalAgentControl {
+    #[tracing::instrument(skip_all)]
+    pub(crate) async fn close_review_agent(
+        &self,
+        caller: ThreadId,
+        target: ThreadId,
+    ) -> Result<()> {
+        let owner = self.runtime.review_quota.owner(target).ok_or_else(|| {
+            CodexErr::InvalidRequest("target is not a protected review member".to_string())
+        })?;
+        let allowed = if owner == target {
+            self.runtime.registry.agent_id_for_path(&AgentPath::root()) == Some(caller)
+        } else {
+            owner == caller
+        };
+        if !allowed {
+            return Err(CodexErr::InvalidRequest(
+                "only the tree root can close a reviewer; only its reviewer can close a helper"
+                    .to_string(),
+            ));
+        }
+        self.shutdown_agent_tree(target).await.map(|_| ())
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn shutdown_review_tree(&self, agent_id: ThreadId) -> Result<String> {
+        let result = self.shutdown_live_agent(agent_id).await;
+        let descendant_ids = {
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            while self.runtime.review_quota.pending_helpers(agent_id) {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(CodexErr::InvalidRequest(
+                        "reviewer startup cleanup did not drain; review quota retained".to_string(),
+                    ));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            self.runtime.review_quota.helper_ids(agent_id)
+        };
+        for descendant_id in descendant_ids {
+            match self.shutdown_live_agent(descendant_id).await {
+                Ok(_) => {}
+                Err(err)
+                    if matches!(
+                        err.details(),
+                        CodexErrorDetails::ThreadNotFound(_) | CodexErrorDetails::InternalAgentDied
+                    ) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        if result.is_ok() {
+            self.runtime.review_quota.subtree_closed(agent_id);
+        }
+        result
+    }
+}
