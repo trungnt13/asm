@@ -1,3 +1,4 @@
+mod fork_history;
 mod managed;
 mod model_catalog;
 mod shared_instructions;
@@ -3015,7 +3016,7 @@ pub(crate) fn fork_history_from_snapshot(
             truncate_before_nth_user_message(history, nth_user_message, &snapshot_state)
         }
         ForkSnapshot::Interrupted => {
-            let history = match history {
+            let mut history = match history {
                 InitialHistory::New => InitialHistory::New,
                 InitialHistory::Cleared => InitialHistory::Cleared,
                 InitialHistory::Forked(history) => InitialHistory::Forked(history),
@@ -3024,6 +3025,12 @@ pub(crate) fn fork_history_from_snapshot(
                 }
             };
             if snapshot_state.ends_mid_turn {
+                if let InitialHistory::Forked(items) = &mut history {
+                    fork_history::append_interrupted_call_outputs(
+                        items,
+                        snapshot_state.active_turn_start_index,
+                    );
+                }
                 append_interrupted_boundary(
                     history,
                     snapshot_state.active_turn_id,

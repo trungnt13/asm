@@ -632,7 +632,7 @@ impl ChatWidget {
             {
                 self.remember_realtime_delegated_reasoning_turn(&notification.turn_id);
             }
-            ThreadItemPayload::AgentMessage { id, phase, .. } if replay_kind.is_none() => {
+            ThreadItemPayload::AgentMessage { id, phase, .. } => {
                 let delegated = self.is_realtime_delegated_agent_item(&notification.turn_id, &id);
                 if !delegated && phase == Some(MessagePhase::FinalAnswer) {
                     self.fold_turn_activity(&notification.turn_id);
