@@ -3681,13 +3681,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
                 app.chat_widget.composer_text_with_pending(),
                 "parent draft-"
             );
-            boxed_future!(app.handle_start_side(
-                &mut tui,
-                &mut app_server,
-                parent_thread_id,
-                /*user_message*/ None
-            ))
-            .await?;
+            boxed_future!(app.toggle_side_conversation(&mut tui, &mut app_server)).await?;
             drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
         }
         assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
