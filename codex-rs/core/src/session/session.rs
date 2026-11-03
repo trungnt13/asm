@@ -2101,15 +2101,13 @@ impl Session {
                 external_runtime: Default::default(),
                 active_turn: Mutex::new(None),
                 async_hook_results,
-                input_queue: if services
-                    .thread_extension_data
-                    .get::<crate::protected_reviewer::ReviewBoundary>()
-                    .is_some()
-                {
-                    InputQueue::new()
-                } else {
-                    InputQueue::with_controller(thread_id, Arc::clone(&services.agent_control))
-                },
+                input_queue: InputQueue::with_controller(
+                    thread_id,
+                    Arc::clone(&services.agent_control),
+                    services
+                        .thread_extension_data
+                        .get::<crate::protected_reviewer::ReviewBoundary>(),
+                ),
                 services,
                 git_enrichment_policy,
                 fork_persistence,

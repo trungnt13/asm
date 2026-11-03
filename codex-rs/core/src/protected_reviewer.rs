@@ -191,16 +191,28 @@ pub(crate) fn configure(config: &mut Config) -> Result<(), String> {
     for feature in [
         codex_features::Feature::CodexHooks,
         codex_features::Feature::Plugins,
+        codex_features::Feature::MultiAgentV2,
+        codex_features::Feature::Collab,
     ] {
         config
             .features
             .disable(feature)
             .map_err(|error| error.to_string())?;
+        if config.features.enabled(feature) {
+            return Err(format!("protected review requires {feature:?} disabled"));
+        }
     }
+    config.agents_enabled = false;
     config
         .features
         .enable(codex_features::Feature::SkipHostSkillDiscovery)
         .map_err(|error| error.to_string())?;
+    if !config
+        .features
+        .enabled(codex_features::Feature::SkipHostSkillDiscovery)
+    {
+        return Err("protected review requires host skill discovery disabled".to_string());
+    }
     config.notify = None;
     config
         .mcp_servers
