@@ -453,7 +453,7 @@ impl LocalAgentControl {
     ) {
         if session_source
             .as_ref()
-            .is_some_and(crate::protected_reviewer::is_protected)
+            .is_some_and(crate::protected_reviewer::is_helper)
         {
             return;
         }
