@@ -1,43 +1,50 @@
+use super::LocalAgentControl;
 use crate::config::Config;
+use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result;
+use codex_protocol::protocol::SessionSource;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 
 #[derive(Default)]
-pub(super) struct ReviewQuota {
-    state: Mutex<QuotaState>,
-}
+pub(super) struct ReviewQuota(Mutex<QuotaState>);
 
 #[derive(Default)]
 struct QuotaState {
     limits: Option<(usize, usize)>,
-    pending_reviews: usize,
-    reviews: HashMap<ThreadId, ReviewBudget>,
-    helpers: HashMap<ThreadId, ThreadId>,
+    members: HashMap<ThreadId, Member>,
 }
 
-#[derive(Default)]
-struct ReviewBudget {
-    helpers_created: usize,
-    pending_helpers: usize,
-    closed: bool,
-    closing: bool,
-}
-
-pub(super) struct ReviewReservation {
-    quota: Arc<ReviewQuota>,
+struct Member {
     owner: Option<ThreadId>,
-    bound: Option<ThreadId>,
-    committed: bool,
+    phase: Phase,
+    closing: bool,
+    closed: bool,
+}
+
+#[derive(PartialEq)]
+enum Phase {
+    Starting,
+    Running,
+    Failed,
+}
+
+#[derive(Clone)]
+pub(crate) struct ReviewStartupQuota(Arc<StartupLease>);
+
+struct StartupLease {
+    quota: Arc<ReviewQuota>,
+    id: ThreadId,
 }
 
 impl ReviewQuota {
     fn lock(&self) -> MutexGuard<'_, QuotaState> {
-        self.state
+        self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -45,25 +52,23 @@ impl ReviewQuota {
     pub(super) fn reserve_for_source(
         self: &Arc<Self>,
         config: &Config,
-        source: Option<&codex_protocol::protocol::SessionSource>,
+        source: Option<&SessionSource>,
         root: Option<ThreadId>,
-    ) -> Result<Option<ReviewReservation>> {
+        id: ThreadId,
+    ) -> Result<Option<ReviewStartupQuota>> {
         let Some(source) = source else {
             return Ok(None);
         };
         let mut state = self.lock();
         let parent = source.parent_thread_id();
-        let parent_is_reviewer = parent.is_some_and(|id| state.reviews.contains_key(&id));
+        let owner = parent.filter(|parent| state.members.contains_key(parent));
         let helper = crate::protected_reviewer::is_helper(source);
         let reviewer = crate::protected_reviewer::is_reviewer(source);
-        if parent.is_some_and(|id| state.helpers.contains_key(&id))
-            || (parent_is_reviewer && !helper)
-            || (helper && !parent_is_reviewer)
+        if owner.is_some_and(|parent| state.members[&parent].owner.is_some() || !helper)
+            || (helper && owner.is_none())
             || (reviewer && (parent.is_none() || parent != root))
         {
-            return Err(CodexErr::InvalidRequest(
-                "only the tree root may create reviewers; reviewers may create only trusted explorers with no descendants".to_string(),
-            ));
+            return Err(CodexErr::InvalidRequest("only root may create reviewers; reviewers may create only trusted explorers without descendants".to_string()));
         }
         if !helper && !reviewer {
             return Ok(None);
@@ -72,163 +77,113 @@ impl ReviewQuota {
             config.reviewer_subagent.max_concurrent_reviews.get(),
             config.reviewer_subagent.max_explorers,
         );
-        limits
-            .1
-            .checked_add(1)
-            .and_then(|helpers| helpers.checked_mul(limits.0))
-            .ok_or_else(|| CodexErr::InvalidRequest("reviewer capacity overflow".to_string()))?;
         if state.limits.is_some_and(|frozen| frozen != limits) {
             return Err(CodexErr::InvalidRequest(
                 "reviewer quotas are frozen for this tree".to_string(),
             ));
         }
         state.limits = Some(limits);
-        let owner = helper.then(|| parent.expect("validated reviewer parent"));
         if let Some(owner) = owner {
-            let review = state
-                .reviews
-                .get_mut(&owner)
-                .expect("validated reviewer parent");
-            if review.closed
-                || review.closing
-                || review
-                    .helpers_created
-                    .saturating_add(review.pending_helpers)
+            let review = &state.members[&owner];
+            if review.closing
+                || review.closed
+                || state
+                    .members
+                    .values()
+                    .filter(|member| member.owner == Some(owner))
+                    .count()
                     >= limits.1
             {
                 return Err(CodexErr::InvalidRequest(
                     "reviewer lifetime explorer quota reached".to_string(),
                 ));
             }
-            review.pending_helpers += 1;
-        } else {
-            let active = state
-                .reviews
-                .values()
-                .filter(|review| !review.closed || review.pending_helpers > 0)
-                .count();
-            if active.saturating_add(state.pending_reviews) >= limits.0 {
-                return Err(CodexErr::InvalidRequest(
-                    "reviewer quota reached; close the previous reviewer subtree first".to_string(),
-                ));
-            }
-            state.pending_reviews += 1;
+        } else if state
+            .members
+            .values()
+            .filter(|member| member.owner.is_none() && !member.closed)
+            .count()
+            >= limits.0
+        {
+            return Err(CodexErr::InvalidRequest(
+                "reviewer quota reached; close the previous reviewer subtree first".to_string(),
+            ));
         }
-        Ok(Some(ReviewReservation {
+        state.members.insert(
+            id,
+            Member {
+                owner,
+                phase: Phase::Starting,
+                closing: false,
+                closed: false,
+            },
+        );
+        Ok(Some(ReviewStartupQuota(Arc::new(StartupLease {
             quota: Arc::clone(self),
-            owner,
-            bound: None,
-            committed: false,
-        }))
+            id,
+        }))))
     }
 
     pub(super) fn owner(&self, member: ThreadId) -> Option<ThreadId> {
-        let state = self.lock();
-        if state.reviews.contains_key(&member) {
-            Some(member)
-        } else {
-            state.helpers.get(&member).copied()
-        }
+        self.lock()
+            .members
+            .get(&member)
+            .map(|entry| entry.owner.unwrap_or(member))
     }
 
     pub(super) fn begin_close(&self, owner: ThreadId) -> bool {
         let mut state = self.lock();
-        let Some(review) = state.reviews.get_mut(&owner) else {
+        let Some(member) = state
+            .members
+            .get_mut(&owner)
+            .filter(|member| member.owner.is_none())
+        else {
             return false;
         };
-        review.closing = true;
+        member.closing = true;
         true
     }
 }
 
-impl ReviewReservation {
-    pub(super) fn bind(&mut self, member: ThreadId) {
-        let mut state = self.quota.lock();
-        match self.owner {
-            None => {
-                state.pending_reviews -= 1;
-                state.reviews.insert(member, ReviewBudget::default());
-            }
-            Some(owner) => {
-                state.helpers.insert(member, owner);
-            }
-        }
-        self.bound = Some(member);
-    }
-
-    pub(super) fn commit(&mut self) -> Result<()> {
-        let mut state = self.quota.lock();
-        match self.owner {
-            None => {}
-            Some(owner) => {
-                let review = state
-                    .reviews
-                    .get_mut(&owner)
-                    .expect("reserved reviewer retained");
-                if review.closed || review.closing {
-                    return Err(CodexErr::InvalidRequest(
-                        "reviewer closed during explorer startup".to_string(),
-                    ));
-                }
-                review.pending_helpers -= 1;
-                review.helpers_created += 1;
-            }
-        }
-        self.committed = true;
-        Ok(())
-    }
-}
-
-impl Drop for ReviewReservation {
-    fn drop(&mut self) {
-        if self.committed {
-            return;
-        }
-        let mut state = self.quota.lock();
-        match self.owner {
-            None => {
-                if let Some(member) = self.bound {
-                    state.reviews.remove(&member);
-                } else {
-                    state.pending_reviews -= 1;
-                }
-            }
-            Some(owner) => {
-                if let Some(review) = state.reviews.get_mut(&owner) {
-                    review.pending_helpers -= 1;
-                }
-                if let Some(member) = self.bound {
-                    state.helpers.remove(&member);
-                }
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct ReviewStartupQuota(Arc<Mutex<ReviewReservation>>);
-
 impl ReviewStartupQuota {
-    pub(super) fn new(reservation: ReviewReservation) -> Self {
-        Self(Arc::new(Mutex::new(reservation)))
-    }
     pub(super) fn commit(&self) -> Result<()> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .commit()
+        let mut state = self.0.quota.lock();
+        let owner = state.members[&self.0.id].owner;
+        if owner.is_some_and(|owner| state.members[&owner].closing) {
+            return Err(CodexErr::InvalidRequest(
+                "reviewer closed during explorer startup".to_string(),
+            ));
+        }
+        state
+            .members
+            .get_mut(&self.0.id)
+            .expect("startup lease retained")
+            .phase = Phase::Running;
+        Ok(())
     }
     pub(crate) fn fail_closed(&self) {
         self.0
+            .quota
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .committed = true;
+            .members
+            .get_mut(&self.0.id)
+            .expect("startup lease retained")
+            .phase = Phase::Failed;
     }
 }
 
-use super::LocalAgentControl;
-use codex_protocol::AgentPath;
-use codex_protocol::error::CodexErrorDetails;
+impl Drop for StartupLease {
+    fn drop(&mut self) {
+        let mut state = self.quota.lock();
+        if state
+            .members
+            .get(&self.id)
+            .is_some_and(|member| member.phase == Phase::Starting)
+        {
+            state.members.remove(&self.id);
+        }
+    }
+}
 
 impl LocalAgentControl {
     #[tracing::instrument(skip_all)]
@@ -237,18 +192,11 @@ impl LocalAgentControl {
         caller: ThreadId,
         target: ThreadId,
     ) -> Result<()> {
-        let owner = self.runtime.review_quota.owner(target).ok_or_else(|| {
-            CodexErr::InvalidRequest("target is not a protected review member".to_string())
-        })?;
-        let allowed = if owner == target {
-            self.runtime.registry.agent_id_for_path(&AgentPath::root()) == Some(caller)
-        } else {
-            owner == caller
-        };
-        if !allowed {
+        if self.runtime.review_quota.owner(target) != Some(target)
+            || self.runtime.registry.agent_id_for_path(&AgentPath::root()) != Some(caller)
+        {
             return Err(CodexErr::InvalidRequest(
-                "only the tree root can close a reviewer; only its reviewer can close a helper"
-                    .to_string(),
+                "only the tree root can close its reviewer subtree".to_string(),
             ));
         }
         self.shutdown_agent_tree(target).await.map(|_| ())
@@ -259,12 +207,28 @@ impl LocalAgentControl {
         let result = self.stop_review_member(agent_id).await;
         let quota = &self.runtime.review_quota;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-        while quota
-            .lock()
-            .reviews
-            .get(&agent_id)
-            .is_some_and(|review| review.pending_helpers > 0)
-        {
+        loop {
+            let (pending, failed) = {
+                let state = quota.lock();
+                state
+                    .members
+                    .iter()
+                    .filter(|(id, member)| **id == agent_id || member.owner == Some(agent_id))
+                    .fold((false, false), |(pending, failed), (_, member)| {
+                        (
+                            pending || member.phase == Phase::Starting,
+                            failed || member.phase == Phase::Failed,
+                        )
+                    })
+            };
+            if failed {
+                return Err(CodexErr::InvalidRequest(
+                    "review startup cleanup failed; review quota retained".to_string(),
+                ));
+            }
+            if !pending {
+                break;
+            }
             if tokio::time::Instant::now() >= deadline {
                 return Err(CodexErr::InvalidRequest(
                     "reviewer startup cleanup did not drain; review quota retained".to_string(),
@@ -274,17 +238,17 @@ impl LocalAgentControl {
         }
         let helpers: Vec<_> = quota
             .lock()
-            .helpers
+            .members
             .iter()
-            .filter_map(|(helper, owner)| (*owner == agent_id).then_some(*helper))
+            .filter_map(|(id, member)| (member.owner == Some(agent_id)).then_some(*id))
             .collect();
         for helper in helpers {
             self.stop_review_member(helper).await?;
         }
         if result.is_ok()
-            && let Some(review) = quota.lock().reviews.get_mut(&agent_id)
+            && let Some(member) = quota.lock().members.get_mut(&agent_id)
         {
-            review.closed = true;
+            member.closed = true;
         }
         result
     }

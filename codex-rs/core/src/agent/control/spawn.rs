@@ -710,10 +710,12 @@ impl LocalAgentControl {
                     .register_session_root(parent_id, parent.parent_thread_id);
             }
         }
+        let child_thread_id = self.runtime.generate_thread_id();
         let mut review_reservation = self.runtime.review_quota.reserve_for_source(
             &config,
             session_source.as_ref(),
             self.runtime.registry.agent_id_for_path(&AgentPath::root()),
+            child_thread_id,
         )?;
         config.system1_initial_revision = 0;
         config.system1_initial_error = None;
@@ -897,15 +899,11 @@ impl LocalAgentControl {
                 crate::review_context::ReviewContext::capture(root, &history),
             );
         }
-        let child_thread_id = self.runtime.generate_thread_id();
         if state.threads.read().await.contains_key(&child_thread_id) {
             return Err(CodexErr::InvalidRequest(format!(
                 "thread {child_thread_id} is already running",
             ))
             .with_agent_context(AgentErrorContext::ChildStartup));
-        }
-        if let Some(reservation) = review_reservation.as_mut() {
-            reservation.bind(child_thread_id);
         }
         start_options.reserved_thread_id = Some(child_thread_id);
         let mut pending_spawn = PendingSpawn::new(

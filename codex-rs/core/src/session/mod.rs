@@ -2959,31 +2959,14 @@ impl Session {
                     // Report the safety stop to the parent without changing the child's
                     // interrupted status or notifying for ordinary interruptions.
                     error_info = error.codex_error_info.clone();
-                    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
-                        AgentStatus::Errored("Review incomplete: execution stopped after denials; inspect the reviewer rollout for diagnostics".to_string())
-                    } else {
-                        AgentStatus::Errored(error.message.clone())
-                    }
+                    AgentStatus::Errored(error.message.clone())
                 } else {
-                    let next_status = crate::protected_reviewer::agent_status(
-                        msg,
-                        &self.services.thread_extension_data,
-                    );
-                    let Some(status) = next_status else {
+                    let Some(status) = agent_status_from_event(msg) else {
                         return;
                     };
                     status
                 }
             }
-        };
-        let status = if crate::protected_reviewer::is_protected(&turn_context.session_source)
-            && matches!(status, AgentStatus::Interrupted)
-        {
-            AgentStatus::Errored(
-                "Review incomplete: interrupted; this review cannot be resumed".to_string(),
-            )
-        } else {
-            status
         };
         if !is_final(&status) {
             return;
