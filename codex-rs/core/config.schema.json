@@ -5564,6 +5564,8 @@
               "copy": null,
               "find_transcript": null,
               "focus_activity": null,
+              "focus_main_composer": null,
+              "focus_sidebar_content": null,
               "hide_pane": null,
               "leader": null,
               "open_agents": null,
@@ -6399,6 +6401,22 @@
           ],
           "description": "Focus activity groups in the owned transcript to inspect their details."
         },
+        "focus_main_composer": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Focus the main conversation composer."
+        },
+        "focus_sidebar_content": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Focus the side conversation, or hide it when already focused."
+        },
         "hide_pane": {
           "allOf": [
             {
@@ -6620,6 +6638,8 @@
             "copy": null,
             "find_transcript": null,
             "focus_activity": null,
+            "focus_main_composer": null,
+            "focus_sidebar_content": null,
             "hide_pane": null,
             "leader": null,
             "open_agents": null,

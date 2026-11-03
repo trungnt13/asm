@@ -1551,6 +1551,7 @@ async fn live_app_server_sub_agent_activity_renders_once() {
                     thread_id: "thread-1".to_string(),
                     turn_id: "turn-1".to_string(),
                     completed_at_ms: 0,
+                    content_token_count: None,
                     item: ThreadItem::untimed(activity),
                 }),
                 replay_kind,
@@ -1726,6 +1727,7 @@ async fn live_app_server_collab_wait_items_render_history() {
                 thread_id: "thread-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 completed_at_ms: 0,
+                content_token_count: None,
                 item: ThreadItem::untimed(wait),
             }),
             replay_kind,
@@ -2133,23 +2135,36 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
 }
 
 #[tokio::test]
-async fn live_app_server_rate_limit_error_renders_upstream_message() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let error = CodexErr::from(CodexErrorDetails::RateLimitExceeded(
-        "Please try again in 10s.".to_string(),
-    ));
+async fn live_app_server_errors_render_upstream_message() {
+    for (error, snapshot) in [
+        (
+            CodexErr::from(CodexErrorDetails::RateLimitExceeded(
+                "Please try again in 10s.".to_string(),
+            )),
+            "rate_limit_exceeded_error",
+        ),
+        (
+            CodexErr::SessionBudgetExceeded,
+            "session_budget_exceeded_error",
+        ),
+    ] {
+        let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        handle_turn_started(&mut chat, "turn-1");
+        drain_insert_history(&mut rx);
+        assert!(chat.bottom_pane.is_task_running());
+        handle_error(
+            &mut chat,
+            error.to_string(),
+            Some(error.to_codex_protocol_error().into()),
+        );
 
-    handle_error(
-        &mut chat,
-        error.to_string(),
-        Some(error.to_codex_protocol_error().into()),
-    );
-
-    let lines = drain_insert_history(&mut rx)
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    assert_chatwidget_snapshot!("rate_limit_exceeded_error", lines_to_single_string(&lines));
+        let lines = drain_insert_history(&mut rx)
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        assert_chatwidget_snapshot!(snapshot, lines_to_single_string(&lines));
+        assert!(!chat.bottom_pane.is_task_running());
+    }
 }
 
 #[tokio::test]
