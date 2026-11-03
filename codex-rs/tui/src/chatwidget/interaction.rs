@@ -2,6 +2,7 @@
 
 use super::clipboard::PendingCopy;
 use super::*;
+use crate::activation_key_guard::ActivationKeySuppression;
 use crate::bottom_pane::BottomPaneView;
 use crate::clipboard_copy::CopyStatus;
 use crate::clipboard_copy::worker::CopyResult;
@@ -50,6 +51,10 @@ impl ChatWidget {
             .copy_composer_selection_on_release(event, selection_copy, copy)
     }
 
+    pub(crate) fn set_composer_cursor(&mut self, cursor: usize) {
+        self.bottom_pane.set_composer_cursor(cursor);
+    }
+
     pub(crate) fn handle_composer_mouse(
         &mut self,
         event: crossterm::event::MouseEvent,
@@ -95,9 +100,10 @@ impl ChatWidget {
         &mut self,
         key: KeyBinding,
         activated_at: Instant,
+        suppression: ActivationKeySuppression,
     ) {
         self.bottom_pane
-            .suppress_current_view_key_until_release(key, activated_at);
+            .suppress_current_view_key_until_release(key, activated_at, suppression);
     }
 
     pub(crate) fn consume_view_transition_key_event(&mut self, key_event: KeyEvent) -> bool {
