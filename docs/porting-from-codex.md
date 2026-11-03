@@ -1145,6 +1145,12 @@ Optional `[memories]` `extract_reasoning_effort` / `consolidation_reasoning_effo
 - Keep unsupported or unresolved destinations visible, and retain destinations in text-only output.
 - Reuse existing hyperlink layout and output transport; keep trusted artifact capabilities separate.
 
+### Conversation switching
+
+Owned fullscreen switches keep the displayed frame and terminal diff buffer until the destination's replay is complete, then draw the new conversation once. Continue collecting background progress and replay current history in order; a parked screen is not authoritative conversation state. Keep native-scrollback clearing unchanged. This behavior does not require the experimental workspace feature.
+
+Creating a side conversation while Main runs a tool snapshots inherited history, not live execution. Complete pending calls only in the fork's persisted interrupted suffix; leave Main and referenced ancestor records unchanged. The side must remain valid after cold resume and must not execute or cancel Main's pending work.
+
 ### Transcript spacing
 
 Keep Markdown paragraphs/code blocks/list items adjacent while streaming and completed. Preserve blanks inside code blocks, raw output, message boundaries, and user padding.

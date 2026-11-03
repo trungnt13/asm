@@ -1375,6 +1375,7 @@ mod tests {
         };
         let stream = response_stream(vec![Ok(ResponseEvent::Completed {
             response_id: "resp-compact".into(),
+            request_duration_ms: None,
             token_usage: Some(usage.clone()),
             usage_metadata: None,
             end_turn: Some(true),

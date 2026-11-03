@@ -1223,18 +1223,17 @@ impl Tui {
 
     pub(crate) fn clear_for_thread_switch(&mut self) -> Result<()> {
         self.clear_thread_switch_on_draw = false;
+        if self.is_owned_screen() {
+            return self.set_mouse_capture(MouseCapture::Inherit);
+        }
         if self.is_alt_screen_active() {
             self.leave_alt_screen()?;
         }
-        if self.is_owned_screen() {
-            self.terminal.clear()?;
-        } else {
-            self.terminal.clear_scrollback_and_visible_screen_ansi()?;
-            let mut area = self.terminal.viewport_area;
-            if area.y > 0 {
-                area.y = 0;
-                self.terminal.set_viewport_area(area);
-            }
+        self.terminal.clear_scrollback_and_visible_screen_ansi()?;
+        let mut area = self.terminal.viewport_area;
+        if area.y > 0 {
+            area.y = 0;
+            self.terminal.set_viewport_area(area);
         }
         Ok(())
     }

@@ -896,7 +896,7 @@ impl App {
         if external_writer {
             self.chat_widget.show_external_writer_thread();
         }
-        if retain_side_view {
+        if tui.is_owned_screen() {
             // Hold drawing and input through the history events emitted by replay.
             self.chat_widget
                 .run_commit_tick_with_scope(CommitTickScope::Replay);

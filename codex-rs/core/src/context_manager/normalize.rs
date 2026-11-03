@@ -19,6 +19,15 @@ use tracing::info;
 const SYNTHETIC_OUTPUT_ID_NAMESPACE: Uuid = Uuid::from_u128(0x90d38d3e_6a5b_4d52_bfe2_2f1e634bfac4);
 
 pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>) {
+    // Insert synthetic outputs in reverse index order to avoid re-indexing.
+    for (idx, output_item) in missing_call_outputs(items).into_iter().rev() {
+        items.insert(idx + 1, output_item);
+    }
+}
+
+pub(crate) fn missing_call_outputs(
+    items: &[ResponseItemEnvelope],
+) -> Vec<(usize, ResponseItemEnvelope)> {
     let mut function_output_ids = HashSet::new();
     let mut tool_search_output_ids = HashSet::new();
     let mut custom_tool_output_ids = HashSet::new();
@@ -147,13 +156,10 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>)
         custom_tool_output_ids,
     ));
 
-    // Insert synthetic outputs in reverse index order to avoid re-indexing.
-    for (idx, output_item) in missing_outputs_to_insert.into_iter().rev() {
-        items.insert(idx + 1, output_item);
-    }
+    missing_outputs_to_insert
 }
 
-/// Derives a stable ID for a prompt-only output from its source call's item ID.
+/// Derives a stable synthetic output ID from its source call's item ID.
 ///
 /// Prompt normalization can run repeatedly without persisting its synthetic
 /// outputs, so the namespace and name format must remain stable across retries
