@@ -74,6 +74,8 @@ mod permission_selection_tests;
 mod projectless_tests;
 #[path = "tests/quick_dials_tests.rs"]
 mod quick_dials_tests;
+#[path = "tests/thread_switch_redraw_tests.rs"]
+mod thread_switch_redraw_tests;
 #[path = "tests/unavailable_commands_tests.rs"]
 mod unavailable_commands;
 
@@ -3340,7 +3342,7 @@ async fn docked_replay_finishes_while_skills_refresh_is_pending() -> Result<()> 
             params,
             Some(serde_json::json!({"cwds": [cwd], "forceReload": true}))
         );
-        assert!(!app.awaiting_side_replay(&tui));
+        assert!(!app.awaiting_thread_switch_replay(&tui));
 
         release
             .send(())

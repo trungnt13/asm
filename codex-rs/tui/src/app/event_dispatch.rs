@@ -1011,6 +1011,8 @@ impl App {
                             TranscriptHistoryState::Complete
                         };
                     }
+                }
+                if finished_current_replay {
                     tui.frame_requester().schedule_frame();
                 }
             }
@@ -1233,7 +1235,7 @@ impl App {
                 self.chat_widget.on_images_prepared(id);
             }
             AppEvent::CodexOp(AppCommand::ListSkills { cwds, force_reload: true })
-                if self.awaiting_side_replay(tui)
+                if self.awaiting_thread_switch_replay(tui)
                     && let Some(thread_id) = self.active_thread_id
                     && self.side_pair_key(thread_id).is_some()
                     && !self.thread_unavailable(thread_id) =>
@@ -1924,7 +1926,7 @@ impl App {
             AppEvent::SideReplaySkillsLoaded { request_id, thread_id, cwd, result } => {
                 if app_server.pending_side_skills_refresh == Some(request_id) {
                     app_server.pending_side_skills_refresh = None;
-                    if !self.awaiting_side_replay(tui)
+                    if !self.awaiting_thread_switch_replay(tui)
                         && self.current_displayed_thread_id() == Some(thread_id)
                         && !cwds_differ(&cwd, self.chat_widget.config_ref().cwd.as_path())
                     {
