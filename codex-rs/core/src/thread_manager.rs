@@ -2455,8 +2455,12 @@ impl ThreadManagerState {
                     .to_string(),
             ));
         }
-        // Older callers and saved reviewers identify isolation through their source.
-        // New internal callers supply an explicit runtime policy before startup.
+        if crate::protected_reviewer::is_protected(&session_source) {
+            thread_extension_init.insert(SessionIsolation::Isolated);
+            thread_extension_init
+                .remove::<codex_extension_api::IsolatedSessionExtensions<Config>>();
+            thread_extension_init.insert(crate::protected_reviewer::tool_policy(&session_source));
+        }
         let isolation = thread_extension_init
             .get::<SessionIsolation>()
             .map(|policy| *policy)
@@ -2611,14 +2615,17 @@ impl ThreadManagerState {
                     report_home: config.codex_home.as_path().to_path_buf(),
                     ..Default::default()
                 });
-            } else {
-                thread_extension_init.insert(crate::protected_reviewer::ReviewHelper::default());
             }
+            thread_extension_init.insert(crate::protected_reviewer::ReviewBoundary {
+                path: session_source.get_agent_path().ok_or_else(|| {
+                    CodexErr::InvalidRequest(
+                        "protected review requires a tree identity".to_string(),
+                    )
+                })?,
+                started: AtomicBool::default(),
+            });
         }
         let mut instructions = match inherited_instructions {
-            _ if crate::protected_reviewer::is_protected(&session_source) => {
-                SessionInstructions::default()
-            }
             Some(instructions) => instructions,
             None if isolation == SessionIsolation::Isolated => SessionInstructions::default(),
             None => {

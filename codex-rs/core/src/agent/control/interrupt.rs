@@ -18,13 +18,6 @@ impl LocalAgentControl {
         caller: ThreadId,
         target: ThreadId,
     ) -> CodexResult<AgentInfo> {
-        if let Some(owner) = self.runtime.review_quota.owner(caller)
-            && (owner != caller || self.runtime.review_quota.owner(target) != Some(caller))
-        {
-            return Err(CodexErr::InvalidRequest(
-                "protected reviewers may interrupt only their own helpers".to_string(),
-            ));
-        }
         let receiver_agent = self.runtime.ensure_agent_known(target)?;
         if receiver_agent
             .agent_path

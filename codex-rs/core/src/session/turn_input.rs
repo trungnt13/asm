@@ -245,7 +245,6 @@ pub(super) async fn handle(
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
     let request = request.into();
-    crate::protected_reviewer::admit_assignment(&session.services.thread_extension_data)?;
     if let SubmittedTurnInput::ResponseItem(item)
     | SubmittedTurnInput::AnnotatedResponseItem(AnnotatedResponseItem { item, .. }) =
         &request.request.input
@@ -333,11 +332,6 @@ pub(super) async fn handle_recovery(
     start_options: TurnStartOptions,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
-    if crate::protected_reviewer::is_protected_session(&session.services.thread_extension_data) {
-        return Err(CodexErr::InvalidRequest(
-            "protected reviewers and helpers cannot be recovered or continued".to_string(),
-        ));
-    }
     let WithTurnExtensionData {
         request: thread_settings,
         turn_extension_init,
@@ -763,7 +757,6 @@ impl Session {
         {
             return None;
         }
-        crate::protected_reviewer::admit_assignment(&self.services.thread_extension_data).ok()?;
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
         let previous_options = if has_trigger_turn {
             Default::default()

@@ -232,53 +232,6 @@ use codex_protocol::error::CodexErrorDetails;
 
 impl LocalAgentControl {
     #[tracing::instrument(skip_all)]
-    pub(super) async fn admit_review_message(
-        &self,
-        caller: ThreadId,
-        target: ThreadId,
-        input: &crate::agent::api::AgentInput,
-    ) -> Result<bool> {
-        let protected = self.get_agent_metadata(target).is_some_and(|metadata| {
-            matches!(
-                metadata.agent_role.as_deref(),
-                Some(crate::protected_reviewer::ROLE | crate::protected_reviewer::HELPER_ROLE)
-            )
-        });
-        let caller_owner = self.runtime.review_quota.owner(caller);
-        let target_owner = self.runtime.review_quota.owner(target);
-        if !protected && caller_owner.is_none() {
-            return Ok(false);
-        }
-        let owned_pair = caller != target
-            && ((caller_owner == Some(target) && target_owner == Some(target))
-                || (caller_owner == Some(caller) && target_owner == Some(caller)));
-        if !owned_pair
-            || !matches!(
-                input,
-                crate::agent::api::AgentInput::Message {
-                    mode: crate::agent::types::MessageDeliveryMode::QueueOnly,
-                    ..
-                }
-            )
-            || self
-                .runtime
-                .upgrade()?
-                .get_thread(target)
-                .await?
-                .session
-                .active_turn
-                .lock()
-                .await
-                .is_none()
-        {
-            return Err(CodexErr::InvalidRequest(
-                "protected reviewers accept only evidence from their own explorers during an active review".to_string(),
-            ));
-        }
-        Ok(protected)
-    }
-
-    #[tracing::instrument(skip_all)]
     pub(crate) async fn close_review_agent(
         &self,
         caller: ThreadId,

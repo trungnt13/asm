@@ -1408,9 +1408,15 @@ creations and one concurrent review. Native runtimes and cold resume/fork are re
 Reviewers and helpers start without root/global/project/host instructions or inherited
 history. Trusted policy is frozen: web disabled, approvals never, root assignments are
 scope/evidence rather than authority. Reject steering, continuation and settings updates;
-runtime policy refresh interrupts. Only root may create a reviewer. Reviewers can message
-or interrupt only their own helpers; helpers only queue evidence to their active reviewer.
-Protected sessions cannot join shared message boards, including explicit host connections.
+runtime policy refresh interrupts. Only root may create a reviewer. Existing isolated-session
+startup removes inherited extensions, boards and ambient host connections; hooks, plugins,
+host skill discovery, inherited MCP servers and controller mailboxes are disabled. An immutable
+explicit tool allowlist permits inspection, pinned evidence and `review_explore` only;
+helpers have only inspection tools. The harness owns helper startup through teardown, awaits
+helper evidence for up to five minutes, and closes helpers even if its tool call is cancelled,
+without ordinary peer messages, arbitrary roles or descendants. Repository and pinned
+conversation content remain untrusted evidence, not policy. Web disabled and approvals never
+are not a complete filesystem or network sandbox; execution sandbox rules still apply.
 
 Atomic review reservations bound combined resources independently of ordinary execution
 and residency limits. Helpers use trusted explorers with no model overrides or descendants.

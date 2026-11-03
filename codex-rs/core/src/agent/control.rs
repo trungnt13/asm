@@ -451,6 +451,12 @@ impl LocalAgentControl {
         child_reference: String,
         child_agent_path: Option<AgentPath>,
     ) {
+        if session_source
+            .as_ref()
+            .is_some_and(crate::protected_reviewer::is_protected)
+        {
+            return;
+        }
         let Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id, ..
         })) = session_source

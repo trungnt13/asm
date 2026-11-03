@@ -472,16 +472,6 @@ pub async fn review(
     sub_id: String,
     review_request: ReviewRequest,
 ) {
-    if crate::protected_reviewer::is_protected_session(&sess.services.thread_extension_data) {
-        sess.send_event_raw(Event {
-            id: sub_id,
-            msg: EventMsg::Warning(WarningEvent {
-                message: "Protected reviewers do not accept review-mode replacement".to_string(),
-            }),
-        })
-        .await;
-        return;
-    }
     if reject_native_operation(sess, &sub_id, "native review mode").await {
         return;
     }
@@ -578,6 +568,10 @@ pub(super) async fn submission_loop(
                 continue;
             }
         };
+        let Some(sub) = crate::protected_reviewer::admit_submission(&sess, sub).await else {
+            continue;
+        };
+
         debug!(
             thread_id = %sess.thread_id(),
             submission_id = %sub.id,
@@ -735,9 +729,6 @@ pub(super) async fn submission_loop(
                         turn_extension_init: sub.turn_extension_init,
                     };
                     let result = async {
-                        if crate::protected_reviewer::is_protected_session(&sess.services.thread_extension_data) {
-                            return Err(CodexErr::InvalidRequest("Protected reviewer settings are frozen".to_string()));
-                        }
                         if system1_enabled.is_some() && persistent {
                             return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
                         }
@@ -796,14 +787,7 @@ pub(super) async fn submission_loop(
                     update,
                     reply,
                 } => {
-                    let outcome = if crate::protected_reviewer::is_protected_session(&sess.services.thread_extension_data)
-                    {
-                        codex_protocol::protocol::TurnSettingsUpdateOutcome::Rejected {
-                            reason: "Protected reviewer settings are frozen".to_string(),
-                        }
-                    } else {
-                        sess.apply_turn_settings(&turn_id, update).await
-                    };
+                    let outcome = sess.apply_turn_settings(&turn_id, update).await;
                     let _ = reply.send(outcome);
                     false
                 }

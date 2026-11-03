@@ -764,9 +764,6 @@ fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
 }
 
 fn collab_tools_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
-    if crate::protected_reviewer::is_helper(&turn_context.session_source) {
-        return false;
-    }
     match turn_context.multi_agent_version {
         MultiAgentVersion::Disabled => false,
         MultiAgentVersion::V1 => !exceeds_thread_spawn_depth_limit(
@@ -877,9 +874,6 @@ fn agent_type_description(
     turn_context: &TurnContext,
     default_agent_type_description: &str,
 ) -> String {
-    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
-        return "Available roles:\nexplorer: Trusted read-only evidence gathering; no descendants or model overrides.".to_string();
-    }
     let build = if turn_context.multi_agent_version == MultiAgentVersion::V2
         && !turn_context.session_source.is_non_root_agent()
     {
@@ -1346,25 +1340,13 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     let features = turn_context.config.features.get();
     let environment_mode = tool_environment_mode(context.environments);
     if turn_context.multi_agent_version == MultiAgentVersion::V2
-        && (!turn_context.session_source.is_non_root_agent()
-            || crate::protected_reviewer::is_reviewer(&turn_context.session_source))
+        && !turn_context.session_source.is_non_root_agent()
     {
         registry.add(crate::tools::handlers::ProtectedReviewTool::CloseAgent);
     }
     if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
         registry.add(crate::tools::handlers::ProtectedReviewTool::ReadContext);
-    }
-
-    if crate::protected_reviewer::is_helper(&turn_context.session_source) {
-        registry.register_trusted_with_exposure(
-            multi_agent_v2_handler(
-                SendMessageHandlerV2,
-                turn_context.config.multi_agent_v2.tool_namespace.as_deref(),
-                /*description_override*/ None,
-                /*parameters_override*/ None,
-            ),
-            ToolExposure::Direct,
-        );
+        registry.add(crate::tools::handlers::ProtectedReviewTool::Explore);
     }
 
     if turn_context.config.update_plan_enabled {
@@ -1628,7 +1610,8 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                                 .features
                                 .enabled(Feature::ModelCatalogInContext),
                             agent_type_description,
-                            expose_agent_type: true,
+                            expose_agent_type: !turn_context.config.agent_roles.is_empty()
+                                || !turn_context.session_source.is_non_root_agent(),
                             hide_agent_type_model_reasoning: hide_spawn_agent_metadata,
                             expose_spawn_agent_model_overrides: turn_context
                                 .config
@@ -1646,11 +1629,7 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                     // Spawn composes the selected description with inheritance and usage guidance.
                     /*description_override*/
                     None,
-                    model_messages
-                        .multi_agent_tool_parameters_override("spawn_agent")
-                        .filter(|_| {
-                            !crate::protected_reviewer::is_reviewer(&turn_context.session_source)
-                        }),
+                    model_messages.multi_agent_tool_parameters_override("spawn_agent"),
                 ),
                 exposure,
                 native_review,
