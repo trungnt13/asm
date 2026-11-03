@@ -114,6 +114,9 @@ impl SessionStartup {
             }
             let mut persistence = std::mem::take(&mut *self.persistence.lock().await);
             if let Err(error) = persistence.discard().await {
+                if let Some(lease) = quota_cleanup.0.as_ref() {
+                    lease.fail_closed();
+                }
                 if let Some(teardown) = teardown.as_ref() {
                     teardown.record_shutdown_failure(
                         "discard_persistence",

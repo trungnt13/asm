@@ -110,6 +110,9 @@ impl Drop for PendingSpawn {
                     match live_thread.discard().await {
                         Ok(()) | Err(ThreadStoreError::ThreadNotFound { .. }) => {}
                         Err(error) => {
+                            if let Some(reservation) = review_reservation.as_ref() {
+                                reservation.fail_closed();
+                            }
                             teardown.record_shutdown_failure(
                                 "discard_child_persistence",
                                 thread_store_error_kind(&error),
@@ -138,6 +141,9 @@ impl Drop for PendingSpawn {
                     AgentGraphStoreError::Internal { .. } => "agent_graph_store_internal",
                 };
                 teardown.record_shutdown_failure("close_spawn_edge", error_kind);
+                if let Some(reservation) = review_reservation.as_ref() {
+                    reservation.fail_closed();
+                }
                 warn!("failed to close cancelled child spawn edge: {error}");
             }
             drop(review_reservation);
