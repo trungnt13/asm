@@ -250,7 +250,7 @@ pub(crate) fn terminal_status(event: &EventMsg, run: Option<&ReviewRun>) -> Opti
                 }),
         ),
         _ => crate::agent::agent_status_from_event(event).map(|status| match status {
-            AgentStatus::Errored(_) => AgentStatus::Errored(
+            AgentStatus::Errored(_) | AgentStatus::Interrupted => AgentStatus::Errored(
                 "Review incomplete: execution failed; inspect the reviewer rollout".to_string(),
             ),
             status => status,
