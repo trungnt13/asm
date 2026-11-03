@@ -23,6 +23,10 @@ impl ChatComposer {
             quote_comments: draft.quote_comments,
             quotes: draft.quotes,
             text: draft.text,
+            shell_mode: self
+                .config
+                .shell_commands_enabled
+                .then_some(draft.is_bash_mode),
             cursor: draft.cursor,
             text_elements: draft.text_elements,
             local_images: attachments.local_images,

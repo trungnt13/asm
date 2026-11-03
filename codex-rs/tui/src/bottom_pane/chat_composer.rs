@@ -719,7 +719,7 @@ struct MentionCompletionTarget {
 }
 
 #[derive(Clone, Copy)]
-enum ShellPrefixHandling {
+pub(crate) enum ShellPrefixHandling {
     Interpret,
     Literal,
 }
@@ -744,6 +744,7 @@ pub(crate) struct ComposerDraftSnapshot {
     pub(crate) quote_comments: Vec<QuoteComment>,
     pub(crate) quotes: Vec<String>,
     pub(crate) text: String,
+    pub(crate) shell_mode: Option<bool>,
     pub(crate) cursor: usize,
     pub(crate) text_elements: Vec<TextElement>,
     pub(crate) local_images: Vec<LocalImageAttachment>,
@@ -1640,7 +1641,7 @@ impl ChatComposer {
         );
     }
 
-    fn set_text_content_with_shell_prefix(
+    pub(super) fn set_text_content_with_shell_prefix(
         &mut self,
         text: String,
         text_elements: Vec<TextElement>,

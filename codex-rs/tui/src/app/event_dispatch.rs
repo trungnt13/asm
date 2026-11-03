@@ -214,7 +214,15 @@ impl App {
             }
             AppEvent::PluginMentionsLoaded { ref cwd, .. }
                 if cwds_differ(cwd, self.config.cwd.as_path()) => {}
-            AppEvent::NewSession { name } => {
+            AppEvent::ChooseNewSessionCheckout { name }
+                if self.chat_widget.managed_worktree_available() =>
+            {
+                self.chat_widget
+                    .open_session_checkout_picker(crate::app_event::ManagedWorktreeMode::New, name);
+            }
+            AppEvent::ChooseNewSessionCheckout { name }
+            | AppEvent::NewSession { name }
+            | AppEvent::NewSessionInCurrentWorktree { name } => {
                 self.start_fresh_session(
                     tui, app_server, /*session_start_source*/ None,
                     /*initial_user_message*/ None, name,
@@ -618,7 +626,7 @@ impl App {
                     Err(err) => return Err(err),
                 }
             }
-            AppEvent::ResumeBackendSession(_) => {
+            AppEvent::ResumeBackendSession(_) | AppEvent::CycleNewConversationBackend => {
                 unreachable!("backend selection is handled by the session manager")
             }
             AppEvent::ArchiveCurrentThread => {
@@ -3872,7 +3880,10 @@ impl App {
             }
         };
 
-        let runtime_keymap = match RuntimeKeymap::from_config(&keymap_config) {
+        let runtime_keymap = match RuntimeKeymap::for_session(
+            &keymap_config,
+            self.local_settings.workspace_enabled(&self.config),
+        ) {
             Ok(runtime_keymap) => runtime_keymap,
             Err(err) => {
                 let params = crate::keymap_setup::build_keymap_conflict_params(
@@ -3965,7 +3976,10 @@ impl App {
             }
         };
 
-        let runtime_keymap = match RuntimeKeymap::from_config(&keymap_config) {
+        let runtime_keymap = match RuntimeKeymap::for_session(
+            &keymap_config,
+            self.local_settings.workspace_enabled(&self.config),
+        ) {
             Ok(runtime_keymap) => runtime_keymap,
             Err(err) => {
                 self.app_event_tx.send(AppEvent::FollowTranscript);

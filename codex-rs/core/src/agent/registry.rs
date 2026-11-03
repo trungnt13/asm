@@ -1,4 +1,5 @@
 use crate::agent::types::AgentMetadata;
+use crate::config::Config;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
@@ -49,9 +50,10 @@ pub(crate) struct EvictedAgentRuntimeState {
     pub(crate) system1_failure_episode: u64,
 }
 
-/// Thread defaults and executor bindings retained while a child's runtime is unloaded.
+/// Effective configuration and executor bindings retained while a child's runtime is unloaded.
 #[derive(Clone, Debug)]
 pub(crate) struct EvictedEnvironments {
+    pub(crate) config: Arc<Config>,
     pub(crate) selections: Vec<TurnEnvironmentSelection>,
     pub(crate) bindings: TurnEnvironmentSnapshot,
 }
