@@ -71,11 +71,13 @@ pub async fn build_prompt_request(
     let thread_manager = Arc::new_cyclic(|thread_manager| {
         ThreadManager::new(
             &config,
-            auth_manager.clone(),
-            codex_core::build_models_manager(
+            codex_core::build_startup_models(
                 &config,
                 auth_manager.clone(),
-                /*runtime_auth*/ None,
+                installation_id,
+                Arc::new(codex_models_manager::manager::ModelCatalogSettings::disk(
+                    config.codex_home.to_path_buf(),
+                )),
             ),
             codex_core::CodexAppsToolsCache::default(),
             SessionSource::Exec,
@@ -110,7 +112,6 @@ pub async fn build_prompt_request(
             codex_core::passthrough_image_store(),
             thread_store,
             codex_core::local_agent_graph_store_from_state_db(state_db.as_ref()),
-            installation_id,
             /*attestation_provider*/ None,
             /*external_time_provider*/ None,
         )
