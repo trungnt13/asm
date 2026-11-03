@@ -336,6 +336,7 @@ async fn title_completion_event(
             turn_id: turn_id.to_string(),
             item: ThreadItem::untimed(title_user_message(&format!("{turn_id}-user"), text)),
             completed_at_ms: 0,
+            content_token_count: None,
         });
         app.enqueue_thread_notification(thread_id, notification.clone())
             .await?;
