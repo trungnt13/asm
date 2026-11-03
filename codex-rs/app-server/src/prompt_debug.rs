@@ -72,7 +72,11 @@ pub async fn build_prompt_request(
         ThreadManager::new(
             &config,
             auth_manager.clone(),
-            codex_core::build_models_manager(&config, auth_manager.clone()),
+            codex_core::build_models_manager(
+                &config,
+                auth_manager.clone(),
+                /*runtime_auth*/ None,
+            ),
             codex_core::CodexAppsToolsCache::default(),
             SessionSource::Exec,
             Arc::clone(&environment_manager),

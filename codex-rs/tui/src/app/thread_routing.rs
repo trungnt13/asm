@@ -1622,6 +1622,7 @@ impl App {
         }
         match presentation {
             ThreadAttachPresentation::Fresh
+            | ThreadAttachPresentation::FreshAfterClear
             | ThreadAttachPresentation::FreshWithDraft
             | ThreadAttachPresentation::SessionLineage => {
                 match self.side_threads.get(&thread_id).map(|side| side.kind) {

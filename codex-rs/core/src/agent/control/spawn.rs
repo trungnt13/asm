@@ -267,7 +267,7 @@ impl LocalAgentControl {
         if owner_thread_id.is_none()
             && let Ok(thread) = state.get_thread(thread_id).await
         {
-            return self.runtime.pin_v2_residency(&state, &thread).await;
+            return self.runtime.pin_v2_residency(&thread).await;
         }
         if self
             .runtime
@@ -278,6 +278,12 @@ impl LocalAgentControl {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
         let evicted_runtime_state = self.runtime.registry.evicted_runtime_state(thread_id);
+        if owner_thread_id.is_none()
+            && let Some(evicted) = &evicted_runtime_state
+        {
+            config.permissions = evicted.environments.config.permissions.clone();
+            config.approvals_reviewer = evicted.environments.config.approvals_reviewer;
+        }
         let mut environment_selections = evicted_runtime_state
             .as_ref()
             .map(|state| state.environments.selections.clone());
@@ -326,7 +332,7 @@ impl LocalAgentControl {
             }
             if let Ok(thread) = state.get_thread(thread_id).await {
                 self.validate_loaded_v2_child(&thread, parent_thread_id)?;
-                return self.runtime.pin_v2_residency(&state, &thread).await;
+                return self.runtime.pin_v2_residency(&thread).await;
             }
         }
         let parent = if let Some(parent) = parent {
@@ -416,7 +422,7 @@ impl LocalAgentControl {
                 )
             })?;
             let model_info = state
-                .models_manager
+                .models_manager_for_config(&config)
                 .get_model_info(model, &config.to_models_manager_config())
                 .await;
             let reasoning_effort = config
@@ -514,7 +520,7 @@ impl LocalAgentControl {
                     if child_config.permission_profile == owner_config.permission_profile {
                         continue;
                     }
-                    if owner_environment.environment.is_remote() {
+                    if owner_environment.environment().is_remote() {
                         return Err(invalid_environment(
                             "permissions changed on a remote executor",
                         ));
@@ -638,9 +644,7 @@ impl LocalAgentControl {
                 // Finish registration even if the sender is cancelled while acquiring its pin.
                 tokio::spawn(async move {
                     let _membership = membership;
-                    let residency_pin = runtime
-                        .pin_v2_residency(&state, &reloaded_thread.thread)
-                        .await?;
+                    let residency_pin = runtime.pin_v2_residency(&reloaded_thread.thread).await?;
                     runtime.registry.clear_evicted_runtime_state(thread_id);
                     residency_slot.commit(reloaded_thread.thread_id);
                     // Register before listeners can forward events from the resumed thread.
@@ -665,7 +669,7 @@ impl LocalAgentControl {
                     }
                     self.runtime.registry.clear_evicted_runtime_state(thread_id);
                     drop(residency_slot);
-                    return self.runtime.pin_v2_residency(&state, &thread).await;
+                    return self.runtime.pin_v2_residency(&thread).await;
                 }
                 Err(err)
             }

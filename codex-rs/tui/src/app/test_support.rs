@@ -15,6 +15,11 @@ use codex_models_manager::test_support::get_model_offline_for_tests;
 pub(super) fn enable_side_retention(app: &mut App) -> Result<()> {
     app.config.features.enable(Feature::TuiWorkspace)?;
     app.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Owned;
+    app.keymap = crate::keymap::RuntimeKeymap::for_session(
+        &app.local_settings.tui.keymap,
+        app.local_settings.workspace_enabled(&app.config),
+    )
+    .map_err(color_eyre::eyre::Report::msg)?;
     Ok(())
 }
 
@@ -44,6 +49,10 @@ pub(crate) async fn make_test_app() -> Box<App> {
         app_event_tx,
         chat_widget,
         workspace_command_runner: None,
+        backend_preference_context: backend_selection::BackendPreferenceContext::new(
+            &config,
+            Some(config.cwd.to_path_buf()),
+        ),
         launch_cwd: config.cwd.to_path_buf(),
         runtime_working_directory_override: None,
         local_settings: crate::local_settings::LocalSettings::from(&config),

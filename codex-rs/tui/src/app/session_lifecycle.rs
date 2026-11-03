@@ -20,6 +20,8 @@ use std::collections::HashSet;
 pub(super) enum ThreadAttachPresentation {
     /// A primary thread created by thread/start, without inherited history.
     Fresh,
+    /// A fresh thread whose terminal clear succeeded before its backend was adopted.
+    FreshAfterClear,
     /// A fresh thread whose startup composer is already visible.
     FreshWithDraft,
     SessionLineage,
@@ -784,6 +786,11 @@ impl App {
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
         self.restore_automatic_thread_title(thread_id, self.chat_widget.thread_name().as_deref())
             .await;
+        if self.side_retention_enabled(tui)
+            && let Some(side) = self.side_threads.get_mut(&thread_id)
+        {
+            side.pane_open = true;
+        }
         if is_replay_only
             && self
                 .thread_event_channels
@@ -1190,12 +1197,6 @@ impl App {
                 return;
             }
         };
-        apply_managed_new_thread_defaults(
-            &mut config,
-            app_server.managed_new_thread_defaults(),
-            &self.cli_kv_overrides,
-            &self.harness_overrides,
-        );
         if let Some((model, effort)) = model_selection {
             config.model = Some(model);
             config.model_reasoning_effort = effort;
@@ -1335,13 +1336,19 @@ impl App {
             self.active_thread_rx = Some(receiver);
         }
         self.store_active_thread_receiver().await;
-        if matches!(presentation, ThreadAttachPresentation::FreshWithDraft) {
-            self.reset_transcript_state_after_clear();
-            tui.clear_pending_history_lines();
-            tui.defer_thread_switch_clear();
-        } else {
-            self.reset_for_thread_switch(tui)?;
-        }
+        self.reset_transcript_state_after_clear();
+        tui.clear_pending_history_lines();
+        let presentation = match presentation {
+            ThreadAttachPresentation::FreshAfterClear => ThreadAttachPresentation::Fresh,
+            ThreadAttachPresentation::FreshWithDraft => {
+                tui.defer_thread_switch_clear();
+                presentation
+            }
+            ThreadAttachPresentation::Fresh | ThreadAttachPresentation::SessionLineage => {
+                tui.clear_for_thread_switch()?;
+                presentation
+            }
+        };
         self.pending_thread_switch_resets += 1;
         self.app_event_tx.send(
             if matches!(presentation, ThreadAttachPresentation::FreshWithDraft) {
