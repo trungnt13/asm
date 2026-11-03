@@ -204,6 +204,7 @@ mod resume_picker;
 mod screen_reader;
 mod service_tier_resolution;
 mod session_archive_commands;
+mod session_lock;
 mod session_log;
 mod session_queue_commands;
 mod session_resume;
@@ -1390,28 +1391,23 @@ async fn run_ratatui_app(
     #[cfg(target_os = "windows")]
     let mut trust_decision_was_made = false;
     let startup_model_provider = initial_config.model_provider_id.clone();
-    let (login_status, mut startup_account) = if workload_identity_selected {
-        (LoginStatus::AuthMode(AuthMode::Chatgpt), None)
-    } else {
-        let Some(active_app_server) = app_server.as_mut() else {
-            unreachable!("app server should exist when auth is required");
-        };
-        let login_status = startup_draft
-            .run_until(&mut tui, get_login_status(active_app_server))
-            .await;
-        match login_status {
-            Ok(Ok((login_status, account))) => (login_status, Some(account)),
-            Ok(Err(err)) => {
-                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                return Err(err);
-            }
-            Err(err) => {
-                shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
-                return Err(err.into());
-            }
+    let Some(active_app_server) = app_server.as_mut() else {
+        unreachable!("app server should exist when auth is required");
+    };
+    let login_status = startup_draft
+        .run_until(&mut tui, get_login_status(active_app_server))
+        .await;
+    let (login_status, mut startup_account) = match login_status {
+        Ok(Ok((login_status, account))) => (login_status, Some(account)),
+        Ok(Err(err)) => {
+            shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+            return Err(err);
+        }
+        Err(err) => {
+            shutdown_startup_session(app_server.take(), &mut terminal_restore_guard).await;
+            return Err(err.into());
         }
     };
-    // Workload identity bypasses interactive login; every other provider uses account/read.
     let uses_external_runtime = initial_config
         .model
         .as_deref()
