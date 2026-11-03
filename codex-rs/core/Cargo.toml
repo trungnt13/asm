@@ -147,6 +147,8 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 
 [dev-dependencies]
 codex-app-server = { workspace = true }
+codex-message-board = { workspace = true }
+codex-agent-message-board-host = { workspace = true }
 assert_cmd = { workspace = true }
 assert_matches = { workspace = true }
 codex-exec-server-test-support = { workspace = true }

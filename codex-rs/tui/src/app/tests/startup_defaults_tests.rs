@@ -226,6 +226,18 @@ async fn cli_fork_omits_implicit_model_and_effort() -> Result<()> {
     Ok(())
 }
 
+// These tests drop startup with thread/start still in flight. Its recorder
+// can still be waiting for a reply after the request assertions have passed.
+async fn stop_interrupted_startup_recorder(
+    proxy: tokio::task::JoinHandle<Result<()>>,
+) -> Result<()> {
+    proxy.abort();
+    match tokio::time::timeout(Duration::from_secs(15), proxy).await? {
+        Err(error) if error.is_cancelled() => Ok(()),
+        result => result?,
+    }
+}
+
 async fn run_until_thread_start(
     server: AppServerSession,
     config: Config,
@@ -517,8 +529,20 @@ requires_openai_auth = false
                 serde_json::json!({"cwd": server_config.cwd.display().to_string(), "includeLayers": true})
             ],
         );
-        if choice == "saved" {
-            assert_eq!(started.session.approvals_reviewer, ApprovalsReviewer::User);
+        if matches!(choice, "saved" | "embedded_saved") {
+            let expected_turn_policy = if choice == "saved" {
+                AskForApproval::OnRequest
+            } else {
+                AskForApproval::Never
+            };
+            assert_eq!(
+                started.session.approvals_reviewer,
+                if choice == "saved" {
+                    ApprovalsReviewer::User
+                } else {
+                    ApprovalsReviewer::AutoReview
+                }
+            );
             let (mut app, _events, mut ops) = make_test_app_with_channels().await;
             app.app_server_target = target;
             app.config.permissions.approval_policy =
@@ -530,7 +554,7 @@ requires_openai_auth = false
                 .await?;
             assert_eq!(
                 app.config.permissions.approval_policy.value(),
-                AskForApproval::OnRequest.to_core()
+                expected_turn_policy.to_core()
             );
             app.chat_widget.insert_str("first turn");
             app.chat_widget
@@ -538,8 +562,11 @@ requires_openai_auth = false
             app.submit_thread_op(&mut server, thread_id, next_user_turn_op(&mut ops))
                 .await?;
             let turn = &recorded_params(&requests, "turn/start")[0];
-            assert_eq!(turn["approvalsReviewer"], "user");
-            assert_eq!(turn["approvalPolicy"], "on-request");
+            assert!(turn["approvalsReviewer"].is_null());
+            assert_eq!(
+                turn["approvalPolicy"],
+                serde_json::json!(expected_turn_policy)
+            );
         }
         server.shutdown().await?;
         proxy.await??;
@@ -783,7 +810,7 @@ async fn fresh_startup_falls_back_only_for_unsupported_config_read() -> Result<(
             ),
             (&serde_json::Value::Null, &serde_json::Value::Null)
         );
-        tokio::time::timeout(Duration::from_secs(/*secs*/ 15), proxy).await???;
+        stop_interrupted_startup_recorder(proxy).await?;
     }
     Ok(())
 }
@@ -849,7 +876,7 @@ async fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
         ),
         (&serde_json::Value::Null, &serde_json::Value::Null),
     );
-    tokio::time::timeout(Duration::from_secs(/*secs*/ 15), proxy).await???;
+    stop_interrupted_startup_recorder(proxy).await?;
     Ok(())
 }
 
