@@ -54,7 +54,7 @@ pub(crate) struct ReviewRun {
 
 #[tracing::instrument(skip_all)]
 pub(crate) async fn admit_submission(
-    session: &crate::session::Session,
+    session: &crate::session::session::Session,
     submission: crate::session::Submission,
 ) -> Option<crate::session::Submission> {
     use codex_protocol::error::CodexErr;
@@ -85,8 +85,12 @@ pub(crate) async fn admit_submission(
                     .rsplit_once('/')
                     .is_some_and(|(parent, _)| parent == communication.author.as_str())
         }
-        Op::TurnInput { request, .. } => {
-            matches!(&request.input, TurnInput::UserInput { content, .. } if content.iter().all(|input| {
+        Op::TurnInput { request, mode, .. } => {
+            matches!(
+                mode,
+                codex_protocol::turn_input::TurnInputMode::StartOrSteer
+                    | codex_protocol::turn_input::TurnInputMode::StartIfIdle
+            ) && matches!(&request.input, TurnInput::UserInput { content, .. } if content.iter().all(|input| {
                 matches!(input,
                     codex_protocol::user_input::UserInput::Text { .. }
                     | codex_protocol::user_input::UserInput::Image { .. }
