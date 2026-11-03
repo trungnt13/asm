@@ -985,7 +985,7 @@ async fn turn_diff_display_roots(step_context: &StepContext) -> Vec<(String, Pat
         // A turn cwd is expected to be a directory. If it is a file, the failed `<cwd>/.git` probe
         // is ignored and ancestor search continues from its parent.
         let root = find_nearest_ancestor_with_markers(
-            turn_environment.environment.get_filesystem().as_ref(),
+            turn_environment.environment().get_filesystem().as_ref(),
             cwd,
             vec![".git".to_string()],
             FindUpErrorPolicy::Ignore,
@@ -1910,6 +1910,11 @@ async fn run_sampling_request(
         if first_attempt && turn_context.config.notify.is_some() {
             notify_messages = legacy_notify_input_messages(&prompt.input);
         }
+        let _native_search = crate::model_search::SearchOwner::reserve_server_fallback(
+            &step_context.extension_data,
+            &sess.services.thread_extension_data,
+            &mut prompt.tools,
+        );
         let mut draining_for_mailbox = false;
         let err = match try_run_sampling_request(
             tool_runtime.clone(),
@@ -2600,6 +2605,7 @@ async fn emit_agent_message_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
     agent_message: codex_protocol::items::AgentMessageItem,
+    content_token_count: Option<u64>,
     state: &mut PlanModeStreamState,
 ) {
     let agent_message_id = agent_message.id.clone();
@@ -2635,8 +2641,12 @@ async fn emit_agent_message_in_plan_mode(
             .insert(agent_message_id.clone());
     }
 
-    sess.emit_turn_item_completed(turn_context, TurnItem::AgentMessage(agent_message))
-        .await;
+    sess.emit_turn_item_completed_with_token_count(
+        turn_context,
+        TurnItem::AgentMessage(agent_message),
+        content_token_count,
+    )
+    .await;
     state.started_agent_message_items.remove(&agent_message_id);
 }
 
@@ -2645,12 +2655,20 @@ async fn emit_turn_item_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
     turn_item: TurnItem,
+    content_token_count: Option<u64>,
     previously_active_item: Option<&TurnItem>,
     state: &mut PlanModeStreamState,
 ) {
     match turn_item {
         TurnItem::AgentMessage(agent_message) => {
-            emit_agent_message_in_plan_mode(sess, turn_context, agent_message, state).await;
+            emit_agent_message_in_plan_mode(
+                sess,
+                turn_context,
+                agent_message,
+                content_token_count,
+                state,
+            )
+            .await;
         }
         _ => {
             if previously_active_item.is_none() {
@@ -2691,6 +2709,7 @@ async fn handle_assistant_item_done_in_plan_mode(
                 sess,
                 turn_context,
                 finalized_turn_item.turn_item,
+                finalized_turn_item.content_token_count,
                 previously_active_item,
                 state,
             )

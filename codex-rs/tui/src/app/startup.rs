@@ -5,6 +5,7 @@
 //! Queued resume history replaces the provisional loading frame only when it is ready to render.
 //! Explicit local launch permissions remain runtime overrides across new sessions and reconnects.
 
+use super::backend_selection::NewBackendSession;
 use super::reconnect::ReconnectState;
 use super::startup_bootstrap::bootstrap_server_owned_start;
 use super::startup_bootstrap::uses_server_owned_fresh_bootstrap;
@@ -243,6 +244,7 @@ impl App {
         initial_backends: super::backend_sessions::InitialBackendSessions,
         mut config: Config,
         launch_cwd: PathBuf,
+        backend_preference_context: backend_selection::BackendPreferenceContext,
         cli_kv_overrides: Vec<(String, TomlValue)>,
         harness_overrides: ConfigOverrides,
         loader_overrides: LoaderOverrides,
@@ -967,14 +969,17 @@ impl App {
             ));
         }
         let file_search = FileSearchManager::new(config.cwd.to_path_buf(), app_event_tx.clone());
-        let runtime_keymap =
-            RuntimeKeymap::from_config(&local_settings.tui.keymap).map_err(|err| {
-                color_eyre::eyre::eyre!(
-                    "Invalid `tui.keymap` configuration: {err}\n\
+        let runtime_keymap = RuntimeKeymap::for_session(
+            &local_settings.tui.keymap,
+            local_settings.workspace_enabled(&config),
+        )
+        .map_err(|err| {
+            color_eyre::eyre::eyre!(
+                "Invalid `tui.keymap` configuration: {err}\n\
 Fix the config and retry.\n\
 See the Codex keymap documentation for supported actions and examples."
-                )
-            });
+            )
+        });
         let runtime_keymap = startup_try!(runtime_keymap);
         #[cfg(not(debug_assertions))]
         let upgrade_version = crate::updates::get_upgrade_version(&config);
@@ -991,6 +996,7 @@ See the Codex keymap documentation for supported actions and examples."
             app_event_tx,
             chat_widget,
             workspace_command_runner: Some(workspace_command_runner),
+            backend_preference_context,
             config,
             local_settings,
             launch_cwd,
@@ -1303,6 +1309,12 @@ See the Codex keymap documentation for supported actions and examples."
 
         let mut backends =
             super::backend_sessions::BackendSessions::from_initial(app_server, other_backends);
+        if matches!(
+            app.app_server_target,
+            AppServerTarget::Embedded | AppServerTarget::LocalDaemon { .. }
+        ) {
+            backends.set_preference_key(backends.displayed_owner(), "local");
+        }
 
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
@@ -1310,6 +1322,14 @@ See the Codex keymap documentation for supported actions and examples."
             loop {
                 let displayed_session = backends.displayed;
                 let displayed_owner = backends.displayed_owner();
+                let multi_backend = app.config.features.enabled(Feature::TuiMultiBackend);
+                let next_backend = if multi_backend && app.can_cycle_conversation_backend() {
+                    backends.next_listening_backend(displayed_owner)
+                } else {
+                    None
+                };
+                let current_label = next_backend.and_then(|_| backends.displayed_name());
+                app.chat_widget.set_new_backend_control(current_label);
                 if !backends.is_listening(displayed_owner)
                     && !app.pending_startup_thread_start
                     && !app.reconnect.offline
@@ -1475,6 +1495,22 @@ See the Codex keymap documentation for supported actions and examples."
                         AppRunControl::Continue
                     }
                     Some(event) = app_event_rx.recv() => {
+                        let switch_backend = match &event {
+                            AppEvent::ChooseNewSessionCheckout { name } | AppEvent::NewSession { name }
+                                if multi_backend => app.other_new_session_backend(&backends).await
+                                    .map(|owner| (owner, NewBackendSession::Fresh { name: name.clone() })),
+                            AppEvent::CycleNewConversationBackend => {
+                                let Some(owner) = next_backend else { continue };
+                                Some((owner, NewBackendSession::CarryDraft))
+                            }
+                            _ => None,
+                        };
+                        if let Some((owner, session)) = switch_backend {
+                            if let Err(message) = Box::pin(app.start_new_session_on_other_backend(tui, &mut backends, owner, session)).await {
+                                app.chat_widget.add_error_message(message);
+                            }
+                            continue;
+                        }
                         if let AppEvent::ResumeBackendSession(target) = event {
                             match app.resume_backend_session(tui, &mut backends, target).await {
                                 Ok(AppRunControl::Continue) => continue,

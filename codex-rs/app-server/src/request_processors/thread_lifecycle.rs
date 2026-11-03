@@ -574,6 +574,7 @@ async fn start_listener(
                                 thread_id: conversation_id.to_string(),
                                 turn_id: event.id.clone(),
                                 item,
+                                content_token_count: None,
                                 completed_at_ms: chrono::Utc::now().timestamp_millis(),
                             },
                         )).await;

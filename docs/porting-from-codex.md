@@ -133,9 +133,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `adca20357620101686ebf633577d1d7e989e75b3`.
-- Date: 2026-11-02.
-- Subject: Preserve steering when returning to a long-running turn (#58998).
+- Last incorporated commit: `ac558e2a3264e1025fd8025fdd71d03dfbe8c86e`.
+- Date: 2026-11-03.
+- Subject: Resolve saved Daybreak preferences against advertised model programs (#59192).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:

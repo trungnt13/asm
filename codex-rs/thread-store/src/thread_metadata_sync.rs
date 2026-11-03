@@ -539,6 +539,7 @@ mod tests {
                 thread_id,
                 vec![RolloutItem::EventMsg(EventMsg::ItemCompleted(
                     ItemCompletedEvent {
+                        content_token_count: None,
                         thread_id,
                         turn_id: "turn-1".to_string(),
                         item: TurnItem::UserMessage(UserMessageItem::new(&[UserInput::Text {
@@ -651,6 +652,7 @@ mod tests {
         let update = sync
             .observe_appended_items(&[RolloutItem::EventMsg(EventMsg::ItemCompleted(
                 ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id,
                     turn_id: "turn-1".to_string(),
                     item: TurnItem::UserMessage(UserMessageItem::new(&[UserInput::Text {
