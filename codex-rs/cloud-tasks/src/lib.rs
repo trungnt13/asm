@@ -116,7 +116,7 @@ async fn init_backend(
     }
 
     let auth_provider = codex_model_provider::auth_provider_from_auth(&auth);
-    http = http.with_auth_provider(auth_provider);
+    http = http.with_auth_provider(auth_provider)?;
     if let Some(acc) = auth.get_account_id() {
         tracing::debug!("auth: set ChatGPT-Account-Id header: {acc}");
     }

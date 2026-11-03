@@ -3,11 +3,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use codex_core::AgentConfigUpdate;
 use codex_core::AgentControl;
 use codex_core::AgentExecutionGuard;
 use codex_core::AgentInfo;
+use codex_core::AgentRef;
 use codex_core::AgentTarget;
 use codex_core::AgentTurnOutcome;
 use codex_core::DeliveryReceipt;
@@ -44,9 +47,11 @@ use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::user_input::UserInput;
 use codex_rollout_trace::ThreadTraceContext;
+use codex_thread_store::LoadThreadHistoryParams;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
@@ -69,8 +74,46 @@ impl codex_core::AgentTurnAdmission for HostRuntime {
     }
 }
 
+pub(super) struct HostSessionReader {
+    root: ThreadId,
+    pub(super) children: Mutex<Option<Vec<AgentRef>>>,
+    pub(super) children_reads: AtomicUsize,
+}
+
+impl codex_core::AgentSessionReader for HostSessionReader {
+    fn root(&self) -> BoxFuture<'_, CodexResult<AgentRef>> {
+        Box::pin(async {
+            Ok(AgentRef {
+                thread_id: self.root,
+                path: AgentPath::root(),
+            })
+        })
+    }
+
+    fn parent(&self) -> BoxFuture<'_, CodexResult<Option<AgentRef>>> {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn children(&self) -> BoxFuture<'_, CodexResult<Vec<AgentRef>>> {
+        Box::pin(async {
+            self.children_reads.fetch_add(1, Ordering::Relaxed);
+            self.children
+                .lock()
+                .expect("host roster")
+                .clone()
+                .ok_or_else(|| CodexErr::InvalidRequest("host agent session unavailable".into()))
+        })
+    }
+}
+
 pub(super) fn install_host_runtime(data: &codex_extension_api::ExtensionData) {
     data.insert(codex_core::AgentRuntimeOwnership::Host);
+    let reader = data.get_or_init(|| HostSessionReader {
+        root: ThreadId::from_string(data.level_id()).expect("test thread identity"),
+        children: Mutex::new(Some(Vec::new())),
+        children_reads: AtomicUsize::new(0),
+    });
+    data.get_or_init(|| reader as Arc<dyn codex_core::AgentSessionReader>);
     data.get_or_init(|| Arc::new(HostRuntime) as Arc<dyn codex_core::AgentTurnAdmission>);
 }
 
@@ -527,14 +570,19 @@ async fn host_factory_follows_thread_lifecycle() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_case(ThreadHistoryMode::Legacy; "legacy")]
+#[test_case(ThreadHistoryMode::Paginated; "paginated")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fresh_hosted_child_persists_inherited_session_id() -> anyhow::Result<()> {
+async fn fresh_hosted_child_persists_inherited_session_id(
+    history_mode: ThreadHistoryMode,
+) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
     let root = test_codex().build_with_auto_env(&server).await?;
     let root_session_id = root.session_configured.session_id;
     let manager = &root.thread_manager;
     let options = || StartThreadOptions {
+        history_mode: Some(history_mode),
         session_source: Some(SessionSource::Custom("host".to_string())),
         environments: Some(vec![root.executor_environment().request()]),
         ..StartThreadOptions::new(root.config.clone())
@@ -554,22 +602,25 @@ async fn fresh_hosted_child_persists_inherited_session_id() -> anyhow::Result<()
     );
     child.thread.ensure_rollout_materialized().await;
     child.thread.flush_rollout().await?;
-    let history = child
-        .thread
-        .load_history(/*include_archived*/ false)
+    let history = root
+        .thread_store
+        .load_latest_model_context(LoadThreadHistoryParams {
+            thread_id: child.thread_id,
+            include_archived: false,
+        })
         .await?;
     let Some(RolloutItem::SessionMeta(meta)) = history.items.first() else {
         anyhow::bail!("expected child metadata as the first rollout item");
     };
     assert_eq!(
-        (meta.meta.id, meta.meta.session_id),
-        (child.thread_id, root_session_id)
+        (meta.meta.id, meta.meta.session_id, meta.meta.history_mode),
+        (child.thread_id, root_session_id, history_mode)
     );
     child.thread.shutdown_and_wait().await?;
     let resumed = manager
         .start_thread(StartThreadOptions {
             initial_history: InitialHistory::Resumed(ResumedHistory {
-                history_revision: None,
+                history_revision: history.revision,
                 conversation_id: child.thread_id,
                 history: Arc::new(history.items),
                 rollout_path: child.thread.rollout_path(),

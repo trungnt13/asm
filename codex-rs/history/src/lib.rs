@@ -70,6 +70,15 @@ pub struct CodexHarnessMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spawn_arguments: Option<String>,
 
+    /// Thread-local append sequence. Compaction keeps the identities of retained inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_sequence: Option<u64>,
+
+    /// Highest input sequence included in a regular request that recorded model output.
+    /// Compaction carries this checkpoint without advancing it. Never model-visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampled_through_sequence: Option<u64>,
+
     /// Complete retained records actually delivered by this Guardian message. Host-only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub guardian_sources: Vec<RetainedSource>,
@@ -89,6 +98,10 @@ pub struct CodexHarnessMetadata {
     /// Original retained evidence represented by this exact history item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retained_source: Option<RetainedSource>,
+
+    /// The harness rendered client-supplied untrusted additional context as a standalone tool output.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub additional_context_tool_output: bool,
 
     /// Whether a developer message was supplied by a client or a client requested tool-output retention.
     #[serde(default)]
