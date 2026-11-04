@@ -84,6 +84,7 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::TurnInputContext;
 use codex_extension_api::TurnInputEnvironment;
 use codex_features::Feature;
+use codex_file_system::EnvironmentAccess;
 use codex_file_system::FindUpErrorPolicy;
 use codex_file_system::find_nearest_ancestor_with_markers;
 use codex_hooks::ModelRequestHookEvent::PostModelRequest;
@@ -130,6 +131,7 @@ use codex_skills::build_skill_name_counts;
 use codex_skills::collect_explicit_skill_mentions;
 use codex_skills::tool_kind_for_path;
 use codex_skills_extension::HostSkillPrompts;
+use codex_skills_extension::HostSkillsSnapshot;
 use codex_skills_extension::InjectedHostSkillPrompts;
 use codex_skills_extension::validate_required_skills;
 use codex_thread_store::PersistContext;
@@ -652,6 +654,7 @@ pub(crate) async fn run_turn(
                 guardian_budget_compacted = false;
                 let SamplingRequestResult {
                     needs_follow_up: model_needs_follow_up,
+                    mailbox_preempted,
                     last_agent_message: sampling_request_last_agent_message,
                 } = sampling_request_output;
                 if model_needs_follow_up {
@@ -765,9 +768,10 @@ pub(crate) async fn run_turn(
                             if run_pending_session_start_hooks(&sess, &turn_context).await {
                                 return Ok(None);
                             }
-                            // After a signaled step, drain the steer even if compaction
+                            // After interrupted sampling, drain pending input even if compaction
                             // leaves the estimated context above the token limit.
                             can_drain_pending_input = !model_needs_follow_up
+                                || mailbox_preempted
                                 || step_context
                                     .preempt
                                     .as_ref()
@@ -811,9 +815,10 @@ pub(crate) async fn run_turn(
                         ));
                     }
                     if stop_outcome.should_block {
-                        if let Some(hook_prompt_message) =
-                            build_hook_prompt_message(&stop_outcome.continuation_fragments)
-                        {
+                        if let Some(hook_prompt_message) = build_hook_prompt_message(
+                            &stop_outcome.continuation_fragments,
+                            &sess.item_id_generator,
+                        ) {
                             sess.record_response_item_and_emit_turn_item(
                                 &turn_context,
                                 &step_context.settings.model_info,
@@ -1062,6 +1067,12 @@ pub(crate) async fn run_hooks_and_record_inputs(
             .await;
         }
     }
+    // The batch has left the input queue. Persist every accepted item before the
+    // optional lookup can suspend this task long enough for an interrupt to abort it.
+    if !input.is_empty() {
+        let ids = std::mem::take(&mut sess.state.lock().await.pending_audio_duration_ids);
+        super::file_audio::resolve(sess, ids).await;
+    }
     Ok(blocked_input && !accepted_user_input)
 }
 
@@ -1209,7 +1220,8 @@ async fn required_mcp_servers_for_input(
     } else {
         HashMap::new()
     };
-    let skills_snapshot = turn_context.skills_snapshot();
+    let environments = sess.services.turn_environments.snapshot().await;
+    let skills_snapshot = sess.host_skills_for_step(turn_context, &environments).await;
     let skills_outcome = skills_snapshot.outcome();
     let mentioned_skills =
         collect_explicit_skill_mentions(user_input, skills_outcome, &connector_slug_counts);
@@ -1280,7 +1292,8 @@ async fn build_skills_and_plugins(
     } else {
         Vec::new()
     };
-    let skills_snapshot = turn_context.skills_snapshot();
+    let skills_snapshot =
+        HostSkillsSnapshot::for_step(&step_context.extension_data, &turn_context.extension_data)?;
     let skills_outcome = skills_snapshot.outcome();
     let connector_slug_counts = build_connector_slug_counts(&available_connectors);
     let extension_injection_items =
@@ -1302,11 +1315,18 @@ async fn build_skills_and_plugins(
     let injected_host_skill_prompts = turn_context
         .extension_data
         .get::<InjectedHostSkillPrompts>();
+    let environments = step_context.environments();
+    let accessors = environments
+        .iter()
+        .map(|(_, access)| access as &dyn EnvironmentAccess)
+        .collect::<Vec<_>>();
     let HostSkillPrompts {
         fragments,
         injected: injected_host_skills,
         warnings: host_skill_warnings,
-    } = skills_snapshot.load_skill_prompts(&mentioned_skills).await;
+    } = skills_snapshot
+        .load_skill_prompts(&mentioned_skills, &accessors)
+        .await;
     emit_explicit_skill_invocations(
         sess,
         turn_context,
@@ -1838,6 +1858,7 @@ pub(crate) fn build_prompt(
         output_schema_strict: !crate::guardian::is_basic_session_source(
             &turn_context.session_source,
         ),
+        prompt_cache_ttl: turn_context.prompt_cache_ttl,
         cyber_access_program: turn_context.cyber_access_program,
     }
 }
@@ -1905,6 +1926,10 @@ async fn run_sampling_request(
             sess.clone_history().await
         };
         let input_item_count = history.raw_items().len();
+        let sampling_step_context = Arc::new(StepContext {
+            sampled_through_sequence: Some(history.input_sequence()),
+            ..step_context.as_ref().clone()
+        });
         let mut prompt_input = history
             .for_prompt(
                 &step_context.settings.model_info.input_modalities,
@@ -1968,7 +1993,7 @@ async fn run_sampling_request(
         let err = match try_run_sampling_request(
             tool_runtime.clone(),
             Arc::clone(&sess),
-            Arc::clone(&step_context),
+            sampling_step_context,
             Arc::clone(&turn_store),
             client_session,
             &responses_metadata,
@@ -2037,6 +2062,7 @@ async fn run_sampling_request(
             return Ok((
                 SamplingRequestResult {
                     needs_follow_up: true,
+                    mailbox_preempted: draining_for_mailbox,
                     last_agent_message: None,
                 },
                 notify_messages,
@@ -2186,6 +2212,8 @@ pub(crate) async fn built_tools(
 #[derive(Debug)]
 struct SamplingRequestResult {
     needs_follow_up: bool,
+    /// Queued mail interrupted sampling and must be drained before the next request.
+    mailbox_preempted: bool,
     last_agent_message: Option<String>,
 }
 
@@ -2704,10 +2732,11 @@ async fn emit_agent_message_in_plan_mode(
             .insert(agent_message_id.clone());
     }
 
-    sess.emit_turn_item_completed_with_token_count(
+    sess.emit_turn_item_completed_with_metadata(
         turn_context,
         TurnItem::AgentMessage(agent_message),
         content_token_count,
+        /*user_input_extension_data*/ None,
     )
     .await;
     state.started_agent_message_items.remove(&agent_message_id);
@@ -2826,21 +2855,6 @@ async fn drain_in_flight(
         }
     }
     Ok(())
-}
-
-fn assign_missing_streamed_response_item_id(
-    item: &mut ResponseItem,
-    active_item: Option<&TurnItem>,
-) {
-    if item.id().is_some_and(|id| !id.is_empty()) {
-        return;
-    }
-
-    let active_item_id = active_item
-        .map(|item| ResponseItemId::from_server(item.id()))
-        .filter(|item_id| !item_id.is_empty());
-    item.set_id(active_item_id);
-    Session::assign_missing_response_item_id(item);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3073,6 +3087,7 @@ async fn try_run_sampling_request(
                 // TODO: Reconcile any response item already being presented to the client.
                 break Ok(SamplingRequestResult {
                     needs_follow_up: true,
+                    mailbox_preempted: false,
                     last_agent_message,
                 });
             }
@@ -3108,6 +3123,7 @@ async fn try_run_sampling_request(
                     // receiving the interrupt. Do not retry without that pending input.
                     break Ok(SamplingRequestResult {
                         needs_follow_up: true,
+                        mailbox_preempted: true,
                         last_agent_message,
                     });
                 }
@@ -3148,7 +3164,12 @@ async fn try_run_sampling_request(
                             authorization: authorization.clone(),
                         })
                     });
-                assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
+                if item.id().is_none_or(|id| id.is_empty())
+                    && let Some(active_item) = &active_item
+                {
+                    item.set_id(Some(ResponseItemId::from_server(active_item.id())));
+                }
+                sess.assign_missing_response_item_id(&mut item);
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
                 if analytics_tool_call_ids.len() < MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE {
@@ -3302,12 +3323,13 @@ async fn try_run_sampling_request(
                     }
                     break Ok(SamplingRequestResult {
                         needs_follow_up: true,
+                        mailbox_preempted: true,
                         last_agent_message,
                     });
                 }
             }
             ResponseEvent::OutputItemAdded(mut item) => {
-                assign_missing_streamed_response_item_id(&mut item, /*active_item*/ None);
+                sess.assign_missing_response_item_id(&mut item);
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
                 if !*draining_for_mailbox
@@ -3519,6 +3541,7 @@ async fn try_run_sampling_request(
                 }
                 break Ok(SamplingRequestResult {
                     needs_follow_up,
+                    mailbox_preempted: *draining_for_mailbox,
                     last_agent_message,
                 });
             }

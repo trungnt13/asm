@@ -64,7 +64,7 @@ pub(crate) struct BackgroundCompactionCandidate {
 pub(crate) struct BackgroundCompactionInput {
     prefix: CompactionPrefix,
     turn_state: Option<String>,
-    window: (String, u64, uuid::Uuid),
+    window: (String, u64, codex_protocol::ContextWindowId),
     base_instructions: BaseInstructions,
     input: Vec<ResponseItem>,
     metadata: Vec<Option<CodexHarnessMetadata>>,
@@ -191,6 +191,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         base_instructions,
         output_schema: None,
         output_schema_strict: true,
+        prompt_cache_ttl: turn_context.prompt_cache_ttl,
         cyber_access_program: turn_context.cyber_access_program,
     };
 
@@ -283,7 +284,7 @@ pub(crate) async fn capture_background_input(
     base_instructions: BaseInstructions,
     turn_state: Option<String>,
     auth_owner_generation: Option<u64>,
-    window: (String, u64, uuid::Uuid),
+    window: (String, u64, codex_protocol::ContextWindowId),
 ) -> BackgroundCompactionInput {
     let base_instructions = if step_context.settings.model_info.use_responses_lite
         && snapshot

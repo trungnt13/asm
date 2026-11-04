@@ -63,7 +63,6 @@ pub async fn build_prompt_request(
     let installation_id = codex_core::resolve_installation_id(&config.codex_home).await?;
     let executor_skill_provider = Arc::new(
         codex_skills_extension::ExecutorSkillProvider::new_with_restriction_product(
-            Arc::clone(&environment_manager),
             SessionSource::Exec.restriction_product(),
         ),
     );
