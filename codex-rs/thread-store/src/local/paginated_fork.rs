@@ -50,7 +50,7 @@ pub(super) async fn prepare(
             read_fork_history(store, thread_id, boundary, lineage)
         })
         .await?;
-    Ok(PreparedFork::new(
+    Ok(PreparedFork::with_source_reservation(
         thread_id,
         history_base,
         Arc::new(model_context),

@@ -29,6 +29,8 @@ pub(crate) use footer::inset_footer_hint_area;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use crate::activation_key_guard::ActivationKeyGuard;
+use crate::activation_key_guard::ActivationKeySuppression;
 use crate::app::app_server_requests::ResolvedAppServerRequest;
 use crate::app_event::AppEvent;
 use crate::app_event::ConnectorsSnapshot;
@@ -1470,23 +1472,24 @@ impl BottomPane {
 
     pub(crate) fn ensure_status_indicator(&mut self) {
         if self.status.is_none() {
-            self.status.get_or_insert_with(|| {
-                StatusIndicatorWidget::new(
-                    self.app_event_tx.clone(),
-                    self.frame_requester.clone(),
-                    self.animations_enabled,
-                    self.effects,
-                )
-            });
-            if let Some(status) = self.status.as_mut() {
-                status.set_interrupt_binding(
-                    self.keymap
-                        .primary_hint(KeymapContext::Chat, "interrupt_turn"),
-                );
-            }
+            self.status = Some(self.new_status_indicator());
             self.sync_status_inline_message();
             self.request_redraw();
         }
+    }
+
+    pub(crate) fn new_status_indicator(&self) -> StatusIndicatorWidget {
+        let mut status = StatusIndicatorWidget::new(
+            self.app_event_tx.clone(),
+            self.frame_requester.clone(),
+            self.animations_enabled,
+            self.effects,
+        );
+        status.set_interrupt_binding(
+            self.keymap
+                .primary_hint(KeymapContext::Chat, "interrupt_turn"),
+        );
+        status
     }
 
     pub(crate) fn set_interrupt_hint_visible(&mut self, visible: bool) {
@@ -2051,13 +2054,15 @@ impl BottomPane {
         &mut self,
         key: KeyBinding,
         activated_at: Instant,
+        suppression: ActivationKeySuppression,
     ) {
-        self.view_transition_key_guard =
-            Some(crate::activation_key_guard::ActivationKeyGuard::new_at(
-                key,
-                activated_at,
-                self.enhanced_keys_supported,
-            ));
+        let reported_repeats_only = self.enhanced_keys_supported
+            || matches!(suppression, ActivationKeySuppression::ReportedRepeats);
+        self.view_transition_key_guard = Some(ActivationKeyGuard::new_at(
+            key,
+            activated_at,
+            reported_repeats_only,
+        ));
     }
 
     pub(crate) fn consume_view_transition_key_event(&mut self, key_event: KeyEvent) -> bool {
@@ -2995,7 +3000,11 @@ mod tests {
         let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
         let mut pane = test_pane(AppEventSender::new(tx_raw));
         let activation_key = crate::key_hint::plain(KeyCode::Enter);
-        pane.suppress_current_view_key_until_release(activation_key, Instant::now());
+        pane.suppress_current_view_key_until_release(
+            activation_key,
+            Instant::now(),
+            ActivationKeySuppression::ViewTransition,
+        );
         pane.push_view(Box::new(DismissibleView::default()));
 
         assert!(pane.consume_view_transition_key(activation_key, KeyEventKind::Repeat));

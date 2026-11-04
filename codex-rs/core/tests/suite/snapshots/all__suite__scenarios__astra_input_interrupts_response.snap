@@ -6,8 +6,8 @@ Scenario: Astra receives new user input after its unfinished response is interru
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (3; hash=e5ef5bef73aea606):
-        - namespace/functions; hash=80f6bbcf34a52070
+00:additional_tools/developer (3; hash=240eeae30b56ee98):
+        - namespace/functions; hash=b141cd314947cacc
           - custom/exec
           - function/wait
           - function/request_user_input

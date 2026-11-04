@@ -316,6 +316,11 @@ impl Session {
         let task: Arc<dyn AnySessionTask> = Arc::new(task);
         let task_kind = task.kind();
         let span_name = task.span_name();
+        crate::turn_timing::review_execution::observe_pending_review_execution(
+            self,
+            &turn_context.turn_timing_state,
+        )
+        .await;
         let started_at = Instant::now();
         let turn_started_at_unix_ms = turn_context
             .turn_timing_state
@@ -358,7 +363,7 @@ impl Session {
         )
         .await;
         let host_admission = self.host_turn_admission();
-        let (agent_execution_guard, task_input, pending_admission_input) = match &host_admission {
+        let (agent_execution_guard, task_input, pending_initial_input) = match &host_admission {
             Some(_) => (None, Vec::new(), Some(input)),
             None => (
                 self.services.agent_control.admit_turn(
@@ -470,7 +475,7 @@ impl Session {
             cancellation_token,
             turn_context: Arc::clone(&turn_context),
             _agent_execution_guard: agent_execution_guard,
-            pending_admission_input,
+            pending_initial_input,
             _diagnostics_guard: ACTIVE_TURNS.track(),
             _timer: timer,
         };
@@ -552,7 +557,9 @@ impl Session {
                 .and_then(|context| context.cyber_access_program);
         }
         let options = NewTurnContextOptions {
+            direct_only_tool_namespaces: start_options.direct_only_tool_namespaces,
             final_output_json_schema: start_options.final_output_json_schema,
+            prompt_cache_ttl: start_options.prompt_cache_ttl,
             cyber_access_program: start_options.cyber_access_program,
         };
         let turn_context = match session_configuration {
@@ -734,8 +741,9 @@ impl Session {
             active_turn.finishing = Some(finishing);
             (
                 Arc::clone(&active_turn.turn_state),
-                task.pending_admission_input.is_some().then_some(task.task),
-                task.pending_admission_input.unwrap_or_default(),
+                (task._agent_execution_guard.is_none() && task.pending_initial_input.is_some())
+                    .then_some(task.task),
+                task.pending_initial_input.unwrap_or_default(),
             )
         };
         turn_context
@@ -1080,10 +1088,10 @@ impl Session {
         let _ = task.handle.await;
 
         if let Err(error) = self
-            .record_unadmitted_input(
+            .record_pending_initial_input(
                 &task.turn_context,
                 turn_state,
-                task.pending_admission_input,
+                task.pending_initial_input,
                 Some(&reason),
             )
             .await
