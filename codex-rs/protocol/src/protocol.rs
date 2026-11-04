@@ -2613,6 +2613,11 @@ pub struct ThreadSettingsSnapshot {
     pub service_tier: Option<String>,
     pub approval_policy: AskForApproval,
     pub approvals_reviewer: ApprovalsReviewer,
+    /// Original selection before managed policy resolved the effective reviewer.
+    /// Older histories contain only `approvals_reviewer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub requested_approvals_reviewer: Option<ApprovalsReviewer>,
     pub permission_profile: PermissionProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -3769,6 +3774,10 @@ pub struct TurnContextItem {
     /// Root turn that owns this turn's attribution, retained across recovery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_turn_id: Option<String>,
+    /// Explicit routing for this turn. An empty list clears the thread's direct namespaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub direct_only_tool_namespaces: Option<Vec<String>>,
     /// Plugin selection captured for this turn. Absent in older histories.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -6762,6 +6771,7 @@ mod tests {
         let item = TurnContextItem {
             turn_id: None,
             root_turn_id: None,
+            direct_only_tool_namespaces: None,
             disabled_plugin_ids: None,
             cwd: test_path_buf("/tmp").abs(),
             approval_policy: AskForApproval::Never,

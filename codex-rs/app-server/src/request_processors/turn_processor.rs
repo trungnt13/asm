@@ -720,11 +720,12 @@ impl TurnRequestProcessor {
                     .on_start(TurnStartOptions {
                         turn_trigger: params.turn_trigger,
                         parent_turn_id: params.parent_turn_id,
-                        initiating_agent_path: None,
                         root_turn_id: params.root_turn_id,
                         final_output_json_schema: params.output_schema,
                         service_tier: params.service_tier_for_turn,
+                        prompt_cache_ttl: None,
                         cyber_access_program: params.cyber_access_program.map(Into::into),
+                        ..Default::default()
                     })
                     .with_additional_context(additional_context)
                     .with_responses_metadata(params.responsesapi_client_metadata)
@@ -975,6 +976,7 @@ impl TurnRequestProcessor {
                     runtime_workspace_roots: runtime_workspace_roots.clone(),
                     approval_policy,
                     approvals_reviewer,
+                    requested_approvals_reviewer: None,
                     sandbox_policy: sandbox_policy.clone(),
                     permission_profile: permission_profile.clone(),
                     active_permission_profile: active_permission_profile.clone(),

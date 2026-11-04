@@ -31,6 +31,7 @@ use crate::event_mapping::is_contextual_user_message_content;
 use crate::event_mapping::parse_turn_item;
 use crate::guardian::GUARDIAN_MAX_ROOT_MESSAGE_TOKENS;
 use crate::guardian::guardian_truncate_text;
+use crate::session::FileAudioDurations;
 use crate::session::turn_context::TurnContext;
 use crate::utils::json::serialized_json_bytes;
 use base64::Engine;
@@ -39,6 +40,7 @@ use codex_attachment_store::AttachmentStore;
 use codex_context_fragments::set_annotated_content;
 use codex_context_fragments::to_annotated_content;
 use codex_extension_api::ConversationHistorySnapshot;
+use codex_guardian_context::ContextBudgeting;
 use codex_guardian_context::SectionHistory;
 use codex_guardian_context::TranscriptHistory;
 use codex_history::CodexHarnessMetadata;
@@ -50,6 +52,7 @@ use codex_history::RetainedContextEvent;
 use codex_history::RetainedInputSource;
 use codex_prompts::render_model_instructions;
 use codex_protocol::DEFAULT_FUNCTION_NAMESPACE;
+use codex_protocol::ItemIdGenerator;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::AudioReference;
@@ -91,28 +94,28 @@ use codex_features::Feature;
 
 static GUARDIAN_REVIEW_CONTEXT_REVISION: AtomicU64 = AtomicU64::new(/*v*/ 1);
 
-// Responses validates uploaded audio against its 20-minute duration limit.
-// File durations are unavailable locally, so budget that maximum at the existing
-// inline estimate of 10 audio tokens per second.
-pub(crate) const FILE_AUDIO_TOKENS_ESTIMATE: usize = 20 * 60 * 10;
-
 fn next_guardian_review_context_revision() -> u64 {
     GUARDIAN_REVIEW_CONTEXT_REVISION.fetch_add(/*val*/ 1, Ordering::Relaxed)
 }
 
 /// Transcript of thread history
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct ContextManager {
+    item_id_generator: ItemIdGenerator,
+    sampling: super::sampling::SamplingProgress,
     /// The oldest items are at the beginning of the vector. Snapshots share the vector until a
     /// caller needs to mutate it, avoiding deep copies for read-only history consumers.
     items: Arc<Vec<ResponseItemEnvelope>>,
     /// Compatibility history for legacy review and missing root instructions.
     review_history: Option<TranscriptHistory>,
+    /// Captured before recording; replay and legacy backups keep the same storage policy.
+    review_budgeting: ContextBudgeting,
     /// Host facts independent of the model window; snapshots share immutable state.
     retained_context: Arc<RetainedContext>,
     /// File IDs rejected by Responses. Retained history stays append-only; only
     /// request projections omit these references.
     rejected_audio_file_ids: Arc<BTreeSet<String>>,
+    pub(crate) file_audio_durations: Arc<FileAudioDurations>,
     /// Reviewer policy travels with the history snapshot, independently of capture.
     guardian_review_mode: GuardianContextMode,
     guardian_include_additional_context: bool,
@@ -145,6 +148,44 @@ pub(crate) struct ContextManager {
     /// World-state comparison checkpoint. After compaction this may contain only
     /// extension metadata, with model-visible context still awaiting reinjection.
     world_state_baseline: Option<WorldStateSnapshot>,
+}
+
+impl std::fmt::Debug for ContextManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContextManager")
+            .field("items", &self.items)
+            .field("review_history", &self.review_history)
+            .field("retained_context", &self.retained_context)
+            .field("rejected_audio_file_ids", &self.rejected_audio_file_ids)
+            .field("guardian_review_mode", &self.guardian_review_mode)
+            .field(
+                "guardian_include_additional_context",
+                &self.guardian_include_additional_context,
+            )
+            .field(
+                "retain_inherited_user_messages",
+                &self.retain_inherited_user_messages,
+            )
+            .field("history_version", &self.history_version)
+            .field("reset_version", &self.reset_version)
+            .field("user_message_revision", &self.user_message_revision)
+            .field(
+                "guardian_review_context_revision",
+                &self.guardian_review_context_revision,
+            )
+            .field("token_info", &self.token_info)
+            .field(
+                "last_server_reported_usage_item_count",
+                &self.last_server_reported_usage_item_count,
+            )
+            .field(
+                "last_model_output_item_count",
+                &self.last_model_output_item_count,
+            )
+            .field("reference_context_item", &self.reference_context_item)
+            .field("world_state_baseline", &self.world_state_baseline)
+            .finish()
+    }
 }
 
 struct SharedConversationHistory {
@@ -264,19 +305,24 @@ impl SharedConversationHistory {
     }
 }
 
+#[cfg(test)]
 impl Default for ContextManager {
     fn default() -> Self {
-        Self::new()
+        Self::new(codex_protocol_test_support::uuid_v7_item_id_generator_for_test())
     }
 }
 
 impl ContextManager {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(item_id_generator: ItemIdGenerator) -> Self {
         Self {
+            item_id_generator,
+            sampling: Default::default(),
             items: Arc::new(Vec::new()),
             review_history: None,
+            review_budgeting: ContextBudgeting::Fixed,
             retained_context: Arc::default(),
             rejected_audio_file_ids: Arc::default(),
+            file_audio_durations: Arc::default(),
             guardian_review_mode: GuardianContextMode::ThreadOwned,
             guardian_include_additional_context: Feature::GuardianIncludeAdditionalContext
                 .default_enabled(),
@@ -313,6 +359,8 @@ impl ContextManager {
     pub(crate) fn for_session(
         root_capabilities_restricted: bool,
         features: &ManagedFeatures,
+        budgeting: ContextBudgeting,
+        item_id_generator: ItemIdGenerator,
     ) -> Self {
         let independent = !features.enabled(Feature::GuardianReuseParentCompaction);
         Self {
@@ -324,8 +372,10 @@ impl ContextManager {
             } else {
                 GuardianContextMode::ThreadOwned
             },
-            review_history: independent.then(TranscriptHistory::default),
-            ..Self::new()
+            review_budgeting: budgeting,
+            review_history: independent
+                .then(|| TranscriptHistory::new(/*generation*/ 0, budgeting)),
+            ..Self::new(item_id_generator)
         }
     }
 
@@ -334,7 +384,7 @@ impl ContextManager {
     }
 
     pub(crate) fn record_retained_context(&mut self, event: &RetainedContextEvent) -> bool {
-        if !Arc::make_mut(&mut self.retained_context).record(event) {
+        if !Arc::make_mut(&mut self.retained_context).record(event, &self.item_id_generator) {
             return false;
         }
         match event {
@@ -459,7 +509,7 @@ impl ContextManager {
             .as_ref()
             .map_or(self.history_version, TranscriptHistory::generation)
             .saturating_add(1);
-        let mut history = TranscriptHistory::new(generation);
+        let mut history = TranscriptHistory::new(generation, self.review_budgeting);
         if let Some(checkpoint) = checkpoint {
             history.reset(checkpoint.0.iter());
         } else {
@@ -580,6 +630,7 @@ impl ContextManager {
         policy: TruncationPolicy,
     ) {
         for envelope in items {
+            self.sampling.record(envelope);
             if let Some(source) =
                 self.record_item_with_metadata(&envelope.item, envelope.metadata.as_ref(), policy)
             {
@@ -623,6 +674,7 @@ impl ContextManager {
             item: item.clone(),
             metadata: metadata.cloned(),
         };
+        self.sampling.record(&mut processed);
         if let ResponseItem::FunctionCallOutput { output, .. }
         | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
         {
@@ -779,6 +831,14 @@ impl ContextManager {
         self.history_version
     }
 
+    pub(crate) fn input_sequence(&self) -> u64 {
+        self.sampling.last_sequence
+    }
+
+    pub(crate) fn checkpoint_sampling(&mut self, items: &mut [ResponseItemEnvelope]) {
+        self.sampling.checkpoint(items);
+    }
+
     // Estimate token usage using byte-based heuristics from the truncation helpers.
     // This is a coarse lower bound, not a tokenizer-accurate count.
     pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {
@@ -808,7 +868,9 @@ impl ContextManager {
         let items_tokens = self
             .items
             .iter()
-            .map(|envelope| estimate_item_token_count(&envelope.item))
+            .map(|envelope| {
+                estimate_item_token_count_with_audio(&envelope.item, &self.file_audio_durations)
+            })
             .fold(0i64, i64::saturating_add);
 
         Some(base_tokens.saturating_add(items_tokens))
@@ -834,7 +896,8 @@ impl ContextManager {
         self.replace_annotated(items.into_iter().map(ResponseItemEnvelope::new).collect());
     }
 
-    pub(crate) fn replace_annotated(&mut self, items: Vec<ResponseItemEnvelope>) {
+    pub(crate) fn replace_annotated(&mut self, mut items: Vec<ResponseItemEnvelope>) {
+        self.sampling = super::sampling::SamplingProgress::restore(&mut items);
         self.retained_context = Arc::default();
         self.user_message_revision = self.user_message_revision.saturating_add(1);
         if let Some(review_history) = &mut self.review_history {
@@ -873,7 +936,10 @@ impl ContextManager {
         }
         if self.guardian_review_mode == GuardianContextMode::Legacy && self.review_history.is_none()
         {
-            let mut retained = TranscriptHistory::new(self.history_version.saturating_add(1));
+            let mut retained = TranscriptHistory::new(
+                self.history_version.saturating_add(1),
+                self.review_budgeting,
+            );
             for item in self
                 .annotated_items()
                 .iter()
@@ -1081,7 +1147,9 @@ impl ContextManager {
                     }
                 )
             })
-            .map(|envelope| estimate_item_token_count(&envelope.item))
+            .map(|envelope| {
+                estimate_item_token_count_with_audio(&envelope.item, &self.file_audio_durations)
+            })
             .fold(0i64, i64::saturating_add)
     }
 
@@ -1116,7 +1184,7 @@ impl ContextManager {
 
     pub(crate) fn estimated_tokens_since_last_usage(&self) -> i64 {
         self.items_since_last_usage()
-            .map(estimate_item_token_count)
+            .map(|item| estimate_item_token_count_with_audio(item, &self.file_audio_durations))
             .fold(0i64, i64::saturating_add)
     }
 
@@ -1249,8 +1317,17 @@ fn estimate_encrypted_function_output_length(encoded_len: usize) -> usize {
 /// Counts content directly, excluding transport IDs, metadata, and outer JSON escaping.
 /// Original-detail file images use the maximum patch count.
 pub(crate) fn estimate_item_token_count(item: &ResponseItem) -> i64 {
-    let model_visible_bytes = estimate_response_item_model_visible_bytes(item);
-    approx_tokens_from_byte_count_i64(model_visible_bytes)
+    estimate_item_token_count_with_audio(item, &FileAudioDurations::default())
+}
+
+pub(crate) fn estimate_item_token_count_with_audio(
+    item: &ResponseItem,
+    audio_durations: &FileAudioDurations,
+) -> i64 {
+    approx_tokens_from_byte_count_i64(estimate_response_item_model_visible_bytes(
+        item,
+        audio_durations,
+    ))
 }
 
 /// Approximate model-visible byte cost for one image input.
@@ -1276,7 +1353,10 @@ static ORIGINAL_IMAGE_ESTIMATE_CACHE: LazyLock<OriginalImageEstimateCache> = Laz
     )
 });
 
-fn estimate_response_item_model_visible_bytes(item: &ResponseItem) -> i64 {
+fn estimate_response_item_model_visible_bytes(
+    item: &ResponseItem,
+    audio_durations: &FileAudioDurations,
+) -> i64 {
     match item {
         ResponseItem::Message { content, .. } => content
             .iter()
@@ -1287,7 +1367,9 @@ fn estimate_response_item_model_visible_bytes(item: &ResponseItem) -> i64 {
                 ContentItem::InputImage { image, detail } => {
                     estimate_image_reference_bytes(image, *detail)
                 }
-                ContentItem::InputAudio { audio } => estimate_audio_reference_bytes(audio),
+                ContentItem::InputAudio { audio } => {
+                    estimate_audio_reference_bytes(audio, audio_durations)
+                }
             })
             .fold(0i64, i64::saturating_add),
         ResponseItem::AgentMessage {
@@ -1500,13 +1582,15 @@ fn estimate_audio_bytes(audio_url: &str) -> i64 {
     .unwrap_or(i64::MAX)
 }
 
-/// Audio estimate for callers that only have the reference. Uploaded file durations are not
-/// available locally, so file references use the maximum duration accepted by Responses.
-fn estimate_audio_reference_bytes(audio: &AudioReference) -> i64 {
+fn estimate_audio_reference_bytes(
+    audio: &AudioReference,
+    audio_durations: &FileAudioDurations,
+) -> i64 {
     match audio {
         AudioReference::Inline { audio_url } => estimate_audio_bytes(audio_url),
-        AudioReference::File { .. } => {
-            i64::try_from(approx_bytes_for_tokens(FILE_AUDIO_TOKENS_ESTIMATE)).unwrap_or(i64::MAX)
+        AudioReference::File { file_id } => {
+            i64::try_from(approx_bytes_for_tokens(audio_durations.tokens(file_id)))
+                .unwrap_or(i64::MAX)
         }
     }
 }

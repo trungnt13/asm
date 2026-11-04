@@ -119,7 +119,7 @@ async fn interrupted_snapshot_closes_only_child_pending_calls(kind: &str) {
             _ => None,
         })
         .collect();
-    let mut history = ContextManager::new();
+    let mut history = ContextManager::default();
     history.replace_annotated(envelopes.clone());
     assert_eq!(
         history
@@ -146,7 +146,7 @@ fn live_custom_call_without_output_still_violates_history_invariant() {
         "type": "custom_tool_call", "call_id": "live", "name": "code_mode", "input": ""
     }))
     .unwrap();
-    let mut history = ContextManager::new();
+    let mut history = ContextManager::default();
     history.replace(vec![call]);
     history.normalize_history(&[InputModality::Text]);
 }

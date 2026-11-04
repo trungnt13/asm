@@ -3367,7 +3367,22 @@ async fn docked_replay_finishes_while_skills_refresh_is_pending() -> Result<()> 
 #[tokio::test]
 async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    // Both pane footers should fit the same way on Unix and Windows.
+    std::fs::write(
+        &app.local_settings.user_config_path,
+        "[tui]\nstatus_line = ['model-with-reasoning', 'thread-name']\n",
+    )?;
     let config = app.chat_widget.config_ref().clone();
+    let model =
+        app_test_support::create_mock_responses_server_repeating_assistant("Side answer").await;
+    std::fs::write(
+        config.codex_home.join("config.toml"),
+        // Each thread reloads this footer. Omit the platform-specific working directory.
+        format!(
+            "openai_base_url = '{}/v1'\n[tui]\nstatus_line = ['model-with-reasoning']",
+            model.uri()
+        ),
+    )?;
     let parent_thread_id = ThreadId::from_string(
         &app_test_support::create_fake_rollout(
             config.codex_home.as_path(),
@@ -3410,7 +3425,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         &mut app_server,
         parent_thread_id,
         CompanionKind::Parallel,
-        /*user_message*/ None,
+        Some("Side question".into()),
     ))
     .await?;
 
@@ -3428,8 +3443,27 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             .is_closed
     );
 
+    // Give Ctrl-/ its earliest opportunity to switch back after /btw queues the prompt.
+    while !app.can_read_terminal_after_thread_switch(&tui, &app_event_rx) {
+        let event = app_event_rx.try_recv()?;
+        boxed_future!(app.handle_event(&mut tui, &mut app_server, event)).await?;
+    }
+    macro_rules! keys {
+        ($($key:expr),+) => {{
+            for key in [$($key),+] {
+                boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(key))).await?;
+            }
+            drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
+        }};
+    }
+    let toggle = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL);
+    for expected in [parent_thread_id, side_thread_id] {
+        keys!(toggle);
+        assert_eq!(app.active_thread_id, Some(expected));
+    }
+
     let mut saw_thread_started = false;
-    for _ in 0..20 {
+    loop {
         let event = time::timeout(
             std::time::Duration::from_secs(/*secs*/ 2),
             app_server.next_event(),
@@ -3439,11 +3473,19 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         .expect("app-server event stream should remain open");
         if let codex_app_server_client::AppServerEvent::ServerNotification(notification) =
             event.event
-            && let ServerNotification::ThreadStarted(notification) = notification.as_ref()
-            && notification.thread.id == side_thread_id.to_string()
         {
-            saw_thread_started = true;
-            break;
+            match notification.as_ref() {
+                ServerNotification::ThreadStarted(started)
+                    if started.thread.id == side_thread_id.to_string() =>
+                {
+                    saw_thread_started = true;
+                }
+                ServerNotification::TurnStarted(started) => {
+                    assert_eq!(started.thread_id, side_thread_id.to_string());
+                    break;
+                }
+                _ => {}
+            }
         }
     }
 
@@ -3549,14 +3591,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         ))
     );
 
-    macro_rules! keys {
-        ($($key:expr),+) => {{
-            for key in [$($key),+] {
-                boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(key))).await?;
-            }
-            drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
-        }};
-    }
     let leader = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
     let [minus, repeat, release] = [
         KeyEventKind::Press,
@@ -3621,7 +3655,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     };
     let inactive = composer_gutter(&mut app, &mut tui)?;
 
-    let toggle = KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL);
     keys!(toggle);
     assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
     let wide = side_frame(&mut app, &mut tui, size)?;
@@ -3673,8 +3706,10 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         if width == 100 {
             app.pending_server_profiles
                 .insert(side_thread_id, read_only.clone());
-            keys!(prefix, main);
-            assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
+            for completion in [main, KeyCode::Left.into()] {
+                keys!(prefix, completion);
+                assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
+            }
             assert!(app.transcript_view.is_select_mode());
             assert!(
                 app.side_companions[&parent_thread_id]
@@ -3705,6 +3740,17 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
                 app.chat_widget.composer_text_with_pending(),
                 "parent draft-"
             );
+            // With the pane hidden, right must leave both the Find text and its caret alone.
+            app.transcript_view.begin_search();
+            assert!(app.transcript_view.paste_search(parent_row));
+            let (_, end) = app.transcript_view.search_footer(width).unwrap();
+            keys!(KeyCode::Left.into());
+            let footer = app.transcript_view.search_footer(width).unwrap();
+            assert!(footer.1 < end);
+            keys!(prefix, KeyCode::Right.into());
+            assert_eq!(app.transcript_view.search_footer(width), Some(footer));
+            assert!(!app.side_threads[&side_thread_id].pane_open);
+            app.transcript_view.cancel_search();
             boxed_future!(app.toggle_side_conversation(&mut tui, &mut app_server)).await?;
             drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
         }
@@ -3754,8 +3800,10 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert!(app.transcript_view.begin_select_mode(&app.transcript_cells));
     app.pending_server_profiles
         .insert(parent_thread_id, read_only);
-    keys!(prefix, side);
-    assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
+    for completion in [side, KeyCode::Right.into()] {
+        keys!(prefix, completion);
+        assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
+    }
     assert!(app.transcript_view.is_select_mode());
     app.pending_server_profiles.remove(&parent_thread_id);
     keys!(prefix, side);
@@ -3767,6 +3815,76 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             .has_active_interaction()
     );
     app.transcript_view.end_select_mode();
+
+    // At 99 columns only the focused conversation is painted, but both panes are still open.
+    side_frame(&mut app, &mut tui, Size::new(/*width*/ 99, /*height*/ 18))?;
+    assert!(app.transcript_view.begin_select_mode(&app.transcript_cells));
+    keys!(KeyCode::Char('v').into(), KeyCode::Right.into());
+    let selected = app.transcript_view.selected_text(&app.transcript_cells);
+    assert!(selected.as_deref().is_some_and(|text| !text.is_empty()));
+    keys!(prefix, KeyCode::Right.into());
+    assert_eq!(
+        app.transcript_view.selected_text(&app.transcript_cells),
+        selected
+    );
+
+    keys!(prefix, KeyCode::Char('h').into());
+    assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
+    assert!(app.side_threads[&side_thread_id].pane_open);
+    side_frame(&mut app, &mut tui, Size::new(/*width*/ 99, /*height*/ 18))?;
+    assert!(app.transcript_view.begin_select_mode(&app.transcript_cells));
+    keys!(KeyCode::Char('v').into(), KeyCode::Right.into());
+    let parent_text = app.transcript_view.selected_text(&app.transcript_cells);
+    assert!(parent_text.as_deref().is_some_and(|text| !text.is_empty()));
+    keys!(prefix, KeyCode::Left.into());
+    assert_eq!(
+        app.transcript_view.selected_text(&app.transcript_cells),
+        parent_text
+    );
+
+    keys!(prefix, KeyCode::Char('l').into());
+    assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
+    assert_eq!(
+        app.transcript_view.selected_text(&app.transcript_cells),
+        selected
+    );
+    app.transcript_view.end_select_mode();
+    keys!(prefix, KeyCode::Left.into());
+    assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
+    assert!(app.transcript_view.is_select_mode());
+    assert_eq!(
+        app.transcript_view.selected_text(&app.transcript_cells),
+        parent_text
+    );
+
+    keys!(prefix, main);
+    app.transcript_view.begin_search();
+    assert!(app.transcript_view.paste_search(parent_row));
+    keys!(KeyCode::Left.into());
+    let find = app.transcript_view.search_footer(size.width).unwrap();
+    keys!(prefix, KeyCode::Right.into());
+    keys!(prefix, KeyCode::Left.into());
+    assert_eq!(app.transcript_view.search_footer(size.width), Some(find));
+    keys!(KeyCode::Char('x').into());
+    let frame = side_frame(&mut app, &mut tui, size)?;
+    assert_app_snapshot!(
+        "direction_restores_parent_find",
+        frame.lines().find(|row| row.contains("Find:")).unwrap()
+    );
+
+    // Explicit composer focus ends Find. Scrolling alone keeps the composer active.
+    keys!(prefix, main);
+    read_side_history(&mut app, &mut tui, "parent")?;
+    keys!(prefix, KeyCode::Right.into());
+    keys!(prefix, KeyCode::Left.into());
+    assert!(side_frame(&mut app, &mut tui, size)?.contains(parent_row));
+    // End flushes the composer's pending paste-burst character.
+    keys!(KeyCode::Char('!').into(), KeyCode::End.into());
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending(),
+        "parent draft-!"
+    );
+    keys!(toggle);
 
     read_side_history(&mut app, &mut tui, "child")?;
     // The upload finishes before the app event loop can park the now-inactive child.
