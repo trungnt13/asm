@@ -316,6 +316,11 @@ impl Session {
         let task: Arc<dyn AnySessionTask> = Arc::new(task);
         let task_kind = task.kind();
         let span_name = task.span_name();
+        crate::turn_timing::review_execution::observe_pending_review_execution(
+            self,
+            &turn_context.turn_timing_state,
+        )
+        .await;
         let started_at = Instant::now();
         let turn_started_at_unix_ms = turn_context
             .turn_timing_state
@@ -552,7 +557,9 @@ impl Session {
                 .and_then(|context| context.cyber_access_program);
         }
         let options = NewTurnContextOptions {
+            direct_only_tool_namespaces: start_options.direct_only_tool_namespaces,
             final_output_json_schema: start_options.final_output_json_schema,
+            prompt_cache_ttl: start_options.prompt_cache_ttl,
             cyber_access_program: start_options.cyber_access_program,
         };
         let turn_context = match session_configuration {
