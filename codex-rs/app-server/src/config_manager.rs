@@ -38,6 +38,11 @@ use tracing::warn;
 
 #[path = "application_network.rs"]
 pub(crate) mod application_network;
+#[path = "model_provider_admission.rs"]
+mod model_provider_admission;
+
+pub(crate) use model_provider_admission::SavedModelProvider;
+use model_provider_admission::model_selects_provider;
 
 /// Shared app-server entry point for loading effective Codex configuration.
 #[derive(Clone)]
@@ -521,7 +526,7 @@ impl ConfigManager {
     /// Validates saved and requested providers before resume overrides or policy can replace them.
     pub(crate) async fn load_for_resume(
         &self,
-        saved_provider: Option<&str>,
+        saved_route: Option<SavedModelProvider<'_>>,
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
         cwd: Option<PathBuf>,
@@ -533,6 +538,7 @@ impl ConfigManager {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         });
+        let saved_provider = saved_route.map(|route| route.provider);
         if let Some(saved) = saved_provider {
             typesafe_overrides.model_provider = Some(saved.to_owned());
         }
@@ -541,7 +547,8 @@ impl ConfigManager {
             request_overrides,
             typesafe_overrides,
             cwd,
-            |config, _overrides, layers| {
+            |config, overrides, layers| {
+                let saved_provider = saved_route.map(|route| route.provider);
                 let requested_provider = requested_provider
                     .as_deref()
                     .or(saved_provider)

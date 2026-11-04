@@ -20,6 +20,7 @@ use super::thread_input::can_accept_direct_input;
 use super::thread_input::ensure_direct_input_allowed;
 use super::thread_lifecycle::thread_closing_for_resume;
 use super::*;
+use crate::config_manager::SavedModelProvider;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::error_code::method_not_found;
 use crate::thread_sample::SampleTask;
@@ -4362,19 +4363,30 @@ impl ThreadRequestProcessor {
                     .load_for_resume(
                         resume_source_thread
                             .as_ref()
-                            .map(|thread| thread.model_provider.as_str())
-                            .filter(|provider| !provider.is_empty())
+                            .map(|thread| SavedModelProvider {
+                                model: thread.model.as_deref(),
+                                provider: thread.model_provider.as_str(),
+                            })
+                            .filter(|route| !route.provider.is_empty())
                             .or_else(|| {
-                                config_state
-                                    .persisted_metadata
-                                    .as_ref()
-                                    .map(|metadata| metadata.model_provider.as_str())
+                                config_state.persisted_metadata.as_ref().map(|metadata| {
+                                    SavedModelProvider {
+                                        model: metadata.model.as_deref(),
+                                        provider: metadata.model_provider.as_str(),
+                                    }
+                                })
                             })
                             .or_else(|| match &thread_history {
                                 InitialHistory::Resumed(resumed) => {
                                     resumed.history.iter().find_map(|item| match item {
                                         RolloutItem::SessionMeta(meta) => {
-                                            meta.meta.model_provider.as_deref()
+                                            meta.meta.model_provider.as_deref().map(|provider| {
+                                                SavedModelProvider {
+                                                    model: persisted_model_settings
+                                                        .map(|settings| settings.model.as_str()),
+                                                    provider,
+                                                }
+                                            })
                                         }
                                         _ => None,
                                     })
