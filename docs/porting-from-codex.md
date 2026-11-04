@@ -338,6 +338,12 @@ do not add HTTP provider bindings or change native model/runtime selection.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
 Provider changes in the picker start fresh sessions and preserve the old chat.
+Input and resume admission keep valid catalog-bound and native-runtime routes independent
+of the global HTTP-provider default. Validate saved and requested identities separately;
+request overrides cannot grant an exception to an unrelated saved chat. Keep mandatory
+provider policy, configuration errors, missing-provider checks, and history/runtime boundaries.
+Ordinary unbound API models retain upstream default-provider admission rules. Route checks
+use existing in-memory model bindings and runtime detection, not discovery or extra I/O.
 Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
 reuse and preserve saved provider identity on resume. Build a provider-specific
 model manager for bound models rather than reuse the parent's discovery identity.
