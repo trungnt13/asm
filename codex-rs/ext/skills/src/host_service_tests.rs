@@ -215,11 +215,17 @@ async fn skills_for_config_reuses_cache_for_same_effective_config() {
 
     let base_input = HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack);
     let unscoped = skills_service
-        .snapshot_for_config(&base_input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &base_input,
+            Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await;
     let reviewer_input = base_input.with_agent_role(Some("reviewer".to_string()));
     let unscoped_reviewer = skills_service
-        .snapshot_for_config(&reviewer_input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &reviewer_input,
+            Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await;
     assert!(std::ptr::eq(
         unscoped.outcome(),
@@ -262,7 +268,10 @@ allowed_agent_roles = []
             .clone()
             .with_agent_role(role.map(str::to_string));
         let config_snapshot = skills_service
-            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+            .snapshot_for_config(
+                &input,
+                Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+            )
             .await;
         let cwd_snapshot = skills_service
             .for_request()
