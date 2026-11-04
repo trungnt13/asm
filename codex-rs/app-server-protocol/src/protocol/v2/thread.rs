@@ -2087,7 +2087,7 @@ pub struct ThreadTokenUsageUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
     pub token_usage: ThreadTokenUsage,
-    /// Successful ordinary response throughput, including request latency and reasoning output.
+    /// Successful ordinary response non-reasoning output throughput, excluding initial latency.
     /// Other usage updates and replayed updates carry `None`.
     #[serde(default)]
     pub output_tokens_per_second: Option<f64>,

@@ -528,6 +528,7 @@ async fn streaming_client_retries_on_transport_error() -> Result<()> {
         match stream.next().await {
             Some(Ok(ResponseEvent::Completed {
                 request_duration_ms,
+                generation_duration_ms: _,
                 ..
             })) => break request_duration_ms,
             Some(Ok(_)) => {}

@@ -67,12 +67,12 @@ impl ModelResponseInterceptor for Permit {
                 let mut output_items = 0;
                 while let Some(mut event) = stream.next().await {
                     if let Ok(ResponseEvent::Completed {
-                        request_duration_ms,
+                        generation_duration_ms,
                         ..
                     }) = &mut event
                     {
                         // A fixed transport duration isolates core accounting from test scheduling.
-                        *request_duration_ms = Some(2_000);
+                        *generation_duration_ms = Some(2_000);
                     }
                     let metadata_event_type = match &event {
                         Ok(ResponseEvent::ModelVerifications(_)) => Some("verification"),
@@ -226,8 +226,8 @@ async fn model_request_gates_output_and_cancellation() -> Result<()> {
     let EventMsg::TokenCount(token_count) = token_count else {
         unreachable!("expected token usage update");
     };
-    // Seven total output tokens include the three reasoning tokens: 7 / 2 seconds.
-    assert_eq!(token_count.output_tokens_per_second, Some(3.5));
+    // Exclude the three reasoning tokens from the seven total output tokens: 4 / 2 seconds.
+    assert_eq!(token_count.output_tokens_per_second, Some(2.0));
     wait_for_event(&test.codex, |e| matches!(e, EventMsg::TurnComplete(_))).await;
     assert_eq!(gates.cancelled.available_permits(), 0);
 

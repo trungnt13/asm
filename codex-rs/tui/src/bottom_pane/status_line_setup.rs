@@ -132,7 +132,7 @@ pub(crate) enum StatusLineItem {
     /// Total output tokens generated.
     TotalOutputTokens,
 
-    /// Latest successful request output tokens per second, including reasoning and latency.
+    /// Latest successful request non-reasoning output tokens per second, excluding initial latency.
     OutputTps,
 
     /// Estimated credits attributed directly to the current enterprise thread.
@@ -220,9 +220,7 @@ impl StatusLineItem {
                 "Cached share of the latest request's input tokens (omitted until available)"
             }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
-            StatusLineItem::OutputTps => {
-                "Latest successful request output tokens/s, including reasoning and latency"
-            }
+            StatusLineItem::OutputTps => "Non-reasoning output tokens/s, excluding initial latency",
             StatusLineItem::ThreadCredits => {
                 "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
             }

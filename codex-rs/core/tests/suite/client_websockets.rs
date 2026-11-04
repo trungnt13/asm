@@ -202,6 +202,7 @@ async fn responses_websocket_preserves_credit_usage_metadata() {
         if let ResponseEvent::Completed {
             usage_metadata: metadata,
             request_duration_ms,
+            generation_duration_ms: _,
             ..
         } = event.expect("websocket stream failed")
         {
