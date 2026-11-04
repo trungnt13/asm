@@ -335,7 +335,13 @@ allowed_agent_roles = []
                 assert_eq!(selected, expected);
             }
             // Catalog visibility does not deny ordinary file reads.
-            let contents = config_snapshot.read_skill_text(skill).await.unwrap();
+            let contents = config_snapshot
+                .read_skill_text(
+                    skill,
+                    &[&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)],
+                )
+                .await
+                .unwrap();
             assert!(contents.contains("# Body"));
         }
         scoped_snapshots.push(config_snapshot);

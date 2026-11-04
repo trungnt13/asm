@@ -15,7 +15,7 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (9; hash=a44e236ec90a07d0):
+  tools (9; hash=dae8d23c35fba302):
     - function/exec_command: Runs a command in a PTY, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=c04108e51a8548c5
     - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.; args=[chars, max_output_tokens, reason, session_id, yield_time_ms]; hash=4c302c45f6b7c80c
     - function/wait_for_environment: Wait for the selected environment.; args=[environment_id]; hash=aac8552da86b3b20

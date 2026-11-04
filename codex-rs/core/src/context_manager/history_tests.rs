@@ -943,8 +943,8 @@ fn filters_non_api_messages() {
     assert_eq!(raw_items(&h), vec![reasoning, u, a]);
 }
 
-#[test]
-fn retains_only_harness_authored_configuration_updates() {
+#[tokio::test]
+async fn retains_only_harness_authored_configuration_updates() {
     let mut history = ContextManager::default();
     let update = ResponseItem::ConfigurationUpdate {
         reasoning: ConfigurationReasoning {
@@ -999,6 +999,8 @@ fn retains_only_harness_authored_configuration_updates() {
         item: trusted.item.clone(),
         metadata: Some(CodexHarnessMetadata {
             harness_authored_configuration: true,
+            history_sequence: Some(5),
+            sampled_through_sequence: Some(0),
             history_truncation_token_limit: Some(4096),
             ..Default::default()
         }),
@@ -1009,13 +1011,25 @@ fn retains_only_harness_authored_configuration_updates() {
                 effort: ReasoningEffort::Low,
             },
         },
-        metadata: last_high.metadata.clone(),
+        metadata: Some(CodexHarnessMetadata {
+            history_sequence: Some(7),
+            ..last_high.metadata.clone().unwrap()
+        }),
     };
-    let untrusted = ResponseItemEnvelope::new(low.item.clone());
+    let untrusted = ResponseItemEnvelope {
+        item: low.item.clone(),
+        metadata: Some(CodexHarnessMetadata {
+            history_sequence: Some(5),
+            sampled_through_sequence: Some(0),
+            ..Default::default()
+        }),
+    };
     let client_authored = ResponseItemEnvelope {
         item: low.item.clone(),
         metadata: Some(CodexHarnessMetadata {
             client_authored: true,
+            history_sequence: Some(6),
+            sampled_through_sequence: Some(0),
             ..Default::default()
         }),
     };
@@ -1043,7 +1057,14 @@ fn retains_only_harness_authored_configuration_updates() {
         cases.push((
             vec![
                 trusted.clone(),
-                ResponseItemEnvelope::new(custom_tool_call_output("orphan", "discard")),
+                ResponseItemEnvelope {
+                    item: custom_tool_call_output("orphan", "discard"),
+                    metadata: Some(CodexHarnessMetadata {
+                        history_sequence: Some(6),
+                        sampled_through_sequence: Some(0),
+                        ..Default::default()
+                    }),
+                },
                 low.clone(),
             ],
             vec![low],

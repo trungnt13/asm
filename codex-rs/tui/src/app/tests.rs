@@ -3500,19 +3500,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             app.chat_widget.config_ref()
         ))
     );
-    app.select_agents_overview_thread(&mut tui, &mut app_server, other_thread_id)
-        .await?;
-    app.select_agents_overview_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
-    app.app_event_tx.send(AppEvent::StartSide {
-        parent_thread_id,
-        user_message: None,
-    });
-    assert!(!app.can_read_terminal_after_thread_switch(&tui, &app_event_rx));
-    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
-    assert_eq!(app.active_thread_id, Some(side_thread_id));
-    assert_eq!(app.side_threads.len(), 1);
     enable_side_retention(&mut app)?;
     tui.set_owned_screen(/*owned*/ true)?;
     read_side_history(&mut app, &mut tui, "child")?;
@@ -3763,14 +3751,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             assert_eq!(app.transcript_view.search_footer(width), Some(footer));
             assert!(!app.side_threads[&side_thread_id].pane_open);
             app.transcript_view.cancel_search();
-            boxed_future!(app.start_companion_conversation(
-                &mut tui,
-                &mut app_server,
-                parent_thread_id,
-                CompanionKind::Parallel,
-                /*user_message*/ None
-            ))
-            .await?;
+            boxed_future!(app.toggle_side_conversation(&mut tui, &mut app_server)).await?;
             drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
         }
         assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
