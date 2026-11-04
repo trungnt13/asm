@@ -519,7 +519,17 @@ async fn multi_agent_v2_spawn_fork_turns_all_applies_agent_type_override(fork_tu
             .find(|skill| skill.name == name)
             .expect("root should discover scoped skill metadata");
         assert!(
-            snapshot.read_skill_text(skill).await.is_ok(),
+            snapshot
+                .read_skill_text(
+                    skill,
+                    &[
+                        &codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(
+                            &codex_exec_server::LOCAL_FS
+                        )
+                    ]
+                )
+                .await
+                .is_ok(),
             "visibility does not deny filesystem reads"
         );
     }

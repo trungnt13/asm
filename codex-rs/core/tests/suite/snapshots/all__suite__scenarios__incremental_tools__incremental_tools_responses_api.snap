@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios_incremental_tools.rs
-expression: "context_snapshot::format_request_history_snapshot(if use_responses_lite\n{\n    \"Tool definitions precede the initial base instructions. A model switch appends one developer notice, changed tools, and replacement instructions without rewriting the prefix; compaction starts a new window with the updated base.\"\n} else\n{\n    \"Regular Responses requests carry the full current tool catalog without an incremental notice; changed execution instructions replace the catalog on subsequent requests.\"\n}, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+expression: "context_snapshot::format_request_history_snapshot(if\nsuppress_model_change_announcements == Some(true)\n{\n    \"A model switch suppresses the model ID announcement while appending changed tools and replacement instructions. Repeated turns preserve the prefix; compaction starts a new window with the updated base.\"\n} else if use_responses_lite\n{\n    \"Tool definitions precede the initial base instructions. A model switch appends one developer notice, changed tools, and replacement instructions without rewriting the prefix; compaction starts a new window with the updated base.\"\n} else\n{\n    \"Regular Responses requests carry the full current tool catalog without an incremental notice; changed execution instructions replace the catalog on subsequent requests.\"\n}, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
 Scenario: Regular Responses requests carry the full current tool catalog without an incremental notice; changed execution instructions replace the catalog on subsequent requests.
 
@@ -15,8 +15,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (9; hash=0da7212ee8f9ee69):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=3b60611486072e76
+  tools (9; hash=5a19d4d1c3b98bfd):
+    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=9226aa5c0caf3b05
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, reason, terminate, yield_time_ms]; hash=64bbcdb3aaaae73c
     - function/exec_command: Runs a command in a PTY, returning output or a session ID for ongoing interaction.  exec tool dec...; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=c92fc9fa49de5dd4
     - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.  exec tool decla...; args=[chars, max_output_tokens, reason, session_id, yield_time_ms]; hash=ed4af467dbfe61b7
@@ -45,7 +45,7 @@ Settings:
 ## Window 2 (after request 2)
 Settings: relative to window 1
   model: "updated-tools-model"
-  tools (9; hash=34efdf90d60a3ee8):
+  tools (9; hash=ce98ab8dee858d23):
     ~ custom/exec: Updated execution instructions.  Some deferred nested tools may be omitted from this description....; hash=7af6961848c10849
 -- request 3 (turn) --
 00:message/developer:
