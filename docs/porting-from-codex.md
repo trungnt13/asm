@@ -501,6 +501,11 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   PATH. Do not extract subscription credentials or enable API billing implicitly.
   Provide deterministic conversational subscription login through the shared
   app-server path, using existing chat requests and responses without Desktop changes.
+  Explicit `claude login` and `cursor login` select the authentication provider in any
+  main chat, including GPT parents authenticating native subagents, without changing
+  the chat model. Keep the provider in the pending login session rather than infer it
+  from the chat model. Subagents cannot start interactive login. Login exchanges are
+  display-only and must not enter the main chat's model history or persisted rollout.
   Intercept login replies before normal turn ingestion, history, hooks, or inference;
   send one-time authorization codes only to the official Claude login subprocess.
   Never include codes in model requests, backend logs, or rollouts. Client-local

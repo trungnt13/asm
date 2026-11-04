@@ -45,6 +45,7 @@ struct LoginSession {
     generation: uuid::Uuid,
     model: String,
     selected_model: String,
+    provider: LoginProvider,
     cwd: PathBuf,
     process: Option<LoginProcess>,
 }
@@ -95,12 +96,19 @@ impl NativeLogin {
         };
         let selected_model = match requested_model {
             Some(model) => model.to_owned(),
+            None if start || cancel => config.model.clone(),
             None => match &pending_entry {
                 Some(entry) => entry.lock().await.selected_model.clone(),
                 None => config.model.clone(),
             },
         };
-        let provider = LoginProvider::from_model(&selected_model);
+        let provider = match requested_provider {
+            Some(provider) => Some(provider),
+            None => match &pending_entry {
+                Some(entry) => Some(entry.lock().await.provider),
+                None => LoginProvider::from_model(&selected_model),
+            },
+        };
         let code = match provider {
             Some(LoginProvider::Cursor) => {
                 pending && text.is_some_and(|text| LoginProvider::Cursor.accepts_reply(text))
@@ -110,28 +118,14 @@ impl NativeLogin {
         if !pending
             && !start
             && !(provider.is_some() && (start || code || thread.native_login_required()))
-            && !(config.model.starts_with("claude-code/") && authorization_code)
+            && !authorization_code
         {
             return Ok(false);
         }
         let Some(provider) = provider else {
             if pending && !cancel {
                 return Err(invalid_request(
-                    "No active native login. Send `claude login` or `cursor login` with the matching native runtime to restart, or `cancel`. Nothing from this exchange is sent to a model.",
-                ));
-            }
-            if let Some(entry) = pending_entry {
-                let mut session = entry.lock().await;
-                if session.owner != request_id.connection_id && session.process.is_some() {
-                    return Err(invalid_request(
-                        "Native login belongs to another connection.",
-                    ));
-                }
-                clear_login_guard(&guard_path).await?;
-                session.process = None;
-                self.sessions.lock().await.remove(&thread_id);
-                return Err(invalid_request(
-                    "Native login cancelled because the selected runtime changed. Send a new message to continue.",
+                    "No active native login. Send `claude login` or `cursor login` to restart, or `cancel`. Nothing from this exchange is sent to a model.",
                 ));
             }
             if durable_pending {
@@ -141,19 +135,14 @@ impl NativeLogin {
                 ));
             }
             return Err(invalid_request(
-                "Native login requires a Claude or Cursor native-runtime chat.",
+                "No active native login. Send `claude login` or `cursor login` to obtain a sign-in link. Nothing from this exchange was sent to a model.",
             ));
         };
-        if requested_provider.is_some_and(|requested| requested != provider) {
-            return Err(invalid_request(
-                "Login command must match the selected native runtime: `cursor login` or `claude login`. Nothing from this exchange was sent to a model.",
-            ));
-        }
         if matches!(
             config.session_source,
             codex_protocol::protocol::SessionSource::SubAgent(_)
         ) {
-            return Err(invalid_request("Sign in from a main native-runtime chat."));
+            return Err(invalid_request("Sign in from a main chat."));
         }
         let owner = request_id.connection_id;
         let entry = self
@@ -167,6 +156,7 @@ impl NativeLogin {
                     generation: uuid::Uuid::new_v4(),
                     model: config.model.clone(),
                     selected_model: selected_model.clone(),
+                    provider,
                     cwd: config.cwd().as_path().to_path_buf(),
                     process: None,
                 }))
@@ -183,6 +173,7 @@ impl NativeLogin {
             && !cancel
             && (session.model != config.model
                 || session.selected_model != selected_model
+                || session.provider != provider
                 || session.cwd != config.cwd().as_path())
         {
             session.process = None;
@@ -196,10 +187,10 @@ impl NativeLogin {
         }
         if !thread.stop_native_for_login().await {
             return Err(invalid_request(
-                "Wait for native work to finish before login.",
+                "Wait for active work to finish before login.",
             ));
         }
-        if selected_model != config.model {
+        if !cancel && selected_model != config.model {
             thread
                 .update_thread_settings(codex_protocol::protocol::ThreadSettingsOverrides {
                     model: Some(selected_model.clone()),
@@ -269,7 +260,8 @@ impl NativeLogin {
             session.process = None;
             session.owner = owner;
             session.model = selected_model.clone();
-            session.selected_model = selected_model;
+            session.selected_model = selected_model.clone();
+            session.provider = provider;
             session.cwd = config.cwd().as_path().to_path_buf();
             session.generation = uuid::Uuid::new_v4();
             let result = tokio::select! {
@@ -310,9 +302,11 @@ impl NativeLogin {
             match result {
                 Ok(()) => match clear_login_guard(&guard_path).await {
                     Ok(()) => {
-                        thread.finish_native_login();
+                        if LoginProvider::from_model(&selected_model) == Some(provider) {
+                            thread.finish_native_login();
+                        }
                         self.sessions.lock().await.remove(&thread_id);
-                        "Native account sign-in completed. The subscription runtime remains selected. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
+                        "Native account sign-in completed. The chat model is unchanged. Send a new message to continue this chat; the failed prompt was not replayed.".to_owned()
                     }
                     Err(_) => login_guard_error().message,
                 },
