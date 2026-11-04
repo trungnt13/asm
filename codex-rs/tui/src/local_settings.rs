@@ -94,6 +94,7 @@ impl LocalSettings {
                 question_esc_back: config.tui_question_esc_back,
                 raw_output_mode: config.tui_raw_output_mode,
                 fullscreen_transcript: config.tui_fullscreen_transcript,
+                sidebar_width_percent: config.tui_sidebar_width_percent,
                 mouse_scroll_speed: config.tui_mouse_scroll_speed,
                 collapse_tool_calls: config.tui_collapse_tool_calls,
                 collapse_tool_calls_max_lines: config.tui_collapse_tool_calls_max_lines,
