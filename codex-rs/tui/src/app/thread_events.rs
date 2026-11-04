@@ -234,6 +234,17 @@ impl ThreadEventStore {
         self.push_notification_inner(Cow::Borrowed(notification));
     }
 
+    pub(super) fn is_realtime_delegated_turn(&self, turn_id: &str) -> bool {
+        self.delegated_turns.iter().any(|id| id == turn_id)
+            || self.turns.iter().any(|turn| {
+                turn.id == turn_id
+                    && turn
+                        .items
+                        .iter()
+                        .any(|entry| is_voice_handoff_item(&entry.payload))
+            })
+    }
+
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
         if let ServerNotification::ThreadTokenUsageUpdated(usage) = notification.as_ref()
             && let Some(tps) = usage.output_tokens_per_second
@@ -328,15 +339,7 @@ impl ThreadEventStore {
                         },
                     ..
                 },
-            ) if !self.delegated_turns.contains(&started.turn_id)
-                && !self.turns.iter().any(|turn| {
-                    turn.id == started.turn_id
-                        && turn
-                            .items
-                            .iter()
-                            .any(|entry| is_voice_handoff_item(&entry.payload))
-                }) =>
-            {
+            ) if !self.is_realtime_delegated_turn(&started.turn_id) => {
                 self.active_reasoning_item =
                     Some(codex_app_server_protocol::ItemStartedNotification::new(
                         started.thread_id.clone(),

@@ -26,6 +26,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::Weak;
 use tempfile::TempDir;
 
 #[derive(Default)]
@@ -177,7 +178,10 @@ async fn skills_for_config_with_stack(
         config_layer_stack.clone(),
     );
     skills_service
-        .snapshot_for_config(&skills_input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &skills_input,
+            Some(&codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await
         .outcome()
         .clone()
@@ -211,11 +215,17 @@ async fn skills_for_config_reuses_cache_for_same_effective_config() {
 
     let base_input = HostSkillsLoadInput::new(cwd.path().abs(), Vec::new(), config_layer_stack);
     let unscoped = skills_service
-        .snapshot_for_config(&base_input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &base_input,
+            Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await;
     let reviewer_input = base_input.with_agent_role(Some("reviewer".to_string()));
     let unscoped_reviewer = skills_service
-        .snapshot_for_config(&reviewer_input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &reviewer_input,
+            Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await;
     assert!(std::ptr::eq(
         unscoped.outcome(),
@@ -258,7 +268,10 @@ allowed_agent_roles = []
             .clone()
             .with_agent_role(role.map(str::to_string));
         let config_snapshot = skills_service
-            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+            .snapshot_for_config(
+                &input,
+                Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+            )
             .await;
         let cwd_snapshot = skills_service
             .for_request()
@@ -322,7 +335,13 @@ allowed_agent_roles = []
                 assert_eq!(selected, expected);
             }
             // Catalog visibility does not deny ordinary file reads.
-            let contents = config_snapshot.read_skill_text(skill).await.unwrap();
+            let contents = config_snapshot
+                .read_skill_text(
+                    skill,
+                    &[&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)],
+                )
+                .await
+                .unwrap();
             assert!(contents.contains("# Body"));
         }
         scoped_snapshots.push(config_snapshot);
@@ -373,7 +392,10 @@ async fn skills_for_config_bounds_plugin_generations_and_preserves_live_snapshot
             .clone()
             .with_plugin_skill_snapshots(Some(SkillRootSnapshots::new(owner)));
         let snapshot = skills_service
-            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+            .snapshot_for_config(
+                &input,
+                Some(&codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+            )
             .await;
 
         if generation == 0 {
@@ -385,7 +407,12 @@ async fn skills_for_config_bounds_plugin_generations_and_preserves_live_snapshot
         if generation == CONFIG_SKILLS_CACHE_CAPACITY - 1 {
             let (input, snapshot) = recent.as_ref().expect("first generation");
             let reused = skills_service
-                .snapshot_for_config(input, Some(Arc::clone(&LOCAL_FS)))
+                .snapshot_for_config(
+                    input,
+                    Some(
+                        &codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS),
+                    ),
+                )
                 .await;
             assert!(std::ptr::eq(snapshot.outcome(), reused.outcome()));
         }
@@ -475,7 +502,10 @@ async fn snapshot_for_config_merges_extension_host_and_legacy_plugin_roots() {
     );
 
     let snapshot = skills_service
-        .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &input,
+            Some(&codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await;
     let skills = snapshot
         .outcome()
@@ -639,7 +669,10 @@ async fn skills_for_config_refreshes_cache_when_remote_plugin_id_changes() {
     )
     .with_plugin_skill_snapshots(Some(test_plugin_skill_snapshots()));
     let plugin_snapshot = skills_service
-        .snapshot_for_config(&plugin_input, Some(Arc::clone(&LOCAL_FS)))
+        .snapshot_for_config(
+            &plugin_input,
+            Some(&codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+        )
         .await;
     fs::write(
         &skill_path,
@@ -923,10 +956,40 @@ async fn skills_for_cwd_loads_repo_and_user_roots_with_local_fs() {
     assert!(loaded_names.contains("repo-skill"));
     let other_file_system: Arc<dyn codex_exec_server::ExecutorFileSystem> =
         Arc::new(codex_exec_server::LocalFileSystem::unsandboxed());
+    let other_access = FileSystemEnvironmentAccessor::unrestricted(&other_file_system);
     let other_snapshot = skills_service
-        .snapshot_for_config(&skills_input, Some(other_file_system))
+        .snapshot_for_config(&skills_input, Some(&other_access))
         .await;
     assert!(!std::ptr::eq(snapshot.outcome(), other_snapshot.outcome()));
+    let outcome = other_snapshot.outcome();
+    let repo_skill = outcome
+        .skills
+        .iter()
+        .find(|skill| skill.name == "repo-skill")
+        .unwrap();
+    let repo_skill_path = repo_skill.path_to_skills_md.to_abs_path().unwrap();
+    assert_eq!(
+        outcome.implicit_skill_for_doc_path(&repo_skill_path),
+        Some(repo_skill)
+    );
+    assert_eq!(
+        outcome.implicit_skill_for_scripts_dir(&repo_skill_path.parent().unwrap().join("scripts")),
+        Some(repo_skill)
+    );
+    let remote_snapshot = skills_service
+        .snapshot_for_config(
+            &skills_input.with_environment_id("remote"),
+            Some(&other_access),
+        )
+        .await;
+    let remote_outcome = remote_snapshot.outcome();
+    for skill in &remote_outcome.skills {
+        assert_eq!(
+            remote_outcome
+                .implicit_skill_for_doc_path(&skill.path_to_skills_md.to_abs_path().unwrap()),
+            (skill.scope != SkillScope::Repo).then_some(skill)
+        );
+    }
 }
 
 #[tokio::test]
@@ -1034,8 +1097,9 @@ async fn skills_for_cwd_uses_cached_result_until_force_reload() {
         .clone()
         .with_plugin_skill_snapshots(Some(test_plugin_skill_snapshots()));
     let request = skills_service.for_request();
+    let access = codex_exec_server::FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS);
     let (config_snapshot, snapshot_a) = tokio::join!(
-        skills_service.snapshot_for_config(&config_input, Some(Arc::clone(&LOCAL_FS))),
+        skills_service.snapshot_for_config(&config_input, Some(&access)),
         request.snapshot_for_cwd(
             &base_input,
             /*force_reload*/ false,
