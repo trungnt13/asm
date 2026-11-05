@@ -184,7 +184,23 @@ async fn active_patch_approval_pager_preserves_changes_and_accepts_once() -> Res
     enqueue_pending_patch(&mut app, thread_id).await?;
     drain_pending_patch(&mut app, &mut tui, &app_server).await?;
 
+    enable_side_retention(&mut app)?;
     tui.set_owned_screen(/*owned*/ true)?;
+    app.sidebar_mut().show(
+        sidebar::SidebarContent::Chooser,
+        sidebar::PaneFocus::Sidebar,
+    );
+    let narrow = Size::new(/*width*/ 80, /*height*/ 24);
+    assert!(side_frame(&mut app, &mut tui, narrow)?.contains("Open in sidebar"));
+    drain_pending_patch(&mut app, &mut tui, &app_server).await?;
+    app.handle_tui_event(
+        &mut tui,
+        &mut app_server,
+        TuiEvent::Key(KeyCode::Enter.into()),
+    )
+    .await?;
+    assert!(app.chat_widget.has_active_modal());
+    assert!(!side_frame(&mut app, &mut tui, narrow)?.contains("Open in sidebar"));
     while let Ok(event) = rx.try_recv() {
         if let AppEvent::InsertHistoryCell(cell) = event {
             app.insert_history_cell(&mut tui, cell);
