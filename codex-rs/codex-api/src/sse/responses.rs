@@ -659,18 +659,32 @@ async fn process_sse_with_treatment(
                 continue;
             }
         };
-        let received_at = Instant::now();
         if generation_started_at.is_none() && event.is_generation_delta() {
-            generation_started_at = Some(received_at);
+            generation_started_at = Some(Instant::now());
         }
+        let completed_at = (event.kind() == "response.completed").then(Instant::now);
         let generation_duration = generation_started_at
             .filter(|_| event.kind() == "response.completed")
             .map(|start| {
-                i64::try_from(received_at.duration_since(start).as_millis()).unwrap_or(i64::MAX)
+                i64::try_from(
+                    completed_at
+                        .expect("completion timestamp")
+                        .duration_since(start)
+                        .as_millis(),
+                )
+                .unwrap_or(i64::MAX)
             });
         let completed_duration_ms = request_started_at
             .filter(|_| event.kind() == "response.completed")
-            .map(|start| i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX));
+            .map(|start| {
+                i64::try_from(
+                    completed_at
+                        .expect("completion timestamp")
+                        .duration_since(start)
+                        .as_millis(),
+                )
+                .unwrap_or(i64::MAX)
+            });
         let safety_buffering = event.safety_buffering(&safety_buffering_treatment);
         let metadata_events = event.metadata_events(safety_buffering);
 

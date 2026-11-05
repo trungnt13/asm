@@ -1540,6 +1540,7 @@ fn config_toml_deserializes_model_availability_nux() {
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
+            sidebar_width_percent: None,
             mouse_scroll_speed: None,
             collapse_tool_calls: false,
             collapse_tool_calls_max_lines: None,
@@ -2362,7 +2363,9 @@ respect_system_proxy = true
         codex_http_client::OutboundProxyPolicy::RespectSystemProxy
     );
     assert_eq!(
-        config.plugins_config_input().remote_plugin_service_config(),
+        config
+            .plugins_config_input()
+            .remote_plugin_service_config(/*runtime_auth*/ None),
         codex_core_plugins::remote::RemotePluginServiceConfig::new(
             config.chatgpt_base_url,
             codex_http_client::HttpClientFactory::new(
@@ -4928,6 +4931,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
+            sidebar_width_percent: None,
             mouse_scroll_speed: None,
             collapse_tool_calls: false,
             collapse_tool_calls_max_lines: None,
@@ -9172,6 +9176,54 @@ async fn load_config_rejects_oversized_guardian_reconsideration_prompt() -> std:
 }
 
 #[tokio::test]
+async fn sync_elastic_budget_is_opt_in_and_validated() {
+    let excessive_minimum = codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS + 1;
+    let minimum_mismatch = format!(
+        r#"[features.guardianv2.sync_elastic_sections.root_conversation_messages]
+min_total_section_tokens = {excessive_minimum}
+max_section_entry_tokens = 1
+"#
+    );
+    let maximum_below_minimum = r#"[features.guardianv2.sync_elastic_sections.root_conversation_messages]
+min_total_section_tokens = 1
+max_section_entry_tokens = 1
+max_total_section_tokens = 0
+"#;
+    let home = TempDir::new().unwrap();
+    for sections in [
+        r#"[features.guardianv2.sync_elastic_sections.transcript_tools]
+min_total_section_tokens = 1
+max_section_entry_tokens = 0
+"#,
+        maximum_below_minimum,
+        minimum_mismatch.as_str(),
+        r#"[features.guardianv2.sync_elastic_sections.root_messages]
+min_total_section_tokens = 1
+max_section_entry_tokens = 1
+[features.guardianv2.sync_elastic_sections.root_conversation_messages]
+min_total_section_tokens = 1
+max_section_entry_tokens = 1
+"#,
+    ] {
+        for enabled in [false, true] {
+            let result = Config::load_from_base_config_with_overrides(
+                toml::from_str(&format!(
+                    "[features.guardianv2]\nenabled = false\nsync_elastic_budgeting = {enabled}\n{sections}"
+                ))
+                .unwrap(),
+                ConfigOverrides {
+                    cwd: Some(home.path().to_path_buf()),
+                    ..Default::default()
+                },
+                home.abs(),
+            )
+            .await;
+            assert_eq!(result.is_err(), enabled);
+        }
+    }
+}
+
+#[tokio::test]
 async fn requirements_guardian_policy_beats_auto_review() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     for (managed_extra, expected_extra) in [
@@ -10257,6 +10309,27 @@ job_max_runtime_seconds = 900
             ..Default::default()
         })
     );
+}
+
+#[tokio::test]
+async fn legacy_multi_agent_opt_out_survives_a_session_override() -> std::io::Result<()> {
+    let home = TempDir::new()?;
+    std::fs::write(
+        home.path().join(CONFIG_TOML_FILE),
+        "[features]\nmulti_agent = false\n",
+    )?;
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(home.path().to_path_buf())
+        .fallback_cwd(Some(home.path().to_path_buf()))
+        .cli_overrides(vec![("features.multi_agent".to_string(), true.into())])
+        .build()
+        .await?;
+    assert!(config.features.enabled(Feature::Collab));
+    assert_eq!(
+        legacy_multi_agent_disabled_sources(&config.config_layer_stack),
+        ["user"]
+    );
+    Ok(())
 }
 
 #[tokio::test]
@@ -12572,7 +12645,6 @@ shell_tool = false
 
 #[test_case::test_case(Feature::Personality; "personality")]
 #[test_case::test_case(Feature::GuardianThreadContext; "guardian thread context")]
-#[test_case::test_case(Feature::DaemonAutoStart; "daemon auto start")]
 #[test_case::test_case(Feature::Worktrees; "worktrees")]
 #[test_case::test_case(Feature::RealtimeConversation; "realtime conversation")]
 #[test_case::test_case(Feature::ShellZshFork; "shell zsh fork")]

@@ -133,9 +133,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `d5830f6fc64ee594ed63a97d9ac968bba87033fa`.
-- Date: 2026-11-03.
-- Subject: Expand per-turn critical path capture and split inference timing (#59245).
+- Last incorporated commit: `529d965d80a36f7b5d9d9ab218d88daf41106748`.
+- Date: 2026-11-05.
+- Subject: Add ChatGPT token stdin authentication to exec-server (#59569).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
@@ -338,6 +338,14 @@ do not add HTTP provider bindings or change native model/runtime selection.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
 Provider changes in the picker start fresh sessions and preserve the old chat.
+Input and resume admission keep valid catalog-bound and native-runtime routes independent
+of the global HTTP-provider default. Validate saved and requested identities separately;
+request overrides cannot grant an exception to an unrelated saved chat. Keep mandatory
+provider policy, configuration errors, missing-provider checks, and history/runtime boundaries.
+Ordinary unbound API models retain upstream saved-provider admission rules. Bound and native
+input routes still require their current provider definition and valid configuration, without
+requiring the global provider default to match. Route classification uses existing in-memory
+model bindings and runtime detection, not discovery.
 Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
 reuse and preserve saved provider identity on resume. Build a provider-specific
 model manager for bound models rather than reuse the parent's discovery identity.
@@ -501,6 +509,11 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   PATH. Do not extract subscription credentials or enable API billing implicitly.
   Provide deterministic conversational subscription login through the shared
   app-server path, using existing chat requests and responses without Desktop changes.
+  Explicit `claude login` and `cursor login` select the authentication provider in any
+  main chat, including GPT parents authenticating native subagents, without changing
+  the chat model. Keep the provider in the pending login session rather than infer it
+  from the chat model. Subagents cannot start interactive login. Login exchanges are
+  display-only and must not enter the main chat's model history or persisted rollout.
   Intercept login replies before normal turn ingestion, history, hooks, or inference;
   send one-time authorization codes only to the official Claude login subprocess.
   Never include codes in model requests, backend logs, or rollouts. Client-local
@@ -1126,6 +1139,16 @@ Local CLI help descriptions and TUI messages use ASM; displayed command hints us
 
 Keep `codex` executable/version prefix, crate/config/state/archive/tag/workflow/job/check identifiers. Never redirect upstream links/installers for branding.
 
+On Linux, normal CLI, app-server, code-mode-host, and exec-server processes set only
+`/proc/self/comm` to `asm`, `asm-app-server`, `asm-code-host`, and `asm-exec-server`,
+respectively. Preserve executable filenames, command-line arguments, helper dispatch,
+package discovery, and protocol identity. Other platforms remain unchanged. A label
+failure warns without blocking startup; process viewers showing full command lines
+still show the canonical executable names. External name-based monitoring must use
+the new labels. UI plugin helpers intentionally share the `asm-code-host` label
+with the regular code-mode host. CLI-dispatched sandbox and filesystem helper
+modes retain upstream labels.
+
 ### Background terminal waits
 
 Top-level `background_terminal_min_timeout` / `background_terminal_max_timeout`, milliseconds, defaults 5000 / 300000. Reject zero/reversed/unrepresentable bounds. Clamp empty `write_stdin` polls; show bounds in description and finish early on exit.
@@ -1199,7 +1222,7 @@ Keep Markdown paragraphs/code blocks/list items adjacent while streaming and com
 - Reasoning: first three letters, including model-with-reasoning: `medium` → `med`, `high` → `hig`, `xhigh` → `xhi`.
 - Apply to footer, `/statusline` preview, `/subagents` model info. Preserve IDs, other picker labels, terminal titles. Remove role-leading space only in footer: `Main[default]`. Preserve paths/roles/colors/order/single-row truncation.
 - Opt-in `cache-hit-rate` in `/statusline`/`tui.status_line`; defaults unchanged. Show current thread's latest reported request cached/input ratio as `CchN.N%`, rounded to one decimal. Use existing usage; no averages/totals/new requests/APIs. Hide unknown/zero-input usage. Missing cache detail remains indistinguishable from reported zero.
-- Offer opt-in `output-tps` with unchanged defaults. Show `Ntps`, rounded to the nearest whole number, for the latest successful ordinary Responses request: provider-reported non-reasoning output tokens (`output_tokens - reasoning_output_tokens`), divided by the duration from its first nonempty text or tool-argument delta to completion. Exclude failed attempts, retry waits, compaction, warmup, tools, and other threads. Exclude initial request latency. This is observed streaming generation throughput, not pure decoding speed: stream buffering can affect the estimate. Exclude reasoning deltas from the timing start so hidden reasoning is not divided by the visible output interval. Omit requests with no generated delta or a zero-millisecond generation duration. Calculate once at live response completion and carry the result on the existing token-usage event. Cache the formatted value in the TUI and use its existing refresh without another notification, redraw request, timer, or streaming estimate. Retain the latest valid result across failed requests; omit unavailable timing or usage and do not reconstruct it from replayed history.
+- Offer opt-in `output-tps` with unchanged defaults. Show `Ntps`, rounded to the nearest whole number, for the latest successful ordinary Responses request or native Claude message: provider-reported non-reasoning output tokens (`output_tokens - reasoning_output_tokens`), divided by the duration from its first nonempty text or tool-argument delta to completion. Exclude failed attempts, retry waits, compaction, warmup, tools, and other threads. Exclude initial request latency. This is observed streaming generation throughput, not pure decoding speed: stream buffering can affect the estimate. Exclude reasoning deltas from the timing start so hidden reasoning is not divided by the visible output interval. Require an explicit reasoning-token breakdown; never treat missing details as zero for TPS. Native Claude uses the matching root message_delta output/thinking usage and message_stop boundary, never whole-turn cumulative usage; ignore native child streams. Cursor TPS remains unavailable. Omit requests with no generated delta or a zero-millisecond generation duration. Calculate once at live response completion and carry the result on the existing token-usage event. Cache the formatted value in the TUI and use its existing refresh without another notification, redraw request, timer, or streaming estimate. Retain the latest valid result across failed requests; omit unavailable timing or usage and do not reconstruct it from replayed history.
 
 ### Continue through model capacity failures
 

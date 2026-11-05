@@ -87,6 +87,10 @@ fn main() -> anyhow::Result<()> {
     }
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
+        #[cfg(target_os = "linux")]
+        if let Err(error) = std::fs::write("/proc/self/comm", "asm-app-server") {
+            eprintln!("WARNING: could not set Linux process label: {error}");
+        }
         let AppServerArgs {
             cloud_skills_snapshot,
             config_overrides,

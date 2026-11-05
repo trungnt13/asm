@@ -244,10 +244,20 @@ def publish_target(repository, tag, sha, release, installer, target):
                   target=target, require_latest=False)
     verified_assets = asset_metadata(release, complete=False)
     if release.get("draft"):
-        api(repository, f"releases/{release['id']}",
-            payload={"draft": False, "prerelease": False, "make_latest": "false"})
+        api(
+            repository,
+            f"releases/{release['id']}",
+            payload={
+                "tag_name": tag,
+                "draft": False,
+                "prerelease": False,
+                "make_latest": "false",
+            },
+        )
     release = api(repository, f"releases/{release['id']}")
     verify_tag(repository, tag, sha)
+    if release.get("tag_name") != tag:
+        raise ValueError("release tag changed during platform publication")
     current_assets = asset_metadata(release, complete=False)
     if release.get("draft") is not False or release.get("prerelease") is not False:
         raise ValueError("platform release was not published as a normal release")
@@ -285,7 +295,11 @@ def finalize(repository, tag, sha, release, installer):
         )
         release = upload_missing(repository, tag, release, directory, ("SHA256SUMS",))
     verify_remote(repository, tag, sha, release, installer, published=True, require_latest=False)
-    release = api(repository, f"releases/{release['id']}", payload={"make_latest": "true"})
+    release = api(
+        repository,
+        f"releases/{release['id']}",
+        payload={"tag_name": tag, "make_latest": "true"},
+    )
     verify_remote(repository, tag, sha, release, installer, published=True)
     print(f"Promoted complete verified release {tag} to Latest at {sha}")
 
@@ -416,7 +430,12 @@ def main():
     release = api(
         repository,
         f"releases/{release['id']}",
-        payload={"draft": False, "prerelease": False, "make_latest": "true"},
+        payload={
+            "tag_name": tag,
+            "draft": False,
+            "prerelease": False,
+            "make_latest": "true",
+        },
     )
     verify_remote(repository, tag, sha, release, installer, published=True)
     print(f"Published and verified Latest release {tag} at {sha}")

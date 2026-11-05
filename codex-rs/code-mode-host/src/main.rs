@@ -104,6 +104,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    #[cfg(target_os = "linux")]
+    if let Err(error) = std::fs::write("/proc/self/comm", "asm-code-host") {
+        eprintln!("WARNING: could not set Linux process label: {error}");
+    }
     if cli.codex_ui_plugin_process {
         return codex_code_mode_runtime::run_ui_sandbox().map_err(Into::into);
     }

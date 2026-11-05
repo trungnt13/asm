@@ -9393,6 +9393,13 @@ class McpResourceReadParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    field_meta: Annotated[
+        dict[str, Any] | None,
+        Field(
+            alias="_meta",
+            description="Additional MCP request metadata. Account and turn routing keys are reserved.",
+        ),
+    ] = None
     connector_id: Annotated[str | None, Field(alias="connectorId")] = None
     origin_call_id: Annotated[
         str | None,

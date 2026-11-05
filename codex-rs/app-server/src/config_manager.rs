@@ -38,6 +38,10 @@ use tracing::warn;
 
 #[path = "application_network.rs"]
 pub(crate) mod application_network;
+#[path = "model_provider_admission.rs"]
+mod model_provider_admission;
+
+use model_provider_admission::model_selects_provider;
 
 /// Shared app-server entry point for loading effective Codex configuration.
 #[derive(Clone)]
@@ -434,21 +438,26 @@ impl ConfigManager {
         Ok(CloudStartupConfig { bootstrap, config })
     }
 
-    /// Admits resumed threads and input only on the currently selected provider.
+    /// Keeps model-selected routes independent of the configured default provider.
     pub(crate) async fn check_thread_model_provider_for_input(
         &self,
         current: &Config,
     ) -> std::io::Result<()> {
         self.check_thread_model_provider(current).await?;
+        if !model_selects_provider(current.model.as_deref(), &current.model_provider_id) {
+            return Ok(());
+        }
         let configured = self
             .load_latest_config(Some(current.cwd.to_path_buf()))
             .await?;
-        if current.model_provider_id != configured.model_provider_id {
+        if !configured
+            .model_providers
+            .contains_key(&current.model_provider_id)
+        {
             return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                ModelProviderError::ModelProviderMismatch {
+                std::io::ErrorKind::NotFound,
+                ModelProviderError::ModelProviderNotConfigured {
                     model_provider: current.model_provider_id.clone(),
-                    current_model_provider: configured.model_provider_id,
                 },
             ));
         }
@@ -544,7 +553,7 @@ impl ConfigManager {
         &self,
         saved_provider: Option<&str>,
         request_overrides: Option<HashMap<String, serde_json::Value>>,
-        typesafe_overrides: ConfigOverrides,
+        mut typesafe_overrides: ConfigOverrides,
         cwd: Option<PathBuf>,
     ) -> std::io::Result<Config> {
         let requested_provider = typesafe_overrides.model_provider.clone().or_else(|| {
@@ -554,11 +563,9 @@ impl ConfigManager {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         });
-        // Resolve the selection before the saved provider is applied as a resume override.
-        let current_provider = self
-            .load_latest_config(typesafe_overrides.cwd.clone().or_else(|| cwd.clone()))
-            .await
-            .map(|config| config.model_provider_id);
+        if let Some(saved) = saved_provider {
+            typesafe_overrides.model_provider = Some(saved.to_owned());
+        }
         self.load_with_validation(
             &self.current_cli_overrides(),
             request_overrides,
@@ -567,6 +574,7 @@ impl ConfigManager {
             |config, _overrides, layers| {
                 let requested_provider = requested_provider
                     .as_deref()
+                    .or(saved_provider)
                     .or(config.model_provider.as_deref())
                     .unwrap_or("openai");
                 // Validate the saved route even when a client sends a provider override.
@@ -597,26 +605,30 @@ impl ConfigManager {
                         ));
                     }
                 }
-                let current_provider = current_provider?;
-                for provider in [
-                    saved_provider.unwrap_or(requested_provider),
-                    requested_provider,
-                ] {
-                    if provider != current_provider {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidInput,
-                            ModelProviderError::ModelProviderMismatch {
-                                model_provider: provider.to_owned(),
-                                current_model_provider: current_provider,
-                            },
-                        ));
-                    }
+                if let Some(saved) = saved_provider
+                    && saved != requested_provider
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!("Cannot change this thread's model provider from `{saved}` to `{requested_provider}` on resume."),
+                    ));
                 }
                 Ok(())
             },
         )
         .await
         .and_then(|config| {
+            if let Some(saved) = saved_provider
+                && saved != config.model_provider_id
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Cannot change this thread's model provider from `{saved}` to `{}` on resume.",
+                        config.model_provider_id
+                    ),
+                ));
+            }
             config.validate_windows_mxc_requirement()?;
             Ok(config)
         })

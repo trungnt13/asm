@@ -4648,6 +4648,7 @@ prefix_rules = [
             parsed,
             RequirementsExecPolicyToml {
                 prefix_rules: vec![RequirementsExecPolicyPrefixRuleToml {
+                    canonical_matching: false,
                     pattern: vec![RequirementsExecPolicyPatternTokenToml {
                         token: Some("rm".to_string()),
                         any_of: None,
@@ -4677,6 +4678,7 @@ prefix_rules = [
             RequirementsExecPolicyToml {
                 prefix_rules: vec![
                     RequirementsExecPolicyPrefixRuleToml {
+                        canonical_matching: false,
                         pattern: vec![RequirementsExecPolicyPatternTokenToml {
                             token: Some("rm".to_string()),
                             any_of: None,
@@ -4685,6 +4687,7 @@ prefix_rules = [
                         justification: None,
                     },
                     RequirementsExecPolicyPrefixRuleToml {
+                        canonical_matching: false,
                         pattern: vec![
                             RequirementsExecPolicyPatternTokenToml {
                                 token: Some("git".to_string()),

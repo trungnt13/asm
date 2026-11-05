@@ -891,20 +891,31 @@ async fn run_websocket_response_stream(
                     }
                     continue;
                 }
-                let received_at = Instant::now();
                 if generation_started_at.is_none() && event.is_generation_delta() {
-                    generation_started_at = Some(received_at);
+                    generation_started_at = Some(Instant::now());
                 }
+                let completed_at = (event.kind() == "response.completed").then(Instant::now);
                 let generation_duration = generation_started_at
                     .filter(|_| event.kind() == "response.completed" && !timing_log_context.warmup)
                     .map(|start| {
-                        i64::try_from(received_at.duration_since(start).as_millis())
-                            .unwrap_or(i64::MAX)
+                        i64::try_from(
+                            completed_at
+                                .expect("completion timestamp")
+                                .duration_since(start)
+                                .as_millis(),
+                        )
+                        .unwrap_or(i64::MAX)
                     });
                 let completed_duration_ms = (event.kind() == "response.completed"
                     && !timing_log_context.warmup)
                     .then(|| {
-                        i64::try_from(request_started_at.elapsed().as_millis()).unwrap_or(i64::MAX)
+                        i64::try_from(
+                            completed_at
+                                .expect("completion timestamp")
+                                .duration_since(request_started_at)
+                                .as_millis(),
+                        )
+                        .unwrap_or(i64::MAX)
                     });
                 emit_responses_websocket_timing_event(
                     event.kind(),
@@ -1145,6 +1156,9 @@ mod tests {
             include: vec!["reasoning.encrypted_content".to_string()],
             service_tier: Some("priority".to_string()),
             prompt_cache_key: Some("cache-key".to_string()),
+            prompt_cache_options: Some(crate::PromptCacheOptions {
+                ttl: codex_protocol::turn_input::PromptCacheTtl::TwelveHours,
+            }),
             text: None,
             access_programs: Some(
                 codex_protocol::turn_input::CyberAccessProgram::DaybreakBlue.into(),

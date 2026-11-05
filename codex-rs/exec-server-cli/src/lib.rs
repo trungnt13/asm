@@ -26,6 +26,10 @@ struct ExecServerCli {
 /// Starts the executor after dispatching internal helper modes and preparing runtime paths.
 pub fn run_standalone() -> anyhow::Result<()> {
     codex_arg0::arg0_dispatch_or_else(|paths| async move {
+        #[cfg(target_os = "linux")]
+        if let Err(error) = std::fs::write("/proc/self/comm", "asm-exec-server") {
+            eprintln!("WARNING: could not set Linux process label: {error}");
+        }
         let args: Vec<_> = std::env::args_os().collect();
         let mut cli = ExecServerCli::parse_from(&args);
         cli.config_overrides = collect_config_overrides(ExecServerCli::command(), args)

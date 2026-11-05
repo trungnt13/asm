@@ -1247,6 +1247,19 @@ impl App {
                 {
                     self.retain_inactive_realtime_transcript(thread_id, &notification);
                 }
+                let agent_count = match &notification {
+                    ServerNotification::TurnCompleted(event) => {
+                        self.turn_agent_counts.count(thread_id, &event.turn.id)
+                    }
+                    _ => None,
+                };
+                if let Some(companion) = self.side_companions.get_mut(&thread_id)
+                    && companion.apply_notification(&notification, &guard, agent_count, || {
+                        self.chat_widget.new_status_indicator()
+                    })
+                {
+                    self.chat_widget.request_redraw();
+                }
                 // Status traffic alone does not change the displayed transcript.
                 guard.replay_may_have_output |= !matches!(
                     &notification,
@@ -1657,6 +1670,8 @@ impl App {
         if should_buffer_initial_replay {
             self.app_event_tx
                 .send(AppEvent::EndInitialHistoryReplayBuffer);
+            self.app_event_tx
+                .send(AppEvent::RestoreBackgroundTerminals(thread_id));
         }
         self.restore_realtime_replay_state_after_replay(
             &replayed_final_items,

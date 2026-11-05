@@ -1106,6 +1106,17 @@ async fn dispatch_cli(
         subcommand,
     } = config_override_args::try_parse_from(std::env::args_os())
         .unwrap_or_else(|error| error.exit());
+    #[cfg(target_os = "linux")]
+    {
+        let label = match &subcommand {
+            Some(Subcommand::AppServer(_)) => "asm-app-server",
+            Some(Subcommand::ExecServer(_)) => "asm-exec-server",
+            _ => "asm",
+        };
+        if let Err(error) = std::fs::write("/proc/self/comm", label) {
+            eprintln!("WARNING: could not set Linux process label: {error}");
+        }
+    }
     // Retain the launch target through TUI exit, even if a launcher changes selection.
     let daemon_cli_executable = arg0_paths
         .codex_self_exe
