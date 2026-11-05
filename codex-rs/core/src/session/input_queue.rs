@@ -129,7 +129,6 @@ pub(crate) struct TurnInputQueue {
 /// Session-scoped pending input storage and active-turn mailbox delivery coordination.
 pub(crate) struct InputQueue {
     activity_tx: watch::Sender<InputQueueActivity>,
-    allow_live_agent_messages: bool,
     controller: Option<(ThreadId, Arc<dyn AgentControl>, watch::Receiver<bool>)>,
     mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>,
 }
@@ -145,7 +144,6 @@ impl InputQueue {
         let (activity_tx, _) = watch::channel(InputQueueActivity::Mailbox);
         Self {
             activity_tx,
-            allow_live_agent_messages: true,
             controller: None,
             mailbox_pending_mails: Mutex::new(VecDeque::new()),
         }
@@ -163,7 +161,6 @@ impl InputQueue {
         });
         Self {
             controller,
-            allow_live_agent_messages,
             ..Self::new()
         }
     }
