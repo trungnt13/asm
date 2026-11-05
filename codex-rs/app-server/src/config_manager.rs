@@ -618,6 +618,17 @@ impl ConfigManager {
         )
         .await
         .and_then(|config| {
+            if let Some(saved) = saved_provider
+                && saved != config.model_provider_id
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "Cannot change this thread's model provider from `{saved}` to `{}` on resume.",
+                        config.model_provider_id
+                    ),
+                ));
+            }
             config.validate_windows_mxc_requirement()?;
             Ok(config)
         })
