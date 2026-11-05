@@ -188,6 +188,15 @@ where
 }
 
 impl ResponsesStreamEvent {
+    pub(crate) fn is_generation_delta(&self) -> bool {
+        matches!(
+            self.kind(),
+            "response.output_text.delta"
+                | "response.function_call_arguments.delta"
+                | "response.custom_tool_call_input.delta"
+        ) && self.delta.as_ref().is_some_and(|delta| !delta.is_empty())
+    }
+
     pub fn kind(&self) -> &str {
         &self.kind
     }
@@ -508,6 +517,7 @@ pub fn process_responses_event(
                             token_usage: resp.usage.map(Into::into),
                             usage_metadata: resp.usage_metadata,
                             request_duration_ms: None,
+                            generation_duration_ms: None,
                             end_turn: if interrupted {
                                 Some(false)
                             } else {
@@ -594,6 +604,7 @@ async fn process_sse_with_treatment(
     let mut stream = stream.eventsource();
     let mut response_error: Option<ApiError> = None;
     let mut last_server_model: Option<String> = None;
+    let mut generation_started_at = None;
 
     loop {
         let start = Instant::now();
@@ -648,9 +659,32 @@ async fn process_sse_with_treatment(
                 continue;
             }
         };
+        if generation_started_at.is_none() && event.is_generation_delta() {
+            generation_started_at = Some(Instant::now());
+        }
+        let completed_at = (event.kind() == "response.completed").then(Instant::now);
+        let generation_duration = generation_started_at
+            .filter(|_| event.kind() == "response.completed")
+            .map(|start| {
+                i64::try_from(
+                    completed_at
+                        .expect("completion timestamp")
+                        .duration_since(start)
+                        .as_millis(),
+                )
+                .unwrap_or(i64::MAX)
+            });
         let completed_duration_ms = request_started_at
             .filter(|_| event.kind() == "response.completed")
-            .map(|start| i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX));
+            .map(|start| {
+                i64::try_from(
+                    completed_at
+                        .expect("completion timestamp")
+                        .duration_since(start)
+                        .as_millis(),
+                )
+                .unwrap_or(i64::MAX)
+            });
         let safety_buffering = event.safety_buffering(&safety_buffering_treatment);
         let metadata_events = event.metadata_events(safety_buffering);
 
@@ -676,10 +710,12 @@ async fn process_sse_with_treatment(
             Ok(Some(mut event)) => {
                 if let ResponseEvent::Completed {
                     request_duration_ms,
+                    generation_duration_ms,
                     ..
                 } = &mut event
                 {
                     *request_duration_ms = completed_duration_ms;
+                    *generation_duration_ms = generation_duration;
                 }
                 let is_completed = matches!(event, ResponseEvent::Completed { .. });
                 if tx_event.send(Ok(event)).await.is_err() {
@@ -892,6 +928,7 @@ mod tests {
                 token_usage,
                 usage_metadata,
                 request_duration_ms,
+                generation_duration_ms: _,
                 end_turn,
             }) => {
                 assert_eq!(response_id, "resp1");
@@ -1092,6 +1129,7 @@ mod tests {
                 token_usage,
                 usage_metadata,
                 request_duration_ms,
+                generation_duration_ms: _,
                 end_turn,
             }) => {
                 assert_eq!(response_id, "resp1");
@@ -1693,6 +1731,7 @@ mod tests {
                 usage_metadata: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1735,6 +1774,7 @@ mod tests {
                 usage_metadata: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1772,6 +1812,7 @@ mod tests {
                 usage_metadata: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1809,6 +1850,7 @@ mod tests {
                 usage_metadata: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }

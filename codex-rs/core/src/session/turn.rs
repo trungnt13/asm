@@ -3520,15 +3520,28 @@ async fn try_run_sampling_request(
                 response_id,
                 token_usage,
                 usage_metadata,
-                request_duration_ms,
+                generation_duration_ms,
                 end_turn,
+                ..
             } => {
                 output_tokens_per_second = token_usage
                     .as_ref()
-                    .zip(request_duration_ms)
-                    .filter(|(usage, duration)| usage.output_tokens >= 0 && *duration > 0)
+                    .zip(generation_duration_ms)
+                    .filter(|(usage, duration)| {
+                        usage_metadata
+                            .as_ref()
+                            .and_then(|usage| usage.metadata.as_ref())
+                            .and_then(|usage| {
+                                usage["output_tokens_details"]["reasoning_tokens"].as_i64()
+                            })
+                            .is_some()
+                            && usage.reasoning_output_tokens >= 0
+                            && usage.output_tokens >= usage.reasoning_output_tokens
+                            && *duration > 0
+                    })
                     .map(|(usage, duration)| {
-                        usage.output_tokens as f64 * 1_000.0 / duration as f64
+                        (usage.output_tokens - usage.reasoning_output_tokens) as f64 * 1_000.0
+                            / duration as f64
                     });
                 if let Some(accepted) = pending_audio.take() {
                     sess.record_retained_context(

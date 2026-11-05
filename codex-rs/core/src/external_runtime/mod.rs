@@ -794,7 +794,7 @@ async fn run_conversation(
             )
             .await;
         session
-            .send_token_count_event(turn, /*output_tokens_per_second*/ None)
+            .send_token_count_event(turn, stream.output_tps)
             .await;
         session.flush_rollout().await?;
         runtime.checkpoint.in_flight = false;

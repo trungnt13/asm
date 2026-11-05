@@ -1832,6 +1832,7 @@ async fn response_stream_records_last_model_feedback_ids() {
             token_usage: None,
             usage_metadata: None,
             request_duration_ms: Some(2_000),
+            generation_duration_ms: Some(2_000),
             end_turn: Some(true),
         }),
     ]);
@@ -1845,16 +1846,22 @@ async fn response_stream_records_last_model_feedback_ids() {
     );
 
     let mut completed_duration_ms = None;
+    let mut completed_generation_duration_ms = None;
     while let Some(event) = stream.next().await {
         if let ResponseEvent::Completed {
             request_duration_ms,
+            generation_duration_ms,
             ..
         } = event.unwrap()
         {
             completed_duration_ms = request_duration_ms;
+            completed_generation_duration_ms = generation_duration_ms;
         }
     }
-    assert_eq!(completed_duration_ms, Some(2_000));
+    assert_eq!(
+        (completed_duration_ms, completed_generation_duration_ms),
+        (Some(2_000), Some(2_000))
+    );
 
     let tags = tags.lock().unwrap().clone();
     assert_eq!(
@@ -2363,6 +2370,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
             token_usage: None,
             usage_metadata: None,
             request_duration_ms: None,
+            generation_duration_ms: None,
             end_turn: None,
         }))
         .await?;

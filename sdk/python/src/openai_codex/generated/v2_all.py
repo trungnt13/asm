@@ -11473,7 +11473,7 @@ class ThreadTokenUsageUpdatedNotification(BaseModel):
         float | None,
         Field(
             alias="outputTokensPerSecond",
-            description="Successful ordinary response throughput, including request latency and reasoning output. Other usage updates and replayed updates carry `None`.",
+            description="Successful ordinary response non-reasoning output throughput, excluding initial latency. Other usage updates and replayed updates carry `None`.",
         ),
     ] = None
     thread_id: Annotated[str, Field(alias="threadId")]

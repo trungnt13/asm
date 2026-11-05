@@ -106,6 +106,8 @@ pub enum ResponseEvent {
         usage_metadata: Option<ResponseUsageMetadata>,
         /// Elapsed milliseconds for a successful transport attempt through completion.
         request_duration_ms: Option<i64>,
+        /// Elapsed milliseconds from the first nonempty text or tool-argument delta through completion.
+        generation_duration_ms: Option<i64>,
         /// Did the model affirmatively end its turn? Some providers do not set this,
         /// so we rely on fallback logic when this is `None`.
         end_turn: Option<bool>,

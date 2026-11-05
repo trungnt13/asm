@@ -2746,7 +2746,7 @@ impl TokenUsageInfo {
 pub struct TokenCountEvent {
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshot>,
-    /// Successful inference request throughput in output tokens per second; live updates only.
+    /// Successful inference non-reasoning output tokens per second, excluding initial latency; live updates only.
     #[serde(skip)]
     #[schemars(skip)]
     #[ts(skip)]

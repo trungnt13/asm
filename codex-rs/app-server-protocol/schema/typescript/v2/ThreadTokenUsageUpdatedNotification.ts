@@ -5,7 +5,7 @@ import type { ThreadTokenUsage } from "./ThreadTokenUsage";
 
 export type ThreadTokenUsageUpdatedNotification = { threadId: string, turnId: string, tokenUsage: ThreadTokenUsage,
 /**
- * Successful ordinary response throughput, including request latency and reasoning output.
+ * Successful ordinary response non-reasoning output throughput, excluding initial latency.
  * Other usage updates and replayed updates carry `None`.
  */
 outputTokensPerSecond: number | null, };
