@@ -212,6 +212,7 @@ mod session_start;
 mod session_state;
 mod shortcut_help;
 mod side_conversations;
+mod sidebar_chooser;
 mod skills_helpers;
 mod slash_command;
 mod startup_draft;

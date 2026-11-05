@@ -169,6 +169,7 @@ pub use agent::host::AgentRuntimeOwnership;
 pub use agent::host::AgentSessionReader;
 pub use agent::host::AgentTurnAdmission;
 pub use agent::host::AgentTurnAdmissionRequest;
+pub use agent::host::AgentTurnOutcomeReporter;
 pub use agent::host::AgentUsageAccounting;
 pub use agent::host::AgentUsageReport;
 pub use agent::host::HostThreadSpawnReservation;

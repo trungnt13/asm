@@ -337,6 +337,9 @@ impl Session {
         let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
+            if self.outcome_handoffs_closed() {
+                return;
+            }
             let turn = active.get_or_insert_with(ActiveTurn::default);
             debug_assert!(turn.task.is_none());
             turn.finishing = None;
@@ -354,6 +357,15 @@ impl Session {
         .await;
 
         let mut active = self.active_turn.lock().await;
+        // Shutdown closes registration before taking this same lock to abort active work.
+        let outcome_handoff = if let Some(reporting) = &self.outcome_reporting {
+            if reporting.handoffs.is_closed() {
+                return;
+            }
+            Some(reporting.handoffs.token())
+        } else {
+            None
+        };
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.task.is_none());
         // Record lineage only when the task starts: settings changes can invalidate a reservation.
@@ -475,6 +487,7 @@ impl Session {
             cancellation_token,
             turn_context: Arc::clone(&turn_context),
             _agent_execution_guard: agent_execution_guard,
+            outcome_handoff,
             pending_initial_input,
             _diagnostics_guard: ACTIVE_TURNS.track(),
             _timer: timer,
@@ -722,7 +735,7 @@ impl Session {
             && turn_context.terminal_error.lock().await.is_none();
         let finishing = CancellationToken::new();
         let finish_recording = finishing.clone().drop_guard();
-        let (turn_state, unadmitted_task, mut pending_input) = {
+        let (turn_state, unadmitted_task, mut pending_input, outcome_handoff) = {
             let mut active = self.active_turn.lock().await;
             let active_turn = active.as_mut()?;
             if !Arc::ptr_eq(&active_turn.task.as_ref()?.turn_context, &turn_context) {
@@ -744,6 +757,7 @@ impl Session {
                 (task._agent_execution_guard.is_none() && task.pending_initial_input.is_some())
                     .then_some(task.task),
                 task.pending_initial_input.unwrap_or_default(),
+                task.outcome_handoff,
             )
         };
         turn_context
@@ -981,6 +995,7 @@ impl Session {
             // The parent can request another review as soon as it receives this event.
             self.send_event(turn_context.as_ref(), event).await;
         }
+        drop(outcome_handoff);
         if cleared_active_turn {
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }

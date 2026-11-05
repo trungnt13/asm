@@ -3503,6 +3503,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     );
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     enable_side_retention(&mut app)?;
+    app.local_settings.tui.animations = false;
     tui.set_owned_screen(/*owned*/ true)?;
     read_side_history(&mut app, &mut tui, "child")?;
     app.chat_widget.insert_str("child draft");
@@ -3718,6 +3719,27 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
                     .is_search_editing()
             );
             app.pending_server_profiles.remove(&side_thread_id);
+
+            app.local_settings.tui.animations = true;
+            tokio::time::pause();
+            let mut dividers = Vec::new();
+            for (key, focus) in [(minus, parent_thread_id), (side, side_thread_id)] {
+                keys!(prefix, key);
+                assert_eq!(app.current_displayed_thread_id(), Some(focus));
+                for elapsed in [Duration::ZERO, Duration::from_millis(90)] {
+                    tokio::time::advance(elapsed).await;
+                    side_frame(&mut app, &mut tui, size)?;
+                    let buffer = tui.terminal.previous_buffer();
+                    dividers.push(
+                        (0..width)
+                            .find(|&x| buffer[(x, 0)].symbol() == "│")
+                            .expect("painted divider"),
+                    );
+                }
+            }
+            insta::assert_snapshot!(format!("{dividers:?}"), @"[63, 81, 81, 72]");
+            tokio::time::resume();
+            app.local_settings.tui.animations = false;
         }
         keys!(prefix, if width == 100 { minus } else { side });
         assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
@@ -3750,7 +3772,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             assert!(footer.1 < end);
             keys!(prefix, KeyCode::Right.into());
             assert_eq!(app.transcript_view.search_footer(width), Some(footer));
-            assert!(!app.side_threads[&side_thread_id].pane_open);
+            assert!(app.open_pane_focus().is_none());
             app.transcript_view.cancel_search();
             boxed_future!(app.toggle_side_conversation(&mut tui, &mut app_server)).await?;
             drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
@@ -3831,7 +3853,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
 
     keys!(prefix, KeyCode::Char('h').into());
     assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
-    assert!(app.side_threads[&side_thread_id].pane_open);
+    assert!(app.open_pane_focus().is_some());
     side_frame(&mut app, &mut tui, Size::new(/*width*/ 99, /*height*/ 18))?;
     assert!(app.transcript_view.begin_select_mode(&app.transcript_cells));
     keys!(KeyCode::Char('v').into(), KeyCode::Right.into());
@@ -3923,30 +3945,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             format!("x{draft}")
         );
     }
-
-    read_side_history(&mut app, &mut tui, "child")?;
-    // The upload finishes before the app event loop can park the now-inactive child.
-    app.app_event_tx.send(AppEvent::FeedbackSubmitted {
-        origin_thread_id: Some(side_thread_id),
-        category: FeedbackCategory::Bug,
-        include_logs: false,
-        result: Ok("uploaded-thread".to_string()),
-    });
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
-    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
-    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
-    let frame = side_frame(&mut app, &mut tui, size)?;
-    assert!(
-        frame.contains(child_row) && frame.contains("New activity"),
-        "{frame}"
-    );
-    assert!(app.transcript_cells.iter().any(|cell| {
-        lines_to_single_string(&cell.display_lines(/*width*/ 120))
-            .contains("Feedback recorded (no logs).")
-    }));
 
     // A delta queued just before switching must appear once in the inactive pane.
     app.transcript_view.jump_to_latest();
@@ -4064,9 +4062,133 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(divider_at(&tui, 0), 197);
     let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path)?)?;
     assert_eq!(saved["tui"]["sidebar_width_percent"].as_integer(), Some(34));
+
+    // The drag scenario used a temporary image path. Keep the keyboard frames portable.
+    app.transcript_cells.pop();
+    for (key, column) in [('H', 191), ('L', 197)] {
+        keys!(prefix, KeyCode::Char(key).into());
+        side_frame(&mut app, &mut tui, wide)?;
+        assert_eq!(divider_at(&tui, 0), column);
+    }
+    let zoom = KeyEvent::from(KeyCode::Char('z'));
+    keys!(prefix, zoom);
+    let zoomed = side_frame(&mut app, &mut tui, wide)?;
+    keys!(prefix, zoom);
+    let restored = side_frame(&mut app, &mut tui, wide)?;
+    assert_eq!(divider_at(&tui, 0), 197);
+    keys!(prefix, zoom);
+    keys!(toggle);
+    keys!(toggle);
+    side_frame(&mut app, &mut tui, wide)?;
+    assert_eq!(divider_at(&tui, 0), 197);
     assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
 
+    let even = Size::new(/*width*/ 200, wide.height);
+    tui.terminal = terminal_at(even);
+    keys!(prefix, zoom);
+    keys!(prefix, KeyCode::Char('=').into());
+    let equalized = side_frame(&mut app, &mut tui, even)?;
+    assert_app_snapshot!(
+        "keyboard_pane_widths",
+        format!("Zoomed\n{zoomed}\nRestored\n{restored}\nEqualized\n{equalized}")
+    );
+    assert_eq!(divider_at(&tui, 0), 99);
+
+    // Minimize and maximize the side, move left, then maximize and minimize the main pane.
+    for (key, width) in [(',', 36), ('.', 135), ('h', 64), ('.', 163), (',', 64)] {
+        keys!(prefix, KeyCode::Char(key).into());
+        side_frame(&mut app, &mut tui, even)?;
+        assert_eq!(app.conversation_area(even.into()).width, width);
+    }
+    app.local_settings.tui.sidebar_width_percent = Some(30);
+    side_frame(&mut app, &mut tui, even)?;
+    assert_eq!(app.conversation_area(even.into()).width, 139);
+    tokio::time::pause();
+    keys!(prefix);
+    side_frame(&mut app, &mut tui, even)?;
+    assert_eq!(app.conversation_frame.leader_hud, None);
+    tokio::time::advance(super::workspace_hud::REVEAL_DELAY).await;
+    let composer = app.render_owned_transcript(&mut tui, even)?;
+    let panel_text = |app: &App, tui: &tui::Tui| {
+        let mut panel = ratatui::buffer::Buffer::empty(
+            app.conversation_frame
+                .leader_hud
+                .expect("visible shortcut panel"),
+        );
+        for pos in panel.area.positions() {
+            panel[pos] = tui.terminal.previous_buffer()[pos].clone();
+        }
+        buffer_text(&panel)
+    };
+    app.transcript_view.jump_to_latest();
+    let hud = app
+        .conversation_frame
+        .leader_hud
+        .expect("visible shortcut panel");
+    let scroll = mouse(MouseEventKind::ScrollUp, hud.left(), hud.top());
+    boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, scroll)).await?;
+    app.render_owned_transcript(&mut tui, even)?;
+    assert!(!app.transcript_view.is_following());
+    insta::assert_snapshot!("workspace_leader_hints", panel_text(&app, &tui));
+    app.reconnect.offline = true;
+    app.render_owned_transcript(&mut tui, even)?;
+    let offline = panel_text(&app, &tui);
+    assert!(!offline.contains("Pane right") && offline.contains("Zoom pane"));
+    app.reconnect.offline = false;
+    let draft = app.chat_widget.composer_text_with_pending();
+    keys!(KeyCode::Char('p').into());
+    assert_eq!(app.render_owned_transcript(&mut tui, even)?, composer);
+    insta::assert_snapshot!("workspace_presets", panel_text(&app, &tui));
+    keys!(KeyCode::Esc.into());
+    assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
+    tokio::time::resume();
+    keys!(prefix, KeyCode::Char('r').into(), KeyCode::Left.into());
+    let resizing = side_frame(&mut app, &mut tui, even)?;
+    let hint = resizing
+        .lines()
+        .filter_map(|row| row.split_once('│'))
+        .map(|(main, _)| main.trim())
+        .find(|main| main.starts_with("Resize"));
+    insta::assert_snapshot!(hint.expect("resize hint in main pane"), @"Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done");
+    let divider_bold = |tui: &tui::Tui| {
+        let cell = &tui.terminal.previous_buffer()[(divider_at(tui, 4), 4)];
+        cell.modifier.contains(ratatui::style::Modifier::BOLD)
+    };
+    let resizing_bold = divider_bold(&tui);
+    assert_eq!(app.conversation_area(even.into()).width, 138);
+    assert_eq!(app.local_settings.tui.sidebar_width_percent, Some(30));
+    keys!(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    side_frame(&mut app, &mut tui, even)?;
+    assert_eq!(app.conversation_area(even.into()).width, 128);
+    keys!(KeyCode::Esc.into());
+    assert_eq!(app.local_settings.tui.sidebar_width_percent, Some(36));
+    side_frame(&mut app, &mut tui, even)?;
+    assert_eq!(app.conversation_area(even.into()).width, 128);
+    insta::assert_snapshot!(format!("{resizing_bold} -> {}", divider_bold(&tui)), @"true -> false");
+
+    let confirmed = std::fs::read(&path)?;
+    for interrupt in [
+        TuiEvent::FocusLost,
+        TuiEvent::Resize(Size::new(80, even.height)),
+    ] {
+        keys!(
+            prefix,
+            KeyCode::Char('r').into(),
+            KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)
+        );
+        side_frame(&mut app, &mut tui, even)?;
+        assert_eq!(app.conversation_area(even.into()).width, 138);
+        assert!(!app.handle_pane_resize(&tui, &interrupt).await);
+        side_frame(&mut app, &mut tui, even)?;
+        assert_eq!(app.conversation_area(even.into()).width, 128);
+        assert_eq!(std::fs::read(&path)?, confirmed);
+    }
+
     keys!(prefix, main);
+    // A divider shortcut with main focus passes its final key back to the composer.
+    let upper_h = KeyEvent::from(KeyCode::Char('H'));
+    assert_eq!(app.route_key_chord_event(&mut tui, prefix), None);
+    assert_eq!(app.route_key_chord_event(&mut tui, upper_h), Some(upper_h));
     // Park a streaming parent through the normal focus shortcut, then finish it while parked.
     let parent = parent_thread_id;
     let turn = "live-parent";
@@ -4207,6 +4329,33 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         1,
         "{finished}"
     );
+    // Check feedback after capturing the layout snapshots and before the clipboard toast appears.
+    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+        .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
+    read_side_history(&mut app, &mut tui, "child")?;
+    // The upload finishes before the app event loop can park the now-inactive child.
+    app.app_event_tx.send(AppEvent::FeedbackSubmitted {
+        origin_thread_id: Some(side_thread_id),
+        category: FeedbackCategory::Bug,
+        include_logs: false,
+        result: Ok("uploaded-thread".to_string()),
+    });
+    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
+        .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
+    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
+        .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
+    let frame = side_frame(&mut app, &mut tui, even)?;
+    assert!(
+        frame.contains(child_row) && frame.contains("New activity"),
+        "{frame}"
+    );
+    assert!(app.transcript_cells.iter().any(|cell| {
+        lines_to_single_string(&cell.display_lines(/*width*/ 120))
+            .contains("Feedback recorded (no logs).")
+    }));
 
     // Copy a retained range with the child composer still focused.
     app.transcript_view.jump_to_latest();
@@ -7443,6 +7592,7 @@ async fn make_test_app() -> Box<App> {
     let session_telemetry = test_session_telemetry(&config, model.as_str());
 
     Box::new(App {
+        provider_writes: HashMap::new(),
         feature_write_lock: Arc::default(),
         config_notification_test_generation: 0,
         config_notification_test_pending: None,
@@ -7528,8 +7678,12 @@ async fn make_test_app() -> Box<App> {
         pending_server_profiles: HashMap::new(),
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
+        sidebars: HashMap::new(),
         side_companions: HashMap::new(),
+        zoomed_thread: None,
+        exact_sidebar_width: None,
         divider_drag: None,
+        pane_resize: None,
         passive_link_drag: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
@@ -7579,6 +7733,7 @@ pub(super) async fn make_test_app_with_channels() -> (
 
     (
         Box::new(App {
+            provider_writes: HashMap::new(),
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,
             config_notification_test_pending: None,
@@ -7664,8 +7819,12 @@ pub(super) async fn make_test_app_with_channels() -> (
             pending_server_profiles: HashMap::new(),
             agents_overview: Default::default(),
             side_threads: HashMap::new(),
+            sidebars: HashMap::new(),
             side_companions: HashMap::new(),
+            zoomed_thread: None,
+            exact_sidebar_width: None,
             divider_drag: None,
+            pane_resize: None,
             passive_link_drag: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,

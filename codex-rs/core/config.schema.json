@@ -538,10 +538,6 @@
           "description": "Experimental replacement for the history-retrieval instructions when history tools and Apps are enabled. Omitted or blank values use the built-in prompt.",
           "type": "string"
         },
-        "experimental_denial_reconsideration_prompt": {
-          "description": "Developer message used when `features.guardian_denial_reconsideration` is enabled. Omitted or blank values use the built-in prompt. Maximum 1,000 UTF-8 bytes.",
-          "type": "string"
-        },
         "experimental_policy_template": {
           "description": "Experimental full Guardian prompt template containing the tenant policy placeholder.",
           "type": "string"
@@ -994,6 +990,9 @@
             "async_compaction": {
               "$ref": "#/definitions/FeatureToml_for_AsyncCompactionConfigToml"
             },
+            "async_compaction_root_only": {
+              "type": "boolean"
+            },
             "auth_elicitation": {
               "type": "boolean"
             },
@@ -1070,6 +1069,9 @@
               "type": "boolean"
             },
             "collaboration_modes": {
+              "type": "boolean"
+            },
+            "command_sessions_world_state": {
               "type": "boolean"
             },
             "compaction_image_budget": {
@@ -5603,6 +5605,7 @@
               "change_host": null,
               "clear_terminal": null,
               "copy": null,
+              "equalize_pane_widths": null,
               "find_transcript": null,
               "focus_activity": null,
               "focus_main_composer": null,
@@ -5611,13 +5614,19 @@
               "focus_sidebar_content": null,
               "hide_pane": null,
               "leader": null,
+              "maximize_pane_width": null,
+              "minimize_pane_width": null,
+              "move_divider_left": null,
+              "move_divider_right": null,
               "open_agents": null,
               "open_external_editor": null,
               "open_transcript": null,
               "queue": null,
+              "resize_panes": null,
               "select_transcript": null,
               "submit": null,
               "toggle_fast_mode": null,
+              "toggle_pane_zoom": null,
               "toggle_raw_output": null,
               "toggle_shortcuts": null,
               "toggle_side_conversation": null,
@@ -6436,6 +6445,14 @@
           ],
           "description": "Copy the last agent response to the clipboard."
         },
+        "equalize_pane_widths": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Equalize visible pane widths."
+        },
         "find_transcript": {
           "allOf": [
             {
@@ -6500,6 +6517,38 @@
           ],
           "description": "Prefix for persistent, context-aware shortcut menus."
         },
+        "maximize_pane_width": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Maximize the focused pane width."
+        },
+        "minimize_pane_width": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Minimize the focused pane width."
+        },
+        "move_divider_left": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Move the divider left when the side pane has focus."
+        },
+        "move_divider_right": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Move the divider right when the side pane has focus."
+        },
         "open_agents": {
           "allOf": [
             {
@@ -6532,6 +6581,14 @@
           ],
           "description": "Queue the current composer draft while a task is running."
         },
+        "resize_panes": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Enter keyboard resize mode for visible dividers."
+        },
         "select_transcript": {
           "allOf": [
             {
@@ -6555,6 +6612,14 @@
             }
           ],
           "description": "Toggle Fast mode."
+        },
+        "toggle_pane_zoom": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Zoom or restore the focused pane."
         },
         "toggle_raw_output": {
           "allOf": [
@@ -6703,6 +6768,7 @@
             "change_host": null,
             "clear_terminal": null,
             "copy": null,
+            "equalize_pane_widths": null,
             "find_transcript": null,
             "focus_activity": null,
             "focus_main_composer": null,
@@ -6711,13 +6777,19 @@
             "focus_sidebar_content": null,
             "hide_pane": null,
             "leader": null,
+            "maximize_pane_width": null,
+            "minimize_pane_width": null,
+            "move_divider_left": null,
+            "move_divider_right": null,
             "open_agents": null,
             "open_external_editor": null,
             "open_transcript": null,
             "queue": null,
+            "resize_panes": null,
             "select_transcript": null,
             "submit": null,
             "toggle_fast_mode": null,
+            "toggle_pane_zoom": null,
             "toggle_raw_output": null,
             "toggle_shortcuts": null,
             "toggle_side_conversation": null,
@@ -8080,6 +8152,9 @@
         "async_compaction": {
           "$ref": "#/definitions/FeatureToml_for_AsyncCompactionConfigToml"
         },
+        "async_compaction_root_only": {
+          "type": "boolean"
+        },
         "auth_elicitation": {
           "type": "boolean"
         },
@@ -8156,6 +8231,9 @@
           "type": "boolean"
         },
         "collaboration_modes": {
+          "type": "boolean"
+        },
+        "command_sessions_world_state": {
           "type": "boolean"
         },
         "compaction_image_budget": {

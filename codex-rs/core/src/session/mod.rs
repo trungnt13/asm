@@ -2210,7 +2210,9 @@ impl Session {
             state.last_started_turn_id = last_started_turn_id;
             state.turn_attribution = turn_attribution;
             state.restored_turn_routing = restored_turn_routing;
-            if let Some(world_state) = world_state_baseline {
+            if let Some(mut world_state) = world_state_baseline {
+                // Handles belong to this runtime; a saved checkpoint can also lag its fragment.
+                world_state.invalidate_section("command_sessions");
                 state.history.set_world_state_baseline(world_state);
             }
             let fallback_ids = state.auto_compact_window_ids();
@@ -2885,7 +2887,7 @@ impl Session {
                 .track_guardian_session_event(self.thread_id, &event);
         }
         self.send_event_raw(event).await;
-        self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
+        self.maybe_publish_terminal_agent_result(turn_context, &legacy_source)
             .await;
         self.maybe_mirror_event_text_to_realtime(&legacy_source)
             .await;
@@ -2905,33 +2907,47 @@ impl Session {
         }
     }
 
-    /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
-    async fn maybe_notify_parent_of_terminal_turn(
+    /// Classifies terminal results for native parent delivery and opted-in hosts.
+    async fn maybe_publish_terminal_agent_result(
         &self,
         turn_context: &TurnContext,
         msg: &EventMsg,
     ) {
-        if turn_context.multi_agent_version != MultiAgentVersion::V2 {
-            return;
-        }
-
         if !matches!(msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
             return;
         }
 
-        let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            agent_path: Some(_),
-            ..
-        }) = &turn_context.session_source
-        else {
+        let notify_native_parent = turn_context.multi_agent_version == MultiAgentVersion::V2
+            && matches!(
+                &turn_context.session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    agent_path: Some(_),
+                    ..
+                })
+            );
+        let reporter = self
+            .outcome_reporting
+            .as_ref()
+            .map(|reporting| &reporting.reporter);
+        if !notify_native_parent && reporter.is_none() {
             return;
-        };
+        }
 
+        let terminal_error_message = {
+            let mut terminal_error = turn_context.terminal_error.lock().await;
+            if notify_native_parent {
+                terminal_error.take().map(|error| error.message)
+            } else {
+                terminal_error.as_ref().map(|error| error.message.clone())
+            }
+        };
         let mut error_info = None;
-        let status = match turn_context.terminal_error.lock().await.take() {
-            Some(error) => {
-                let status = AgentStatus::Errored(error.message);
-                self.agent_status.send_replace(status.clone());
+        let status = match terminal_error_message {
+            Some(message) => {
+                let status = AgentStatus::Errored(message);
+                if notify_native_parent {
+                    self.agent_status.send_replace(status.clone());
+                }
                 status
             }
             None => {
@@ -2956,24 +2972,31 @@ impl Session {
             return;
         }
 
-        self.services
-            .agent_control
-            .turn_finished(
-                AgentTurnOutcome {
-                    thread_id: self.thread_id,
-                    turn_id: turn_context.sub_id.clone(),
-                    source: turn_context.session_source.clone(),
-                    parent_turn_id: turn_context.turn_metadata_state.parent_turn_id(),
-                    initiating_agent_path: turn_context
-                        .turn_metadata_state
-                        .initiating_agent_path()
-                        .cloned(),
-                    status,
-                    error_info,
-                },
-                &self.services.rollout_thread_trace,
-            )
-            .await;
+        let outcome = AgentTurnOutcome {
+            thread_id: self.thread_id,
+            turn_id: turn_context.sub_id.clone(),
+            source: turn_context.session_source.clone(),
+            parent_turn_id: turn_context.turn_metadata_state.parent_turn_id(),
+            initiating_agent_path: turn_context
+                .turn_metadata_state
+                .initiating_agent_path()
+                .cloned(),
+            status,
+            error_info,
+        };
+        let host_outcome = if notify_native_parent {
+            let host_outcome = reporter.is_some().then(|| outcome.clone());
+            self.services
+                .agent_control
+                .turn_finished(outcome, &self.services.rollout_thread_trace)
+                .await;
+            host_outcome
+        } else {
+            Some(outcome)
+        };
+        if let Some((reporter, outcome)) = reporter.zip(host_outcome) {
+            reporter.report(outcome).await;
+        }
     }
 
     async fn maybe_mirror_event_text_to_realtime(&self, msg: &EventMsg) {

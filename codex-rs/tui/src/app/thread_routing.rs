@@ -126,6 +126,9 @@ impl App {
         };
         self.restore_automatic_thread_title(thread_id, name.as_deref())
             .await;
+        if let Some(startup_pane) = self.sidebars.remove(&None) {
+            self.sidebars.entry(Some(thread_id)).or_insert(startup_pane);
+        }
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = receiver;
         self.refresh_pending_thread_approvals().await;

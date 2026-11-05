@@ -891,6 +891,11 @@ impl ThreadManager {
         self.state.auth_manager.clone()
     }
 
+    /// Return the harness owner initialized at startup, if runtime auth was enabled.
+    pub fn runtime_auth_manager(&self) -> Option<Arc<RuntimeAuthManager>> {
+        self.state.runtime_auth.get().cloned()
+    }
+
     /// Share the harness runtime with an API client using this effective ChatGPT configuration.
     pub fn runtime_auth_for_config(
         &self,
@@ -910,6 +915,21 @@ impl ThreadManager {
             &self.state.runtime_auth,
             config,
             Arc::clone(&self.state.auth_manager),
+            &self.state.installation_id,
+        )
+        .map(|runtime| (runtime, config.runtime_auth_mode)))
+    }
+
+    /// Initialize the selected thread owner's runtime, including after a feature enablement.
+    pub fn runtime_auth_for_mcp_manager(
+        &self,
+        config: &Config,
+        mcp_manager: &McpManager,
+    ) -> std::io::Result<Option<(Arc<RuntimeAuthManager>, codex_features::RuntimeAuthMode)>> {
+        Ok(crate::runtime_auth::runtime_for_config(
+            &mcp_manager.plugins_manager().runtime_auth_slot(),
+            config,
+            mcp_manager.auth_manager(),
             &self.state.installation_id,
         )
         .map(|runtime| (runtime, config.runtime_auth_mode)))
@@ -2671,10 +2691,14 @@ impl ThreadManagerState {
             codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile
         };
         // A resumed actor and its descendants share an owner, not the harness default's credentials.
-        let (runtime_auth, plugins_manager) = if Arc::ptr_eq(&auth_manager, &self.auth_manager) {
+        let (runtime_auth, plugins_manager, analytics_events_client) = if Arc::ptr_eq(
+            &auth_manager,
+            &self.auth_manager,
+        ) {
             (
                 inherited_runtime_auth.unwrap_or_else(|| Arc::clone(&self.runtime_auth)),
                 Arc::clone(&self.plugins_manager),
+                self.analytics_events_client.clone(),
             )
         } else {
             let threads = self.threads.read().await;
@@ -2687,6 +2711,7 @@ impl ThreadManagerState {
                     inherited_runtime_auth
                         .unwrap_or_else(|| Arc::clone(&parent.session.services.runtime_auth)),
                     Arc::clone(&parent.session.services.plugins_manager),
+                    Some(parent.session.services.analytics_events_client.clone()),
                 )
             } else {
                 let runtime_auth = inherited_runtime_auth.unwrap_or_default();
@@ -2694,7 +2719,35 @@ impl ThreadManagerState {
                     self.plugins_manager
                         .for_auth_context(Arc::clone(&auth_manager), Arc::clone(&runtime_auth)),
                 );
-                (runtime_auth, plugins)
+                let runtime_provider = config
+                    .features
+                    .enabled(Feature::RuntimeAgentInstances)
+                    .then(|| (Arc::clone(&runtime_auth), config.runtime_auth_mode));
+                let analytics = self.analytics_events_client.as_ref().map(|client| {
+                        let api_key_headers = if codex_model_provider::provider_uses_first_party_auth_path(
+                            &config.model_provider,
+                        ) {
+                            match config.model_provider.build_header_map() {
+                                Ok(headers) => headers,
+                                Err(error) => {
+                                    tracing::warn!(%error, "failed to resolve analytics resource selectors");
+                                    return codex_analytics::AnalyticsEventsClient::disabled();
+                                }
+                            }
+                        } else {
+                            Default::default()
+                        };
+                        client.for_auth_context(
+                            Arc::clone(&auth_manager),
+                            config.chatgpt_base_url.clone(),
+                            runtime_provider,
+                            api_key_headers,
+                        )
+                    });
+                if let Some(client) = &analytics {
+                    plugins.set_analytics_events_client(client.clone());
+                }
+                (runtime_auth, plugins, analytics)
             }
         };
         let mcp_manager = if Arc::ptr_eq(&plugins_manager, &self.plugins_manager) {
@@ -2768,7 +2821,7 @@ impl ThreadManagerState {
             turn_extension_init,
             client_mcp_extensions,
             reserved_thread_id,
-            analytics_events_client: self.analytics_events_client.clone(),
+            analytics_events_client,
             image_store: Arc::clone(&self.image_store),
             thread_store: Arc::clone(&self.thread_store),
             attestation_provider: self.attestation_provider.clone(),
