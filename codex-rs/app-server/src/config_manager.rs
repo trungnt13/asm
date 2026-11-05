@@ -41,7 +41,6 @@ pub(crate) mod application_network;
 #[path = "model_provider_admission.rs"]
 mod model_provider_admission;
 
-pub(crate) use model_provider_admission::SavedModelProvider;
 use model_provider_admission::model_selects_provider;
 
 /// Shared app-server entry point for loading effective Codex configuration.
@@ -439,6 +438,32 @@ impl ConfigManager {
         Ok(CloudStartupConfig { bootstrap, config })
     }
 
+    /// Keeps model-selected routes independent of the configured default provider.
+    pub(crate) async fn check_thread_model_provider_for_input(
+        &self,
+        current: &Config,
+    ) -> std::io::Result<()> {
+        self.check_thread_model_provider(current).await?;
+        if !model_selects_provider(current.model.as_deref(), &current.model_provider_id) {
+            return Ok(());
+        }
+        let configured = self
+            .load_latest_config(Some(current.cwd.to_path_buf()))
+            .await?;
+        if !configured
+            .model_providers
+            .contains_key(&current.model_provider_id)
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                ModelProviderError::ModelProviderNotConfigured {
+                    model_provider: current.model_provider_id.clone(),
+                },
+            ));
+        }
+        Ok(())
+    }
+
     /// Installs local policy before cloud access; failed policy loads block traffic while
     /// non-strict startup remains available for configuration repair.
     pub(crate) async fn load_startup_config(
@@ -526,7 +551,7 @@ impl ConfigManager {
     /// Validates saved and requested providers before resume overrides or policy can replace them.
     pub(crate) async fn load_for_resume(
         &self,
-        saved_route: Option<SavedModelProvider<'_>>,
+        saved_provider: Option<&str>,
         request_overrides: Option<HashMap<String, serde_json::Value>>,
         mut typesafe_overrides: ConfigOverrides,
         cwd: Option<PathBuf>,
@@ -538,7 +563,6 @@ impl ConfigManager {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         });
-        let saved_provider = saved_route.map(|route| route.provider);
         if let Some(saved) = saved_provider {
             typesafe_overrides.model_provider = Some(saved.to_owned());
         }
@@ -547,8 +571,7 @@ impl ConfigManager {
             request_overrides,
             typesafe_overrides,
             cwd,
-            |config, overrides, layers| {
-                let saved_provider = saved_route.map(|route| route.provider);
+            |config, _overrides, layers| {
                 let requested_provider = requested_provider
                     .as_deref()
                     .or(saved_provider)

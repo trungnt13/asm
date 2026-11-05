@@ -8,8 +8,8 @@ use chrono::Datelike;
 use chrono::Local;
 use chrono::NaiveDate;
 use codex_app_server_protocol::TokenUsageBreakdown;
-use codex_protocol::ThreadId;
 use codex_app_server_protocol::Turn;
+use codex_protocol::ThreadId;
 use std::collections::HashSet;
 
 /// Completion metadata shown after the assistant's final response.
