@@ -133,9 +133,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `d78f68f8d1016b2ffba14a91ccd33ef7fa527971`.
-- Date: 2026-11-04.
-- Subject: Allow per-turn overrides for direct-only tool namespaces (#59481).
+- Last incorporated commit: `529d965d80a36f7b5d9d9ab218d88daf41106748`.
+- Date: 2026-11-05.
+- Subject: Add ChatGPT token stdin authentication to exec-server (#59569).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
@@ -342,8 +342,10 @@ Input and resume admission keep valid catalog-bound and native-runtime routes in
 of the global HTTP-provider default. Validate saved and requested identities separately;
 request overrides cannot grant an exception to an unrelated saved chat. Keep mandatory
 provider policy, configuration errors, missing-provider checks, and history/runtime boundaries.
-Ordinary unbound API models retain upstream default-provider admission rules. Route checks
-use existing in-memory model bindings and runtime detection, not discovery or extra I/O.
+Ordinary unbound API models retain upstream saved-provider admission rules. Bound and native
+input routes still require their current provider definition and valid configuration, without
+requiring the global provider default to match. Route classification uses existing in-memory
+model bindings and runtime detection, not discovery.
 Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
 reuse and preserve saved provider identity on resume. Build a provider-specific
 model manager for bound models rather than reuse the parent's discovery identity.

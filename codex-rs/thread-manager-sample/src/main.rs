@@ -309,6 +309,7 @@ async fn new_config(
         tui_fullscreen_transcript: false,
         tui_collapse_tool_calls: false,
         tui_collapse_tool_calls_max_lines: None,
+        tui_sidebar_width_percent: None,
         tui_mouse_scroll_speed: None,
         tui_copy_on_select: Default::default(),
         tui_copy_on_select_clear_selection: false,

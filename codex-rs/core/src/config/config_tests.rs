@@ -1540,6 +1540,7 @@ fn config_toml_deserializes_model_availability_nux() {
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
+            sidebar_width_percent: None,
             mouse_scroll_speed: None,
             collapse_tool_calls: false,
             collapse_tool_calls_max_lines: None,
@@ -2362,7 +2363,9 @@ respect_system_proxy = true
         codex_http_client::OutboundProxyPolicy::RespectSystemProxy
     );
     assert_eq!(
-        config.plugins_config_input().remote_plugin_service_config(),
+        config
+            .plugins_config_input()
+            .remote_plugin_service_config(/*runtime_auth*/ None),
         codex_core_plugins::remote::RemotePluginServiceConfig::new(
             config.chatgpt_base_url,
             codex_http_client::HttpClientFactory::new(
@@ -4928,6 +4931,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
+            sidebar_width_percent: None,
             mouse_scroll_speed: None,
             collapse_tool_calls: false,
             collapse_tool_calls_max_lines: None,

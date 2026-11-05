@@ -20,7 +20,6 @@ use super::thread_input::can_accept_direct_input;
 use super::thread_input::ensure_direct_input_allowed;
 use super::thread_lifecycle::thread_closing_for_resume;
 use super::*;
-use crate::config_manager::SavedModelProvider;
 use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::error_code::method_not_found;
 use crate::thread_sample::SampleTask;
@@ -675,7 +674,7 @@ impl ThreadRequestProcessor {
             .await
             .map_err(|_| invalid_request("thread/sample requires a loaded source"))?;
         self.config_manager
-            .check_thread_model_provider(parent.config().await.as_ref())
+            .check_thread_model_provider_for_input(parent.config().await.as_ref())
             .await
             .map_err(|error| config_load_error(&error))?;
         generate_sample(
@@ -1004,11 +1003,29 @@ impl ThreadRequestProcessor {
 
     pub(crate) async fn thread_items_list(
         &self,
+        request_id: &ConnectionRequestId,
         params: ThreadItemsListParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
-        self.thread_items_list_response_inner(params)
-            .await
-            .map(|response| Some(response.into()))
+        let cursor_kind = match &params.cursor {
+            None => "none",
+            Some(ThreadItemsListCursor::Opaque(_)) => "opaque",
+            Some(ThreadItemsListCursor::Anchor(ThreadItemsListAnchor::Item { .. })) => {
+                "item_anchor"
+            }
+        };
+        let started = std::time::Instant::now();
+        let result = self.thread_items_list_response_inner(params).await;
+        let page = result.as_ref().ok();
+        tracing::debug!(
+            request_id = %request_id.request_id,
+            cursor_kind,
+            item_count = page.map(|page| page.data.len()),
+            has_next_page = page.map(|page| page.next_cursor.is_some()),
+            duration_ms = started.elapsed().as_millis() as u64,
+            success = result.is_ok(),
+            "thread/items/list finished"
+        );
+        result.map(|response| Some(response.into()))
     }
 
     pub(crate) async fn thread_items_read(
@@ -4345,30 +4362,19 @@ impl ThreadRequestProcessor {
                     .load_for_resume(
                         resume_source_thread
                             .as_ref()
-                            .map(|thread| SavedModelProvider {
-                                model: thread.model.as_deref(),
-                                provider: thread.model_provider.as_str(),
-                            })
-                            .filter(|route| !route.provider.is_empty())
+                            .map(|thread| thread.model_provider.as_str())
+                            .filter(|provider| !provider.is_empty())
                             .or_else(|| {
-                                config_state.persisted_metadata.as_ref().map(|metadata| {
-                                    SavedModelProvider {
-                                        model: metadata.model.as_deref(),
-                                        provider: metadata.model_provider.as_str(),
-                                    }
-                                })
+                                config_state
+                                    .persisted_metadata
+                                    .as_ref()
+                                    .map(|metadata| metadata.model_provider.as_str())
                             })
                             .or_else(|| match &thread_history {
                                 InitialHistory::Resumed(resumed) => {
                                     resumed.history.iter().find_map(|item| match item {
                                         RolloutItem::SessionMeta(meta) => {
-                                            meta.meta.model_provider.as_deref().map(|provider| {
-                                                SavedModelProvider {
-                                                    model: persisted_model_settings
-                                                        .map(|settings| settings.model.as_str()),
-                                                    provider,
-                                                }
-                                            })
+                                            meta.meta.model_provider.as_deref()
                                         }
                                         _ => None,
                                     })
