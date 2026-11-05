@@ -191,6 +191,7 @@ async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_bounda
                 item: visible.clone(),
                 started_at_ms: None,
                 completed_at_ms: None,
+                output_deferred: false,
             },
             ThreadItemEntry {
                 turn_id: "older-parent-turn".into(),
@@ -201,6 +202,7 @@ async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_bounda
                 ),
                 started_at_ms: None,
                 completed_at_ms: None,
+                output_deferred: false,
             },
         ],
         next_cursor: Some("parent-items".into()),
