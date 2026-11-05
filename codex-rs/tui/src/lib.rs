@@ -770,6 +770,10 @@ where
     })
     .await
     .wrap_err("failed to start embedded app server")?;
+    app_server_connection::enable_asm_transcript(
+        codex_app_server_client::AppServerRequestHandle::InProcess(client.request_handle()),
+    )
+    .await?;
     Ok(client)
 }
 

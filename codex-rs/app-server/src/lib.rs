@@ -152,6 +152,7 @@ mod startup_warnings;
 mod thread_sample;
 mod thread_state;
 mod thread_status;
+mod transcript_compat;
 mod transport;
 mod turn_admission;
 mod turn_cost_worker;
@@ -203,6 +204,7 @@ enum OutboundControlEvent {
         disconnect_sender: Option<CancellationToken>,
         initialized: Arc<AtomicBool>,
         experimental_api_enabled: Arc<AtomicBool>,
+        asm_transcript_enabled: Arc<AtomicBool>,
         opted_out_notification_methods: Arc<RwLock<HashSet<String>>>,
     },
     /// Remove state for a closed/disconnected connection.
@@ -964,18 +966,18 @@ pub async fn run_main_with_transport_options(
                                 disconnect_sender,
                                 initialized,
                                 experimental_api_enabled,
+                                asm_transcript_enabled,
                                 opted_out_notification_methods,
                             } => {
-                                outbound_connections.insert(
-                                    connection_id,
-                                    OutboundConnectionState::new(
-                                        writer,
-                                        initialized,
-                                        experimental_api_enabled,
-                                        opted_out_notification_methods,
-                                        disconnect_sender,
-                                    ),
+                                let mut outbound = OutboundConnectionState::new(
+                                    writer,
+                                    initialized,
+                                    experimental_api_enabled,
+                                    opted_out_notification_methods,
+                                    disconnect_sender,
                                 );
+                                outbound.asm_transcript_enabled = asm_transcript_enabled;
+                                outbound_connections.insert(connection_id, outbound);
                             }
                             OutboundControlEvent::Closed { connection_id } => {
                                 outbound_connections.remove(&connection_id);
@@ -1173,12 +1175,17 @@ pub async fn run_main_with_transport_options(
                                     Arc::new(AtomicBool::new(false));
                                 let outbound_opted_out_notification_methods =
                                     Arc::new(RwLock::new(HashSet::new()));
+                                let outbound_asm_transcript_enabled =
+                                    Arc::new(AtomicBool::new(/*v*/ false));
                                 if outbound_control_tx
                                     .send(OutboundControlEvent::Opened {
                                         connection_id,
                                         writer,
                                         disconnect_sender,
                                         initialized: Arc::clone(&outbound_initialized),
+                                        asm_transcript_enabled: Arc::clone(
+                                            &outbound_asm_transcript_enabled,
+                                        ),
                                         experimental_api_enabled: Arc::clone(
                                             &outbound_experimental_api_enabled,
                                         ),
@@ -1191,16 +1198,15 @@ pub async fn run_main_with_transport_options(
                                 {
                                     break "outbound_router_closed";
                                 }
-                                connections.insert(
-                                    connection_id,
-                                    ConnectionState::new(
-                                        origin,
-                                        auth,
-                                        outbound_initialized,
-                                        outbound_experimental_api_enabled,
-                                        outbound_opted_out_notification_methods,
-                                    ),
+                                let connection = ConnectionState::new(
+                                    origin,
+                                    auth,
+                                    outbound_asm_transcript_enabled,
+                                    outbound_initialized,
+                                    outbound_experimental_api_enabled,
+                                    outbound_opted_out_notification_methods,
                                 );
+                                connections.insert(connection_id, connection);
                             }
                             TransportEvent::ConnectionClosed { connection_id } => {
                                 let Some(connection_state) = connections.remove(&connection_id) else {

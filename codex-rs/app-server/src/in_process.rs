@@ -488,16 +488,16 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
         let outbound_opted_out_notification_methods = Arc::new(RwLock::new(HashSet::new()));
 
         let mut outbound_connections = HashMap::<ConnectionId, OutboundConnectionState>::new();
-        outbound_connections.insert(
-            IN_PROCESS_CONNECTION_ID,
-            OutboundConnectionState::new(
-                writer_tx,
-                Arc::clone(&outbound_initialized),
-                Arc::clone(&outbound_experimental_api_enabled),
-                Arc::clone(&outbound_opted_out_notification_methods),
-                /*disconnect_sender*/ None,
-            ),
+        let outbound_asm_transcript_enabled = Arc::new(AtomicBool::new(/*v*/ false));
+        let mut outbound = OutboundConnectionState::new(
+            writer_tx,
+            Arc::clone(&outbound_initialized),
+            Arc::clone(&outbound_experimental_api_enabled),
+            Arc::clone(&outbound_opted_out_notification_methods),
+            /*disconnect_sender*/ None,
         );
+        outbound.asm_transcript_enabled = Arc::clone(&outbound_asm_transcript_enabled);
+        outbound_connections.insert(IN_PROCESS_CONNECTION_ID, outbound);
         let (outbound_shutdown_tx, outbound_shutdown_rx) = oneshot::channel();
         let mut outbound_handle = tokio::spawn(run_outbound_router(
             outgoing_rx,
@@ -535,9 +535,10 @@ async fn start_uninitialized(mut args: InProcessStartArgs) -> IoResult<InProcess
                 plugin_startup_tasks: Some(PluginStartupConfig::Current),
             }));
             let mut thread_created_rx = processor.thread_created_receiver();
-            let session = Arc::new(ConnectionSessionState::new(
-                crate::transport::ConnectionOrigin::InProcess,
-            ));
+            let mut session =
+                ConnectionSessionState::new(crate::transport::ConnectionOrigin::InProcess);
+            session.asm_transcript_enabled = outbound_asm_transcript_enabled;
+            let session = Arc::new(session);
             let mut listen_for_threads = true;
 
             loop {

@@ -51,7 +51,8 @@ const GOALS_DB_FILENAME: &str = "goals_1.sqlite";
 const MEMORIES_DB_FILENAME: &str = "memories_1.sqlite";
 const QUEUE_DB_FILENAME: &str = "queue_1.sqlite";
 const STATE_DB_FILENAME: &str = "state_5.sqlite";
-const THREAD_HISTORY_DB_FILENAME: &str = "thread_history_1.sqlite";
+// Fork-only transcript items and migrations must not enter the stock reader's cache.
+const THREAD_HISTORY_DB_FILENAME: &str = "asm_thread_history_1.sqlite";
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum RecoveryMode {

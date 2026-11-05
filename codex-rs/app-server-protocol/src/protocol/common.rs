@@ -549,6 +549,12 @@ client_request_definitions! {
         response: v2::UserVerificationCancelResponse,
     },
 
+    #[experimental("asmTranscript/enable")]
+    AsmTranscriptEnable => "asmTranscript/enable" {
+        params: v2::AsmTranscriptEnableParams,
+        serialization: None,
+        response: v2::AsmTranscriptEnableResponse,
+    },
     /// NEW APIs
     // Thread lifecycle
     // Uses `inspect_params` because only some fields are experimental.

@@ -110,6 +110,7 @@ pub(in crate::local) async fn search_thread_occurrences(
             .map(|ordinal| sqlite_integer(ordinal, "rollout ordinal"))
             .transpose()?
             .unwrap_or(i64::MAX);
+        store.ensure_history_projection(segment).await?;
         let mut rows = sqlx::query(
             r#"
 SELECT turn_id, item_id, rollout_ordinal, item_json, turn_rollout_ordinal
