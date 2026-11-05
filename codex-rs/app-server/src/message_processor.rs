@@ -4,6 +4,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use crate::attestation::app_server_attestation_provider;
 use crate::config_manager::ConfigManager;
@@ -190,6 +191,7 @@ pub(crate) struct ConnectionSessionState {
     pub(crate) origin: crate::transport::ConnectionOrigin,
     pub(crate) mcp_event_streams: McpEventStreams,
     initialized: OnceLock<InitializedConnectionSessionState>,
+    pub(crate) asm_transcript_enabled: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -210,6 +212,7 @@ impl ConnectionSessionState {
             rpc_gate: Arc::new(ConnectionRpcGate::new()),
             mcp_event_streams: McpEventStreams::default(),
             initialized: OnceLock::new(),
+            asm_transcript_enabled: Arc::new(AtomicBool::new(/*v*/ false)),
         }
     }
 
@@ -1142,6 +1145,11 @@ impl MessageProcessor {
         let app_server_client_name = session.app_server_client_name().map(str::to_string);
         let client_version = session.client_version().map(str::to_string);
         let client_mcp_extensions = session.client_mcp_extensions();
+        let transcript_support = if session.asm_transcript_enabled.load(Ordering::Acquire) {
+            crate::transcript_compat::TranscriptSupport::AsmV1
+        } else {
+            crate::transcript_compat::TranscriptSupport::Standard
+        };
         let request_id = ConnectionRequestId {
             connection_id,
             request_id: codex_request.id().clone(),
@@ -1191,6 +1199,21 @@ impl MessageProcessor {
             &codex_request,
         );
         let result: Result<Option<ClientResponsePayload>, JSONRPCErrorError> = match codex_request {
+            ClientRequest::AsmTranscriptEnable { params, .. } => {
+                if params.version != 1 {
+                    Err(invalid_params(
+                        "unsupported ASM transcript version; expected 1",
+                    ))
+                } else {
+                    session
+                        .asm_transcript_enabled
+                        .store(/*val*/ true, Ordering::Release);
+                    Ok(Some(
+                        codex_app_server_protocol::AsmTranscriptEnableResponse { version: 1 }
+                            .into(),
+                    ))
+                }
+            }
             ClientRequest::Initialize { .. } => {
                 panic!("Initialize should be handled before initialized request dispatch");
             }
@@ -1667,7 +1690,7 @@ impl MessageProcessor {
             }
             ClientRequest::ThreadItemsList { params, .. } => {
                 self.thread_processor
-                    .thread_items_list(&request_id, params)
+                    .thread_items_list(&request_id, params, transcript_support)
                     .await
             }
             ClientRequest::ThreadItemsRead { params, .. } => {
@@ -1852,7 +1875,9 @@ impl MessageProcessor {
                     .await
             }
             ClientRequest::ThreadTimelineList { params, .. } => {
-                self.thread_processor.thread_timeline_list(params).await
+                self.thread_processor
+                    .thread_timeline_list(params, transcript_support)
+                    .await
             }
             ClientRequest::ThreadRealtimeListVoices { params: _, .. } => {
                 self.turn_processor.thread_realtime_list_voices().await

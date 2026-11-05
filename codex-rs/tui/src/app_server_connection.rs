@@ -5,17 +5,23 @@ use crate::AppServerTarget;
 use crate::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
 use crate::connect_remote_app_server;
 use codex_app_server_client::AppServerClient;
+use codex_app_server_client::AppServerRequestHandle;
 #[cfg(windows)]
 use codex_app_server_client::RemoteAppServerClient;
 #[cfg(windows)]
 use codex_app_server_client::RemoteAppServerConnectArgs;
 #[cfg(windows)]
 use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_client::TypedRequestError;
+use codex_app_server_protocol::AsmTranscriptEnableParams;
+use codex_app_server_protocol::AsmTranscriptEnableResponse;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::RequestId;
 #[cfg(windows)]
 use codex_utils_absolute_path::AbsolutePathBuf;
 
 pub(crate) async fn connect(target: &AppServerTarget) -> color_eyre::Result<AppServerClient> {
-    match target {
+    let client = match target {
         AppServerTarget::Embedded => {
             color_eyre::eyre::bail!("embedded sessions have no remote connection")
         }
@@ -46,5 +52,35 @@ pub(crate) async fn connect(target: &AppServerTarget) -> color_eyre::Result<AppS
         AppServerTarget::LocalDaemon { endpoint, .. } | AppServerTarget::Remote { endpoint } => {
             connect_remote_app_server(endpoint.clone()).await
         }
+    }?;
+    enable_asm_transcript(client.request_handle()).await?;
+    Ok(client)
+}
+
+#[tracing::instrument(skip_all)]
+pub(crate) async fn enable_asm_transcript(
+    handle: AppServerRequestHandle,
+) -> color_eyre::Result<()> {
+    let response = handle
+        .request_typed::<AsmTranscriptEnableResponse>(ClientRequest::AsmTranscriptEnable {
+            request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
+            params: AsmTranscriptEnableParams { version: 1 },
+        })
+        .await;
+    match response {
+        Ok(response) if response.version == 1 => Ok(()),
+        Ok(response) => {
+            color_eyre::eyre::bail!("unsupported ASM transcript version: {}", response.version)
+        }
+        Err(TypedRequestError::Server { source, .. })
+            if source.code == -32601
+                || (source.code == -32600
+                    && source.message.starts_with(
+                        "Invalid request: unknown variant `asmTranscript/enable`, expected ",
+                    )) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
     }
 }

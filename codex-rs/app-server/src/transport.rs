@@ -48,11 +48,13 @@ impl ConnectionState {
     pub(crate) fn new(
         origin: ConnectionOrigin,
         auth: Option<codex_app_server_transport::ConnectionAuth>,
+        asm_transcript_enabled: Arc<AtomicBool>,
         outbound_initialized: Arc<AtomicBool>,
         outbound_experimental_api_enabled: Arc<AtomicBool>,
         outbound_opted_out_notification_methods: Arc<RwLock<HashSet<String>>>,
     ) -> Self {
         let mut session = ConnectionSessionState::new(origin);
+        session.asm_transcript_enabled = asm_transcript_enabled;
         let mut rpc_gate = crate::connection_rpc_gate::ConnectionRpcGate::new();
         rpc_gate.auth = auth;
         session.rpc_gate = Arc::new(rpc_gate);
@@ -67,6 +69,7 @@ impl ConnectionState {
 }
 
 pub(crate) struct OutboundConnectionState {
+    pub(crate) asm_transcript_enabled: Arc<AtomicBool>,
     pub(crate) initialized: Arc<AtomicBool>,
     pub(crate) experimental_api_enabled: Arc<AtomicBool>,
     pub(crate) opted_out_notification_methods: Arc<RwLock<HashSet<String>>>,
@@ -83,6 +86,7 @@ impl OutboundConnectionState {
         disconnect_sender: Option<CancellationToken>,
     ) -> Self {
         Self {
+            asm_transcript_enabled: Arc::new(AtomicBool::new(/*v*/ false)),
             initialized,
             experimental_api_enabled,
             opted_out_notification_methods,
@@ -148,6 +152,14 @@ async fn send_message_to_connection(
         warn!("dropping message for disconnected connection: {connection_id:?}");
         return false;
     };
+    let mut message = message;
+    if !connection_state
+        .asm_transcript_enabled
+        .load(Ordering::Acquire)
+        && !crate::transcript_compat::filter(&mut message)
+    {
+        return false;
+    }
     let message = filter_outgoing_message_for_connection(connection_state, message);
     if should_skip_notification_for_connection(connection_state, &message) {
         return false;

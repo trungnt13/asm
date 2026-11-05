@@ -1004,7 +1004,8 @@ impl ThreadRequestProcessor {
     pub(crate) async fn thread_items_list(
         &self,
         request_id: &ConnectionRequestId,
-        params: ThreadItemsListParams,
+        mut params: ThreadItemsListParams,
+        transcript_support: crate::transcript_compat::TranscriptSupport,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let cursor_kind = match &params.cursor {
             None => "none",
@@ -1014,7 +1015,22 @@ impl ThreadRequestProcessor {
             }
         };
         let started = std::time::Instant::now();
-        let result = self.thread_items_list_response_inner(params).await;
+        let result: Result<ThreadItemsListResponse, JSONRPCErrorError> = async {
+            loop {
+                let mut page = self
+                    .thread_items_list_response_inner(params.clone())
+                    .await?;
+                if transcript_support == crate::transcript_compat::TranscriptSupport::Standard {
+                    page.data
+                        .retain(|entry| crate::transcript_compat::supported(&entry.item));
+                }
+                if !page.data.is_empty() || page.next_cursor.is_none() {
+                    return Ok(page);
+                }
+                params.cursor = page.next_cursor.map(ThreadItemsListCursor::Opaque);
+            }
+        }
+        .await;
         let page = result.as_ref().ok();
         tracing::debug!(
             request_id = %request_id.request_id,
@@ -1039,31 +1055,43 @@ impl ThreadRequestProcessor {
 
     pub(crate) async fn thread_timeline_list(
         &self,
-        params: ThreadTimelineListParams,
+        mut params: ThreadTimelineListParams,
+        transcript_support: crate::transcript_compat::TranscriptSupport,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let thread_id = ThreadId::from_string(&params.thread_id)
             .map_err(|error| invalid_request(format!("invalid thread id: {error}")))?;
-        let page = self
-            .thread_store
-            .list_timeline(StoreListTimelineParams {
-                thread_id,
-                cursor: params.cursor,
-                page_size: params
-                    .limit
-                    .map(|limit| limit as usize)
-                    .unwrap_or(THREAD_ITEMS_DEFAULT_LIMIT)
-                    .clamp(1, THREAD_ITEMS_MAX_LIMIT),
-            })
-            .await
-            .map_err(paginated_history_list_error)?;
-        Ok(Some(
-            ThreadTimelineListResponse {
-                data: page.items,
-                next_cursor: page.next_cursor,
-                active_realtime_session_at_page_start: page.active_realtime_session_at_page_start,
+        loop {
+            let mut page = self
+                .thread_store
+                .list_timeline(StoreListTimelineParams {
+                    thread_id,
+                    cursor: params.cursor.clone(),
+                    page_size: params
+                        .limit
+                        .map(|limit| limit as usize)
+                        .unwrap_or(THREAD_ITEMS_DEFAULT_LIMIT)
+                        .clamp(1, THREAD_ITEMS_MAX_LIMIT),
+                })
+                .await
+                .map_err(paginated_history_list_error)?;
+            if transcript_support == crate::transcript_compat::TranscriptSupport::Standard {
+                page.items
+                    .retain(crate::transcript_compat::supported_timeline);
             }
-            .into(),
-        ))
+            if page.items.is_empty() && page.next_cursor.is_some() {
+                params.cursor = page.next_cursor;
+                continue;
+            }
+            return Ok(Some(
+                ThreadTimelineListResponse {
+                    data: page.items,
+                    next_cursor: page.next_cursor,
+                    active_realtime_session_at_page_start: page
+                        .active_realtime_session_at_page_start,
+                }
+                .into(),
+            ));
+        }
     }
 
     pub(crate) async fn thread_shell_command(
