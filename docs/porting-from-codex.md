@@ -1139,6 +1139,16 @@ Local CLI help descriptions and TUI messages use ASM; displayed command hints us
 
 Keep `codex` executable/version prefix, crate/config/state/archive/tag/workflow/job/check identifiers. Never redirect upstream links/installers for branding.
 
+On Linux, normal CLI, app-server, code-mode-host, and exec-server processes set only
+`/proc/self/comm` to `asm`, `asm-app-server`, `asm-code-host`, and `asm-exec-server`,
+respectively. Preserve executable filenames, command-line arguments, helper dispatch,
+package discovery, and protocol identity. Other platforms remain unchanged. A label
+failure warns without blocking startup; process viewers showing full command lines
+still show the canonical executable names. External name-based monitoring must use
+the new labels. UI plugin helpers intentionally share the `asm-code-host` label
+with the regular code-mode host. CLI-dispatched sandbox and filesystem helper
+modes retain upstream labels.
+
 ### Background terminal waits
 
 Top-level `background_terminal_min_timeout` / `background_terminal_max_timeout`, milliseconds, defaults 5000 / 300000. Reject zero/reversed/unrepresentable bounds. Clamp empty `write_stdin` polls; show bounds in description and finish early on exit.
