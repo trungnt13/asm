@@ -1143,7 +1143,9 @@ respectively. Preserve executable filenames, command-line arguments, helper disp
 package discovery, and protocol identity. Other platforms remain unchanged. A label
 failure warns without blocking startup; process viewers showing full command lines
 still show the canonical executable names. External name-based monitoring must use
-the new labels. Internal sandbox and filesystem helper modes retain upstream labels.
+the new labels. UI plugin helpers intentionally share the `asm-code-host` label
+with the regular code-mode host. CLI-dispatched sandbox and filesystem helper
+modes retain upstream labels.
 
 ### Background terminal waits
 
