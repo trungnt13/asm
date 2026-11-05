@@ -5426,7 +5426,7 @@ dependencies = [
 
 [[package]]
 name = "codex-utils-model-facing-id"
-version = "0.0.0"
+version = "0.167.1-alpha.4"
 dependencies = [
  "blake3",
  "pretty_assertions",

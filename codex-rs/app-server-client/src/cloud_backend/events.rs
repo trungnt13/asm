@@ -11,6 +11,7 @@ pub(super) fn turn(summary: cloud::TurnSummary) -> Result<protocol::Turn> {
         root_turn_id: None,
         items: Vec::new(),
         items_view: protocol::TurnItemsView::NotLoaded,
+        token_usage: None,
         status: match summary.status {
             cloud::TurnStatus::Completed => protocol::TurnStatus::Completed,
             cloud::TurnStatus::Interrupted => protocol::TurnStatus::Interrupted,
