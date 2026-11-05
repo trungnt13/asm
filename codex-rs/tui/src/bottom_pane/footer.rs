@@ -51,8 +51,9 @@ use crate::status::format_tokens_compact;
 use crate::style::secondary_text_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::ui_consts::FOOTER_INDENT_COLS;
-use crate::ui_tree::StackProps;
+use crate::ui_tree::RowProps;
 use crate::ui_tree::UiNode;
+use crate::ui_tree::UiTree;
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -834,17 +835,13 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<FooterCo
                 ""
             };
             return Some(FooterContent::Extension {
-                content: UiNode::Row {
-                    key: None,
-                    props: StackProps::default(),
+                content: UiTree(Some(UiNode::Row {
+                    props: RowProps::default(),
                     children: vec![
-                        Some(content.clone()),
-                        Some(UiNode::text(
-                            /*key*/ None,
-                            format!("{separator}{suffix}"),
-                        )),
+                        content.0.clone(),
+                        Some(UiNode::String(format!("{separator}{suffix}"))),
                     ],
-                },
+                })),
             });
         }
         None => HyperlinkLine::default(),
