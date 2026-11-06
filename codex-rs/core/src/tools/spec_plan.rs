@@ -155,7 +155,8 @@ pub(crate) fn build_tool_router(
         &turn_context.config,
         apps_enabled,
         &mcp.config().mcp_server_catalog,
-        model_info.supports_search_tool,
+        model_info.supports_search_tool
+            || super::harness_tool_search::enabled(turn_context, model_info),
         session.services.mcp_manager.shared_definitions(),
         &mut registry,
     );
@@ -196,7 +197,7 @@ pub(crate) fn build_tool_router(
     if native_mode.is_none() {
         registry.remove(&ToolName::namespaced("web", "run"));
     }
-    append_dynamic_tool_runtimes(dynamic_tools, &mut registry);
+    append_dynamic_tool_runtimes(turn_context, model_info, dynamic_tools, &mut registry);
     let hosted_specs = if let Some(mode) = native_mode {
         hosted_model_tool_specs(
             turn_context,
@@ -294,7 +295,8 @@ fn apply_mcp_tool_exposure_policy(
             exposures = exposures.difference(ToolExposures::DEFERRED | ToolExposures::CODE_MODE);
         }
 
-        exposures = if model_info.supports_search_tool
+        exposures = if (model_info.supports_search_tool
+            || super::harness_tool_search::enabled(turn_context, model_info))
             && exposures.contains(ToolExposures::DEFERRED)
             && (effective_tool_mode(turn_context, model_info) != ToolMode::CodeModeOnly
                 || exposures.contains(ToolExposures::CODE_MODE))
@@ -369,7 +371,7 @@ pub(crate) fn append_source_tools(
         extension_tool_executors,
         registry,
     );
-    append_dynamic_tool_runtimes(dynamic_tools, registry);
+    append_dynamic_tool_runtimes(turn_context, model_info, dynamic_tools, registry);
     hosted_model_tool_specs(
         turn_context,
         model_info,
@@ -422,7 +424,8 @@ pub(crate) fn finalize_tool_router(
         }
     }
     let tool_search_name = ToolName::plain(TOOL_SEARCH_TOOL_NAME);
-    let search_exposure = if model_info.supports_search_tool
+    let search_exposure = if (model_info.supports_search_tool
+        || super::harness_tool_search::enabled(turn_context, model_info))
         && registry.tool_policy.allows(&tool_search_name)
         && registry.entries().any(|tool| {
             tool.runtime.tool_name() != tool_search_name
@@ -489,6 +492,7 @@ pub(crate) fn finalize_tool_router(
             &mut registry,
             tool_search_handler_cache,
             exposure,
+            model_info,
         );
     }
 
@@ -1138,7 +1142,10 @@ fn register_code_mode_executors(
 }
 
 #[instrument(level = "trace", skip_all, fields(tool_spec_count = specs.len()))]
-fn merge_into_namespaces(specs: Vec<ToolSpec>, mcp_namespaces: &HashSet<&str>) -> Vec<ToolSpec> {
+pub(super) fn merge_into_namespaces(
+    specs: Vec<ToolSpec>,
+    mcp_namespaces: &HashSet<&str>,
+) -> Vec<ToolSpec> {
     let mut merged_specs = Vec::with_capacity(specs.len());
     let mut namespace_indices = BTreeMap::<String, usize>::new();
     for spec in specs {
@@ -1736,7 +1743,12 @@ pub(crate) fn register_multi_agent_v2_communication_tools(
 }
 
 #[instrument(level = "trace", skip_all, fields(dynamic_tool_count = dynamic_tools.len()))]
-fn append_dynamic_tool_runtimes(dynamic_tools: &[DynamicToolSpec], registry: &mut ToolRegistry) {
+fn append_dynamic_tool_runtimes(
+    turn_context: &TurnContext,
+    model_info: &ModelInfo,
+    dynamic_tools: &[DynamicToolSpec],
+    registry: &mut ToolRegistry,
+) {
     for spec in dynamic_tools {
         match spec {
             DynamicToolSpec::Function(tool) => {
@@ -1747,7 +1759,12 @@ fn append_dynamic_tool_runtimes(dynamic_tools: &[DynamicToolSpec], registry: &mu
                     );
                     continue;
                 };
-                registry.register_external(Arc::new(handler));
+                let exposure = if super::harness_tool_search::enabled(turn_context, model_info) {
+                    ToolExposure::Deferred
+                } else {
+                    handler.exposure()
+                };
+                registry.register_external_with_exposure(Arc::new(handler), exposure);
             }
             DynamicToolSpec::Namespace(namespace) => {
                 for tool in &namespace.tools {
@@ -1761,7 +1778,13 @@ fn append_dynamic_tool_runtimes(dynamic_tools: &[DynamicToolSpec], registry: &mu
                         );
                         continue;
                     };
-                    registry.register_external(Arc::new(handler));
+                    let exposure = if super::harness_tool_search::enabled(turn_context, model_info)
+                    {
+                        ToolExposure::Deferred
+                    } else {
+                        handler.exposure()
+                    };
+                    registry.register_external_with_exposure(Arc::new(handler), exposure);
                 }
             }
         }
@@ -1774,18 +1797,27 @@ fn append_tool_search_executor(
     registry: &mut ToolRegistry,
     tool_search_handler_cache: &ToolSearchHandlerCache,
     exposure: ToolExposure,
+    model_info: &ModelInfo,
 ) {
-    let source_listing = if turn_context
-        .config
-        .features
-        .enabled(Feature::DeferredToolWorldState)
+    let source_listing = if super::harness_tool_search::enabled(turn_context, model_info)
+        || turn_context
+            .config
+            .features
+            .enabled(Feature::DeferredToolWorldState)
     {
         ToolSearchSourceListing::Omit
     } else {
         ToolSearchSourceListing::Include
     };
     let handler = tool_search_handler_cache.get_or_build(registry, source_listing);
-    registry.register_trusted_with_exposure(handler, exposure);
+    if super::harness_tool_search::enabled(turn_context, model_info) {
+        registry.register_trusted_with_exposure(
+            Arc::new(super::harness_tool_search::FunctionToolSearch::new(handler)),
+            exposure,
+        );
+    } else {
+        registry.register_trusted_with_exposure(handler, exposure);
+    }
 }
 
 fn append_extension_tool_executors(

@@ -1883,13 +1883,19 @@ pub(crate) fn build_prompt(
     incremental_tools: bool,
 ) -> Prompt {
     let turn_context = &step_context.turn;
+    let tools = if incremental_tools {
+        Arc::default()
+    } else if crate::tools::harness_tool_search::enabled(
+        turn_context,
+        &step_context.settings.model_info,
+    ) {
+        crate::tools::harness_tool_search::specs_for_history(&step_context.tool_router, &input)
+    } else {
+        step_context.tool_router.model_visible_specs()
+    };
     Prompt {
         input,
-        tools: if incremental_tools {
-            Arc::default()
-        } else {
-            step_context.tool_router.model_visible_specs()
-        },
+        tools,
         parallel_tool_calls: true,
         base_instructions: if incremental_tools {
             BaseInstructions {
