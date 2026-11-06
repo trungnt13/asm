@@ -314,7 +314,7 @@ impl ServerHandler for DynamicToolMcpHandler {
             thread_id: thread_id.to_string(),
             turn_id,
             call_id,
-            namespace: Some(format!("mcp__{}", dynamic_tools::NAMESPACE)),
+            namespace: Some(dynamic_tools::NAMESPACE.to_string()),
             tool: request.name.into_owned(),
             arguments: Value::Object(request.arguments.unwrap_or_default()),
         };
