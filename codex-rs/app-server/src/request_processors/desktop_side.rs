@@ -87,39 +87,12 @@ pub(super) fn apply_defaults(
     Some(initialization)
 }
 
-pub(super) fn is_boundary(items: &[ResponseItem]) -> bool {
-    let [ResponseItem::Message { role, content, .. }] = items else {
-        return false;
-    };
-    let [ContentItem::InputText { text }] = content.as_slice() else {
-        return false;
-    };
-    if role != "user" {
-        return false;
-    }
-    if text == BOUNDARY {
-        return true;
-    }
-    let Some(reference) = text
-        .strip_prefix(BOUNDARY)
-        .and_then(|suffix| suffix.strip_prefix("\n\nParent chat: "))
-        .and_then(|suffix| suffix.strip_suffix("\n").unwrap_or(suffix).strip_suffix("\nUse this reference with read_thread, send_message_to_thread, or wait_threads when those tools are available. Sending a message requires explicit user authorization in this side conversation."))
-        .and_then(|reference| serde_json::from_str::<serde_json::Value>(reference).ok())
-    else {
-        return false;
-    };
-    reference.as_object().is_some_and(|reference| {
-        reference
-            .keys()
-            .all(|key| matches!(key.as_str(), "threadId" | "hostId"))
-            && reference
-                .get("threadId")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|id| codex_protocol::ThreadId::from_string(id).is_ok())
-            && reference
-                .get("hostId")
-                .is_none_or(|host| host.as_str().is_some_and(|host| !host.is_empty()))
-    })
+pub(super) fn is_desktop_side_boundary(items: &[ResponseItem]) -> bool {
+    matches!(items, [ResponseItem::Message { role, content, .. }]
+        if role == "user" && matches!(content.as_slice(),
+            [ContentItem::InputText { text }]
+                if text.strip_prefix(BOUNDARY).is_some_and(|tail|
+                    tail.is_empty() || tail.starts_with("\n\n"))))
 }
 
 pub(super) enum SideOrigin {

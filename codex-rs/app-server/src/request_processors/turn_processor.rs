@@ -1140,7 +1140,7 @@ impl TurnRequestProcessor {
             .map_err(invalid_request)?;
         validate_response_item_image_urls(&items)?;
 
-        let side_boundary = super::desktop_side::is_boundary(&items);
+        let side_boundary = super::desktop_side::is_desktop_side_boundary(&items);
         if side_boundary {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             let state = thread_state.lock().await;
