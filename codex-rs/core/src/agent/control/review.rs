@@ -257,7 +257,17 @@ pub(crate) fn configure(config: &mut Config) -> anyhow::Result<()> {
     if let Some(model) = settings.model {
         config.model = Some(model);
     }
+    if let Some(provider) = &settings.model_provider {
+        config.apply_model_provider(provider)?;
+    }
     config.apply_external_model_provider()?;
+    anyhow::ensure!(
+        settings
+            .model_provider
+            .as_ref()
+            .is_none_or(|p| p == &config.model_provider_id),
+        "reviewer model conflicts with its configured provider"
+    );
     if let Some(model) = config.model.as_deref()
         && crate::external_runtime::is_native_model(model)
     {

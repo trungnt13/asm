@@ -5,6 +5,7 @@ use super::*;
 #[serde(default, deny_unknown_fields)]
 pub struct ReviewerSubagentConfig {
     pub model: Option<String>,
+    pub model_provider: Option<String>,
     pub model_reasoning_effort: ReasoningEffort,
     pub developer_instructions: Option<String>,
     /// Omission selects the caller's actual root, without granting cross-tree access.
@@ -20,6 +21,7 @@ impl Default for ReviewerSubagentConfig {
     fn default() -> Self {
         Self {
             model: None,
+            model_provider: None,
             model_reasoning_effort: ReasoningEffort::High,
             developer_instructions: None,
             root_session_id: None,

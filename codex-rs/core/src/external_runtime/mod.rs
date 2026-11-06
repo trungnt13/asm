@@ -290,9 +290,10 @@ async fn run_conversation(
     } else {
         None
     };
-    // Native children get ASM messaging tools through a session MCP server. Cursor team policy
-    // can block it without telling ASM; mail still arrives between Cursor turns.
-    let messaging = child_agent;
+    let review_root = turn.parent_thread_id.is_none()
+        && !turn.session_source.is_non_root_agent()
+        && turn.multi_agent_version == MultiAgentVersion::V2;
+    let mut messaging = child_agent || review_root;
     let mut last_message = None;
     loop {
         if cancellation.is_cancelled() {
@@ -325,6 +326,9 @@ async fn run_conversation(
         let messages = input_messages(original_history.raw_items())?;
         let mut lease = RuntimeLease::take(&session.external_runtime)?;
         let needs_binding = lease.runtime.is_some();
+        if review_root && let Some(runtime) = &lease.runtime {
+            messaging = runtime.checkpoint.messaging;
+        }
         let mut fork_boundary = None;
         if lease.runtime.is_none() {
             let mut role_instructions = if thread_spawn_child {
@@ -416,6 +420,10 @@ async fn run_conversation(
                 }
                 (None, Err(error)) => return Err(error.into()),
             };
+            // Legacy native roots retain their saved bridge capability on resume/fork.
+            if review_root {
+                messaging = checkpoint.messaging;
+            }
             checkpoint.validate(
                 &settings.model_info.slug,
                 bound_auto_compact_window(thread_spawn_child, auto_compact_window, &checkpoint),
@@ -430,7 +438,7 @@ async fn run_conversation(
             {
                 return Ok(last_message);
             }
-            let bridge = if messaging {
+            let bridge = if messaging && !(review_root && matches!(linkage, Linkage::Temporary)) {
                 let step = session
                     .capture_speculative_step_context(Arc::clone(turn), cancellation)
                     .await?;

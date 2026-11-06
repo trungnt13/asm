@@ -1,4 +1,4 @@
-//! Child-only local JSON bridge to the canonical ASM messaging and message-board tools.
+//! Local JSON bridge for child communication and root protected reviews.
 
 use std::sync::Arc;
 use std::sync::Weak;
@@ -167,11 +167,10 @@ impl ExternalMessageBridge {
         if self.stop.is_cancelled() {
             bail!("Native messaging bridge is stopped");
         }
-        if step.turn.parent_thread_id.is_none()
-            || !step.turn.session_source.is_non_root_agent()
+        if step.turn.parent_thread_id.is_some() != step.turn.session_source.is_non_root_agent()
             || step.turn.multi_agent_version != MultiAgentVersion::V2
         {
-            bail!("Native messaging is available only to native V2 child agents");
+            bail!("Native bridge requires a V2 root or child");
         }
         let (router, message_tools) = build_message_tools(&session, &step)?;
         // The bridge owns a fresh captured step. Inference metadata must not hide
@@ -329,6 +328,12 @@ fn build_message_tools(
 ) -> anyhow::Result<(ToolRouter, Vec<MessageTool>)> {
     let config = &step.turn.config.multi_agent_v2;
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
+    let root = !step.turn.session_source.is_non_root_agent();
+    if root {
+        use crate::tools::handlers::multi_agents::protected_review;
+        registry.add(protected_review::SPAWN_REVIEW);
+        registry.add(protected_review::CLOSE_REVIEW);
+    }
     // Reuse the canonical collaboration gates, minus spawning. A native child's model
     // metadata must not hide them, so the model-catalog check does not apply here.
     if !config.disable_native_tools {
@@ -339,14 +344,16 @@ fn build_message_tools(
             &mut registry,
         );
     }
-    // The board extension binds its tools to this caller at thread start, when the board is
-    // enabled for it. Expose only its discussion tools, never other extension tools.
-    let namespace = config.tool_namespace.as_deref();
-    let board_tools = MessageBoardTool::DISCUSSION
-        .map(|tool| ToolName::new(namespace.map(str::to_owned), tool.name()));
-    for executor in extension_tool_executors(session, &step.extension_data) {
-        if board_tools.contains(&executor.tool_name()) {
-            registry.register_external(Arc::new(ExtensionToolAdapter::new(executor)));
+    if !root {
+        // The board extension binds its tools to this caller at thread start, when the board is
+        // enabled for it. Expose only its discussion tools, never other extension tools.
+        let namespace = config.tool_namespace.as_deref();
+        let board_tools = MessageBoardTool::DISCUSSION
+            .map(|tool| ToolName::new(namespace.map(str::to_owned), tool.name()));
+        for executor in extension_tool_executors(session, &step.extension_data) {
+            if board_tools.contains(&executor.tool_name()) {
+                registry.register_external(Arc::new(ExtensionToolAdapter::new(executor)));
+            }
         }
     }
     if let Some(name) = registry.first_collision() {
@@ -356,6 +363,14 @@ fn build_message_tools(
     let mut specs = Vec::new();
     for registered in registry.entries() {
         let name = registered.runtime.tool_name();
+        if root
+            && !matches!(
+                name.name.as_str(),
+                "spawn_review" | "close_agent" | "wait_agent" | "list_agents"
+            )
+        {
+            continue;
+        }
         let spec = registered.spec().as_ref().clone();
         let tool = match spec.clone() {
             ToolSpec::Function(tool) => tool,
