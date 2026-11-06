@@ -2,6 +2,7 @@
 //!
 //! Explicit spawn models override role defaults without removing role constraints.
 
+use crate::agent::host::AgentRuntimeServices;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
 use crate::agent::role::build_role_layer_stack;
@@ -85,6 +86,14 @@ pub(crate) async fn prepare_agent_spawn_config(
     let explicit_model = options.model.and(config.model.clone());
     let model_before_role = config.model.clone();
     let mut role_reasoning_effort = None;
+    let shares_service_tier = match &session.agent_runtime {
+        AgentRuntimeServices::Controller => true,
+        AgentRuntimeServices::Host(services) => services.service_tier.is_some(),
+    };
+    if !shares_service_tier {
+        // Inherit the parent's thread preference before applying child role overrides.
+        config.service_tier = session.thread_settings_snapshot().await.service_tier;
+    }
     if !options.full_history_fork
         || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
     {
@@ -375,10 +384,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .model_reasoning_effort
         .as_ref()
         .or(model_info.default_reasoning_level.as_ref());
-    let inherited_tier = session
-        .services
-        .agent_control
-        .service_tier()
+    let inherited_tier = crate::agent::host::service_tier(session, config.service_tier.clone())
         .filter(|tier| {
             tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE || model_info.supports_service_tier(tier)
         });

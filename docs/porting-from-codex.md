@@ -147,9 +147,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `c48785a9b746cbfd01fcae3bef6e4dacb73ca49a`.
-- Date: 2026-11-05.
-- Subject: Stop Noise relay recovery on rejected executor credentials (#59750).
+- Last incorporated commit: `a037e65ead8f6789f960e9450bfe6af5a87a0053`.
+- Date: 2026-11-06.
+- Subject: Preserve client metadata through queued submissions (#59826).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:

@@ -1047,6 +1047,8 @@ impl Session {
                 ));
             }
         };
+        let required_cyber_access_programs =
+            thread_extension_init.get::<crate::cyber_access_program::RequiredCyberAccessPrograms>();
         let inherited_session_id = thread_extension_init
             .remove::<InheritedSessionId>()
             .map(|inherited| inherited.0);
@@ -1131,6 +1133,8 @@ impl Session {
                 }
             }
         }
+        let has_provided_agent_control =
+            matches!(&agent_control, AgentControlInit::Provided { .. });
         let (agent_control, local_agent_runtime): (Arc<dyn AgentControl>, _) = match agent_control {
             AgentControlInit::Local(control) => {
                 let control = control.with_session_id(
@@ -1191,6 +1195,13 @@ impl Session {
             thread_id.to_string(),
             thread_extension_init,
         );
+        if let Some(required) = &required_cyber_access_programs {
+            thread_extension_data.insert(
+                crate::cyber_access_program::RequiredCyberAccessProgramsSnapshot(Arc::clone(
+                    required,
+                )),
+            );
+        }
         thread_extension_data.insert(crate::context::GuardianReviewEvidence::default());
         crate::model_search::SearchOwner::restore(&thread_extension_data, &initial_history);
         // Kick off independent async setup tasks in parallel to reduce startup latency.
@@ -1911,6 +1922,13 @@ impl Session {
                     // This placeholder is used only for teardown, before the session is published.
                     Err(err) => (AgentRuntimeServices::Controller, Some(err)),
                 };
+            state.shared_service_tier_pending = parent_thread_id.is_none()
+                && match &agent_runtime {
+                    AgentRuntimeServices::Controller => has_provided_agent_control,
+                    AgentRuntimeServices::Host(services) => {
+                        session_id == SessionId::from(thread_id) && services.service_tier.is_some()
+                    }
+                };
             let executed_tool_calls =
                 crate::state::ExecutedToolCalls::new(&config.features, &initial_history);
             let codex_responses_headers =
@@ -1967,6 +1985,7 @@ impl Session {
                 codex_responses_headers,
                 crate::cyber_access_program::ApiKeyCyberAccessPrograms::from_config(&config),
                 config.continue_when_model_at_capacity,
+                required_cyber_access_programs,
             );
             // Once tracing starts, startup cleanup must own the session before the next await.
             let rollout_thread_trace = if !config.diagnostic_log_capture {

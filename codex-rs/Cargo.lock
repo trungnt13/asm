@@ -4086,6 +4086,7 @@ dependencies = [
  "http 1.4.0",
  "jsonwebtoken",
  "keyring",
+ "oauth2",
  "once_cell",
  "opentelemetry_sdk",
  "os_info",
@@ -4565,7 +4566,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-tungstenite",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -16042,7 +16042,7 @@ dependencies = [
 [[package]]
 name = "tokio-tungstenite"
 version = "0.28.0"
-source = "git+https://github.com/openai-oss-forks/tokio-tungstenite?rev=0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186#0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186"
+source = "git+https://github.com/openai-oss-forks/tokio-tungstenite?rev=02cb49fa827411e9279e3688d19ab9e82661b0e8#02cb49fa827411e9279e3688d19ab9e82661b0e8"
 dependencies = [
  "futures-util",
  "log",
@@ -16530,7 +16530,7 @@ dependencies = [
 [[package]]
 name = "tungstenite"
 version = "0.27.0"
-source = "git+https://github.com/openai-oss-forks/tungstenite-rs?rev=4fffad30fe373adbdcffab9545e9e9bf4f2fc19f#4fffad30fe373adbdcffab9545e9e9bf4f2fc19f"
+source = "git+https://github.com/openai-oss-forks/tungstenite-rs?rev=db4be399bc1b8b5de2edb46c7187834edabf7e30#db4be399bc1b8b5de2edb46c7187834edabf7e30"
 dependencies = [
  "bytes",
  "data-encoding",

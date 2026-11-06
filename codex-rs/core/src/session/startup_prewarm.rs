@@ -29,8 +29,6 @@ use codex_otel::STARTUP_PREWARM_DURATION_METRIC;
 use codex_otel::SessionTelemetry;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::BaseInstructions;
-use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::SubAgentSource;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum PrewarmInput {
@@ -352,27 +350,28 @@ async fn schedule_startup_prewarm_inner(
     let startup_cancellation_token = CancellationToken::new();
     let preconnect_model_info = Arc::clone(startup_turn_context.model_info());
     // Warmup uses the same child routing rule as request capture.
-    let preconnect_service_tier = if matches!(
-        startup_turn_context.session_source,
-        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-    ) {
-        crate::agent::child_config::select_subagent_service_tier(
-            &startup_turn_context.config,
-            &preconnect_model_info,
-            startup_turn_context
-                .initial_settings
-                .effective_reasoning_effort()
-                .as_ref(),
-            crate::session::get_service_tier(
-                session.services.agent_control.service_tier(),
-                &session.features(),
+    let preconnect_service_tier =
+        if session.inherits_root_service_tier(&startup_turn_context.session_source) {
+            crate::agent::child_config::select_subagent_service_tier(
+                &startup_turn_context.config,
                 &preconnect_model_info,
-            ),
-        )
-        .map_err(codex_protocol::error::CodexErr::InvalidRequest)?
-    } else {
-        startup_turn_context.initial_settings.service_tier.clone()
-    };
+                startup_turn_context
+                    .initial_settings
+                    .effective_reasoning_effort()
+                    .as_ref(),
+                crate::session::get_service_tier(
+                    crate::agent::host::service_tier(
+                        &session,
+                        startup_turn_context.initial_settings.service_tier.clone(),
+                    ),
+                    &session.features(),
+                    &preconnect_model_info,
+                ),
+            )
+            .map_err(codex_protocol::error::CodexErr::InvalidRequest)?
+        } else {
+            startup_turn_context.initial_settings.service_tier.clone()
+        };
     // The handshake precedes tool capture; attach the finalized step metadata to the warmup.
     let (window_id, window_number, context_window_id) = session.current_window().await;
     let mut handshake_metadata = startup_turn_context
