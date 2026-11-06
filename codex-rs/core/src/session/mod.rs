@@ -4533,7 +4533,12 @@ impl Session {
                     .then(|| self.services.turn_environments.configured_snapshot_now()),
             )
         };
-        if self.inherits_root_service_tier(&turn_context.session_source) {
+        if self.inherits_root_service_tier(&turn_context.session_source)
+            || matches!(
+                &turn_context.session_source,
+                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+            )
+        {
             let child_service_tier = crate::agent::child_config::select_subagent_service_tier(
                 &turn_context.config,
                 &settings.model_info,

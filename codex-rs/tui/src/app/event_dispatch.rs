@@ -2117,7 +2117,7 @@ impl App {
             AppEvent::SetThreadGoalDraft {
                 thread_id,
                 draft,
-                mode: _,
+                mode,
             } => {
                 self.set_thread_goal_draft(app_server, thread_id, draft, mode)
                     .await;

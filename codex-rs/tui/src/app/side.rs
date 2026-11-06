@@ -992,6 +992,12 @@ impl App {
             self.restore_side_user_message(user_message);
             return Ok(AppRunControl::Continue);
         }
+        if self.sidebars.values().any(|pane| pane.creation.is_some()) {
+            self.restore_side_user_message(user_message.take());
+            self.chat_widget
+                .add_error_message("Finish or cancel the pending side conversation first.".into());
+            return Ok(AppRunControl::Continue);
+        }
         if let Some(message) = self.side_start_block_message(kind) {
             self.restore_side_user_message(user_message.take());
             self.sync_side_thread_ui();

@@ -284,7 +284,7 @@ struct ApiTransportKey {
     factory: HttpClientFactory,
     url: String,
     redirect_policy: ClientRedirectPolicy,
-    auth_owner_generation: Option<u64>,
+    auth_owner: Option<AuthOwner>,
     runtime_id: Option<String>,
     headers: ApiHeaderMap,
 }
@@ -320,7 +320,7 @@ fn build_api_transport(
         factory: setup.http_client_factory.clone(),
         url: api_provider.url_for_path(endpoint),
         redirect_policy,
-        auth_owner_generation: setup.auth_owner_generation,
+        auth_owner: setup.auth_owner.clone(),
         runtime_id: setup.runtime_id.clone(),
         headers: default_headers(),
     };
