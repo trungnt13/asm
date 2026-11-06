@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent::api::AgentInfo;
 use codex_protocol::error::CodexErrorDetails;
+use codex_thread_store::PersistContext;
 
 impl LocalAgentControl {
     /// Submit a shutdown request for a live agent without marking it explicitly closed in
@@ -8,11 +9,14 @@ impl LocalAgentControl {
     pub(crate) async fn shutdown_live_agent(&self, agent_id: ThreadId) -> CodexResult<String> {
         let state = self.runtime.upgrade()?;
         let result = if let Ok(thread) = state.get_thread(agent_id).await {
+            thread
+                .session
+                .ensure_rollout_materialized(PersistContext::Standard)
+                .await;
+            thread.session.flush_rollout().await?;
             let result = if matches!(thread.agent_status().await, AgentStatus::Shutdown) {
                 Ok(String::new())
             } else {
-                thread.ensure_rollout_materialized().await;
-                thread.flush_rollout().await?;
                 state
                     .send_op(
                         agent_id,

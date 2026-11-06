@@ -101,7 +101,8 @@ impl LocalAgentControl {
         caller: ThreadId,
         target: ThreadId,
     ) -> anyhow::Result<()> {
-        let session = &self.runtime.upgrade()?.get_thread(target).await?.session;
+        let manager = self.runtime.upgrade()?;
+        let session = &manager.get_thread(target).await?.session;
         let scope = session
             .review_context()
             .filter(|s| s.root == caller)
@@ -110,6 +111,7 @@ impl LocalAgentControl {
         scope.members.close();
         scope.members.wait().await;
         scope.check_cleanup()?;
+        manager.remove_thread(&target).await;
         self.close_agent(target)
             .await
             .inspect_err(|_| scope.poison())?;
