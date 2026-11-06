@@ -87,10 +87,12 @@ pub(super) fn apply_defaults(
     Some(initialization)
 }
 
-pub(super) fn is_boundary(items: &[ResponseItem]) -> bool {
+pub(super) fn is_desktop_side_boundary(items: &[ResponseItem]) -> bool {
     matches!(items, [ResponseItem::Message { role, content, .. }]
         if role == "user" && matches!(content.as_slice(),
-            [ContentItem::InputText { text }] if text == BOUNDARY))
+            [ContentItem::InputText { text }]
+                if text.strip_prefix(BOUNDARY).is_some_and(|tail|
+                    tail.is_empty() || tail.starts_with("\n\n"))))
 }
 
 pub(super) enum SideOrigin {
