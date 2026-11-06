@@ -149,18 +149,10 @@ impl InputQueue {
         }
     }
 
-    pub(crate) fn with_controller(
-        thread_id: ThreadId,
-        control: Arc<dyn AgentControl>,
-        boundary: Option<Arc<crate::protected_reviewer::ReviewBoundary>>,
-    ) -> Self {
-        let allow_live_agent_messages = boundary.is_none();
-        let controller = allow_live_agent_messages.then(|| {
-            let updates = control.watch_mailbox(thread_id);
-            (thread_id, control, updates)
-        });
+    pub(crate) fn with_controller(thread_id: ThreadId, control: Arc<dyn AgentControl>) -> Self {
+        let updates = control.watch_mailbox(thread_id);
         Self {
-            controller,
+            controller: Some((thread_id, control, updates)),
             ..Self::new()
         }
     }

@@ -197,9 +197,7 @@ impl LocalAgentRuntime {
         if !std::ptr::eq(thread, registered.as_ref()) {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
-        if !crate::protected_reviewer::is_protected(&thread.session_source) {
-            self.residency.touch(thread_id);
-        }
+        self.residency.touch(thread_id);
         Ok(Some(guard))
     }
 }

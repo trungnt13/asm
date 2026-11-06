@@ -347,6 +347,7 @@ async fn start_listener(
             &environments,
         )
         .await;
+    let harness_owned = codex_core::is_protected_review_source(&config_snapshot.session_source);
     let is_v2_child = conversation.multi_agent_version() == Some(MultiAgentVersion::V2)
         && matches!(config_snapshot.session_source, SessionSource::SubAgent(_));
     let thread_settings_baseline = thread_settings_from_config_snapshot(&config_snapshot);
@@ -629,7 +630,7 @@ async fn start_listener(
                     } else {
                         None
                     }
-                } => {
+                }, if !harness_owned => {
                     let Some(_idle_guard) = idle_guard else {
                         break false;
                     };

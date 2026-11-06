@@ -55,7 +55,12 @@ impl Session {
         next_config: Config,
         scope: RuntimeConfigRefresh,
     ) -> ConfigRefreshOutcome {
-        if crate::protected_reviewer::freeze(&self.services.thread_extension_data) {
+        if let Some(boundary) = &self.review_assignment {
+            if boundary.lock().await.take().is_some() {
+                let error = "Review incomplete: interrupted by policy refresh".into();
+                self.agent_status
+                    .send_replace(codex_protocol::protocol::AgentStatus::Errored(error));
+            }
             self.interrupt_task().await;
             return ConfigRefreshOutcome::Rejected;
         }

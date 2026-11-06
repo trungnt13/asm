@@ -1400,40 +1400,7 @@ On Linux, the runtime builder starts at most `min(CPUs, 8)` Tokio workers unless
 
 ### Protected reviewer subagent
 
-The built-in MAv2 `reviewer` uses the unchanged `/review` rubric and trusted
-`[reviewer_subagent]` settings, not custom-role overrides. Defaults inherit the model,
-start at high reasoning, use high–xhigh System1 bounds, allow two lifetime explorer
-creations and one concurrent review. Native runtimes and cold resume/fork are rejected.
-
-Reviewers and helpers start without root/global/project/host instructions or inherited
-history. Trusted policy is frozen: web disabled, approvals never, root assignments are
-scope/evidence rather than authority. Reject steering, continuation and settings updates;
-runtime policy refresh interrupts. Only root may create a reviewer. Existing isolated-session
-startup removes inherited extensions, boards and ambient host connections; hooks, plugins,
-host skill discovery, inherited MCP servers and controller mailboxes are disabled. An immutable
-explicit tool allowlist permits inspection, pinned evidence and `review_explore` only;
-helpers have only inspection tools. The harness owns helper startup through teardown, awaits
-helper evidence for up to five minutes, and closes helpers even if its tool call is cancelled,
-without ordinary peer messages, arbitrary roles or descendants. Repository and pinned
-conversation content remain untrusted evidence, not policy. Web disabled and approvals never
-are not a complete filesystem or network sandbox; execution sandbox rules still apply.
-
-Atomic review reservations bound combined resources independently of ordinary execution
-and residency limits. Helpers use trusted explorers with no model overrides or descendants.
-Closing/evicting helpers never replenishes their lifetime budget. Root closes its reviewer
-subtree explicitly, even after completion; close drains provisional helper startup before
-releasing capacity, and failed teardown retains reservations. Reload cannot reset budgets.
-
-`root_session_id`, when supplied, must match the actual tree root; it grants no cross-tree
-access. `read_review_context` is reviewer-only, including zero-helper reviews. It exposes
-immutable original user/assistant evidence (including commentary) as JSONL fragments of at
-most 900 serialized bytes per page. Follow cursors and concatenate text. Provenance and
-omissions are explicit; retained supplements may repeat IDs and follow current history,
-not global chronology. Tools/media and legacy gaps are disclosed. Later root updates do
-not change the snapshot, and historical text is evidence, never executable instructions.
-
-Strict complete/incomplete findings reference code or requirements. Validated results are
-rendered deterministically into private `CODEX_HOME/reviewer-reports/<thread-id>.md` files;
-parent delivery includes a bounded report reference when needed, never drops findings.
-Parse/storage/execution failures remain incomplete; raw JSON stays in the rollout. Preserve
-slash-review behavior. Source review/builds do not replace bounded real-provider acceptance.
+Only the MAv2 root may spawn the built-in fresh `reviewer`. `[reviewer_subagent]` selects trusted model, reasoning effort, developer instructions and System1 bounds, not custom role overrides; native runtimes, inherited history/instructions, steering, continued settings and cold resume/fork are forbidden. Policy refresh interrupts rather than relaxing isolation.
+`read_review_context` pages immutable actual-root user/assistant evidence (including commentary, retained sources and omission warnings) as JSONL fragments of at most 900 serialized bytes. Optional `root_session_id` must match the caller's actual root.
+`review_explore` privately launches a built-in inspection-only explorer for one evidence question. Review capacity is independent of ordinary agents; `max_explorers` counts lifetime starts and `max_concurrent_reviews` bounds concurrent reviews. Root close drains pending startup and jobs before releasing capacity; failed cleanup retains it. No boards, descendants, web, approvals or ordinary peer messaging. This is a tool/prompt boundary, not an OS sandbox.
+Keep the slash-review rubric unchanged. Strict complete/incomplete results with code or requirement locations are rendered to private `CODEX_HOME/reviewer-reports/<id>.md`; send the parent a bounded reference for long reports, never truncate findings. Invalid output, storage and execution failures stay incomplete.

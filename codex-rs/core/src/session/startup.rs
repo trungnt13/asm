@@ -24,20 +24,9 @@ use super::session::Session;
 #[derive(Default)]
 pub(crate) struct SessionStartup {
     teardown: StdMutex<Option<AgentTreeTeardownGuard>>,
-    pub(crate) review_quota: StdMutex<Option<Arc<crate::agent::control::ReviewStartupQuota>>>,
     pub(crate) persistence: Mutex<LiveThreadInitGuard>,
     pub(crate) session: OnceLock<Arc<Session>>,
     pub(crate) io: OnceLock<SessionIo>,
-}
-
-struct CleanupQuotaGuard(Option<Arc<crate::agent::control::ReviewStartupQuota>>);
-
-impl Drop for CleanupQuotaGuard {
-    fn drop(&mut self) {
-        if let Some(lease) = self.0.as_ref() {
-            lease.fail_closed();
-        }
-    }
 }
 
 impl SessionStartup {
@@ -74,12 +63,6 @@ impl SessionStartup {
     }
 
     pub(crate) async fn cleanup(&self) {
-        let mut quota_cleanup = CleanupQuotaGuard(
-            self.review_quota
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone(),
-        );
         let mut teardown = self.lock_teardown().take();
         if let Some(teardown) = teardown.as_mut()
             && let Some(session) = self.session.get()
@@ -99,9 +82,6 @@ impl SessionStartup {
                     );
                 }
                 tracing::warn!("failed to stop cancelled session init: {error}");
-                if let Some(lease) = quota_cleanup.0.as_ref() {
-                    lease.fail_closed();
-                }
             }
         } else {
             if let Some(session) = self.session.get() {
@@ -114,9 +94,6 @@ impl SessionStartup {
             }
             let mut persistence = std::mem::take(&mut *self.persistence.lock().await);
             if let Err(error) = persistence.discard().await {
-                if let Some(lease) = quota_cleanup.0.as_ref() {
-                    lease.fail_closed();
-                }
                 if let Some(teardown) = teardown.as_ref() {
                     teardown.record_shutdown_failure(
                         "discard_persistence",
@@ -128,11 +105,6 @@ impl SessionStartup {
                 );
             }
         }
-        self.review_quota
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        quota_cleanup.0 = None;
         if let Some(teardown) = teardown {
             teardown.complete();
         }
@@ -152,33 +124,13 @@ impl SessionStartupGuard {
     }
 
     pub(crate) fn disarm(mut self) {
-        if let Some(startup) = self.startup.take() {
-            startup
-                .review_quota
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .take();
-        }
+        self.startup = None;
     }
 
     pub(crate) fn cleanup(mut self) -> BoxFuture<'static, ()> {
         Box::pin(async move {
             if let Some(startup) = self.startup.take() {
-                let protected = startup
-                    .review_quota
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .is_some();
-                if protected {
-                    let cleanup = tokio::spawn(async move {
-                        startup.cleanup().await;
-                    });
-                    if let Err(error) = cleanup.await {
-                        tracing::warn!("session startup cleanup task failed: {error}");
-                    }
-                } else {
-                    startup.cleanup().await;
-                }
+                startup.cleanup().await;
             }
         })
     }

@@ -28,6 +28,7 @@ use crate::environment_selection::default_thread_environment_requests;
 use crate::exec_policy::ExecPolicyManager;
 use crate::exec_policy::InheritedExecPolicy;
 use crate::mcp::McpManager;
+use crate::protected_reviewer as review;
 use crate::rollout::truncation;
 use crate::session::ForkPersistence;
 use crate::session::GitEnrichmentPolicy;
@@ -1763,6 +1764,7 @@ impl ThreadManager {
             initial_history: history,
             persistence: fork_persistence,
         } = fork_history;
+        review::check_external_access(history.get_session_meta().map(|m| &m.source))?;
         // `forked_from_id()` describes this history's existing lineage. When
         // forking a resumed thread, the child copies the resumed thread itself.
         let source_thread_id = match &history {
@@ -2362,13 +2364,6 @@ impl ThreadManagerState {
                 .get_or_insert_with(|| Arc::new(SessionStartup::default())),
         );
         startup_state.hold_membership(membership);
-        *startup_state
-            .review_quota
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = request
-            .options
-            .thread_extension_init
-            .remove::<crate::agent::control::ReviewStartupQuota>();
         let startup_guard =
             owns_startup.then(|| SessionStartupGuard::new(Arc::clone(&startup_state)));
         let ThreadSpawnRequest {
@@ -2436,14 +2431,7 @@ impl ThreadManagerState {
                 "thread store resume preparation requires a persisted resumed thread".to_string(),
             ));
         }
-        if initial_history
-            .get_resumed_session_sources()
-            .is_some_and(|(source, _)| crate::protected_reviewer::is_protected(&source))
-        {
-            return Err(CodexErr::InvalidRequest(
-                "protected reviewer sessions cannot be restored; start a new review".to_string(),
-            ));
-        }
+        review::check_external_access(initial_history.get_session_meta().map(|m| &m.source))?;
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         if thread_extension_init.get::<InheritedSessionId>().is_some()
@@ -2455,11 +2443,25 @@ impl ThreadManagerState {
                     .to_string(),
             ));
         }
-        if crate::protected_reviewer::is_protected(&session_source) {
+        let protected = review::is_protected(&session_source);
+        if protected {
+            let owned = runtime.review.as_ref().is_some_and(|r| {
+                !review::is_reviewer(&session_source) || Some(r.id) == reserved_thread_id
+            });
+            let requirements = config.config_layer_stack.requirements();
+            let managed = &requirements.additional_developer_instructions;
+            if !matches!(&initial_history, InitialHistory::New)
+                || !owned
+                || managed.as_ref().is_some_and(|s| !s.is_empty())
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "protected review requires fresh harness-owned context without managed developer instructions".into(),
+                ));
+            }
             thread_extension_init.insert(SessionIsolation::Isolated);
             thread_extension_init
                 .remove::<codex_extension_api::IsolatedSessionExtensions<Config>>();
-            thread_extension_init.insert(crate::protected_reviewer::tool_policy(&session_source));
+            thread_extension_init.insert(review::tool_policy(&session_source));
         }
         let isolation = thread_extension_init
             .get::<SessionIsolation>()
@@ -2593,38 +2595,6 @@ impl ThreadManagerState {
                 .restore_v2_agent_metadata(&config, resumed.conversation_id)
                 .await;
         }
-        if crate::protected_reviewer::is_protected(&session_source) {
-            if !matches!(&initial_history, InitialHistory::New) {
-                return Err(CodexErr::InvalidRequest(
-                    "protected reviewer sessions cannot be restored; start a new review"
-                        .to_string(),
-                ));
-            }
-            if crate::protected_reviewer::is_reviewer(&session_source) {
-                crate::protected_reviewer::configure(&mut config)
-                    .map_err(CodexErr::InvalidRequest)?;
-                if thread_extension_init
-                    .get::<crate::review_context::ReviewContext>()
-                    .is_none()
-                {
-                    return Err(CodexErr::InvalidRequest(
-                        "reviewer requires a pinned associated root snapshot".to_string(),
-                    ));
-                }
-                thread_extension_init.insert(crate::protected_reviewer::ReviewRun {
-                    report_home: config.codex_home.as_path().to_path_buf(),
-                    ..Default::default()
-                });
-            }
-            thread_extension_init.insert(crate::protected_reviewer::ReviewBoundary {
-                path: session_source.get_agent_path().ok_or_else(|| {
-                    CodexErr::InvalidRequest(
-                        "protected review requires a tree identity".to_string(),
-                    )
-                })?,
-                started: AtomicBool::default(),
-            });
-        }
         let mut instructions = match inherited_instructions {
             Some(instructions) => instructions,
             None if isolation == SessionIsolation::Isolated => SessionInstructions::default(),
@@ -2648,12 +2618,15 @@ impl ThreadManagerState {
         }
         // Resolve only the global contribution here, after host and inherited snapshots.
         // Forked history keeps its baseline so normal context updates replace the active text.
-        if !crate::protected_reviewer::is_protected(&session_source)
-            && matches!(
-                session_source,
-                SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
-            )
-        {
+        if protected {
+            instructions = SessionInstructions {
+                project_snapshot: Some(Arc::new(crate::agents_md::LoadedAgentsMd::default())),
+                ..Default::default()
+            };
+        } else if matches!(
+            session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
             let path = config.codex_home.join("SUBAGENTS.md");
             match tokio::fs::read(&path).await {
                 Ok(contents) => {
@@ -2666,12 +2639,6 @@ impl ThreadManagerState {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
-        }
-        if crate::protected_reviewer::is_protected(&session_source) {
-            instructions = SessionInstructions {
-                project_snapshot: Some(Arc::new(crate::agents_md::LoadedAgentsMd::default())),
-                ..Default::default()
-            };
         }
         let (exec_policy, multi_agent_version) = match isolation {
             SessionIsolation::Isolated => (None, Some(MultiAgentVersion::Disabled)),

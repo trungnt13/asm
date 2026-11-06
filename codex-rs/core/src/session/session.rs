@@ -112,6 +112,8 @@ pub(crate) struct Session {
     pub(crate) realtime_history: Option<Mutex<crate::realtime_history::RealtimeHistoryState>>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
     pub(crate) async_hook_results: async_channel::Receiver<HookCompletedEvent>,
+    /// Serializes the sole protected assignment with a policy refresh that interrupts it.
+    pub(super) review_assignment: Option<Mutex<Option<codex_protocol::AgentPath>>>,
     pub(crate) input_queue: InputQueue,
     pub(crate) services: SessionServices,
     pub(super) git_enrichment_policy: GitEnrichmentPolicy,
@@ -2068,7 +2070,9 @@ impl Session {
                 turn_environments: Arc::clone(&turn_environments),
             };
             let (mcp_prewarm_tx, mcp_prewarm_rx) = async_channel::bounded(1);
+            let protected = services.local_agent_runtime.review.is_some();
             let sess = Arc::new(Session {
+                review_assignment: protected.then(|| Mutex::new(session_configuration.session_source.get_agent_path())),
                 thread_id,
                 item_id_generator,
                 agent_runtime,
@@ -2101,13 +2105,11 @@ impl Session {
                 external_runtime: Default::default(),
                 active_turn: Mutex::new(None),
                 async_hook_results,
-                input_queue: InputQueue::with_controller(
-                    thread_id,
-                    Arc::clone(&services.agent_control),
-                    services
-                        .thread_extension_data
-                        .get::<crate::protected_reviewer::ReviewBoundary>(),
-                ),
+                input_queue: if protected {
+                    InputQueue::new()
+                } else {
+                    InputQueue::with_controller(thread_id, Arc::clone(&services.agent_control))
+                },
                 services,
                 git_enrichment_policy,
                 fork_persistence,

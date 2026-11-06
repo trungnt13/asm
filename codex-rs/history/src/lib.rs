@@ -528,7 +528,7 @@ impl InitialHistory {
             .and_then(|meta| meta.parent_thread_id)
     }
 
-    fn get_session_meta(&self) -> Option<&SessionMeta> {
+    pub fn get_session_meta(&self) -> Option<&SessionMeta> {
         match self {
             Self::New | Self::Cleared => None,
             Self::Resumed(resumed) => resumed.history.iter().find_map(|item| match item {

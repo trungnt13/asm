@@ -208,7 +208,7 @@ pub(crate) fn resolve_role_config<'a>(
     role_name: &str,
 ) -> Option<&'a AgentRoleConfig> {
     if role_name == crate::protected_reviewer::ROLE {
-        return built_in::configs().get(role_name);
+        return None;
     }
     config
         .agent_roles
@@ -330,30 +330,19 @@ pub(crate) mod spawn_tool_spec {
 
     /// Builds the spawn-agent tool description text from built-in and configured roles.
     pub(crate) fn build(user_defined_agent_roles: &BTreeMap<String, AgentRoleConfig>) -> String {
-        let roles = built_in::configs()
-            .iter()
-            .filter(|(name, _)| name.as_str() != crate::protected_reviewer::ROLE);
-        build_from_configs(roles, user_defined_agent_roles)
-    }
-
-    pub(crate) fn build_for_root(
-        user_defined_agent_roles: &BTreeMap<String, AgentRoleConfig>,
-    ) -> String {
-        build_from_configs(built_in::configs(), user_defined_agent_roles)
+        let built_in_roles = built_in::configs();
+        build_from_configs(built_in_roles, user_defined_agent_roles)
     }
 
     // This function is not inlined for testing purpose.
-    fn build_from_configs<'a>(
-        built_in_roles: impl IntoIterator<Item = (&'a String, &'a AgentRoleConfig)>,
+    fn build_from_configs(
+        built_in_roles: &BTreeMap<String, AgentRoleConfig>,
         user_defined_roles: &BTreeMap<String, AgentRoleConfig>,
     ) -> String {
         let mut seen = BTreeSet::new();
         let mut formatted_roles = Vec::new();
         for (name, declaration) in user_defined_roles {
-            if name == crate::protected_reviewer::ROLE {
-                continue;
-            }
-            if seen.insert(name.as_str()) {
+            if name != crate::protected_reviewer::ROLE && seen.insert(name.as_str()) {
                 formatted_roles.push(format_role(name, declaration));
             }
         }
@@ -416,14 +405,6 @@ mod built_in {
     pub(super) fn configs() -> &'static BTreeMap<String, AgentRoleConfig> {
         static CONFIG: LazyLock<BTreeMap<String, AgentRoleConfig>> = LazyLock::new(|| {
             BTreeMap::from([
-                (
-                    crate::protected_reviewer::ROLE.to_string(),
-                    AgentRoleConfig {
-                        description: Some("Independent protected review. Uses fresh context and trusted reviewer_subagent settings; cannot be steered or continued. Native runtimes are unsupported.".to_string()),
-                        config_file: None,
-                        nickname_candidates: None,
-                    },
-                ),
                 (
                     DEFAULT_ROLE_NAME.to_string(),
                     AgentRoleConfig {

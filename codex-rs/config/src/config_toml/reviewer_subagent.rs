@@ -1,9 +1,4 @@
-use codex_protocol::ThreadId;
-use codex_protocol::openai_models::ReasoningEffort;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use std::num::NonZeroUsize;
+use super::*;
 
 /// Stores trusted defaults for protected review sessions, not ordinary role overrides.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -13,7 +8,7 @@ pub struct ReviewerSubagentConfig {
     pub model_reasoning_effort: ReasoningEffort,
     pub developer_instructions: Option<String>,
     /// Omission selects the caller's actual root, without granting cross-tree access.
-    pub root_session_id: Option<ThreadId>,
+    pub root_session_id: Option<codex_protocol::ThreadId>,
     /// Limits total explorer creations per review, not concurrent ordinary agents.
     pub max_explorers: usize,
     pub max_concurrent_reviews: NonZeroUsize,
@@ -38,11 +33,7 @@ impl Default for ReviewerSubagentConfig {
 
 impl ReviewerSubagentConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if self
-            .model
-            .as_ref()
-            .is_some_and(|model| model.trim().is_empty())
-        {
+        if self.model.as_deref().map(str::trim) == Some("") {
             return Err("reviewer_subagent.model must not be blank".to_string());
         }
         crate::System1Config {

@@ -161,6 +161,7 @@ impl PreparedGuardianContext {
                 .get_or_init(|| self.parent.get_tx_event());
         }
         let io = SessionIo {
+            protected: thread.io.protected,
             tx_sub: thread.io.tx_sub.clone(),
             rx_event: thread.io.rx_event.clone(),
             agent_status: thread.io.agent_status.clone(),

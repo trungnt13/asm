@@ -76,9 +76,8 @@ mod interrupt;
 mod legacy;
 mod mailbox;
 mod residency;
-mod review_quota;
+pub(crate) mod review;
 pub use residency::ThreadEvictionOutcome;
-pub(crate) use review_quota::ReviewStartupQuota;
 mod resume;
 mod root_handoff;
 mod runtime;
@@ -451,12 +450,6 @@ impl LocalAgentControl {
         child_reference: String,
         child_agent_path: Option<AgentPath>,
     ) {
-        if session_source
-            .as_ref()
-            .is_some_and(crate::protected_reviewer::is_helper)
-        {
-            return;
-        }
         let Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id, ..
         })) = session_source

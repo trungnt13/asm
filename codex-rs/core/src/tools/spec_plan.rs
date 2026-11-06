@@ -37,6 +37,7 @@ use crate::tools::handlers::multi_agents::ResumeAgentHandler;
 use crate::tools::handlers::multi_agents::SendInputHandler;
 use crate::tools::handlers::multi_agents::SpawnAgentHandler;
 use crate::tools::handlers::multi_agents::WaitAgentHandler;
+use crate::tools::handlers::multi_agents::protected_review;
 use crate::tools::handlers::multi_agents_common::DEFAULT_WAIT_TIMEOUT_MS;
 use crate::tools::handlers::multi_agents_common::MAX_WAIT_TIMEOUT_MS;
 use crate::tools::handlers::multi_agents_common::MIN_WAIT_TIMEOUT_MS;
@@ -874,14 +875,13 @@ fn agent_type_description(
     turn_context: &TurnContext,
     default_agent_type_description: &str,
 ) -> String {
-    let build = if turn_context.multi_agent_version == MultiAgentVersion::V2
+    let mut agent_type_description =
+        crate::agent::role::spawn_tool_spec::build(&turn_context.config.agent_roles);
+    if turn_context.multi_agent_version == MultiAgentVersion::V2
         && !turn_context.session_source.is_non_root_agent()
     {
-        crate::agent::role::spawn_tool_spec::build_for_root
-    } else {
-        crate::agent::role::spawn_tool_spec::build
-    };
-    let agent_type_description = build(&turn_context.config.agent_roles);
+        agent_type_description.push_str("\n- reviewer: Independent protected review; fresh context, trusted settings, no steering or continuation.");
+    }
     if agent_type_description.is_empty() {
         default_agent_type_description.to_string()
     } else {
@@ -1342,11 +1342,11 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     if turn_context.multi_agent_version == MultiAgentVersion::V2
         && !turn_context.session_source.is_non_root_agent()
     {
-        registry.add(crate::tools::handlers::ProtectedReviewTool::CloseAgent);
+        registry.add(protected_review::CLOSE_REVIEW);
     }
     if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
-        registry.add(crate::tools::handlers::ProtectedReviewTool::ReadContext);
-        registry.add(crate::tools::handlers::ProtectedReviewTool::Explore);
+        registry.add(protected_review::READ_CONTEXT);
+        registry.add(protected_review::EXPLORE);
     }
 
     if turn_context.config.update_plan_enabled {
