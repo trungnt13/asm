@@ -357,6 +357,11 @@ Show aliases in picker entries while retaining canonical selection identity. Nat
 do not add HTTP provider bindings or change native model/runtime selection.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
+For Fireworks, defer MCP/app and desktop dynamic tools in the harness, discover them
+through an ordinary function call, and expose only selected tools on subsequent requests.
+Preserve explicitly direct-only namespaces. Keep discovery in the harness: do not send native
+tool-search items or undiscovered schemas to Fireworks. Preserve native tool search for
+providers that support it and resolve discovered tools against current permissions on resume.
 Provider changes in the picker start fresh sessions and preserve the old chat.
 Input and resume admission keep valid catalog-bound and native-runtime routes independent
 of the global HTTP-provider default. Validate saved and requested identities separately;
