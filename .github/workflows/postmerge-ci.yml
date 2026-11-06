@@ -1,12 +1,7 @@
 name: postmerge-ci
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - AGENTS.md
-      - docs/porting-from-codex.md
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}::${{ github.ref }}
