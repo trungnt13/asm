@@ -800,6 +800,10 @@ async fn execute_inner(
             Ok(json!({"threadId": thread_id, "archived": arguments.archived}))
         }
         "wait_threads" => {
+            let wait_tool = match params.namespace.as_deref() {
+                Some(namespace) => format!("{namespace}.{}", params.tool),
+                None => params.tool.clone(),
+            };
             let arguments: WaitArguments = parse_arguments(params.arguments)?;
             let reason = codex_tools::WaitReason::new(&arguments.reason)?;
             let timeout_ms = arguments.timeout_ms.unwrap_or(MAX_WAIT_TIMEOUT_MS);
@@ -832,9 +836,8 @@ async fn execute_inner(
             let result =
                 |timed_out: bool, wake: Option<Value>, polls: Vec<Value>, errors: Vec<Value>| {
                     let mut result = json!({"timedOut": timed_out, "wake": wake, "polls": polls});
-                    if let Some(reminder) = reason.reminder(codex_tools::WaitReminder::Returned) {
-                        result["message"] = json!(reminder);
-                    }
+                    result["message"] =
+                        json!(reason.reminder(&wait_tool, codex_tools::WaitReminder::Returned));
                     if !errors.is_empty() {
                         result["errors"] = json!(errors);
                     }

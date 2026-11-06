@@ -47,6 +47,7 @@ impl Handler {
             turn,
             payload,
             call_id,
+            tool_name,
             ..
         } = invocation;
         let arguments = function_arguments(payload)?;
@@ -116,10 +117,14 @@ impl Handler {
                 codex_tools::WaitReminder::Returned
             }
         };
-        if let Some(reminder) = reason.reminder(reminder) {
-            result.message.push(' ');
-            result.message.push_str(&reminder);
-        }
+        let wait_tool = match tool_name.namespace.as_deref() {
+            Some(namespace) => format!("{namespace}.{}", tool_name.name),
+            None => tool_name.name,
+        };
+        result.message.push(' ');
+        result
+            .message
+            .push_str(&reason.reminder(&wait_tool, reminder));
 
         session
             .emit_turn_item_completed(
