@@ -14,7 +14,6 @@ use crate::CodexAppsToolsCache;
 use crate::CodexThreadSettingsOverrides;
 use crate::agent::AgentStatus;
 use crate::agent::LocalAgentControl;
-use crate::agent::api::AgentConfigUpdate;
 use crate::agent::api::AgentControl;
 use crate::agent::control::AgentControlInit;
 use crate::agent::host::InheritedSessionId;
@@ -74,6 +73,8 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
 use codex_login::default_client::originator;
+use codex_model_provider::ModelCatalogFactory;
+use codex_model_provider::ProviderAuthContext;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 use codex_models_manager::manager::RefreshStrategy;
@@ -1048,6 +1049,36 @@ impl ThreadManager {
         self.state.models_manager_for_config(config)
     }
 
+    /// Build a separate catalog with the harness's runtime identity and the caller's cache policy.
+    pub fn temporary_models_manager_for_config(
+        &self,
+        config: &Config,
+        factory: &dyn ModelCatalogFactory,
+    ) -> SharedModelsManager {
+        let manager = factory.build(
+            self.catalog_auth_context(config)
+                .model_provider(config.model_provider.clone()),
+            config.model_catalog.clone(),
+            config.features.enabled(Feature::ApiKeyModelDiscovery),
+        );
+        manager.set_load_external_models_json(config.load_external_models_json);
+        manager
+    }
+
+    fn catalog_auth_context(&self, config: &Config) -> ProviderAuthContext {
+        let credentials = self.auth_manager();
+        let runtime = crate::runtime_auth::runtime_for_config(
+            &self.state.runtime_auth,
+            config,
+            Arc::clone(&credentials),
+            &self.state.installation_id,
+        );
+        ProviderAuthContext {
+            credentials,
+            runtime_auth: runtime.map(|runtime| (runtime, config.runtime_auth_mode)),
+        }
+    }
+
     pub fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
         self.state
             .model_catalog
@@ -1891,8 +1922,10 @@ impl ThreadManagerState {
         self.model_catalog.for_config(
             config,
             config.model_catalog.as_ref(),
-            credentials,
-            runtime,
+            ProviderAuthContext {
+                credentials,
+                runtime_auth: runtime.map(|runtime| (runtime, config.runtime_auth_mode)),
+            },
             /*same_owner*/ true,
         )
     }
@@ -2559,11 +2592,6 @@ impl ThreadManagerState {
                 }) => Some(*parent_thread_id),
                 _ => None,
             });
-        // Host controllers can already be shared with live threads. Publish root settings
-        // only after registration succeeds, so a failed start cannot update their tree.
-        let initial_host_config = (self.agent_control_factory.is_some()
-            && parent_thread_id.is_none())
-        .then(|| AgentConfigUpdate::ServiceTier(config.service_tier.clone()));
         // Both resume entry points must restore identities before children can be loaded lazily.
         if let InitialHistory::Resumed(resumed) = &initial_history
             && initial_history.get_multi_agent_version() == Some(MultiAgentVersion::V2)
@@ -2863,7 +2891,7 @@ impl ThreadManagerState {
             }
         }
         let finalize_result = self
-            .finalize_thread_spawn(session, io, tracked_session_source, initial_host_config)
+            .finalize_thread_spawn(session, io, tracked_session_source)
             .await;
         let new_thread = match finalize_result {
             Ok(new_thread) => new_thread,
@@ -2895,7 +2923,6 @@ impl ThreadManagerState {
         session: Arc<Session>,
         io: SessionIo,
         session_source: SessionSource,
-        initial_host_config: Option<AgentConfigUpdate>,
     ) -> CodexResult<NewThread> {
         let thread_id = session.thread_id();
         let event = io.next_event().await?;
@@ -2916,23 +2943,31 @@ impl ThreadManagerState {
             .mcp_ema_cancellation()
             .clone();
         {
+            let pending_service_tier = if self.agent_control_factory.is_some()
+                || matches!(
+                    &session.agent_runtime,
+                    crate::agent::host::AgentRuntimeServices::Host(services)
+                        if services.service_tier.is_some()
+                ) {
+                session.lock_pending_service_tier().await
+            } else {
+                None
+            };
             let mut threads = self.threads.write().await;
             if let std::collections::hash_map::Entry::Vacant(e) = threads.entry(thread_id) {
-                if let Some(update) = initial_host_config {
-                    session
-                        .services
-                        .agent_control
-                        .propagate_config_update(update);
-                }
                 ema_cancellation.publish();
                 let thread = Arc::new(CodexThread::new(
-                    session,
+                    Arc::clone(&session),
                     io,
                     ThreadStartupMetadata::from(&session_configured),
                     session_configured.rollout_path.clone(),
                     session_source,
                 ));
                 e.insert(thread.clone());
+                if let Some((mut state, update)) = pending_service_tier {
+                    crate::agent::host::propagate_config_update(&session, update);
+                    state.shared_service_tier_pending = false;
+                }
                 return Ok(NewThread {
                     thread_id,
                     thread,

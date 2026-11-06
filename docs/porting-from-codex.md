@@ -135,6 +135,12 @@ For syncs or changes that affect saved caches or wire formats, apply these steps
 8. Record known remaining findings as unresolved, not passed. Keep missing boundary evidence blocked. Do not claim readiness or silently expand the authorized fix scope. Ask for decisions outside that scope.
 9. If an older ASM contaminated a stock cache, use manual recovery only. Verify the affected host, actual reader executable/version/hash, and home. Stop all writers. Back up the derived database and its SQLite WAL/SHM. Quarantine or rebuild only that cache. Preserve canonical history and shared state. Do not use the older writer against the recovered home.
 
+#### Known upstream cold-history limitation
+
+Unmodified Codex `rust-v0.168.0-alpha.7` returns an empty cold child timeline when a fresh home contains canonical rollouts but no derived history database. Its timeline reader does not first rebuild that projection; resuming the chat builds it and exposes the saved messages. The same missing catch-up remains in upstream `a037e65ead`. ASM already rebuilds the projection before querying; this sync does not introduce that difference. No history loss was observed in the isolated checks.
+
+The owner accepts this upstream limitation for the sync through `a037e65ead` and its ensuing release. Record cold-stock reading as unresolved, not passed; successful resume-assisted handoff is separate evidence. This acceptance does not waive other compatibility checks or authorize changes to personal history or caches.
+
 ### Live backend model catalog
 
 Every upstream rebase/sync must also fetch the live authenticated backend model catalog. Source searches and cached or bundled catalogs cannot establish current model availability; the backend can expose new models without a source update.
@@ -147,9 +153,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `c48785a9b746cbfd01fcae3bef6e4dacb73ca49a`.
-- Date: 2026-11-05.
-- Subject: Stop Noise relay recovery on rejected executor credentials (#59750).
+- Last incorporated commit: `a037e65ead8f6789f960e9450bfe6af5a87a0053`.
+- Date: 2026-11-06.
+- Subject: Preserve client metadata through queued submissions (#59826).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:

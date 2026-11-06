@@ -1310,7 +1310,8 @@ async fn background_turn_program(
             params: ModelListParams {
                 cursor: None,
                 limit: None,
-                include_hidden: Some(true)
+                include_hidden: Some(true),
+                model_provider: None,
             },
         }),
     );

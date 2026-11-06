@@ -791,6 +791,15 @@ impl App {
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
         self.restore_automatic_thread_title(thread_id, self.chat_widget.thread_name().as_deref())
             .await;
+        if !is_replay_only
+            && let Some(message) = self
+                .side_threads
+                .get_mut(&thread_id)
+                .and_then(|side| side.opening_message.take())
+        {
+            self.chat_widget
+                .submit_user_message_as_plain_user_turn(message);
+        }
         if self.side_retention_enabled(tui) {
             if self.side_threads.contains_key(&thread_id) {
                 self.sidebar_mut().show(
@@ -854,12 +863,14 @@ impl App {
                 .and_then(|session| session.service_tier.clone());
         }
         let retain_side_view = self.side_retention_enabled(tui);
+        let side_parent = |id| {
+            self.side_threads
+                .get(&self.side_pair_key(id)?)
+                .map(|side| side.parent_thread_id)
+        };
         let preserve_screen = retain_side_view
-            && self.side_pair_key(thread_id).is_some_and(|pair| {
-                self.chat_widget
-                    .thread_id()
-                    .and_then(|id| self.side_pair_key(id))
-                    == Some(pair)
+            && side_parent(thread_id).is_some_and(|parent| {
+                self.chat_widget.thread_id().and_then(side_parent) == Some(parent)
             });
         let init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui, config, /*initial_user_message*/ None,

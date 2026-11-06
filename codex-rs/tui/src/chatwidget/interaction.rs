@@ -436,6 +436,10 @@ impl ChatWidget {
         self.bottom_pane.set_footer_hint_override(items);
     }
 
+    pub(crate) fn dismiss_provider_view(&mut self, id: &'static str) {
+        self.bottom_pane.dismiss_view_by_id(id);
+    }
+
     pub(crate) fn show_selection_view(&mut self, params: SelectionViewParams) {
         self.bottom_pane.show_selection_view(params);
         self.request_redraw();
@@ -477,6 +481,10 @@ impl ChatWidget {
 
     pub(crate) fn no_modal_or_popup_active(&self) -> bool {
         self.bottom_pane.no_modal_or_popup_active()
+    }
+
+    pub(crate) fn completion_can_yield_focus(&self) -> bool {
+        self.bottom_pane.completion_can_yield_focus()
     }
 
     pub(crate) fn can_launch_external_editor(&self) -> bool {

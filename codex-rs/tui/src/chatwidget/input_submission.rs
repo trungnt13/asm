@@ -166,9 +166,11 @@ impl ChatWidget {
             || self.input_queue.thread_switch_pending
             || self.safety_recourse.is_some()
         {
-            let model_prompt = source == UserMessageSource::Prompt
-                && (shell_escape_policy == ShellEscapePolicy::Disallow
-                    || !user_message.text.starts_with('!'));
+            let model_prompt = matches!(
+                source,
+                UserMessageSource::Prompt | UserMessageSource::DirectEnter
+            ) && (shell_escape_policy == ShellEscapePolicy::Disallow
+                || !user_message.text.starts_with('!'));
             // Prepared submissions and interrupted steers precede queued follow-ups.
             let queue_index = if prepared_images.is_some() || self.input_queue.thread_switch_pending
             {
@@ -200,9 +202,11 @@ impl ChatWidget {
             return (true, None);
         }
         if !self.is_session_configured() {
-            let model_prompt = source == UserMessageSource::Prompt
-                && (shell_escape_policy == ShellEscapePolicy::Disallow
-                    || !user_message.text.starts_with('!'));
+            let model_prompt = matches!(
+                source,
+                UserMessageSource::Prompt | UserMessageSource::DirectEnter
+            ) && (shell_escape_policy == ShellEscapePolicy::Disallow
+                || !user_message.text.starts_with('!'));
             tracing::warn!("cannot submit user message before session is configured; queueing");
             self.input_queue
                 .queued_user_messages
@@ -299,6 +303,17 @@ impl ChatWidget {
             }));
         }
 
+        use crate::app_command::CloudSubmissionIntent;
+        let (cloud_submission, source) = match source {
+            UserMessageSource::DirectEnter => (
+                CloudSubmissionIntent::StartOrSteer,
+                UserMessageSource::Prompt,
+            ),
+            UserMessageSource::Prompt => (CloudSubmissionIntent::StartIfIdle, source),
+            UserMessageSource::QuestionAnswer | UserMessageSource::SafetyRecourse => {
+                (CloudSubmissionIntent::UseKnownTurn, source)
+            }
+        };
         if !text.is_empty() {
             items.push(UserInput::Text {
                 text: text.clone(),
@@ -464,6 +479,8 @@ impl ChatWidget {
         crate::startup_recovery::bind_submission(&text, &client_user_message_id);
         let pending_steer = (!render_in_history).then(|| PendingSteer {
             client_id: client_user_message_id.clone(),
+            admitted_turn_id: None,
+            optimistically_rendered: false,
             user_message: UserMessage {
                 text: text.clone(),
                 local_images: local_images.clone(),
@@ -483,6 +500,7 @@ impl ChatWidget {
             } else {
                 "user"
             },
+            cloud_submission,
             client_user_message_id.clone(),
             items,
             self.config.cwd.to_path_buf(),
@@ -534,6 +552,7 @@ impl ChatWidget {
             self.refresh_status_surfaces();
             self.input_queue.user_turn_pending_start = true;
             self.input_queue.pending_user_message_client_id = Some(client_user_message_id.clone());
+            self.input_queue.pending_user_message_history_record = Some(history_record.clone());
         }
 
         // Persist the submitted text to cross-session message history. Mentions are encoded into

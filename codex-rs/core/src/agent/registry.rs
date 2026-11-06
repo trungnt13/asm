@@ -54,6 +54,7 @@ pub(crate) struct EvictedAgentRuntimeState {
 #[derive(Clone, Debug)]
 pub(crate) struct EvictedEnvironments {
     pub(crate) config: Arc<Config>,
+    pub(crate) has_independent_service_tier: bool,
     pub(crate) selections: Vec<TurnEnvironmentSelection>,
     pub(crate) bindings: TurnEnvironmentSnapshot,
 }

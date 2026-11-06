@@ -290,6 +290,10 @@ impl LocalAgentControl {
         let mut environment_selections = evicted_runtime_state
             .as_ref()
             .map(|state| state.environments.selections.clone());
+        let independent_service_tier = evicted_runtime_state
+            .as_ref()
+            .filter(|state| state.environments.has_independent_service_tier)
+            .map(|state| state.environments.config.service_tier.clone());
         let evicted_environments = evicted_runtime_state
             .as_ref()
             .map(|state| state.environments.bindings.clone());
@@ -401,7 +405,7 @@ impl LocalAgentControl {
                     CodexErr::InvalidRequest(format!("permission_profile is invalid: {err}"))
                 })?;
         }
-        config.service_tier = self.root_service_tier();
+        config.service_tier = independent_service_tier.unwrap_or_else(|| self.root_service_tier());
         if let Some(model) = stored_model {
             config.model = Some(model);
         }
