@@ -1353,13 +1353,16 @@ replacement through normal incremental context updates, not history rewriting.
 `clock.sleep`, V2 `agents.wait_agent`, Code Mode
 `wait`, ASM TUI `wait_threads` (including its MCP exposure), and empty-input
 `write_stdin` polls require a `reason`. Nonempty terminal input stays unchanged.
-Trim reasons and reject more than 500 characters. An empty reason produces no
-reminder. Return nonempty reasons as JSON-quoted tool
+Trim reasons and reject more than 500 characters. Always return continuation
+guidance naming the wait tool; an empty reason omits only its context line.
+Return nonempty reasons as JSON-quoted tool
 context, separate from command/script output and its truncation budget.
 
-When new input interrupts a wait, remind the model to handle it and resume pending
-work unless canceled, paused, replaced, or blocked. Use neutral guidance when a
-return does not identify interruption. Preserve running children, cells, processes,
+When new input interrupts a wait, remind the model to understand the user's intent;
+a status question alone does not cancel or pause pending work. If work remains
+pending, give status as commentary and call the named wait tool again with valid
+current arguments rather than ending the turn. Use neutral guidance when a return
+does not identify interruption. Preserve running children, cells, processes,
 and collected terminal output. Explicit stop and cell termination must not prompt
 resumption. Reminders are guidance, not guaranteed continuation or automatic waits.
 Code Mode, terminal polling, and TUI waits use the existing `instant_interrupt`

@@ -17,12 +17,11 @@ pub(super) fn reason(arguments: &Value) -> Result<WaitReason, FunctionCallError>
     WaitReason::new(reason).map_err(FunctionCallError::RespondToModel)
 }
 
-pub(super) fn interrupted(reason: &WaitReason) -> Value {
-    let mut result = json!({"timedOut": false, "wake": null, "polls": [], "interrupted": true});
-    if let Some(message) = reason.reminder(WaitReminder::Interrupted) {
-        result["message"] = json!(message);
-    }
-    result
+pub(super) fn interrupted(reason: &WaitReason, wait_tool: &str) -> Value {
+    json!({
+        "timedOut": false, "wake": null, "polls": [], "interrupted": true,
+        "message": reason.reminder(wait_tool, WaitReminder::Interrupted),
+    })
 }
 
 #[tracing::instrument(skip_all)]

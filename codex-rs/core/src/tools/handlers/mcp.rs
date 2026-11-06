@@ -319,6 +319,11 @@ impl McpHandler {
             payload,
         ));
         let result = if let Some(reason) = &reason {
+            let wait_tool = format!(
+                "{}.{}",
+                self.definition.tool_info.callable_namespace,
+                self.definition.tool_info.callable_name
+            );
             match super::tui_wait::observe(
                 result,
                 step_context.preempt.as_ref(),
@@ -326,12 +331,29 @@ impl McpHandler {
             )
             .await
             {
-                Some(result) => result,
+                Some(mut result) => {
+                    for content in &mut result.result.content {
+                        if let Some(text) = content
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            && let Ok(mut value) = serde_json::from_str::<Value>(&text)
+                            && value.get("timedOut").is_some()
+                            && value.get("polls").is_some()
+                        {
+                            value["message"] = serde_json::json!(
+                                reason.reminder(&wait_tool, codex_tools::WaitReminder::Returned)
+                            );
+                            content["text"] = Value::String(value.to_string());
+                        }
+                    }
+                    result
+                }
                 None if !cancellation_token.is_cancelled() => {
                     crate::mcp_tool_call::HandledMcpToolCall {
                         result: codex_protocol::mcp::CallToolResult {
                             content: vec![
-                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason).to_string()}),
+                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &wait_tool).to_string()}),
                             ],
                             structured_content: None,
                             is_error: Some(false),

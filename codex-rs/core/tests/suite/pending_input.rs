@@ -300,7 +300,7 @@ fn assert_interrupted_sleep_output(output: Option<&str>) {
     };
     let Some(wall_time) = output
         .strip_prefix("Wall time: ")
-        .and_then(|output| output.strip_suffix(" seconds\nSleep interrupted by new input. Handle the new input, then resume the pending work unless canceled, paused, replaced, or blocked.\nReason for waiting (quoted context): \"Waiting for pending work\""))
+        .and_then(|output| output.strip_suffix(" seconds\nSleep interrupted by new input. Your clock.sleep call was interrupted by new input.\n\nResponse to user input and understand the intention to determine whether the new input cancels, pauses, replaces, or otherwise changes the pending task. A status question alone does not cancel or pause it.\n\nIf the task should continue, check whether the awaited work is complete or blocked. If it remains pending, give any status update as commentary, then call clock.sleep again with valid current arguments. Do not end the turn merely because you answered a status question or a delegated agent is still working.\n\nReason for waiting (quoted context): \"Waiting for pending work\""))
     else {
         panic!("sleep output should include wall time");
     };
@@ -781,7 +781,7 @@ async fn input_interrupts_wait_agent_and_is_sent_in_follow_up_request(input: Wai
     assert_eq!(
         serde_json::from_str::<Value>(wait_output).expect("parse wait_agent output"),
         json!({
-            "message": "Wait interrupted by new input.",
+            "message": "Wait interrupted by new input. Your collaboration.wait_agent call was interrupted by new input.\n\nResponse to user input and understand the intention to determine whether the new input cancels, pauses, replaces, or otherwise changes the pending task. A status question alone does not cancel or pause it.\n\nIf the task should continue, check whether the awaited work is complete or blocked. If it remains pending, give any status update as commentary, then call collaboration.wait_agent again with valid current arguments. Do not end the turn merely because you answered a status question or a delegated agent is still working.",
             "timed_out": false,
         })
     );
