@@ -101,8 +101,7 @@ impl LocalAgentControl {
         caller: ThreadId,
         target: ThreadId,
     ) -> anyhow::Result<()> {
-        let thread = self.runtime.upgrade()?.get_thread(target).await?;
-        let session = &thread.session;
+        let session = &self.runtime.upgrade()?.get_thread(target).await?.session;
         let scope = session
             .review_context()
             .filter(|s| s.root == caller)
