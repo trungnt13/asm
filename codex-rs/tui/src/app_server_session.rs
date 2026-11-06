@@ -1180,7 +1180,7 @@ impl AppServerSession {
         config: Config,
         parent: ThreadId,
         profile: Option<PermissionProfileSelection>,
-        boundary: ResponseItem,
+        boundary: Vec<ResponseItem>,
     ) -> impl Future<Output = Result<SidebarFork>> + Send + use<> {
         let mut view = self
             .request_view()
@@ -1193,7 +1193,7 @@ impl AppServerSession {
                 .fork_side_thread(&settings, config, parent, profile.as_ref())
                 .await?;
             let boundary = view
-                .thread_inject_items(thread.session.thread_id, vec![boundary])
+                .thread_inject_items(thread.session.thread_id, boundary)
                 .await
                 .map(|_| ())
                 .map_err(|err| err.to_string());

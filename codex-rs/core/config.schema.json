@@ -9249,6 +9249,10 @@
     "side_model": {
       "type": "string"
     },
+    "side_prompt": {
+      "description": "Adds default instructions to temporary sides without replacing their built-in boundaries.",
+      "type": "string"
+    },
     "side_reasoning_effort": {
       "$ref": "#/definitions/ReasoningEffort"
     },

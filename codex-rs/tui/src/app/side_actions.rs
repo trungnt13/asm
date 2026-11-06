@@ -129,7 +129,7 @@ impl App {
                 if let Err(error) = app_server
                     .thread_inject_items(
                         replacement_id,
-                        vec![Self::side_boundary_prompt_item(CompanionKind::Side)],
+                        self.side_boundary_items(CompanionKind::Side),
                     )
                     .await
                 {

@@ -1110,6 +1110,8 @@ pub struct Config {
     pub side_reasoning_effort: Option<ReasoningEffort>,
     /// Overrides the parent service tier for temporary side conversations.
     pub side_service_tier: Option<String>,
+    /// Adds default instructions to temporary sides without replacing their built-in boundaries.
+    pub side_prompt: Option<String>,
     pub system1: codex_config::System1Config,
     /// Retains role restrictions across live-toggle inheritance and child reloads.
     pub(crate) role_system1_disabled: bool,
@@ -4905,6 +4907,7 @@ impl Config {
             side_model: cfg.side_model,
             side_reasoning_effort: cfg.side_reasoning_effort,
             side_service_tier: cfg.side_service_tier,
+            side_prompt: cfg.side_prompt,
             system1,
             role_system1_disabled: false,
             role_system1_base_bounds: None,
