@@ -156,6 +156,7 @@ pub use config_requirements::apply_otel_requirements;
 pub use config_requirements::sandbox_mode_requirement_for_permission_profile;
 pub use config_server::ConfigServer;
 pub use config_server::ConfigServerOAuth;
+pub use config_toml::ReviewerSubagentConfig;
 pub use config_toml::effective_sandbox_mode;
 pub use constraint::Constrained;
 pub use constraint::ConstraintError;

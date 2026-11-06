@@ -32,7 +32,7 @@ impl Session {
     }
 
     pub(crate) async fn refresh_runtime_config(
-        &self,
+        self: &Arc<Self>,
         expected_config: Arc<Config>,
         next_config: Config,
     ) -> ConfigRefreshOutcome {
@@ -41,7 +41,7 @@ impl Session {
     }
 
     pub(crate) async fn refresh_mcp_config(
-        &self,
+        self: &Arc<Self>,
         expected_config: Arc<Config>,
         next_config: Config,
     ) -> ConfigRefreshOutcome {
@@ -50,11 +50,20 @@ impl Session {
     }
 
     pub(super) async fn refresh_config(
-        &self,
+        self: &Arc<Self>,
         expected_config: Arc<Config>,
         next_config: Config,
         scope: RuntimeConfigRefresh,
     ) -> ConfigRefreshOutcome {
+        if let Some(boundary) = &self.review_assignment {
+            if boundary.lock().await.take().is_some() {
+                let error = "Review incomplete: interrupted by policy refresh".into();
+                self.agent_status
+                    .send_replace(codex_protocol::protocol::AgentStatus::Errored(error));
+            }
+            self.interrupt_task().await;
+            return ConfigRefreshOutcome::Rejected;
+        }
         let (mut config, mut outcome, rejection_kind) =
             match expected_config.resolve_runtime_refresh(&next_config, scope) {
                 Ok(config) => (config, ConfigRefreshOutcome::Published, None),

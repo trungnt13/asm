@@ -61,6 +61,26 @@ pub(crate) async fn prepare_agent_spawn_config(
     let turn = step_context.turn.as_ref();
     let mut config =
         build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
+    use crate::protected_reviewer as review;
+    if review::is_protected(&turn.session_source) || options.role_name == Some(review::HELPER_ROLE)
+    {
+        return Err("protected helpers are private to the reviewer harness".into());
+    }
+    if options.role_name == Some(review::ROLE) {
+        if options.version != SpawnConfigVersion::V2
+            || options.full_history_fork
+            || options.model.is_some()
+            || options.reasoning_effort.is_some()
+        {
+            return Err("reviewer requires fresh MAv2 context and trusted settings".into());
+        }
+        review::configure(&mut config).map_err(|e| e.to_string())?;
+        validate_spawn_agent_config_effort(session, &config).await?;
+        return Ok(PreparedSpawnConfig {
+            config,
+            role_name: Some(review::ROLE.into()),
+        });
+    }
     if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
         reject_full_fork_agent_type_override(options.role_name)?;
         config.role_model_context_window = turn.config.role_model_context_window;

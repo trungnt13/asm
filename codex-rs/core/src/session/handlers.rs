@@ -86,6 +86,27 @@ pub async fn inter_agent_communication(
     communication: crate::PendingAgentMessage,
     start_options: codex_protocol::turn_input::TurnStartOptions,
 ) {
+    let _admission = if let Some(boundary) = &sess.review_assignment {
+        let mut slot = boundary.lock().await;
+        let c = &communication;
+        if slot.as_ref() != Some(&c.recipient)
+            || !c.trigger_turn
+            || !c.other_recipients.is_empty()
+            || c.recipient
+                .as_str()
+                .rsplit_once('/')
+                .map(|(parent, _)| parent)
+                != Some(c.author.as_str())
+            || start_options.final_output_json_schema.is_some()
+            || start_options.service_tier.is_some()
+        {
+            return;
+        }
+        slot.take();
+        Some(slot)
+    } else {
+        None
+    };
     let trigger_turn = communication.trigger_turn;
     sess.input_queue
         .enqueue_mailbox_communication(communication, start_options)

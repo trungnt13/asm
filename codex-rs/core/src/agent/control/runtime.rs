@@ -42,6 +42,7 @@ const MAX_RETAINED_SHUTDOWN_FAILURES: usize = 64;
 
 #[derive(Debug)]
 pub(crate) struct AgentTreeShutdownState {
+    cancellation: CancellationToken,
     members: TaskTracker,
     report: Mutex<AgentTreeShutdownReport>,
 }
@@ -49,6 +50,7 @@ pub(crate) struct AgentTreeShutdownState {
 impl Default for AgentTreeShutdownState {
     fn default() -> Self {
         Self {
+            cancellation: CancellationToken::new(),
             members: TaskTracker::new(),
             report: Mutex::new(AgentTreeShutdownReport {
                 tree_id: Uuid::now_v7(),
@@ -115,6 +117,7 @@ impl AgentTreeShutdownState {
 pub(crate) struct AgentTreeMembership {
     state: Arc<AgentTreeShutdownState>,
     _member: TaskTrackerToken,
+    review: Option<(Arc<super::review::ReviewRun>, TaskTrackerToken)>,
 }
 
 impl AgentTreeMembership {
@@ -156,6 +159,9 @@ impl AgentTreeTeardownGuard {
     }
 
     pub(crate) fn record_shutdown_failure(&self, phase: &'static str, error_kind: &'static str) {
+        if let Some((scope, _)) = &self.membership.review {
+            scope.poison();
+        }
         self.membership
             .state
             .record_failure(AgentTreeShutdownFailure::operation_failed(
@@ -174,6 +180,9 @@ impl AgentTreeTeardownGuard {
 impl Drop for AgentTreeTeardownGuard {
     fn drop(&mut self) {
         if !self.completed {
+            if let Some((scope, _)) = &self.membership.review {
+                scope.poison();
+            }
             // Record before membership is dropped, so a waiter cannot snapshot first.
             self.membership
                 .state
@@ -207,6 +216,8 @@ pub(crate) struct LocalAgentRuntime {
         Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
     pub(super) registry: Arc<AgentRegistry>,
     pub(super) residency: Arc<V2Residency>,
+    pub(super) review_slots: Arc<OnceLock<Arc<tokio::sync::Semaphore>>>,
+    pub(crate) review: Option<Arc<super::review::ReviewRun>>,
     pub(super) mailboxes: Arc<super::mailbox::Mailboxes>,
     /// Shared by every session in this tree, including private delegates.
     pub(crate) shutdown: CancellationToken,
@@ -219,6 +230,7 @@ impl LocalAgentRuntime {
         thread_id_generator: ThreadIdGenerator,
         rollout_budget: Option<RolloutBudgetConfig>,
     ) -> Self {
+        let shutdown_state = Arc::new(AgentTreeShutdownState::default());
         let runtime = Self {
             manager,
             thread_id_generator,
@@ -226,9 +238,11 @@ impl LocalAgentRuntime {
             context_window_id_generator: Arc::new(codex_protocol::ContextWindowId::new_uuid_v7),
             registry: Arc::default(),
             residency: Arc::default(),
+            review_slots: Arc::default(),
+            review: None,
             mailboxes: Arc::default(),
-            shutdown: CancellationToken::new(),
-            shutdown_state: Arc::default(),
+            shutdown: shutdown_state.cancellation.clone(),
+            shutdown_state,
             agent_execution_limiter: Arc::default(),
             rollout_budget: Arc::default(),
             root_service_tier: Arc::new(ArcSwapOption::from(None)),
@@ -293,10 +307,14 @@ impl LocalAgentRuntime {
         let membership = AgentTreeMembership {
             state: Arc::clone(&self.shutdown_state),
             _member: self.shutdown_state.members.token(),
+            review: self
+                .review
+                .as_ref()
+                .map(|scope| (scope.clone(), scope.members.token())),
         };
         // Closing a TaskTracker does not reject new tokens. Recheck so a start racing with
         // shutdown is either admitted before the fence or rejected after it.
-        if self.shutdown_state.members.is_closed() {
+        if self.shutdown_state.members.is_closed() || self.shutdown.is_cancelled() {
             return Err(
                 CodexErr::InvalidRequest("agent runtime is shutting down".to_owned())
                     .with_agent_context(AgentErrorContext::RuntimeShutdown),
@@ -307,7 +325,7 @@ impl LocalAgentRuntime {
 
     pub(crate) fn request_shutdown(&self) -> Arc<AgentTreeShutdownState> {
         self.shutdown_state.members.close();
-        self.shutdown.cancel();
+        self.shutdown_state.cancellation.cancel();
         self.mailboxes.close();
         Arc::clone(&self.shutdown_state)
     }
@@ -315,6 +333,9 @@ impl LocalAgentRuntime {
     /// The caller must hold tree membership until this record has been written. This keeps
     /// the completed shutdown report stable for every waiter.
     pub(crate) fn record_shutdown_failure(&self, failure: AgentTreeShutdownFailure) {
+        if let Some(scope) = &self.review {
+            scope.poison();
+        }
         self.shutdown_state.record_failure(failure);
     }
 

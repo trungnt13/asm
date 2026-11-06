@@ -26,6 +26,7 @@ impl LocalAgentControl {
             }
             Err(err) => return Err(err),
         };
+        crate::protected_reviewer::check_external_access(Some(&thread.session_source))?;
         let agent = LiveAgent {
             thread_id,
             metadata: self.get_agent_metadata(thread_id).unwrap_or_default(),

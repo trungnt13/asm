@@ -84,6 +84,7 @@ fn is_execution_limited(
     session_source: &SessionSource,
 ) -> bool {
     multi_agent_version == MultiAgentVersion::V2
+        && !crate::protected_reviewer::is_protected(session_source)
         && matches!(session_source, SessionSource::SubAgent(_))
 }
 

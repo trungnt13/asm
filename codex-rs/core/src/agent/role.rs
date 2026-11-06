@@ -207,6 +207,9 @@ pub(crate) fn resolve_role_config<'a>(
     config: &'a Config,
     role_name: &str,
 ) -> Option<&'a AgentRoleConfig> {
+    if role_name == crate::protected_reviewer::ROLE {
+        return None;
+    }
     config
         .agent_roles
         .get(role_name)
@@ -339,7 +342,7 @@ pub(crate) mod spawn_tool_spec {
         let mut seen = BTreeSet::new();
         let mut formatted_roles = Vec::new();
         for (name, declaration) in user_defined_roles {
-            if seen.insert(name.as_str()) {
+            if name != crate::protected_reviewer::ROLE && seen.insert(name.as_str()) {
                 formatted_roles.push(format_role(name, declaration));
             }
         }

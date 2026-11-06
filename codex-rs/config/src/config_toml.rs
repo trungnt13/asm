@@ -65,6 +65,9 @@ use serde::Serialize;
 use serde::de::Error as SerdeError;
 use serde_json::Value as JsonValue;
 
+mod reviewer_subagent;
+pub use reviewer_subagent::ReviewerSubagentConfig;
+
 const RESERVED_MODEL_PROVIDER_IDS: [&str; 6] = [
     AMAZON_BEDROCK_PROVIDER_ID,
     AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
@@ -177,6 +180,8 @@ pub struct ConfigToml {
     pub subagent_model_list: Option<Vec<String>>,
     /// Review model override used by the `/review` feature.
     pub review_model: Option<String>,
+    /// Defaults reserved for protected reviewer sessions, not ordinary agent roles.
+    pub reviewer_subagent: Option<ReviewerSubagentConfig>,
 
     /// Provider to use from the model_providers map.
     pub model_provider: Option<String>,

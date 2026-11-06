@@ -76,6 +76,7 @@ mod interrupt;
 mod legacy;
 mod mailbox;
 mod residency;
+pub(crate) mod review;
 pub use residency::ThreadEvictionOutcome;
 mod resume;
 mod root_handoff;

@@ -454,6 +454,7 @@ pub(crate) enum NetworkApprovalTurn {
 /// completion future observes that shutdown.
 #[derive(Clone)]
 pub(crate) struct SessionIo {
+    pub(crate) protected: bool,
     pub(crate) tx_sub: Sender<Submission>,
     pub(crate) rx_event: Receiver<Event>,
     // Last known status of the agent.
@@ -1041,6 +1042,14 @@ impl Session {
             )?;
             token_budget::apply_model_defaults(Arc::make_mut(&mut config), &model_info);
         }
+        if crate::is_protected_review_source(&session_source)
+            && let Some(budget) = Arc::make_mut(&mut config).token_budget.as_mut()
+        {
+            budget.guidance_message = None;
+            budget.auto_compact_fallback_prompt = None;
+            budget.reminder_message_template =
+                crate::config::TokenBudgetConfig::default().reminder_message_template;
+        }
         let configured_config = Arc::clone(&config);
         let history_mode = conversation_history.get_history_mode(
             requested_history_mode.unwrap_or_else(|| thread_store.default_history_mode()),
@@ -1264,6 +1273,7 @@ impl Session {
             }
         })));
         let io = SessionIo {
+            protected: session.review_assignment.is_some(),
             tx_sub,
             rx_event,
             agent_status: agent_status_rx,
@@ -1325,6 +1335,16 @@ impl SessionIo {
 
     /// Use sparingly: prefer `submit()` so submission IDs are generated consistently.
     pub(crate) async fn submit_with_id(&self, mut sub: Submission) -> CodexResult<()> {
+        if self.protected
+            && !matches!(
+                sub.op,
+                Op::Shutdown | Op::Interrupt | Op::InterAgentCommunication { .. }
+            )
+        {
+            return Err(CodexErr::InvalidRequest(
+                "protected review accepts only its initial assignment".into(),
+            ));
+        }
         if sub.trace.is_none() {
             sub.trace = current_span_w3c_trace_context();
         }
@@ -2691,7 +2711,7 @@ impl Session {
         }
     }
 
-    pub(crate) async fn reload_user_config_layer(&self) {
+    pub(crate) async fn reload_user_config_layer(self: &Arc<Self>) {
         // Refresh layer-backed runtime state for an existing session, including enabled plugin,
         // skill, hook, and MCP feature state. Other feature gates and legacy notify settings
         // remain session-static.
@@ -3176,7 +3196,10 @@ impl Session {
             }
         }
         // Record the last known agent status.
-        if let Some(status) = agent_status_from_event(&event.msg) {
+        if let Some(mut status) = agent_status_from_event(&event.msg) {
+            if let Some(review) = self.review_context() {
+                status = review.finish(status).await;
+            }
             self.agent_status.send_replace(status);
         }
         if let Err(e) = self.tx_event.send(event).await {
@@ -5560,6 +5583,11 @@ impl Session {
             history.lock().await.extend_from_slice(items);
         }
         true
+    }
+
+    pub(crate) fn review_context(&self) -> Option<&Arc<crate::protected_reviewer::ReviewRun>> {
+        let run = self.services.local_agent_runtime.review.as_ref()?;
+        (run.id == self.thread_id).then_some(run)
     }
 
     pub(crate) async fn clone_history(&self) -> ContextManager {

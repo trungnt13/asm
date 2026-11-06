@@ -13,7 +13,8 @@ pub(super) fn can_accept_direct_input(
     multi_agent_version: Option<MultiAgentVersion>,
     session_source: &SessionSource,
 ) -> bool {
-    multi_agent_version != Some(MultiAgentVersion::V2)
+    (multi_agent_version != Some(MultiAgentVersion::V2)
+        && !codex_core::is_protected_review_source(session_source))
         || !matches!(
             session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })

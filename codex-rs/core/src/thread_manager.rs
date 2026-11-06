@@ -27,6 +27,7 @@ use crate::environment_selection::default_thread_environment_requests;
 use crate::exec_policy::ExecPolicyManager;
 use crate::exec_policy::InheritedExecPolicy;
 use crate::mcp::McpManager;
+use crate::protected_reviewer as review;
 use crate::rollout::truncation;
 use crate::session::ForkPersistence;
 use crate::session::GitEnrichmentPolicy;
@@ -1794,6 +1795,7 @@ impl ThreadManager {
             initial_history: history,
             persistence: fork_persistence,
         } = fork_history;
+        review::check_external_access(history.get_session_meta().map(|m| &m.source))?;
         // `forked_from_id()` describes this history's existing lineage. When
         // forking a resumed thread, the child copies the resumed thread itself.
         let source_thread_id = match &history {
@@ -2462,6 +2464,7 @@ impl ThreadManagerState {
                 "thread store resume preparation requires a persisted resumed thread".to_string(),
             ));
         }
+        review::check_external_access(initial_history.get_session_meta().map(|m| &m.source))?;
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         if thread_extension_init.get::<InheritedSessionId>().is_some()
@@ -2473,8 +2476,26 @@ impl ThreadManagerState {
                     .to_string(),
             ));
         }
-        // Older callers and saved reviewers identify isolation through their source.
-        // New internal callers supply an explicit runtime policy before startup.
+        let protected = review::is_protected(&session_source);
+        if protected {
+            let owned = runtime.review.as_ref().is_some_and(|r| {
+                !review::is_reviewer(&session_source) || Some(r.id) == reserved_thread_id
+            });
+            let requirements = config.config_layer_stack.requirements();
+            let managed = &requirements.additional_developer_instructions;
+            if !matches!(&initial_history, InitialHistory::New)
+                || !owned
+                || managed.as_ref().is_some_and(|s| !s.is_empty())
+            {
+                return Err(CodexErr::InvalidRequest(
+                    "protected review requires fresh harness-owned context without managed developer instructions".into(),
+                ));
+            }
+            thread_extension_init.insert(SessionIsolation::Isolated);
+            thread_extension_init
+                .remove::<codex_extension_api::IsolatedSessionExtensions<Config>>();
+            thread_extension_init.insert(review::tool_policy(&session_source));
+        }
         let isolation = thread_extension_init
             .get::<SessionIsolation>()
             .map(|policy| *policy)
@@ -2625,7 +2646,12 @@ impl ThreadManagerState {
         }
         // Resolve only the global contribution here, after host and inherited snapshots.
         // Forked history keeps its baseline so normal context updates replace the active text.
-        if matches!(
+        if protected {
+            instructions = SessionInstructions {
+                project_snapshot: Some(Arc::new(crate::agents_md::LoadedAgentsMd::default())),
+                ..Default::default()
+            };
+        } else if matches!(
             session_source,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
         ) {

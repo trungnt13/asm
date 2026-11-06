@@ -123,6 +123,11 @@ impl AgentControl for LocalAgentControl {
                 }
                 AgentInput::Message { message, mode } => {
                     let receiver = self.runtime.ensure_agent_known(target)?;
+                    if receiver.agent_role.as_deref() == Some(super::review::ROLE) {
+                        return Err(CodexErr::InvalidRequest(
+                            "protected review cannot receive follow-up input".into(),
+                        ));
+                    }
                     let author = self
                         .runtime
                         .ensure_agent_known(caller)?

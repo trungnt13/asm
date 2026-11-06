@@ -166,6 +166,10 @@ impl LocalAgentControl {
                 continue;
             }
             let restore_result = stored_thread.and_then(|stored_thread| {
+                if crate::is_protected_review_source(&stored_thread.source) {
+                    return Ok(());
+                }
+
                 let stored_agent_path = stored_thread
                     .agent_path
                     .as_deref()
@@ -325,6 +329,7 @@ impl LocalAgentControl {
         let (session_source, _) = initial_history
             .get_resumed_session_sources()
             .unwrap_or((stored_source, None));
+        crate::protected_reviewer::check_external_access(Some(&session_source))?;
         if let Some(parent_thread_id) = owner_thread_id {
             if session_source.parent_thread_id() != Some(parent_thread_id)
                 || initial_history
@@ -690,12 +695,18 @@ impl LocalAgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<(LiveAgent, ThreadConfigSnapshot)> {
+        let state = self.runtime.upgrade()?;
+        let mut child_control = self.clone();
+        let review_id = child_control
+            .prepare_review(&state, &config, session_source.as_ref())
+            .await
+            .map_err(|e| CodexErr::InvalidRequest(e.to_string()))?;
+        let protected = review_id.is_some();
         config.system1_initial_revision = 0;
         config.system1_initial_error = None;
         config.system1_initial_failure_episode = 0;
-        let membership = self.runtime.admit_start()?;
+        let membership = child_control.runtime.admit_start()?;
         let spawn_started_at = Instant::now();
-        let state = self.runtime.upgrade()?;
         // Resolve the parent before inheriting settings or copying attachments.
         // Recovering it later from history only repairs the child's metadata.
         let parent_thread_id = session_source
@@ -727,7 +738,8 @@ impl LocalAgentControl {
             self.ensure_execution_capacity(multi_agent_version, session_source)?;
         }
         let agent_max_threads = config.effective_agent_max_threads(multi_agent_version);
-        let spawn_uses_v2_residency = multi_agent_version == MultiAgentVersion::V2
+        let spawn_uses_v2_residency = !protected
+            && multi_agent_version == MultiAgentVersion::V2
             && session_source
                 .as_ref()
                 .is_some_and(is_v2_resident_session_source);
@@ -748,7 +760,7 @@ impl LocalAgentControl {
         } else {
             (None, None)
         };
-        let reservation_max_threads = if spawn_uses_v2_residency {
+        let reservation_max_threads = if spawn_uses_v2_residency || protected {
             None
         } else {
             agent_max_threads
@@ -846,7 +858,7 @@ impl LocalAgentControl {
         };
         // Fork startup can persist copied history before returning a live child.
         // Publish its deletion relationship before any child storage is created.
-        let child_thread_id = self.runtime.generate_thread_id();
+        let child_thread_id = review_id.unwrap_or_else(|| self.runtime.generate_thread_id());
         if state.threads.read().await.contains_key(&child_thread_id) {
             return Err(CodexErr::InvalidRequest(format!(
                 "thread {child_thread_id} is already running",
@@ -862,6 +874,7 @@ impl LocalAgentControl {
         );
         let edge_write_started_at = Instant::now();
         let control = self.clone();
+        let review_shutdown = child_control.runtime.shutdown.clone();
         let source = notification_source.clone();
         let ephemeral = config.ephemeral;
         pending_spawn.set_edge_write(tokio::spawn(async move {
@@ -875,7 +888,7 @@ impl LocalAgentControl {
         let new_thread = state
             .spawn_child_thread(
                 start_options,
-                self.clone(),
+                child_control,
                 parent_thread_id,
                 inherited_exec_policy,
             )
@@ -954,6 +967,9 @@ impl LocalAgentControl {
             Some(config) => config,
             None => new_thread.thread.config_snapshot().await,
         };
+        if protected && review_shutdown.is_cancelled() {
+            return Err(CodexErr::TurnAborted);
+        }
         reservation.commit(agent_metadata.clone());
         if let Some(residency_slot) = residency_slot {
             residency_slot.commit(new_thread.thread_id);

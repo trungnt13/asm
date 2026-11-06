@@ -70,6 +70,9 @@ impl LocalAgentControl {
                         )
                         .await
                 {
+                    if thread.session.services.local_agent_runtime.review.is_some() {
+                        return Err(CodexErr::Fatal(err.to_string()));
+                    }
                     warn!("failed to persist thread-spawn edge status for {agent_id}: {err}");
                 }
                 AgentInfo::Loaded { agent, config }

@@ -33,6 +33,10 @@ impl Config {
         else {
             return Ok(());
         };
+        self.apply_model_provider(provider_id)
+    }
+
+    pub(crate) fn apply_model_provider(&mut self, provider_id: &str) -> io::Result<()> {
         if self
             .config_layer_stack
             .required_model_provider()

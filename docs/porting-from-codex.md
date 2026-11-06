@@ -1406,3 +1406,12 @@ Keep one model API transport per session and reuse the existing route-aware pool
 ### Tokio worker cap
 
 On Linux, the runtime builder starts at most `min(CPUs, 8)` Tokio workers unless `TOKIO_WORKER_THREADS` is set. Tokio otherwise starts one worker per CPU, 64 on the primary host. Mock-model runs with the glibc arena cap (64 CPUs; 32 conversations × 30 turns and 64 × 20) measured 9–15% lower RSS and about 21% lower total CPU than the default, with no wall-time loss. The effect on real sessions and on peak async CPU is unmeasured. macOS and Windows keep Tokio's default. Drop this drift if upstream caps workers itself.
+
+### Protected reviewer subagent
+
+Only the MAv2 root may spawn the built-in fresh `reviewer`. `[reviewer_subagent]` selects trusted model, optional model_provider, reasoning effort, developer instructions and System1 bounds, not custom role overrides; native runtimes, inherited history/instructions, steering, continued settings and cold resume/fork are forbidden. Policy refresh interrupts rather than relaxing isolation.
+`read_review_context` pages immutable actual-root user/assistant evidence (including commentary, retained sources and omission warnings) as JSONL fragments of at most 900 serialized bytes. Optional `root_session_id` must match the caller's actual root.
+`review_explore` privately launches a built-in inspection-only explorer for one evidence question. Review capacity is independent of ordinary agents; `max_explorers` counts lifetime starts and `max_concurrent_reviews` bounds concurrent reviews. Root close drains pending startup and jobs before releasing capacity; failed cleanup retains it. No boards, descendants, web, approvals or ordinary peer messaging. This is a tool/prompt boundary, not an OS sandbox.
+Keep the slash-review rubric unchanged. Strict complete/incomplete results with code or requirement locations are rendered to private `CODEX_HOME/reviewer-reports/<id>.md`; send the parent a bounded reference for long reports, never truncate findings. Invalid output, storage and execution failures stay incomplete.
+
+Fresh native MAv2 roots expose `spawn_review` through the existing native bridge, with reviewer close/status/wait tools only. Claude/Cursor roots may delegate to backend reviewers; native reviewers remain forbidden. Legacy native roots retain their saved bridge capability and need a fresh root for this access. Explicit reviewer providers must satisfy managed provider constraints and model bindings.

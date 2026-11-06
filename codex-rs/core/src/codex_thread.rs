@@ -745,6 +745,9 @@ impl CodexThread {
         &self,
         items: Vec<ResponseItem>,
     ) -> Result<(), Vec<ResponseItem>> {
+        if crate::is_protected_review_source(&self.session_source) {
+            return Err(items);
+        }
         if items
             .iter()
             .try_for_each(validate_injected_response_item)
@@ -1026,6 +1029,7 @@ impl CodexThread {
         &self,
         items: Vec<ResponseItem>,
     ) -> CodexResult<()> {
+        crate::protected_reviewer::check_external_access(Some(&self.session_source))?;
         if items.is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "items must not be empty".to_string(),
