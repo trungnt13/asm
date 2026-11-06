@@ -36,11 +36,11 @@ parent-28                                                      │
 parent-29                                                      │
                                                                │child-29
                                                                │
-                                                               │                           Parallel
+                                                               │                               Side
 › parent draft-                                                │› child draft!
                                                                │
   sol61 def                                                    │  sol61 def·Agent
-                                                               │  Parallel from main thread · ⌃/ to
+                                                               │  Side from main thread · ⌃/ to swit
 
 99 columns, reopened
  Side chat                                                                                      +
@@ -56,9 +56,8 @@ child-28
 
 child-29
 
-
-                                                                                          Parallel
+                                                                                              Side
 › child draft!
 
   sol61 def·Agent
-                                           Parallel from main thread · ⌃/ to switch · ⌃c to close
+                                               Side from main thread · ⌃/ to switch · ⌃c to close
