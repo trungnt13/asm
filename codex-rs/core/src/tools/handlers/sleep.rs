@@ -167,10 +167,8 @@ impl ToolExecutor<ToolInvocation> for SleepHandler {
             } else {
                 codex_tools::WaitReminder::Returned
             };
-            if let Some(reminder) = reason.reminder(outcome) {
-                output.push(' ');
-                output.push_str(&reminder);
-            }
+            output.push(' ');
+            output.push_str(&reason.reminder("clock.sleep", outcome));
             Ok(boxed_tool_output(FunctionToolOutput::from_text(
                 output,
                 /*success*/ Some(true),

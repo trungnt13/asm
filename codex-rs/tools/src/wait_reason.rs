@@ -1,6 +1,6 @@
 use crate::JsonSchema;
 
-pub const WAIT_REASON_DESCRIPTION: &str = "What you are waiting for and what work you should resume after an interruption. At most 500 characters; use an empty string for no reminder.";
+pub const WAIT_REASON_DESCRIPTION: &str = "What you are waiting for and what work you should resume after an interruption. At most 500 characters; use an empty string to omit the reason context. Continuation guidance is still returned.";
 
 pub struct WaitReason(String);
 
@@ -20,22 +20,23 @@ impl WaitReason {
         Ok(Self(reason.to_string()))
     }
 
-    pub fn reminder(&self, outcome: WaitReminder) -> Option<String> {
-        if self.0.is_empty() {
-            return None;
-        }
-        let guidance = match outcome {
-            WaitReminder::Interrupted => {
-                "Handle the new input, then resume the pending work unless canceled, paused, replaced, or blocked."
-            }
-            WaitReminder::Returned => {
-                "Check the pending work after waiting; continue unless canceled, paused, replaced, or blocked."
-            }
+    pub fn reminder(&self, wait_tool: &str, outcome: WaitReminder) -> String {
+        let mut guidance = match outcome {
+            WaitReminder::Interrupted => format!(
+                "Your {wait_tool} call was interrupted by new input.\n\nResponse to user input and understand the intention to determine whether the new input cancels, pauses, replaces, or otherwise changes the pending task. A status question alone does not cancel or pause it."
+            ),
+            WaitReminder::Returned => format!("Your {wait_tool} call returned."),
         };
-        let reason = serde_json::Value::String(self.0.clone());
-        Some(format!(
-            "{guidance}\nReason for waiting (quoted context): {reason}"
-        ))
+        guidance.push_str(&format!(
+            "\n\nIf the task should continue, check whether the awaited work is complete or blocked. If it remains pending, give any status update as commentary, then call {wait_tool} again with valid current arguments. Do not end the turn merely because you answered a status question or a delegated agent is still working."
+        ));
+        if !self.0.is_empty() {
+            let reason = serde_json::Value::String(self.0.clone());
+            guidance.push_str(&format!(
+                "\n\nReason for waiting (quoted context): {reason}"
+            ));
+        }
+        guidance
     }
 }
 

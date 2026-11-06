@@ -331,7 +331,7 @@ impl McpHandler {
                     crate::mcp_tool_call::HandledMcpToolCall {
                         result: codex_protocol::mcp::CallToolResult {
                             content: vec![
-                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason).to_string()}),
+                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &format!("{}.{}", self.definition.tool_info.callable_namespace, self.definition.tool_info.callable_name)).to_string()}),
                             ],
                             structured_content: None,
                             is_error: Some(false),

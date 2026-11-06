@@ -224,12 +224,10 @@ impl CodeModeWaitHandler {
                     wall_time,
                     exec.turn.config.code_mode.experimental_show_cell_overhead,
                 );
-                if !args.terminate
-                    && completed_or_yielded
-                    && output.success_for_logging()
-                    && let Some(reminder) = reason.reminder(codex_tools::WaitReminder::Returned)
-                {
-                    output.append_wait_reminder(reminder);
+                if !args.terminate && completed_or_yielded && output.success_for_logging() {
+                    output.append_wait_reminder(
+                        reason.reminder(WAIT_TOOL_NAME, codex_tools::WaitReminder::Returned),
+                    );
                 }
                 Ok(boxed_tool_output(output))
             }
