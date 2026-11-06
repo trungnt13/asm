@@ -38,7 +38,26 @@ pub(super) fn apply_defaults(
     let configured = config.side_model.is_some()
         || config.side_reasoning_effort.is_some()
         || config.side_service_tier.is_some();
-    if !configured {
+    let pending_prompt = if matches!(origin, SideOrigin::Fork) {
+        config
+            .side_prompt
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .map(|prompt| ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: format!("{prompt}\n\n{DEVELOPER_BLOCK}"),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            })
+    } else {
+        None
+    };
+    if !configured && pending_prompt.is_none() {
         return None;
     }
     let initialization = SideSettingsInitialization {
@@ -48,8 +67,9 @@ pub(super) fn apply_defaults(
         normalize_model: config.side_model.is_some(),
         normalize_effort: config.side_reasoning_effort.is_some(),
         normalize_tier: config.side_service_tier.is_some(),
-        pending_sync: true,
+        pending_sync: configured,
         pending_first_turn: matches!(origin, SideOrigin::Start),
+        pending_prompt,
     };
     if let Some(model) = &config.side_model {
         config.model = Some(model.clone());
@@ -79,6 +99,7 @@ pub(super) enum SideOrigin {
 }
 
 pub(crate) struct SideSettingsInitialization {
+    pub(super) pending_prompt: Option<ResponseItem>,
     inherited_model: Option<String>,
     inherited_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
     pub(super) inherited_tier: Option<String>,

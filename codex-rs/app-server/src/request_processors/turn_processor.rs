@@ -1128,7 +1128,7 @@ impl TurnRequestProcessor {
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
 
-        let items = params
+        let mut items = params
             .items
             .into_iter()
             .enumerate()
@@ -1141,6 +1141,17 @@ impl TurnRequestProcessor {
         validate_response_item_image_urls(&items)?;
 
         let side_boundary = super::desktop_side::is_boundary(&items);
+        if side_boundary {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            let state = thread_state.lock().await;
+            if let Some(prompt) = state
+                .side_settings_initialization
+                .as_ref()
+                .and_then(|initialization| initialization.pending_prompt.clone())
+            {
+                items.push(prompt);
+            }
+        }
         thread
             .inject_response_items(items)
             .await
@@ -1148,6 +1159,17 @@ impl TurnRequestProcessor {
                 CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
                 _ => internal_error(format!("failed to inject response items: {err}")),
             })?;
+        if side_boundary {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            if let Some(initialization) = thread_state
+                .lock()
+                .await
+                .side_settings_initialization
+                .as_mut()
+            {
+                initialization.pending_prompt = None;
+            }
+        }
         {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             let synchronize = {

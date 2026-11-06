@@ -845,6 +845,30 @@ impl App {
         }
     }
 
+    pub(super) fn side_boundary_items(&self, kind: CompanionKind) -> Vec<ResponseItem> {
+        let mut items = vec![Self::side_boundary_prompt_item(kind)];
+        if kind == CompanionKind::Side
+            && let Some(prompt) = self
+                .config
+                .side_prompt
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+        {
+            items.push(ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: format!("{prompt}\n\n{SIDE_DEVELOPER_INSTRUCTIONS}"),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            });
+        }
+        items
+    }
+
     pub(super) fn current_thread_fork_config(&self) -> Config {
         let mut fork_config = self.chat_widget.config_ref().clone();
         let parent_model = self.chat_widget.current_model();
@@ -1102,7 +1126,7 @@ impl App {
             fork_config,
             parent_thread_id,
             self.selected_server_profile(parent_thread_id),
-            Self::side_boundary_prompt_item(kind),
+            self.side_boundary_items(kind),
         );
         let create = async move {
             fork.await
