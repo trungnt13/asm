@@ -156,6 +156,7 @@ mod tests {
         let developer_instructions = App::side_developer_instructions(
             Some("Existing developer policy."),
             CompanionKind::Side,
+            /*side_prompt*/ None,
         );
 
         assert!(developer_instructions.contains("Existing developer policy."));
@@ -806,19 +807,23 @@ impl App {
     pub(super) fn side_developer_instructions(
         existing_instructions: Option<&str>,
         kind: CompanionKind,
+        side_prompt: Option<&str>,
     ) -> String {
         let instructions = match kind {
-            CompanionKind::Side => SIDE_DEVELOPER_INSTRUCTIONS,
-            CompanionKind::Parallel => super::parallel::PARALLEL_DEVELOPER_INSTRUCTIONS,
+            CompanionKind::Side => match side_prompt.filter(|prompt| !prompt.trim().is_empty()) {
+                Some(prompt) => format!("{prompt}\n\n{SIDE_DEVELOPER_INSTRUCTIONS}"),
+                None => SIDE_DEVELOPER_INSTRUCTIONS.to_string(),
+            },
+            CompanionKind::Parallel => super::parallel::PARALLEL_DEVELOPER_INSTRUCTIONS.to_string(),
         };
         match existing_instructions {
-            Some(existing_instructions) if existing_instructions.ends_with(instructions) => {
+            Some(existing_instructions) if existing_instructions.ends_with(&instructions) => {
                 existing_instructions.to_string()
             }
             Some(existing_instructions) if !existing_instructions.trim().is_empty() => {
                 format!("{existing_instructions}\n\n{instructions}")
             }
-            _ => instructions.to_string(),
+            _ => instructions,
         }
     }
 
@@ -873,6 +878,7 @@ impl App {
         fork_config.developer_instructions = Some(Self::side_developer_instructions(
             fork_config.developer_instructions.as_deref(),
             kind,
+            self.config.side_prompt.as_deref(),
         ));
         fork_config
     }

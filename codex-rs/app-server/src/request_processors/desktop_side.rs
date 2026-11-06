@@ -14,15 +14,26 @@ pub(super) fn apply_defaults(
     let Some(instructions) = instructions else {
         return None;
     };
-    let matches = instructions
-        .match_indices(DEVELOPER_BLOCK)
-        .any(|(offset, block)| {
-            let end = offset + block.len();
-            (offset == 0 || instructions[..offset].ends_with("\n\n"))
-                && (end == instructions.len() || instructions[end..].starts_with("\n\n"))
-        });
-    if !matches {
+    let side_block_offset =
+        instructions
+            .match_indices(DEVELOPER_BLOCK)
+            .find_map(|(offset, block)| {
+                let end = offset + block.len();
+                ((offset == 0 || instructions[..offset].ends_with("\n\n"))
+                    && (end == instructions.len() || instructions[end..].starts_with("\n\n")))
+                .then_some(offset)
+            });
+    let Some(side_block_offset) = side_block_offset else {
         return None;
+    };
+    if let Some(prompt) = config
+        .side_prompt
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        let mut instructions = instructions.to_string();
+        instructions.insert_str(side_block_offset, &format!("{prompt}\n\n"));
+        config.developer_instructions = Some(instructions);
     }
     let configured = config.side_model.is_some()
         || config.side_reasoning_effort.is_some()
