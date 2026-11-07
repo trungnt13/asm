@@ -68,17 +68,9 @@ async fn legacy_saved_side_reads_its_boundary_without_requesting_paginated_turns
         )
         .await?;
     assert!(!temporary.session.daybreak_enabled);
-    assert_eq!(
-        server
-            .history_pagination
-            .get(&side)
-            .map(|state| state.history_mode),
-        Some(ThreadHistoryMode::Legacy),
-    );
-    let inherited_turns = server
-        .thread_read(side, /*include_turns*/ true)
-        .await?
-        .turns;
+    let inherited = server.thread_read(side, /*include_turns*/ true).await?;
+    assert_eq!(inherited.history_mode, ThreadHistoryMode::Legacy);
+    let inherited_turns = inherited.turns;
     assert!(!inherited_turns.is_empty());
     let directory = home.path().join("asm-side-conversations/local");
     std::fs::create_dir_all(&directory)?;

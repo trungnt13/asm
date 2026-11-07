@@ -504,15 +504,6 @@ impl App {
             self.add_agents_overview_error(message);
             return false;
         }
-        self.unsubscribe_side_thread(app_server, thread_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub(super) async fn unsubscribe_side_thread(
-        &mut self,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) -> bool {
         if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
             let message =
                 format!("Failed to close side conversation {thread_id}; it is still open: {err}");
@@ -612,7 +603,7 @@ impl App {
         self.sync_active_agent_label();
     }
 
-    pub(super) async fn interrupt_side_thread(
+    async fn interrupt_side_thread(
         &self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
