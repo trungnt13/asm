@@ -12,7 +12,6 @@ fn parent_owned_thread_allows_local_commands() {
         ("/subagents", SlashCommand::MultiAgents),
         ("/side", SlashCommand::Side),
         ("/btw", SlashCommand::Btw),
-        ("/parallel", SlashCommand::Parallel),
         ("/diff ", SlashCommand::Diff),
         ("/daemon", SlashCommand::Daemon),
         ("/warnings", SlashCommand::Warnings),

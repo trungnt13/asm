@@ -667,9 +667,8 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
 }
 
 #[tokio::test]
-async fn parallel_voice_requires_started_thread() {
+async fn voice_requires_started_thread() {
     let (mut chat, _sender, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
-    chat.set_parallel_conversation_active(/*active*/ true);
 
     chat.toggle_realtime_conversation();
 

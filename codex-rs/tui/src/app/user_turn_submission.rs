@@ -30,10 +30,7 @@ pub(super) async fn try_submit_user_turn(
     let preflight = || {
         let enabled = app.chat_widget.daybreak_enabled
             && !app.chat_widget.side_conversation_active()
-            && app
-                .side_threads
-                .get(&thread_id)
-                .is_none_or(|side| side.kind == CompanionKind::Parallel);
+            && !app.side_threads.contains_key(&thread_id);
         crate::daybreak::program_for_turn(
             &app.chat_widget.model_catalog().models,
             model,

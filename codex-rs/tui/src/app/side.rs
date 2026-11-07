@@ -1,7 +1,6 @@
-//! Shared navigation for temporary sides and saved parallel conversations.
+//! Side-conversation thread lifecycle.
 //! Inherited history is reference context, not an instruction to continue the parent task.
 //! Keep upstream lifecycle helpers here to limit rebase conflicts despite this module's size.
-//! Saved-only policy belongs in `app::parallel`.
 
 use super::*;
 use crate::app_server_session::SideChatStorage;
@@ -80,7 +79,7 @@ mod tests {
 
     #[test]
     fn side_boundary_prompt_marks_inherited_history_reference_only() {
-        let item = App::side_boundary_prompt_item(CompanionKind::Side);
+        let item = App::side_boundary_prompt_item();
         let ResponseItem::Message { role, content, .. } = item else {
             panic!("expected hidden side boundary prompt to be a user message");
         };
@@ -108,7 +107,7 @@ mod tests {
         );
 
         assert_eq!(
-            App::side_start_error_message(&err, CompanionKind::Side),
+            App::side_start_error_message(&err),
             "'/side' is unavailable until the current conversation has started. Send a message first, then try /side again."
         );
     }
@@ -118,7 +117,7 @@ mod tests {
         let err = color_eyre::eyre::eyre!("transport disconnected");
 
         assert_eq!(
-            App::side_start_error_message(&err, CompanionKind::Side),
+            App::side_start_error_message(&err),
             "Failed to start side conversation: transport disconnected"
         );
     }
@@ -127,7 +126,6 @@ mod tests {
     fn side_developer_instructions_appends_existing_policy() {
         let developer_instructions = App::side_developer_instructions(
             Some("Existing developer policy."),
-            CompanionKind::Side,
             /*side_prompt*/ None,
         );
 
@@ -177,7 +175,6 @@ impl SideParentStatusChange {
 pub(super) struct SideThreadState {
     /// Thread to return to when the current side conversation is dismissed.
     pub(super) parent_thread_id: ThreadId,
-    pub(super) kind: CompanionKind,
     /// Parent-thread condition that changed while this side thread is visible.
     pub(super) parent_status: Option<SideParentStatus>,
     pub(super) opening_message: Option<crate::chatwidget::UserMessage>,
@@ -189,18 +186,10 @@ impl SideThreadState {
     pub(super) fn new(parent_thread_id: ThreadId) -> Self {
         Self {
             parent_thread_id,
-            kind: CompanionKind::Side,
             parent_status: None,
             opening_message: None,
             close_request: None,
             storage: SideChatStorage::Temporary,
-        }
-    }
-
-    pub(super) fn parallel(parent_thread_id: ThreadId) -> Self {
-        Self {
-            kind: CompanionKind::Parallel,
-            ..Self::new(parent_thread_id)
         }
     }
 }
@@ -224,28 +213,22 @@ impl App {
             chat_widget.set_side_conversation_active(/*active*/ false);
             chat_widget.set_composer_mode(crate::bottom_pane::ComposerMode::Main);
             chat_widget.clear_thread_rename_block();
-            chat_widget.set_parallel_conversation_active(/*active*/ false);
             chat_widget.set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Default);
         };
         let Some(active_thread_id) = self.current_displayed_thread_id() else {
             clear_side_ui(&mut self.chat_widget);
             return;
         };
-        let Some((parent_thread_id, parent_status, kind, storage)) =
-            self.side_threads.get(&active_thread_id).map(|state| {
-                (
-                    state.parent_thread_id,
-                    state.parent_status,
-                    state.kind,
-                    state.storage,
-                )
-            })
+        let Some((parent_thread_id, parent_status, storage)) = self
+            .side_threads
+            .get(&active_thread_id)
+            .map(|state| (state.parent_thread_id, state.parent_status, state.storage))
         else {
             clear_side_ui(&mut self.chat_widget);
-            if let Some(state) = self
+            if self
                 .side_threads
                 .values()
-                .find(|state| state.parent_thread_id == active_thread_id)
+                .any(|state| state.parent_thread_id == active_thread_id)
                 && let Some(binding) = self.keymap.primary_hint(
                     crate::keymap::KeymapContext::Global,
                     "toggle_side_conversation",
@@ -253,27 +236,17 @@ impl App {
             {
                 self.chat_widget
                     .set_side_conversation_context_label(Some(format!(
-                        "{} for {}",
-                        binding.display_label(),
-                        state.kind.name()
+                        "{} for side",
+                        binding.display_label()
                     )));
             }
             return;
         };
 
-        match kind {
-            CompanionKind::Side => {
-                self.chat_widget
-                    .set_thread_rename_block_message(SIDE_RENAME_BLOCK_MESSAGE);
-                self.chat_widget
-                    .set_side_conversation_active(/*active*/ true);
-            }
-            CompanionKind::Parallel => {
-                self.chat_widget.clear_thread_rename_block();
-                self.chat_widget
-                    .set_parallel_conversation_active(/*active*/ true);
-            }
-        }
+        self.chat_widget
+            .set_thread_rename_block_message(SIDE_RENAME_BLOCK_MESSAGE);
+        self.chat_widget
+            .set_side_conversation_active(/*active*/ true);
         self.chat_widget
             .set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Suppress);
         let mut label_parts = Vec::new();
@@ -304,10 +277,7 @@ impl App {
             "{} to {action}",
             crate::key_hint::ctrl(KeyCode::Char('c')).display_label()
         ));
-        let mode = match kind {
-            CompanionKind::Side => crate::bottom_pane::ComposerMode::Side,
-            CompanionKind::Parallel => crate::bottom_pane::ComposerMode::Parallel,
-        };
+        let mode = crate::bottom_pane::ComposerMode::Side;
         self.chat_widget.set_composer_mode(mode);
         let title = mode.name();
         self.chat_widget
@@ -445,13 +415,7 @@ impl App {
             && self.chat_widget.no_modal_or_popup_active()
             && self.chat_widget.composer_is_empty()
             && let Some(parent_thread_id) = self.active_side_parent_thread_id()
-            && let Some(side_thread_id) = self.current_displayed_thread_id()
         {
-            if self.side_threads[&side_thread_id].kind == CompanionKind::Parallel {
-                return self
-                    .close_parallel_conversation(tui, app_server, parent_thread_id, side_thread_id)
-                    .await;
-            }
             if self
                 .select_agent_thread_and_discard_side(tui, app_server, parent_thread_id)
                 .await
@@ -471,10 +435,7 @@ impl App {
     ) -> Option<ThreadId> {
         let active_thread_id = self.current_displayed_thread_id()?;
         let (&side_thread_id, state) = self.side_threads.iter().next()?;
-        if state.kind != CompanionKind::Side
-            || target_thread_id == side_thread_id
-            || target_thread_id == active_thread_id
-        {
+        if target_thread_id == side_thread_id || target_thread_id == active_thread_id {
             return None;
         }
 
@@ -501,18 +462,6 @@ impl App {
             return Ok(());
         };
 
-        if state.kind == CompanionKind::Parallel
-            && !self
-                .parallel_navigation_target_available(
-                    app_server,
-                    state.parent_thread_id,
-                    side_thread_id,
-                    target_thread_id,
-                )
-                .await?
-        {
-            return Ok(());
-        }
         self.select_agent_thread(tui, app_server, target_thread_id)
             .await?;
         if self.active_thread_id == Some(target_thread_id)
@@ -555,15 +504,6 @@ impl App {
             self.add_agents_overview_error(message);
             return false;
         }
-        self.unsubscribe_side_thread(app_server, thread_id).await
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub(super) async fn unsubscribe_side_thread(
-        &mut self,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) -> bool {
         if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
             let message =
                 format!("Failed to close side conversation {thread_id}; it is still open: {err}");
@@ -663,49 +603,11 @@ impl App {
         self.sync_active_agent_label();
     }
 
-    pub(super) async fn interrupt_side_thread(
+    async fn interrupt_side_thread(
         &self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> std::result::Result<(), String> {
-        let saved = if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            channel
-                .store
-                .lock()
-                .await
-                .session
-                .as_ref()
-                .is_some_and(|session| session.rollout_path.is_some())
-        } else {
-            false
-        };
-        if saved
-            && self
-                .side_threads
-                .get(&thread_id)
-                .is_some_and(|state| state.kind == CompanionKind::Parallel)
-            && self.config.features.enabled(Feature::Goals)
-        {
-            let response = app_server
-                .thread_goal_get(thread_id)
-                .await
-                .map_err(|error| format!("Failed to read side goal before closing: {error}"))?;
-            if response.goal.is_some_and(|goal| {
-                goal.status == codex_app_server_protocol::ThreadGoalStatus::Active
-            }) {
-                app_server
-                    .thread_goal_set(
-                        thread_id,
-                        /*objective*/ None,
-                        Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
-                        /*token_budget*/ None,
-                    )
-                    .await
-                    .map_err(|error| {
-                        format!("Failed to pause side goal before closing: {error}")
-                    })?;
-            }
-        }
         let turn_id = self.active_turn_id_for_thread(thread_id).await;
         let attachment = self
             .thread_event_channels
@@ -739,19 +641,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> bool {
-        let parent = self
-            .side_threads
-            .get(&thread_id)
-            .filter(|state| state.kind == CompanionKind::Parallel)
-            .map(|state| state.parent_thread_id);
         if self.discard_side_thread(app_server, thread_id).await {
-            if let Some(parent) = parent
-                && let Err(error) = self.close_side_selection(parent, thread_id)
-            {
-                self.chat_widget.add_error_message(format!(
-                    "Side conversation closed, but its saved navigation could not be cleared: {error}"
-                ));
-            }
             true
         } else {
             self.keep_side_thread_visible_after_cleanup_failure(tui, app_server, thread_id)
@@ -762,18 +652,12 @@ impl App {
 
     pub(super) fn side_developer_instructions(
         existing_instructions: Option<&str>,
-        kind: CompanionKind,
         side_prompt: Option<&str>,
     ) -> String {
-        let instructions = match kind {
-            CompanionKind::Side => {
-                let policy = SideConversationPolicy::Temporary.instructions(/*existing*/ None);
-                match side_prompt.filter(|prompt| !prompt.trim().is_empty()) {
-                    Some(prompt) => format!("{prompt}\n\n{policy}"),
-                    None => policy,
-                }
-            }
-            CompanionKind::Parallel => super::parallel::PARALLEL_DEVELOPER_INSTRUCTIONS.to_string(),
+        let policy = SideConversationPolicy::Temporary.instructions(/*existing*/ None);
+        let instructions = match side_prompt.filter(|prompt| !prompt.trim().is_empty()) {
+            Some(prompt) => format!("{prompt}\n\n{policy}"),
+            None => policy,
         };
         match existing_instructions {
             Some(existing_instructions) if existing_instructions.ends_with(&instructions) => {
@@ -786,31 +670,17 @@ impl App {
         }
     }
 
-    pub(super) fn side_boundary_prompt_item(kind: CompanionKind) -> ResponseItem {
-        if kind == CompanionKind::Side {
-            return side_conversation_boundary();
-        }
-        ResponseItem::Message {
-            status: None,
-            encrypted_content: None,
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: super::parallel::PARALLEL_BOUNDARY_PROMPT.to_string(),
-            }],
-            phase: None,
-            internal_chat_message_metadata_passthrough: None,
-        }
+    pub(super) fn side_boundary_prompt_item() -> ResponseItem {
+        side_conversation_boundary()
     }
 
-    pub(super) fn side_boundary_items(&self, kind: CompanionKind) -> Vec<ResponseItem> {
-        let mut items = vec![Self::side_boundary_prompt_item(kind)];
-        if kind == CompanionKind::Side
-            && let Some(prompt) = self
-                .config
-                .side_prompt
-                .as_deref()
-                .filter(|text| !text.trim().is_empty())
+    pub(super) fn side_boundary_items(&self) -> Vec<ResponseItem> {
+        let mut items = vec![Self::side_boundary_prompt_item()];
+        if let Some(prompt) = self
+            .config
+            .side_prompt
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
         {
             items.push(ResponseItem::Message {
                 status: None,
@@ -824,11 +694,9 @@ impl App {
                 internal_chat_message_metadata_passthrough: None,
             });
         }
-        if kind == CompanionKind::Side {
-            items.push(ContextualUserFragment::into(
-                SideConversationPolicy::Temporary,
-            ));
-        }
+        items.push(ContextualUserFragment::into(
+            SideConversationPolicy::Temporary,
+        ));
         items
     }
 
@@ -843,80 +711,52 @@ impl App {
         fork_config
     }
 
-    pub(super) fn side_fork_config(&self, kind: CompanionKind) -> Config {
+    pub(super) fn side_fork_config(&self) -> Config {
         let mut fork_config = self.current_thread_fork_config();
-        fork_config.ephemeral = kind == CompanionKind::Side;
-        if kind == CompanionKind::Side {
-            if let Some(model) = &self.config.side_model {
-                fork_config.model = Some(model.clone());
-            }
-            if let Some(effort) = &self.config.side_reasoning_effort {
-                fork_config.model_reasoning_effort = Some(effort.clone());
-            }
-            if let Some(tier) = &self.config.side_service_tier {
-                fork_config.service_tier = Some(
-                    codex_protocol::config_types::ServiceTier::from_request_value(tier)
-                        .map(|tier| tier.request_value().to_string())
-                        .unwrap_or_else(|| tier.clone()),
-                );
-            }
-            fork_config.daybreak_enabled = false;
+        fork_config.ephemeral = true;
+        if let Some(model) = &self.config.side_model {
+            fork_config.model = Some(model.clone());
         }
+        if let Some(effort) = &self.config.side_reasoning_effort {
+            fork_config.model_reasoning_effort = Some(effort.clone());
+        }
+        if let Some(tier) = &self.config.side_service_tier {
+            fork_config.service_tier = Some(
+                codex_protocol::config_types::ServiceTier::from_request_value(tier)
+                    .map(|tier| tier.request_value().to_string())
+                    .unwrap_or_else(|| tier.clone()),
+            );
+        }
+        fork_config.daybreak_enabled = false;
         fork_config.developer_instructions = Some(Self::side_developer_instructions(
             fork_config.developer_instructions.as_deref(),
-            kind,
             self.config.side_prompt.as_deref(),
         ));
         fork_config
     }
 
-    pub(super) fn side_start_block_message(&self, kind: CompanionKind) -> Option<&'static str> {
+    pub(super) fn side_start_block_message(&self) -> Option<&'static str> {
         if self.primary_thread_id.is_none() {
-            Some(match kind {
-                CompanionKind::Side => SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE,
-                CompanionKind::Parallel => {
-                    super::parallel::PARALLEL_MAIN_THREAD_UNAVAILABLE_MESSAGE
-                }
-            })
+            Some(SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE)
         } else if self
             .current_displayed_thread_id()
-            .and_then(|id| self.side_threads.get(&id))
-            .is_some_and(|state| state.kind == CompanionKind::Side)
+            .is_some_and(|id| self.side_threads.contains_key(&id))
         {
             Some(SIDE_ALREADY_OPEN_MESSAGE)
-        } else if kind == CompanionKind::Side
-            && self
-                .side_threads
-                .values()
-                .any(|state| state.kind == CompanionKind::Parallel)
-        {
-            Some(super::parallel::SIDE_WHILE_PARALLEL_OPEN_MESSAGE)
         } else {
             None
         }
     }
 
-    pub(super) fn side_start_error_message(
-        err: &color_eyre::Report,
-        kind: CompanionKind,
-    ) -> String {
+    pub(super) fn side_start_error_message(err: &color_eyre::Report) -> String {
         if err.chain().any(|cause| {
             let message = cause.to_string();
             message.contains("no rollout found for thread id")
                 || message.contains("includeTurns is unavailable before first user message")
         }) {
-            match kind {
-                CompanionKind::Side => SIDE_NO_STARTED_CONVERSATION_MESSAGE,
-                CompanionKind::Parallel => {
-                    super::parallel::PARALLEL_NO_STARTED_CONVERSATION_MESSAGE
-                }
-            }
-            .to_string()
+            SIDE_NO_STARTED_CONVERSATION_MESSAGE.to_string()
         } else {
-            match kind {
-                CompanionKind::Side => format!("Failed to start side conversation: {err}"),
-                CompanionKind::Parallel => format!("Failed to start parallel conversation: {err}"),
-            }
+            format!("Failed to start side conversation: {err}")
         }
     }
 
@@ -969,10 +809,9 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         mut parent_thread_id: ThreadId,
-        kind: CompanionKind,
         mut user_message: Option<crate::chatwidget::UserMessage>,
     ) -> Result<AppRunControl> {
-        let workspace = kind == CompanionKind::Side && self.side_retention_enabled(tui);
+        let workspace = self.side_retention_enabled(tui);
         if let Some(pane) = self.sidebars.get_mut(&Some(parent_thread_id))
             && pane.creation.is_some()
         {
@@ -991,15 +830,13 @@ impl App {
                 .add_error_message("Finish or cancel the pending side conversation first.".into());
             return Ok(AppRunControl::Continue);
         }
-        if let Some(message) = self.side_start_block_message(kind) {
+        if let Some(message) = self.side_start_block_message() {
             self.restore_side_user_message(user_message.take());
             self.sync_side_thread_ui();
             self.chat_widget.add_error_message(message.to_string());
             return Ok(AppRunControl::Continue);
         }
-        if kind == CompanionKind::Side
-            && let Some(existing) = self.side_thread_for_parent(parent_thread_id)
-        {
+        if let Some(existing) = self.side_thread_for_parent(parent_thread_id) {
             self.select_agent_thread(tui, app_server, existing).await?;
             if self.active_thread_id == Some(existing) {
                 if let Some(message) = user_message.take() {
@@ -1028,17 +865,12 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
 
-        let name = kind.name();
-        self.refresh_in_memory_config_from_disk_best_effort(&format!(
-            "starting a {name} conversation"
-        ))
-        .await;
+        self.refresh_in_memory_config_from_disk_best_effort("starting a side conversation")
+            .await;
 
-        let fork_config = self.side_fork_config(kind);
+        let fork_config = self.side_fork_config();
 
-        if let Some((&side_thread_id, state)) = self.side_threads.iter().next() {
-            let previous_parallel_parent =
-                (state.kind == CompanionKind::Parallel).then_some(state.parent_thread_id);
+        if let Some(&side_thread_id) = self.side_threads.keys().next() {
             if !self.thread_event_channels.contains_key(&side_thread_id) {
                 // Restored UI pairing does not imply this client attached the saved side.
                 self.discard_closed_side_thread(side_thread_id).await;
@@ -1047,22 +879,10 @@ impl App {
                 self.sync_side_thread_ui();
                 return Ok(AppRunControl::Continue);
             }
-            if let Some(parent) = previous_parallel_parent
-                && let Err(error) = self.close_side_selection(parent, side_thread_id)
-            {
-                self.restore_side_user_message(user_message.take());
-                self.sync_side_thread_ui();
-                self.chat_widget
-                    .add_error_message(format!("Failed to close parallel navigation: {error}"));
-                return Ok(AppRunControl::Continue);
-            }
         }
 
         self.session_telemetry.counter(
-            match kind {
-                CompanionKind::Side => "codex.thread.side",
-                CompanionKind::Parallel => "codex.thread.parallel",
-            },
+            "codex.thread.side",
             /*inc*/ 1,
             &[("source", "slash_command")],
         );
@@ -1089,13 +909,13 @@ impl App {
             fork_config,
             parent_thread_id,
             self.selected_server_profile(parent_thread_id),
-            self.side_boundary_items(kind),
+            self.side_boundary_items(),
             SideChatStorage::Temporary,
         );
         let create = async move {
             fork.await
                 .map(Box::new)
-                .map_err(|err| Self::side_start_error_message(&err, kind))
+                .map_err(|err| Self::side_start_error_message(&err))
         };
         if workspace {
             let tx = self.app_event_tx.clone();
@@ -1113,7 +933,6 @@ impl App {
                 tui,
                 app_server,
                 parent_thread_id,
-                kind,
                 user_message,
                 /*enter*/ true,
                 create.await,
@@ -1160,16 +979,8 @@ impl App {
             return;
         }
         let message = pending.message.take();
-        self.apply_side_creation(
-            tui,
-            app_server,
-            parent,
-            CompanionKind::Side,
-            message,
-            enter,
-            result,
-        )
-        .await
+        self.apply_side_creation(tui, app_server, parent, message, enter, result)
+            .await
     }
 
     async fn apply_side_creation(
@@ -1177,29 +988,15 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         parent_thread_id: ThreadId,
-        kind: CompanionKind,
         mut user_message: Option<crate::chatwidget::UserMessage>,
         enter: bool,
         result: Result<Box<crate::app_server_session::SidebarFork>, String>,
     ) {
-        let name = kind.name();
         match result {
             Ok(fork) => {
                 app_server.observe_sidebar_fork(&fork);
                 let forked = fork.thread;
                 let child_thread_id = forked.session.thread_id;
-                if kind == CompanionKind::Parallel
-                    && let Err(error) = app_server
-                        .save_side_conversation(parent_thread_id, child_thread_id)
-                        .await
-                {
-                    self.discard_side_thread(app_server, child_thread_id).await;
-                    self.restore_side_user_message(user_message.take());
-                    self.sync_side_thread_ui();
-                    self.chat_widget
-                        .add_error_message(format!("Failed to save parallel navigation: {error}"));
-                    return;
-                }
                 if let Err(err) = fork.boundary {
                     let message =
                         format!("Failed to prepare side conversation {child_thread_id}: {err}");
@@ -1250,10 +1047,7 @@ impl App {
                     let mut store = channel.store.lock().await;
                     Self::install_side_thread_snapshot(&mut store, forked.session, forked.turns);
                 }
-                let mut child = match kind {
-                    CompanionKind::Side => SideThreadState::new(parent_thread_id),
-                    CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
-                };
+                let mut child = SideThreadState::new(parent_thread_id);
                 child.storage = fork.storage;
                 child.parent_status = self
                     .side_thread_for_parent(parent_thread_id)
@@ -1320,7 +1114,7 @@ impl App {
                         .await;
                     self.restore_side_user_message(user_message.take());
                     self.chat_widget.add_error_message(format!(
-                        "Failed to switch into {name} conversation {child_thread_id}."
+                        "Failed to switch into side conversation {child_thread_id}."
                     ));
                 }
             }
@@ -1363,10 +1157,6 @@ pub(super) async fn interrupt_for_close(
         result => result,
     }
 }
-
-#[cfg(test)]
-#[path = "side_parallel_tests.rs"]
-mod parallel_tests;
 
 #[cfg(test)]
 #[path = "side_navigation_tests.rs"]

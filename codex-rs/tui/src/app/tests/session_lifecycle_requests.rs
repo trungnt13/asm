@@ -929,7 +929,6 @@ pub(super) enum HistoryCapabilities {
     ConfigReadUnknownVoice,
     VoiceCatalogCustom,
     VoiceCatalogUnavailable,
-    SideGoalCancellation,
 }
 
 /// Returns and resets `(thread/loaded/list, thread/read)` request counts.
@@ -1068,7 +1067,6 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
         let mut websocket = accept_async(stream).await?;
         let mut inventories = usize::from(failed_thread_name == Some("background"));
         let mut reject_detach = false;
-        let mut side_goal_presented = false;
         let mut reject_thread_list = history_capabilities == HistoryCapabilities::ThreadListFails;
         loop {
             let frame = tokio::select! {
@@ -1163,9 +1161,6 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             RealtimeRequestBehavior::AcceptSpeech
                                 | RealtimeRequestBehavior::AcceptSpeechAndStallStop
                         ) && request.method == "thread/realtime/appendSpeech");
-                    let fake_side_interrupt = history_capabilities
-                        == HistoryCapabilities::SideGoalCancellation
-                        && request.method == "turn/interrupt";
                     let response = if turn_start_behavior == TurnStartBehavior::Accept
                         && request.method == "turn/start"
                     {
@@ -1173,7 +1168,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             id: request_id,
                             result: serde_json::json!({"turn": {"id": "forwarded-turn", "items": [], "status": "inProgress", "error": null}}),
                         })
-                    } else if fake_realtime_response || fake_side_interrupt {
+                    } else if fake_realtime_response {
                         JSONRPCMessage::Response(JSONRPCResponse {
                             id: request_id,
                             result: serde_json::json!({}),
@@ -1385,19 +1380,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                     &request,
                                     ClientRequest::ThreadRealtimeListVoices { .. }
                                 );
-                            let side_goal_read = history_capabilities
-                                == HistoryCapabilities::SideGoalCancellation
-                                && matches!(&request, ClientRequest::ThreadGoalGet { .. });
                             let mut result = embedded.request(request).await?;
-                            // Present a paused goal as active without starting automatic model work.
-                            if side_goal_read
-                                && !side_goal_presented
-                                && let Ok(value) = &mut result
-                                && value["goal"]["objective"] == "side goal"
-                            {
-                                value["goal"]["status"] = serde_json::json!("active");
-                                side_goal_presented = true;
-                            }
                             if unknown_voice && let Ok(value) = &mut result {
                                 value["config"]["realtime"]["voice"] =
                                     serde_json::json!("future_voice");
@@ -1834,10 +1817,7 @@ async fn external_transport_registers_dynamic_tools_and_finds_task_mentions() ->
     }
     let target_id = started.session.thread_id;
     app_server
-        .thread_inject_items(
-            target_id,
-            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
-        )
+        .thread_inject_items(target_id, vec![App::side_boundary_prompt_item()])
         .await?;
     crate::init_state_db_for_app_server_target(&app.config, &crate::AppServerTarget::Embedded)
         .await?
@@ -1900,153 +1880,6 @@ async fn external_transport_registers_dynamic_tools_and_finds_task_mentions() ->
 
     restarted_app_server.shutdown().await?;
     restarted_proxy.await??;
-    Ok(())
-}
-
-#[tokio::test]
-async fn cancelling_saved_side_pauses_goal_and_preserves_running_parent() -> Result<()> {
-    for background in [false, true] {
-        let (mut app, _codex_home) = make_history_test_app().await?;
-        app.config.features.enable(Feature::Goals)?;
-        let parent_id =
-            create_history_rollout(&app.config, ThreadHistoryMode::Legacy, "keep parent")?;
-        let (mut server, requests, proxy) = start_recording_app_server_with_history(
-            &app.config,
-            HistoryCapabilities::SideGoalCancellation,
-            /*blocked_thread_list*/ None,
-            /*failed_thread_name*/ None,
-            crate::app_server_session::ThreadParamsMode::Embedded,
-            LoaderOverrides::without_managed_config_for_tests(),
-        )
-        .await?;
-        let parent = server
-            .resume_thread(
-                &app.local_settings,
-                app.config.clone(),
-                parent_id,
-                crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-            )
-            .await?;
-        app.enqueue_primary_thread_session(parent.session.clone(), parent.turns)
-            .await?;
-        app.chat_widget.handle_thread_session(parent.session);
-        let side = server
-            .fork_side_thread(
-                &app.local_settings,
-                app.config.clone(),
-                parent_id,
-                /*selected_profile*/ None,
-                crate::app_server_session::SideChatStorage::Temporary,
-            )
-            .await?;
-        let side_id = side.session.thread_id;
-        let side_path = side.session.rollout_path.clone().expect("saved side");
-        server
-            .thread_goal_set(
-                side_id,
-                Some("side goal".to_string()),
-                Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
-                /*token_budget*/ None,
-            )
-            .await?;
-        app.side_threads
-            .insert(side_id, SideThreadState::parallel(parent_id));
-        App::install_side_thread_snapshot(
-            &mut *app.ensure_thread_channel(side_id).store.lock().await,
-            side.session,
-            side.turns,
-        );
-        app.upsert_agent_picker_thread(
-            side_id, /*agent_nickname*/ None, /*agent_role*/ None,
-            /*is_closed*/ false,
-        );
-        let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.select_agent_thread(&mut tui, &mut server, side_id)
-            .await?;
-        // These UI turns exercise routing without creating model requests or goal continuation.
-        for (thread, turn) in [(parent_id, "parent-turn"), (side_id, "side-turn")] {
-            app.enqueue_thread_notification(thread, turn_started_notification(thread, turn))
-                .await?;
-        }
-        if background {
-            app.select_agent_thread(&mut tui, &mut server, parent_id)
-                .await?;
-        }
-        requests.lock().expect("request recorder lock").clear();
-
-        if background {
-            let control = Box::pin(app.handle_event(
-                &mut tui,
-                &mut server,
-                AppEvent::RunningTaskExit {
-                    action: RunningTaskExitAction::CancelTask,
-                    thread_id: side_id,
-                },
-            ))
-            .await?;
-            assert_matches!(control, AppRunControl::Continue);
-        } else {
-            assert!(
-                app.maybe_return_from_side(
-                    &mut tui,
-                    &mut server,
-                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
-                )
-                .await
-            );
-        }
-
-        assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
-        assert_eq!(
-            app.active_turn_id_for_thread(parent_id).await.as_deref(),
-            Some("parent-turn")
-        );
-        assert_eq!(app.side_threads.contains_key(&side_id), background);
-        assert_eq!(app.thread_event_channels.contains_key(&side_id), background);
-        let actual = requests
-            .lock()
-            .expect("request recorder lock")
-            .iter()
-            .filter(|request| {
-                matches!(
-                    request.method.as_str(),
-                    "thread/goal/get" | "thread/goal/set" | "turn/interrupt" | "thread/unsubscribe"
-                )
-            })
-            .map(|request| serde_json::json!({"method": request.method, "params": request.params}))
-            .collect::<Vec<_>>();
-        let mut expected = vec![
-            serde_json::json!({"method": "thread/goal/get", "params": {"threadId": side_id.to_string()}}),
-            serde_json::json!({"method": "thread/goal/set", "params": {
-                "threadId": side_id.to_string(), "origin": "user", "objective": null, "status": "paused"}}),
-            serde_json::json!({"method": "turn/interrupt", "params": {
-                "threadId": side_id.to_string(), "turnId": "side-turn"}}),
-        ];
-        if !background {
-            expected.push(serde_json::json!({"method": "thread/unsubscribe", "params": {"threadId": side_id.to_string()}}));
-        }
-        assert_eq!(actual, expected);
-        let saved_meta = codex_rollout::read_session_meta_line(&side_path).await?;
-        assert_eq!(saved_meta.meta.id, side_id);
-        assert!(
-            server
-                .thread_read(side_id, /*include_turns*/ true)
-                .await
-                .is_ok()
-        );
-        assert!(server.thread_goal_get(parent_id).await?.goal.is_none());
-        assert_eq!(
-            server
-                .thread_goal_get(side_id)
-                .await?
-                .goal
-                .expect("saved goal")
-                .status,
-            codex_app_server_protocol::ThreadGoalStatus::Paused
-        );
-        server.shutdown().await?;
-        proxy.await??;
-    }
     Ok(())
 }
 

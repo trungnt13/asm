@@ -2,28 +2,25 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn saved_sides_restore_from_either_end_and_close_only_the_selected_side() -> std::io::Result<()> {
+fn legacy_child_records_remain_readable_without_pairing() -> std::io::Result<()> {
     let home = tempfile::tempdir()?;
     let store = SideConversationStore::new(home.path(), &AppServerTarget::Embedded);
-    let first = SideConversation {
+    let record = SideConversation {
         parent: ThreadId::new(),
         side: ThreadId::new(),
         last_inherited_turn: Some("inherited".into()),
     };
-    store.save(&first)?;
-    assert_eq!(store.pair(first.parent)?, Some(first.clone()));
-    assert_eq!(store.pair(first.side)?, Some(first.clone()));
-    let second = SideConversation {
-        side: ThreadId::new(),
-        ..first.clone()
-    };
-    store.save(&second)?;
-    store.close_selection(first.parent, first.side)?;
-    assert_eq!(store.pair(first.parent)?, Some(second.clone()));
-    assert_eq!(store.pair(first.side)?, Some(first));
-    store.close_selection(second.parent, second.side)?;
-    assert_eq!(store.pair(second.parent)?, None);
-    assert_eq!(store.pair(second.side)?, Some(second));
+    std::fs::create_dir_all(&store.directory)?;
+    std::fs::write(
+        store.directory.join(format!("side-{}.json", record.side)),
+        serde_json::to_vec(&serde_json::json!({
+            "parent": record.parent,
+            "side": record.side,
+            "last_inherited_turn": record.last_inherited_turn,
+        }))?,
+    )?;
+    assert_eq!(store.side(record.side)?, Some(record.clone()));
+    assert_eq!(store.side(record.parent)?, None);
     Ok(())
 }
 
@@ -44,9 +41,17 @@ fn endpoint_namespaces_do_not_expose_credentials_or_mix_servers() -> std::io::Re
         side: ThreadId::new(),
         last_inherited_turn: None,
     };
-    first.save(&record)?;
-    assert_eq!(second.pair(record.side)?, None);
-    assert_eq!(local.pair(record.side)?, None);
+    std::fs::create_dir_all(&first.directory)?;
+    std::fs::write(
+        first.directory.join(format!("side-{}.json", record.side)),
+        serde_json::to_vec(&serde_json::json!({
+            "parent": record.parent,
+            "side": record.side,
+            "last_inherited_turn": record.last_inherited_turn,
+        }))?,
+    )?;
+    assert_eq!(second.side(record.side)?, None);
+    assert_eq!(local.side(record.side)?, None);
     assert!(!first.directory.to_string_lossy().contains("secret-token"));
     assert!(!first.directory.to_string_lossy().contains("first.example"));
     Ok(())
@@ -61,21 +66,19 @@ fn oversized_metadata_is_rejected_without_unbounded_reads() -> std::io::Result<(
         side: ThreadId::new(),
         last_inherited_turn: None,
     };
-    store.save(&record)?;
+    std::fs::create_dir_all(&store.directory)?;
+    std::fs::write(
+        store.directory.join(format!("side-{}.json", record.side)),
+        serde_json::to_vec(&serde_json::json!({
+            "parent": record.parent,
+            "side": record.side,
+            "last_inherited_turn": record.last_inherited_turn,
+        }))?,
+    )?;
     std::fs::write(
         store.directory.join(format!("side-{}.json", record.side)),
         vec![b' '; MAX_RECORD_BYTES as usize + 1],
     )?;
     assert!(store.side(record.side).is_err());
     Ok(())
-}
-
-impl SideConversationStore {
-    pub(crate) fn pair(&self, thread: ThreadId) -> std::io::Result<Option<SideConversation>> {
-        if let Some(side) = self.side(thread)? {
-            return Ok(Some(side));
-        }
-        let record = self.read(&self.directory.join(format!("parent-{thread}.json")))?;
-        Ok(record.filter(|record| record.parent == thread && record.side != thread))
-    }
 }

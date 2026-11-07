@@ -3,7 +3,7 @@ use crate::legacy_core::config::ConfigBuilder;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() -> Result<()> {
+async fn legacy_saved_side_reads_its_boundary_without_requesting_paginated_turns() -> Result<()> {
     let home = tempfile::tempdir()?;
     let config = ConfigBuilder::default()
         .codex_home(home.path().to_path_buf())
@@ -68,29 +68,24 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
         )
         .await?;
     assert!(!temporary.session.daybreak_enabled);
-    assert_eq!(
-        server
-            .history_pagination
-            .get(&side)
-            .map(|state| state.history_mode),
-        Some(ThreadHistoryMode::Legacy),
-    );
-    let inherited_turns = server
-        .thread_read(side, /*include_turns*/ true)
-        .await?
-        .turns;
+    let inherited = server.thread_read(side, /*include_turns*/ true).await?;
+    assert_eq!(inherited.history_mode, ThreadHistoryMode::Legacy);
+    let inherited_turns = inherited.turns;
     assert!(!inherited_turns.is_empty());
-    server.save_side_conversation(parent, side).await?;
+    let directory = home.path().join("asm-side-conversations/local");
+    std::fs::create_dir_all(&directory)?;
+    let last_inherited_turn = inherited_turns.last().map(|turn| turn.id.clone());
+    std::fs::write(
+        directory.join(format!("side-{side}.json")),
+        serde_json::to_vec(&serde_json::json!({
+            "parent": parent,
+            "side": side,
+            "last_inherited_turn": last_inherited_turn,
+        }))?,
+    )?;
     let stored = server.side_conversation(side).expect("saved side boundary");
     assert_eq!((stored.parent, stored.side), (parent, side));
     assert!(stored.last_inherited_turn.is_some());
-    assert_eq!(
-        server
-            .history_pagination
-            .get(&side)
-            .map(|state| (state.history_mode, state.side_boundary.clone())),
-        Some((ThreadHistoryMode::Legacy, stored.last_inherited_turn)),
-    );
     server.shutdown().await?;
 
     let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
@@ -103,6 +98,13 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
         )
         .await?;
     assert!(resumed.turns.is_empty());
+    assert_eq!(
+        server
+            .history_pagination
+            .get(&side)
+            .map(|state| (state.history_mode, state.side_boundary.clone())),
+        Some((ThreadHistoryMode::Legacy, stored.last_inherited_turn)),
+    );
     assert!(resumed.session.daybreak_enabled);
     let parent = server.thread_read(parent, /*include_turns*/ true).await?;
     assert!(!parent.turns.is_empty());

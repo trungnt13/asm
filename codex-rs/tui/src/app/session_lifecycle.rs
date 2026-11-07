@@ -45,12 +45,7 @@ pub(super) struct LoadedSubagentBackfill {
 
 impl App {
     pub(super) async fn open_agent_picker(&mut self, app_server: &mut AppServerSession) {
-        let backfill = if self.primary_thread_id.is_none()
-            || self
-                .side_threads
-                .values()
-                .any(|state| state.kind == CompanionKind::Parallel)
-        {
+        let backfill = if self.primary_thread_id.is_none() {
             self.backfill_loaded_subagent_threads(app_server).await
         } else {
             LoadedSubagentBackfill::default()
@@ -877,15 +872,11 @@ impl App {
         resume_restored_queue: bool,
     ) -> Result<()> {
         let mut config = self.config.clone();
-        if self
-            .side_threads
-            .get(&thread_id)
-            .is_some_and(|state| state.kind == CompanionKind::Parallel)
-            || (!self.side_threads.contains_key(&thread_id)
-                && snapshot
-                    .session
-                    .as_ref()
-                    .is_some_and(ThreadSessionState::is_user_fork))
+        if !self.side_threads.contains_key(&thread_id)
+            && snapshot
+                .session
+                .as_ref()
+                .is_some_and(ThreadSessionState::is_user_fork)
         {
             // Saved user forks retain their selected tier across view rebuilds.
             config.service_tier = snapshot
@@ -1561,18 +1552,7 @@ impl App {
         }
 
         let mut refreshed_thread_ids = HashSet::new();
-        let mut descendants =
-            find_loaded_subagent_threads_for_primary(threads.clone(), primary_thread_id);
-        for side in self
-            .side_threads
-            .iter()
-            .filter_map(|(id, state)| (state.kind == CompanionKind::Parallel).then_some(*id))
-        {
-            descendants.extend(find_loaded_subagent_threads_for_primary(
-                threads.clone(),
-                side,
-            ));
-        }
+        let descendants = find_loaded_subagent_threads_for_primary(threads, primary_thread_id);
         for thread in descendants {
             let agent_path = thread.agent_path;
             let has_live_channel = self
@@ -1741,14 +1721,6 @@ impl App {
             && self.chat_widget.thread_id() == Some(resumed_thread_id))
         .then(|| self.chat_widget.capture_thread_input_state())
         .flatten();
-        // Keep the selected thread's new subscription while dropping its parallel UI role.
-        if self
-            .side_threads
-            .get(&resumed_thread_id)
-            .is_some_and(|state| state.kind == CompanionKind::Parallel)
-        {
-            self.side_threads.remove(&resumed_thread_id);
-        }
         self.detach_current_thread_for_navigation(app_server, Some(resumed_thread_id))
             .await;
         self.local_settings = local_settings;

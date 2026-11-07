@@ -518,12 +518,6 @@ pub(crate) enum AppEvent {
         action: SideConversationAction,
     },
 
-    /// Fork the current thread into a saved parallel conversation.
-    StartParallel {
-        parent_thread_id: ThreadId,
-        user_message: Option<UserMessage>,
-    },
-
     SideChatRemovalFinished {
         backend_id: crate::backend_id::BackendId,
         target: ThreadId,

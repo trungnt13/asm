@@ -3399,7 +3399,6 @@ async fn slash_cd_changes_current_session_after_replay_and_defaults_to_home() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    chat.set_parallel_conversation_active(/*active*/ true);
     chat.thread_name = Some("Completed task".to_string());
     chat.forked_from = Some(ThreadId::new());
     let (status, duration, error) = (AppServerTurnStatus::Completed, None, None);
@@ -3523,7 +3522,6 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
     chat.bottom_pane.set_task_running(/*running*/ true);
-    chat.set_parallel_conversation_active(/*active*/ true);
 
     submit_composer_text(&mut chat, "/fast");
 

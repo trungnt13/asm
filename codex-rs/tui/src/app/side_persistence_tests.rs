@@ -1,5 +1,6 @@
 use super::*;
 use crate::side_conversations::SideConversation;
+use crate::side_conversations::SideConversationStore;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -18,7 +19,16 @@ async fn resuming_either_end_and_unrelated_threads_keeps_only_selected_session()
     for thread in [pair.parent, pair.side, ThreadId::new()] {
         let mut app = Box::pin(super::super::test_support::make_test_app()).await;
         let store = SideConversationStore::new(&app.config.codex_home, &app.app_server_target);
-        store.save(&pair)?;
+        let directory = app.config.codex_home.join("asm-side-conversations/local");
+        std::fs::create_dir_all(&directory)?;
+        let bytes = serde_json::to_vec(&serde_json::json!({
+            "parent": pair.parent,
+            "side": pair.side,
+            "last_inherited_turn": pair.last_inherited_turn,
+        }))?;
+        std::fs::write(directory.join(format!("side-{}.json", pair.side)), &bytes)?;
+        let selection = directory.join(format!("parent-{}.json", pair.parent));
+        std::fs::write(&selection, &bytes)?;
         let mut session = started.session.clone();
         session.thread_id = thread;
         app.enqueue_primary_thread_session(session, Vec::new())
@@ -31,7 +41,6 @@ async fn resuming_either_end_and_unrelated_threads_keeps_only_selected_session()
                     .as_ref()
                     .map(|session| session.thread_id),
                 app.side_threads.is_empty(),
-                app.chat_widget.parallel_conversation_active(),
                 app.chat_widget.side_conversation_active(),
                 app.agent_navigation.tracked_thread_ids(),
                 app.thread_event_channels
@@ -45,12 +54,11 @@ async fn resuming_either_end_and_unrelated_threads_keeps_only_selected_session()
                 Some(thread),
                 true,
                 false,
-                false,
                 vec![thread],
                 vec![thread]
             ),
         );
-        assert_eq!(store.pair(pair.parent)?, Some(pair.clone()));
+        assert_eq!(std::fs::read(&selection)?, bytes);
         assert_eq!(store.side(pair.side)?, Some(pair.clone()));
     }
     Ok(())
