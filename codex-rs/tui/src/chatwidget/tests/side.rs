@@ -382,6 +382,9 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = Some(ThreadId::new());
         chat.set_side_conversation_active(/*active*/ true);
+        chat.set_thread_rename_block_message(
+            "Side conversations are ephemeral and cannot be renamed.",
+        );
 
         chat.dispatch_command(command);
 
@@ -392,9 +395,13 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         let name = command.command();
         assert_eq!(
             rendered,
-            format!(
-                "■ '/{name}' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
-            )
+            if command == SlashCommand::Rename {
+                "■ Side conversations are ephemeral and cannot be renamed.\n".to_string()
+            } else {
+                format!(
+                    "■ '/{name}' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
+                )
+            }
         );
         assert!(rx.try_recv().is_err(), "{command:?}");
         assert!(op_rx.try_recv().is_err(), "{command:?}");
@@ -462,11 +469,12 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
 async fn temporary_side_rejects_inline_rename() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_side_conversation_active(/*active*/ true);
+    chat.set_thread_rename_block_message("Side conversations are ephemeral and cannot be renamed.");
     chat.dispatch_command_with_args(SlashCommand::Rename, "investigate".to_string(), Vec::new());
     let errors = drain_insert_history(&mut rx);
     assert!(
         lines_to_single_string(&errors[0])
-            .contains("'/rename' is unavailable in side conversations.")
+            .contains("Side conversations are ephemeral and cannot be renamed.")
     );
     assert!(!chat.bottom_pane.has_active_view());
     assert!(op_rx.try_recv().is_err());

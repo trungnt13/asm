@@ -34,7 +34,6 @@ async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
         codex_config::LoaderOverrides::without_managed_config_for_tests(),
     )
     .await?;
-    server = server.with_side_conversations(&app.config.codex_home, &app.app_server_target);
     let started = server
         .resume_thread(
             &app.local_settings,

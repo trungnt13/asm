@@ -2,7 +2,7 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn navigation_discards_temporary_sides_after_leaving_the_pair() {
+async fn navigation_discards_temporary_side_only_when_returning_to_its_parent() {
     let mut app = Box::pin(super::super::test_support::make_test_app()).await;
     let parent = ThreadId::new();
     let side = ThreadId::new();
@@ -11,7 +11,7 @@ async fn navigation_discards_temporary_sides_after_leaving_the_pair() {
     for (active, target, expected) in [
         (side, side, None),
         (side, parent, Some(side)),
-        (parent, elsewhere, Some(side)),
+        (parent, elsewhere, None),
         (parent, parent, None),
         (parent, side, None),
         (elsewhere, parent, None),
