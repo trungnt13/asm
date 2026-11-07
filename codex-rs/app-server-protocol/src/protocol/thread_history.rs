@@ -5,6 +5,7 @@ use crate::protocol::item_builders::build_file_change_begin_item;
 use crate::protocol::item_builders::build_file_change_end_item;
 use crate::protocol::item_builders::build_item_from_guardian_event;
 use crate::protocol::item_builders::review_output_text;
+use crate::protocol::v2::AgentMessageModeration;
 use crate::protocol::v2::CollabAgentState;
 use crate::protocol::v2::CollabAgentTool;
 use crate::protocol::v2::CollabAgentToolCallStatus;
@@ -674,8 +675,18 @@ impl ThreadHistoryBuilder {
             return;
         }
 
-        let id = self.next_item_id();
+        let legacy_id = self.next_item_id();
+        let id = payload
+            .moderation
+            .as_ref()
+            .map_or(legacy_id, |decision| decision.item_id.clone());
         self.push_item_in_current_turn(ThreadItemPayload::AgentMessage {
+            moderation: payload
+                .moderation
+                .as_ref()
+                .map(|decision| AgentMessageModeration {
+                    moderated: decision.moderated,
+                }),
             id,
             text: payload.message.clone(),
             phase: payload.phase.clone(),
@@ -2216,6 +2227,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Hi there".into(),
                 phase: None,
                 memory_citation: None,
@@ -2237,6 +2249,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Reply two".into(),
                 phase: None,
                 memory_citation: None,
@@ -2278,6 +2291,7 @@ mod tests {
         assert_eq!(
             first.items[1].payload,
             ThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "item-2".into(),
                 text: "Hi there".into(),
                 phase: None,
@@ -2313,6 +2327,7 @@ mod tests {
         assert_eq!(
             second.items[1].payload,
             ThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "item-5".into(),
                 text: "Reply two".into(),
                 phase: None,
@@ -3029,6 +3044,7 @@ mod tests {
             },
         ];
         let events = vec![EventMsg::AgentMessage(AgentMessageEvent {
+            moderation: None,
             message: "Final reply".into(),
             phase: Some(CoreMessagePhase::FinalAnswer),
             memory_citation: None,
@@ -3045,6 +3061,7 @@ mod tests {
         assert_eq!(
             turns[0].items[0].payload,
             ThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "item-1".into(),
                 text: "Final reply".into(),
                 phase: Some(CoreMessagePhase::FinalAnswer),
@@ -3176,6 +3193,7 @@ mod tests {
                 text: "first content".into(),
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "interlude".into(),
                 phase: None,
                 memory_citation: None,
@@ -3226,6 +3244,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Working...".into(),
                 phase: None,
                 memory_citation: None,
@@ -3250,6 +3269,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "Second attempt complete.".into(),
                 phase: None,
                 memory_citation: None,
@@ -3282,6 +3302,7 @@ mod tests {
         assert_eq!(
             first_turn.items[1].payload,
             ThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "item-2".into(),
                 text: "Working...".into(),
                 phase: None,
@@ -3308,6 +3329,7 @@ mod tests {
         assert_eq!(
             second_turn.items[1].payload,
             ThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "item-4".into(),
                 text: "Second attempt complete.".into(),
                 phase: None,
@@ -3330,6 +3352,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "A1".into(),
                 phase: None,
                 memory_citation: None,
@@ -3345,6 +3368,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "A2".into(),
                 phase: None,
                 memory_citation: None,
@@ -3361,6 +3385,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "A3".into(),
                 phase: None,
                 memory_citation: None,
@@ -3392,6 +3417,7 @@ mod tests {
                     }],
                 },
                 &ThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "item-2".into(),
                     text: "A1".into(),
                     phase: None,
@@ -3413,6 +3439,7 @@ mod tests {
                     }],
                 },
                 &ThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "item-4".into(),
                     text: "A3".into(),
                     phase: None,
@@ -3436,6 +3463,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "A1".into(),
                 phase: None,
                 memory_citation: None,
@@ -3451,6 +3479,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "A2".into(),
                 phase: None,
                 memory_citation: None,
@@ -4452,6 +4481,7 @@ mod tests {
                 thread_id: ThreadId::default(),
                 turn_id: turn_id.clone(),
                 item: CoreTurnItem::AgentMessage(codex_protocol::items::AgentMessageItem {
+                    moderation: None,
                     id: id.into(),
                     content: vec![codex_protocol::items::AgentMessageContent::Text {
                         text: text.into(),
@@ -4502,6 +4532,7 @@ mod tests {
         }));
         for message in ["draft", "answer"] {
             builder.handle_event(&EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: message.into(),
                 phase: None,
                 memory_citation: None,
@@ -4844,6 +4875,7 @@ mod tests {
                 time_to_first_token_ms: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "still in b".into(),
                 phase: None,
                 memory_citation: None,
@@ -5042,6 +5074,7 @@ mod tests {
                 duration_ms: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "still in b".into(),
                 phase: None,
                 memory_citation: None,
@@ -5340,6 +5373,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                moderation: None,
                 message: "done".into(),
                 phase: None,
                 memory_citation: None,

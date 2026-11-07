@@ -327,6 +327,7 @@ impl NativeLogin {
             text: message,
             phase: None,
             memory_citation: None,
+            moderation: None,
             delivery: None,
             questions: None,
         };

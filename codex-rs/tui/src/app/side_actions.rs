@@ -114,6 +114,7 @@ impl App {
                         config,
                         state.parent_thread_id,
                         selected_profile.as_ref(),
+                        crate::app_server_session::SideChatStorage::Temporary,
                     )
                     .await
                 {
@@ -199,12 +200,14 @@ impl App {
                 config.ephemeral = false;
                 // Only remove the exact guardrail suffix installed by Side. The saved fork has
                 // normal capabilities; inherited tasks remain reference context, not active work.
+                let side_policy = codex_context_fragments::SideConversationPolicy::Temporary
+                    .instructions(/*existing*/ None);
                 let previous = config
                     .developer_instructions
                     .as_deref()
                     .map(|instructions| {
                         instructions
-                            .strip_suffix(super::side::SIDE_DEVELOPER_INSTRUCTIONS)
+                            .strip_suffix(&side_policy)
                             .unwrap_or(instructions)
                             .trim_end()
                     })

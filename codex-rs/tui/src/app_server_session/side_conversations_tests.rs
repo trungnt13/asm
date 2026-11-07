@@ -42,6 +42,7 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
             config.clone(),
             parent,
             /*selected_profile*/ None,
+            crate::app_server_session::SideChatStorage::Temporary,
         )
         .await?;
     let side = fork.session.thread_id;
@@ -63,6 +64,7 @@ async fn legacy_side_captures_its_boundary_without_requesting_paginated_turns() 
             temporary_config,
             parent,
             /*selected_profile*/ None,
+            crate::app_server_session::SideChatStorage::Temporary,
         )
         .await?;
     assert!(!temporary.session.daybreak_enabled);

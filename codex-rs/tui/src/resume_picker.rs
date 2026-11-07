@@ -7582,6 +7582,7 @@ session_picker_view = "dense"
                         }],
                     }),
                     ThreadItem::untimed(ThreadItemPayload::AgentMessage {
+                        moderation: None,
                         id: String::from("agent-1"),
                         text: String::from("hello from assistant"),
                         phase: None,

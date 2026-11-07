@@ -4,6 +4,8 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
 
@@ -31,7 +33,10 @@ impl<'a, Id: Copy + Eq> TabStrip<'a, Id> {
         self.ids.iter().position(|id| Some(*id) == self.selected)
     }
 
-    fn targets(self, area: Rect) -> (impl Iterator<Item = (usize, Id, Rect)> + 'a, Rect) {
+    pub(crate) fn strip_targets(
+        self,
+        area: Rect,
+    ) -> (impl Iterator<Item = (usize, Id, Rect)> + 'a, Rect) {
         let width = area.width.saturating_sub(1);
         let plus = width.min(3);
         let available = width - plus;
@@ -49,12 +54,14 @@ impl<'a, Id: Copy + Eq> TabStrip<'a, Id> {
         (targets, Rect::new(area.x + available, area.y, plus, height))
     }
 
-    pub(crate) fn hit(self, area: Rect, point: Position) -> Option<TabTarget<Id>> {
-        let (mut tabs, add) = self.targets(area);
+    pub(crate) fn hit(self, area: Rect, point: Position) -> Option<(TabTarget<Id>, Rect)> {
+        let (mut tabs, add) = self.strip_targets(area);
         if add.contains(point) {
-            Some(TabTarget::Add)
+            Some((TabTarget::Add, add))
         } else {
-            tabs.find_map(|(_, id, rect)| rect.contains(point).then_some(TabTarget::Tab(id)))
+            tabs.find_map(|(_, id, rect)| {
+                rect.contains(point).then_some((TabTarget::Tab(id), rect))
+            })
         }
     }
 
@@ -64,21 +71,34 @@ impl<'a, Id: Copy + Eq> TabStrip<'a, Id> {
         buf: &mut Buffer,
         add_state: TabState,
         selected_state: TabState,
-        label: impl Fn(usize, Id) -> Line<'a>,
+        hovered_tab: Option<Id>,
+        paint: impl Fn(Id, Rect, Style, &mut Buffer),
     ) {
-        let (tabs, add) = self.targets(area);
+        let (tabs, add) = self.strip_targets(area);
         let style = |state| match state {
             TabState::Active => crate::style::selection_style().not_underlined(),
             TabState::Inactive => crate::bottom_pane::active_tab_style(),
-            TabState::Absent => crate::style::secondary_text_style(),
+            TabState::Absent => crate::style::secondary_text_style()
+                .bg(Color::Reset)
+                .not_underlined()
+                .not_reversed(),
         };
-        for (index, id, rect) in tabs {
-            let state = if add_state == TabState::Absent && Some(id) == self.selected {
-                selected_state
+        for (_, id, rect) in tabs {
+            let tab_style = if selected_state != TabState::Absent && Some(id) == self.selected {
+                style(selected_state)
+            } else if hovered_tab == Some(id) {
+                let hover = crate::style::quiet_workspace_style()
+                    .fg(Color::Reset)
+                    .not_dim();
+                if hover.bg == Some(Color::Reset) {
+                    hover.underlined()
+                } else {
+                    hover
+                }
             } else {
-                TabState::Absent
+                style(TabState::Absent)
             };
-            label(index, id).style(style(state)).render(rect, buf);
+            paint(id, rect, tab_style, buf);
         }
         Line::from(" + ").style(style(add_state)).render(add, buf);
     }

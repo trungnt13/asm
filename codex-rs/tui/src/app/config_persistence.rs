@@ -99,21 +99,20 @@ impl App {
         self.rebuild_config_for_cwd_from(&self.config, cwd).await
     }
 
-    pub(super) async fn rebuild_config_for_cwd_from(
+    pub(super) fn rebuild_config_for_cwd_from(
         &self,
         base: &Config,
         cwd: PathBuf,
-    ) -> Result<Config> {
+    ) -> impl std::future::Future<Output = Result<Config>> + use<> {
         self.rebuild_config_for_cwd_with_overrides(base, cwd, self.harness_overrides.clone())
-            .await
     }
 
-    pub(super) async fn rebuild_config_for_cwd_with_overrides(
+    pub(super) fn rebuild_config_for_cwd_with_overrides(
         &self,
         base: &Config,
         cwd: PathBuf,
         mut overrides: ConfigOverrides,
-    ) -> Result<Config> {
+    ) -> impl std::future::Future<Output = Result<Config>> + use<> {
         overrides.cwd = Some(cwd.clone());
         let cwd_display = cwd.display().to_string();
         let builder = ConfigBuilder::default()
@@ -127,7 +126,6 @@ impl App {
             base.application_network_policy.clone(),
             format!("Failed to rebuild config for cwd {cwd_display}"),
         )
-        .await
     }
 
     #[cfg(test)]

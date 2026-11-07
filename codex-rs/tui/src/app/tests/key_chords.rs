@@ -19,6 +19,7 @@ use crate::keymap::KeymapContext;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::test_support::test_path_display;
 use crate::tui::Tui;
+use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ToolRequestUserInputOption;
 use codex_app_server_protocol::ToolRequestUserInputParams;
 use codex_app_server_protocol::ToolRequestUserInputQuestion;
@@ -1236,9 +1237,11 @@ async fn sidebar_chooser_preserves_the_parent_draft_and_starts_a_side_chat() -> 
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let mut server = start_config_write_test_app_server(&app).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.local_settings.tui.keymap = toml::from_str("[list]\naccept = ['f5 g']")?;
     super::enable_side_retention(&mut app)?;
     tui.set_owned_screen(/*owned*/ true)?;
     let parent = ThreadId::new();
+    server.remember_thread_history_mode(parent, ThreadHistoryMode::Legacy);
     app.chat_widget
         .handle_thread_session(test_thread_session(parent, app.config.cwd.to_path_buf()));
     app.chat_widget.local_settings.tui.status_line = Some(vec!["model-with-reasoning".into()]);
@@ -1345,7 +1348,14 @@ async fn sidebar_chooser_preserves_the_parent_draft_and_starts_a_side_chat() -> 
                 Box::pin(press(&mut app, &mut tui, &mut server, stroke)).await?;
             }
         }
-        Box::pin(press(&mut app, &mut tui, &mut server, key.into())).await?;
+        let strokes = if key == KeyCode::Esc {
+            &[KeyCode::Esc][..]
+        } else {
+            &[KeyCode::F(5), KeyCode::Char('g')]
+        };
+        for stroke in strokes {
+            Box::pin(press(&mut app, &mut tui, &mut server, (*stroke).into())).await?;
+        }
         assert_eq!(
             app.chat_widget.composer_text_with_pending(),
             "parent draft!"
@@ -1434,6 +1444,23 @@ prepared.
         draft.contains("first prompt") && draft.contains("second prompt"),
         "{draft}"
     );
+    // The pinned New action leaves room for two scrolling chats.
+    let pane = app.sidebar_mut();
+    for _ in 0..4 {
+        pane.chat_ready(ThreadId::new());
+    }
+    pane.show(
+        crate::app::sidebar::SidebarContent::Chooser,
+        crate::app::sidebar::PaneFocus::Sidebar,
+    );
+    pane.choice = 2;
+    let two_rows = ratatui::layout::Size::new(/*width*/ 120, /*height*/ 11);
+    tui.terminal = terminal_at(two_rows);
+    super::side_frame(&mut app, &mut tui, two_rows)?;
+    for (key, expected) in [(KeyCode::PageDown, 4), (KeyCode::PageUp, 2)] {
+        Box::pin(press(&mut app, &mut tui, &mut server, key.into())).await?;
+        assert_eq!(app.sidebar().unwrap().choice, expected);
+    }
     tokio::time::resume();
     server.shutdown().await?;
     Ok(())
