@@ -1255,6 +1255,7 @@ impl ThreadRequestProcessor {
     fn listener_task_context(&self) -> ListenerTaskContext {
         ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
+            thread_store: Arc::clone(&self.thread_store),
             thread_state_manager: self.thread_state_manager.clone(),
             outgoing: Arc::clone(&self.outgoing),
             pending_thread_unloads: Arc::clone(&self.pending_thread_unloads),
@@ -1385,6 +1386,7 @@ impl ThreadRequestProcessor {
         typesafe_overrides.ephemeral = ephemeral;
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
+            thread_store: Arc::clone(&self.thread_store),
             thread_state_manager: self.thread_state_manager.clone(),
             outgoing: Arc::clone(&self.outgoing),
             pending_thread_unloads: Arc::clone(&self.pending_thread_unloads),
@@ -1619,7 +1621,8 @@ impl ThreadRequestProcessor {
                 .thread_manager
                 .default_environment_requests(&config.cwd, &config.workspace_roots)
         });
-        let dynamic_tools = dynamic_tools.unwrap_or_default();
+        let mut dynamic_tools = dynamic_tools.unwrap_or_default();
+        crate::desktop_worktrees::amend_tools(&mut dynamic_tools);
         if !dynamic_tools.is_empty() {
             validate_dynamic_tools(&dynamic_tools).map_err(invalid_request)?;
         }
@@ -4469,11 +4472,14 @@ impl ThreadRequestProcessor {
         }
         super::app_context_filter::apply(&mut config);
         let response_history = thread_history.clone();
+        let mut dynamic_tools = thread_history.get_dynamic_tools().unwrap_or_default();
+        crate::desktop_worktrees::amend_tools(&mut dynamic_tools);
 
         match self
             .thread_manager
             .start_thread(StartThreadOptions {
                 initial_history: thread_history,
+                dynamic_tools,
                 parent_trace: match target {
                     ThreadResumeTarget::Client(request_id) => {
                         self.request_trace_context(request_id).await
