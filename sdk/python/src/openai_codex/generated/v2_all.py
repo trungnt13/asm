@@ -52,6 +52,25 @@ class AccountRoutingOverride(Enum):
     us_cr = "us_cr"
 
 
+class AccountSecuritySetupAction(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    label: str
+    url: str
+
+
+class AccountSecuritySetupNotice(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    action: AccountSecuritySetupAction
+    description: str
+    title: str
+    user_id: Annotated[str, Field(alias="userId")]
+
+
 class AccountSessionWorkspaceKind(Enum):
     personal = "personal"
     workspace = "workspace"
@@ -152,6 +171,13 @@ class AgentMessageInputContent(
     RootModel[InputTextAgentMessageInputContent | EncryptedContentAgentMessageInputContent]
 ):
     root: InputTextAgentMessageInputContent | EncryptedContentAgentMessageInputContent
+
+
+class AgentMessageModeration(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    moderated: bool
 
 
 class AgentPath(RootModel[str]):
@@ -1912,6 +1938,13 @@ class GetAccountRateLimitsParams(BaseModel):
     ] = None
 
 
+class GetAccountSecuritySetupResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    notice: AccountSecuritySetupNotice | None = None
+
+
 class GetAccountTokenUsageParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3369,7 +3402,7 @@ class PluginInterface(BaseModel):
         list[str] | None,
         Field(
             alias="defaultPrompt",
-            description="Starter prompts for the plugin. Capped at 3 entries with a maximum of 128 characters per entry.",
+            description="Starter prompts for the plugin. Capped at 3 entries with a maximum of 512 characters per entry.",
         ),
     ] = None
     developer_name: Annotated[str | None, Field(alias="developerName")] = None
@@ -8337,6 +8370,18 @@ class AccountLogoutRequest(BaseModel):
     params: Annotated[None, Field(None)] = None
 
 
+class AccountSecuritySetupReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/securitySetup/read"],
+        Field(title="Account/securitySetup/readRequestMethod"),
+    ]
+    params: Annotated[None, Field(None)] = None
+
+
 class AccountRateLimitsReadRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9112,6 +9157,13 @@ class GetAccountResponse(BaseModel):
     )
     account: Account | None = None
     requires_openai_auth: Annotated[bool, Field(alias="requiresOpenaiAuth")]
+    user_id: Annotated[
+        str | None,
+        Field(
+            alias="userId",
+            description="ChatGPT user ID belonging to this account response, when available.",
+        ),
+    ] = None
 
 
 class GuardianApprovalReview(BaseModel):
@@ -10960,6 +11012,7 @@ class AgentMessageThreadItem(BaseModel):
     delivery: AgentMessageDelivery | None = None
     id: str
     memory_citation: Annotated[MemoryCitation | None, Field(alias="memoryCitation")] = None
+    moderation: AgentMessageModeration | None = None
     phase: MessagePhase | None = None
     questions: list[AsyncUserInputQuestion] | None = None
     started_at_ms: Annotated[
@@ -14046,6 +14099,7 @@ class ClientRequest(
         | AccountLoginStartRequest
         | AccountLoginCancelRequest
         | AccountLogoutRequest
+        | AccountSecuritySetupReadRequest
         | AccountRateLimitsReadRequest
         | AccountRateLimitResetCreditConsumeRequest
         | AccountUsageReadRequest
@@ -14158,6 +14212,7 @@ class ClientRequest(
         | AccountLoginStartRequest
         | AccountLoginCancelRequest
         | AccountLogoutRequest
+        | AccountSecuritySetupReadRequest
         | AccountRateLimitsReadRequest
         | AccountRateLimitResetCreditConsumeRequest
         | AccountUsageReadRequest

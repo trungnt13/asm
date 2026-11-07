@@ -99,6 +99,7 @@ use codex_mcp::McpResourceClient;
 use codex_mcp::McpRuntime;
 use codex_mcp::McpRuntimeContext;
 use codex_mcp::McpRuntimeInput;
+use codex_models_manager::manager::ModelsManager;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_network_proxy::NetworkProxy;
@@ -142,6 +143,7 @@ use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::SandboxEnforcement;
+use codex_protocol::openai_models::CatalogModel;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
@@ -327,7 +329,6 @@ use crate::guardian::GuardianReviewSessionManager;
 use crate::mcp::McpEnvironmentScope;
 use crate::mcp::McpManager;
 use crate::mcp::McpThreadIdentity;
-use crate::network_policy_decision::execpolicy_network_rule_amendment;
 use crate::rollout::map_session_init_error;
 use crate::session::startup_prewarm::SessionStartupPrewarmHandle;
 use crate::shell;
@@ -619,6 +620,53 @@ pub(crate) fn assign_missing_item_id(
 }
 
 impl Session {
+    pub(crate) async fn resolve_startup_model(
+        models_manager: &dyn ModelsManager,
+        config: &Config,
+        session_source: &SessionSource,
+        allow_provider_model_fallback: bool,
+    ) -> CodexResult<(String, CatalogModel)> {
+        // Child catalogs are initialized by their selector. Reading only memory here
+        // preserves the loaded snapshot shared with the parent.
+        let uses_native_runtime = config
+            .model
+            .as_deref()
+            .is_some_and(crate::external_runtime::is_native_model);
+        let refresh_strategy = if uses_native_runtime || session_source.is_non_root_agent() {
+            RefreshStrategy::InMemory
+        } else {
+            RefreshStrategy::OnlineIfUncached
+        };
+        if !uses_native_runtime && !session_source.is_non_root_agent() {
+            let _ = models_manager
+                .list_models(refresh_strategy, config.http_client_factory())
+                .await;
+        }
+        let model = if uses_native_runtime {
+            config.model.clone().ok_or_else(|| {
+                CodexErr::InvalidRequest("Native runtimes require an explicit model".to_owned())
+            })?
+        } else {
+            models_manager
+                .get_default_model(
+                    &config.model,
+                    allow_provider_model_fallback,
+                    refresh_strategy,
+                    config.http_client_factory(),
+                )
+                .await
+        };
+        if model.trim().is_empty() {
+            return Err(CodexErr::InvalidRequest(
+                "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
+            ));
+        }
+        let model_info = models_manager
+            .get_model_info(model.as_str(), &config.to_models_manager_config())
+            .await;
+        Ok((model, model_info))
+    }
+
     /// Spawn and initialize a new session.
     /// Hide the concrete startup future from callers while keeping initialization lazy.
     #[inline(never)]
@@ -887,42 +935,13 @@ impl Session {
             Arc::clone(&auth_manager),
             &installation_id,
         );
-        let refresh_strategy = if uses_native_runtime || session_source.is_non_root_agent() {
-            codex_models_manager::manager::RefreshStrategy::Offline
-        } else {
-            codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
-        };
-        if !uses_native_runtime
-            && (configured_runtime.is_some()
-                || config.model.is_none()
-                || !matches!(
-                    refresh_strategy,
-                    codex_models_manager::manager::RefreshStrategy::Offline
-                ))
-        {
-            let _ = models_manager
-                .list_models(refresh_strategy, config.http_client_factory())
-                .await;
-        }
-        let model = if uses_native_runtime {
-            config.model.clone().ok_or_else(|| {
-                CodexErr::InvalidRequest("Native runtimes require an explicit model".to_owned())
-            })?
-        } else {
-            models_manager
-                .get_default_model(
-                    &config.model,
-                    allow_provider_model_fallback,
-                    refresh_strategy,
-                    config.http_client_factory(),
-                )
-                .await
-        };
-        if model.trim().is_empty() {
-            return Err(CodexErr::InvalidRequest(
-                "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
-            ));
-        }
+        let (model, _) = Self::resolve_startup_model(
+            models_manager.as_ref(),
+            &config,
+            &session_source,
+            allow_provider_model_fallback,
+        )
+        .await?;
         let mut requested_approvals_reviewer = config
             .requested_approvals_reviewer
             .unwrap_or(config.approvals_reviewer);
@@ -966,11 +985,17 @@ impl Session {
             .auto_review_required_for_model(&model)
             && !trusted_guardian_reviewer
         {
-            let config = Arc::make_mut(&mut config);
-            if matches!(
-                config.legacy_sandbox_policy(),
-                SandboxPolicy::DangerFullAccess
-            ) {
+            let permission_profile = config.permissions.effective_permission_profile();
+            if permission_profile.enforcement() != SandboxEnforcement::External
+                && permission_profile.network_sandbox_policy().is_enabled()
+                && {
+                    let file_system = permission_profile.file_system_sandbox_policy();
+                    file_system.has_full_disk_write_access()
+                        // Preserve the legacy fallback for writable URIs that cannot be projected locally.
+                        && file_system.entries.iter().all(|entry| entry.legacy_writable_path().is_ok())
+                }
+            {
+                let config = Arc::make_mut(&mut config);
                 let permission_profile = PermissionProfile::workspace_write();
                 config
                     .permissions
@@ -2322,6 +2347,7 @@ impl Session {
     ) -> ConstraintResult<Option<SessionSettingsCommit>> {
         let notify_config_contributors = !self.services.extensions.config_contributors().is_empty();
         let windows_sandbox_changed;
+        let mut tier_acceptance = None;
         let (
             commit,
             previous_config,
@@ -2386,7 +2412,7 @@ impl Session {
             }
             state.session_configuration = updated;
             if root_service_tier_changed && !state.shared_service_tier_pending {
-                crate::agent::host::propagate_config_update(
+                state.service_tier_acceptance = crate::agent::host::propagate_config_update(
                     self,
                     AgentConfigUpdate::ServiceTier(
                         state
@@ -2396,6 +2422,9 @@ impl Session {
                             .clone(),
                     ),
                 );
+            }
+            if root_service_tier_changed || updates.step_settings.service_tier.is_some() {
+                tier_acceptance = state.service_tier_acceptance.clone();
             }
             let new_config = notify_config_contributors
                 .then(|| self.build_effective_session_config(&state.session_configuration));
@@ -2439,6 +2468,9 @@ impl Session {
         if mcp_inputs_changed {
             self.schedule_mcp_prewarm();
         }
+        if let Some(accepted) = tier_acceptance {
+            accepted.await;
+        }
         Ok(Some(commit))
     }
 
@@ -2453,6 +2485,21 @@ impl Session {
         Ok(self
             .effective_thread_config_snapshot(&configuration, configuration.environments.clone())
             .await)
+    }
+
+    pub(crate) async fn selected_model_info(&self) -> Arc<ModelInfo> {
+        let (settings, overrides) = {
+            let state = self.state.lock().await;
+            let config = &state.session_configuration;
+            (
+                Arc::clone(&config.step_settings),
+                config.model_info_overrides.clone(),
+            )
+        };
+        settings
+            .resolve_model_info(self.services.models_manager.as_ref(), &overrides)
+            .await
+            .model
     }
 
     pub(crate) async fn thread_config_snapshot(&self) -> ThreadConfigSnapshot {
@@ -3342,49 +3389,19 @@ impl Session {
             .session_configuration
             .codex_home()
             .clone();
-        let execpolicy_amendment =
-            execpolicy_network_rule_amendment(amendment, network_approval_context, &host);
-        let mut on_policy_applied = Some(on_policy_applied);
-
-        if let Some(started_network_proxy) = self.services.network_proxy.load_full() {
-            let proxy = started_network_proxy.proxy();
-            match amendment.action {
-                NetworkPolicyRuleAction::Allow => proxy
-                    .add_allowed_domain(&host)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("failed to update runtime allowlist: {err}"))?,
-                NetworkPolicyRuleAction::Deny => proxy
-                    .add_denied_domain(&host)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("failed to update runtime denylist: {err}"))?,
-            }
-            // Active enforcement changed successfully. Notify the owner before
-            // the next fallible await so cancellation cannot contradict it.
-            if let Some(on_policy_applied) = on_policy_applied.take() {
-                on_policy_applied();
-            }
-        }
-
+        let started_proxy = self.services.network_proxy.load_full();
+        let proxy = started_proxy.as_deref().map(StartedNetworkProxy::proxy);
         self.services
             .exec_policy
-            .append_network_rule_and_update(
+            .apply_network_rule_and_persist(
                 &codex_home,
                 &host,
-                execpolicy_amendment.protocol,
-                execpolicy_amendment.decision,
-                Some(execpolicy_amendment.justification),
+                amendment,
+                network_approval_context,
+                proxy.as_ref(),
+                on_policy_applied,
             )
             .await
-            .map_err(|err| {
-                anyhow::anyhow!("failed to persist network policy amendment to execpolicy: {err}")
-            })?;
-
-        // Without a running proxy, persistence is the first effective policy change.
-        if let Some(on_policy_applied) = on_policy_applied {
-            on_policy_applied();
-        }
-
-        Ok(())
     }
 
     fn validated_network_policy_amendment_host(
@@ -4539,11 +4556,16 @@ impl Session {
                 SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
             )
         {
+            let root_service_tier = tokio::select! {
+                biased;
+                tier = crate::agent::host::service_tier(self, settings.selected().service_tier.clone()) => tier,
+                _ = cancellation_token.cancelled() => return Err(CodexErr::TurnAborted),
+            };
             let child_service_tier = crate::agent::child_config::select_subagent_service_tier(
                 &turn_context.config,
                 &settings.model_info,
                 settings.effective_reasoning_effort().as_ref(),
-                crate::agent::host::service_tier(self, settings.selected().service_tier.clone()),
+                root_service_tier,
             )
             .map_err(CodexErr::InvalidRequest)?;
             if settings.selected().service_tier != child_service_tier {

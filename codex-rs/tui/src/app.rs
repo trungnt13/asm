@@ -38,6 +38,7 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::chatwidget::ChatWidget;
+use crate::chatwidget::ClipboardPasteContext;
 use crate::chatwidget::ExternalEditorState;
 use crate::chatwidget::ReplayKind;
 use crate::chatwidget::ThreadInputState;
@@ -221,6 +222,9 @@ mod backend_events;
 pub(crate) mod backend_selection;
 pub(crate) mod backend_sessions;
 mod background_requests;
+mod cloud_switch_wait;
+#[cfg(test)]
+pub(crate) use cloud_switch_wait::wait_for_cloud_switch;
 mod composer_hints;
 mod config_panel;
 mod config_persistence;
@@ -870,7 +874,14 @@ impl App {
             tui.frame_requester().schedule_frame();
             return Ok(AppRunControl::Continue);
         }
+        let previous = tui.link_hover.position();
         tui.link_hover.observe(&event);
+        let current = tui.link_hover.position();
+        if previous != current
+            && self.hovered_sidebar_tab(previous) != self.hovered_sidebar_tab(current)
+        {
+            tui.frame_requester().schedule_frame();
+        }
         if self.handle_pane_resize(tui, &event).await {
             return Ok(AppRunControl::Continue);
         }
@@ -1317,7 +1328,9 @@ impl App {
                         self.app_event_tx.send(AppEvent::LaunchExternalEditor);
                     }
                 }
-                TuiEvent::Mouse(mouse) => self.start_right_click_paste(tui, mouse),
+                TuiEvent::Mouse(mouse) => {
+                    self.start_right_click_paste(tui, mouse, ClipboardPasteContext::Composer);
+                }
                 TuiEvent::FocusLost => {}
             }
         }

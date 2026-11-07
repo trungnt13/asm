@@ -586,6 +586,9 @@ pub struct GetAccountParams {
 #[ts(export_to = "v2/")]
 pub struct GetAccountResponse {
     pub account: Option<Account>,
+    /// ChatGPT user ID belonging to this account response, when available.
+    #[serde(default)]
+    pub user_id: Option<String>,
     pub requires_openai_auth: bool,
     #[experimental("account/read.workspaceRouting")]
     pub workspace_routing: Option<WorkspaceRouting>,
@@ -880,4 +883,32 @@ pub struct AccountLoginCompletedNotification {
 #[ts(export_to = "v2/")]
 pub enum DesktopOnboardingEntrypoint {
     LifeSciences,
+}
+
+/// Optional security reminder bound to the account that fetched it. Unavailable or
+/// ineligible accounts return no notice; this read never changes account security.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct GetAccountSecuritySetupResponse {
+    pub notice: Option<AccountSecuritySetupNotice>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountSecuritySetupNotice {
+    pub account_id: String,
+    pub user_id: String,
+    pub title: String,
+    pub description: String,
+    pub action: AccountSecuritySetupAction,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct AccountSecuritySetupAction {
+    pub label: String,
+    pub url: String,
 }

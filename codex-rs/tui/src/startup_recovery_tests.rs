@@ -11,6 +11,7 @@ fn snapshot(text: &str) -> ComposerDraftSnapshot {
     ComposerDraftSnapshot {
         quote_comments: Vec::new(),
         quotes: Vec::new(),
+        vim_normal_mode: false,
         text: text.to_string(),
         shell_mode: None,
         cursor: text.len(),
