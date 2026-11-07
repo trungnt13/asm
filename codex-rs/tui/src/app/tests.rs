@@ -1,13 +1,13 @@
 //! App-level orchestration tests for the TUI.
 
+#[path = "side_persistence_tests.rs"]
+mod side_persistence_tests;
+
 #[path = "tests/terminal_size_telemetry_tests.rs"]
 mod terminal_size_telemetry_tests;
 
 #[path = "tests/copy_mode_tests.rs"]
 mod copy_mode_tests;
-
-#[path = "tests/durable_side_lifecycle_tests.rs"]
-mod durable_side_lifecycle_tests;
 
 #[path = "tests/mcp_login_tests.rs"]
 mod mcp_login_tests;
@@ -3783,7 +3783,6 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         &mut tui,
         &mut app_server,
         parent_thread_id,
-        CompanionKind::Side,
         Some("Side question".into()),
     ))
     .await?;
@@ -7142,7 +7141,7 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
     let original_approval_policy = app.config.permissions.approval_policy.value();
     let original_sandbox_policy = app.config.legacy_sandbox_policy();
 
-    let fork_config = app.side_fork_config(CompanionKind::Side);
+    let fork_config = app.side_fork_config();
 
     assert!(fork_config.ephemeral);
     assert_eq!(
@@ -7201,7 +7200,7 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
     app.chat_widget
         .set_approvals_reviewer(ApprovalsReviewer::AutoReview);
 
-    let fork_config = app.side_fork_config(CompanionKind::Side);
+    let fork_config = app.side_fork_config();
 
     assert_eq!(
         (
@@ -7228,7 +7227,7 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
     ] {
         app.config.side_model = model.map(str::to_owned);
         app.config.side_reasoning_effort = effort.clone();
-        let side = app.side_fork_config(CompanionKind::Side);
+        let side = app.side_fork_config();
         assert_eq!(
             (side.model.as_deref(), side.model_reasoning_effort),
             (
@@ -7236,27 +7235,19 @@ async fn side_fork_config_inherits_parent_thread_runtime_settings() {
                 effort.or(Some(ReasoningEffortConfig::High))
             )
         );
-        let parallel = app.side_fork_config(CompanionKind::Parallel);
-        assert_eq!(
-            (parallel.model.as_deref(), parallel.model_reasoning_effort),
-            (
-                Some("parent-thread-model"),
-                Some(ReasoningEffortConfig::High)
-            )
-        );
     }
 }
 
 #[tokio::test]
-async fn side_start_block_message_rejects_temporary_but_allows_parallel_replacement() {
+async fn side_start_block_message_rejects_nested_side() {
     let mut app = make_test_app().await;
     assert_eq!(
-        app.side_start_block_message(CompanionKind::Side),
+        app.side_start_block_message(),
         Some("'/side' is unavailable until the main thread is ready.")
     );
 
     app.primary_thread_id = Some(ThreadId::new());
-    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
+    assert_eq!(app.side_start_block_message(), None);
 
     let parent_thread_id = ThreadId::new();
     let side_thread_id = ThreadId::new();
@@ -7264,32 +7255,18 @@ async fn side_start_block_message_rejects_temporary_but_allows_parallel_replacem
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
 
     app.active_thread_id = Some(parent_thread_id);
-    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
+    assert_eq!(app.side_start_block_message(), None);
 
     app.active_thread_id = Some(side_thread_id);
-    for kind in [CompanionKind::Side, CompanionKind::Parallel] {
-        assert_eq!(
-            app.side_start_block_message(kind),
-            Some(
-                "A side conversation is already open. Press ctrl + c to return before starting another."
-            )
-        );
-    }
-    app.side_threads
-        .insert(side_thread_id, SideThreadState::parallel(parent_thread_id));
-    for thread_id in [parent_thread_id, side_thread_id] {
-        app.active_thread_id = Some(thread_id);
-        assert_eq!(
-            app.side_start_block_message(CompanionKind::Side),
-            Some(
-                "'/side' and '/btw' are unavailable while a parallel conversation is open. Switch to the parallel chat and press Ctrl+C to close it first."
-            )
-        );
-        assert_eq!(app.side_start_block_message(CompanionKind::Parallel), None);
-    }
+    assert_eq!(
+        app.side_start_block_message(),
+        Some(
+            "A side conversation is already open. Press ctrl + c to return before starting another."
+        )
+    );
 
     app.side_threads.remove(&side_thread_id);
-    assert_eq!(app.side_start_block_message(CompanionKind::Side), None);
+    assert_eq!(app.side_start_block_message(), None);
 }
 
 #[tokio::test]

@@ -53,7 +53,6 @@ pub enum SlashCommand {
     #[strum(serialize = "sendlast")]
     SendLast,
     Sync,
-    Parallel,
     Copy,
     #[strum(serialize = "copyid")]
     CopyId,
@@ -160,7 +159,6 @@ impl SlashCommand {
             }
             SlashCommand::SendLast => "send the last side reply to main with optional instructions",
             SlashCommand::Sync => "replace side history with the latest main context",
-            SlashCommand::Parallel => "start a saved parallel conversation",
             SlashCommand::Permissions => "choose what ASM is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",
@@ -213,7 +211,6 @@ impl SlashCommand {
                 | SlashCommand::Btw
                 | SlashCommand::SendLast
                 | SlashCommand::Sync
-                | SlashCommand::Parallel
                 | SlashCommand::Resume
         )
     }
@@ -334,8 +331,7 @@ impl SlashCommand {
             | SlashCommand::Exit
             | SlashCommand::Side
             | SlashCommand::Btw
-            | SlashCommand::SendLast
-            | SlashCommand::Parallel => true,
+            | SlashCommand::SendLast => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,

@@ -21,12 +21,7 @@ impl App {
         let Some(thread_id) = self.current_displayed_thread_id() else {
             return Ok(());
         };
-        let Some(state) = self
-            .side_threads
-            .get(&thread_id)
-            .cloned()
-            .filter(|state| state.kind == CompanionKind::Side)
-        else {
+        let Some(state) = self.side_threads.get(&thread_id).cloned() else {
             self.chat_widget
                 .add_error_message("This command requires an active Side conversation.".into());
             return Ok(());
@@ -106,7 +101,7 @@ impl App {
                 }
             }
             SideConversationAction::Sync => {
-                let config = self.side_fork_config(CompanionKind::Side);
+                let config = self.side_fork_config();
                 let selected_profile = self.selected_server_profile(thread_id);
                 let forked = match app_server
                     .fork_side_thread(
@@ -128,10 +123,7 @@ impl App {
                 };
                 let replacement_id = forked.session.thread_id;
                 if let Err(error) = app_server
-                    .thread_inject_items(
-                        replacement_id,
-                        self.side_boundary_items(CompanionKind::Side),
-                    )
+                    .thread_inject_items(replacement_id, self.side_boundary_items())
                     .await
                 {
                     self.discard_side_thread(app_server, replacement_id).await;

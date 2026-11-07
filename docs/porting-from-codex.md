@@ -613,7 +613,7 @@ descriptions or hidden catalogs. Do not rely on a failed spawn to teach this con
   context; it keeps Side's reference-only, no-agent and no-worktree rules. Never replay
   history or copy session files. The side checkpoint stays in memory and the side thread
   unloads as soon as it is closed, ending its process; a lost process or closed side
-  cannot cold-resume. Cursor sides, `/parallel`, saved `/fork` and historical cuts of
+  cannot cold-resume. Cursor sides, saved `/fork` and historical cuts of
   native history stay rejected.
 - External threads use Default collaboration mode only and never use guardian
   approval review. Mandatory managed-execution restrictions still apply.
@@ -1048,7 +1048,7 @@ allowed_agent_roles = ["reviewer"]
 ```
 
 - Match the current child's explicit role, never an ancestor's role or the displayed TUI view. Omission keeps existing visibility; an empty list hides the matching skills from every role.
-- Root, ordinary Side/Parallel, saved user forks, and unnamed/nonmatching children do not match. Explicit reviewer children match with fresh or V2 full-history context; resume restores their own role. Preserve V1 full-history role restrictions.
+- Root, ordinary Side, saved user forks, and unnamed/nonmatching children do not match. Explicit reviewer children match with fresh or V2 full-history context; resume restores their own role. Preserve V1 full-history role restrictions.
 - Keep parent enablement and permission boundaries. Roles remain deny-only for skill overrides; a matching role cannot re-enable an otherwise disabled skill. Scope restrictions also survive enables using another matching selector.
 - Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Respect scope in both config-aware and cwd cache paths. Keep prompt lists stable and use existing append-only availability updates and context budgets.
 - This is visibility, not access isolation. Do not change filesystem, script execution, sandbox, network, or approval permissions. Inherited history can retain old lists or previously read skill content; never scrub history to conceal it.
@@ -1106,13 +1106,13 @@ Top-level `include_web_search_copyright_compliance`, default `true`:
 
 For all three visibility/tool settings above, do not update setup-managed profiles before a supporting CLI release.
 
-### Saved forks, upstream sides, and parallel conversations
+### Saved forks and upstream sides
 
 - Stack-budget exception to async instrumentation: leave `start_companion_conversation` and `select_agent_thread_and_discard_side` uninstrumented. Their tracing wrappers duplicate large futures in unoptimized poll frames and exhaust the unchanged 16 MiB UI stack. Keep companion event-dispatch futures boxed; do not increase stack limits. Construct startup and run-loop event futures through a separate non-inlined closure boundary at the existing allocation sites, so their construction temporaries do not remain in the run-loop poll frame. Do not add a nested selection allocation as a substitute.
 
 - Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
-- Optional top-level `side_model`, `side_reasoning_effort`, and `side_service_tier` (for example, `"fast"` or `"default"`) independently override parent settings for temporary `/side` and `/btw` forks, including `/sync`. Unset values inherit current parent settings. Do not apply them to `/parallel` or saved forks. Preserve native-runtime fork admission restrictions, including Claude’s same-model requirement.
-- Optional top-level `side_prompt` adds default developer instructions to temporary `/side` and `/btw` conversations, including `/sync`, and recognized Desktop side chats. For example: `side_prompt = "Act as a critical reviewer. Keep answers concise."` Unset or whitespace-only values preserve existing behavior. Preserve nonblank text and append it before the built-in side policy, without duplicating it on `/sync`. Forks also append the custom developer message once after their reference-only boundary because inherited context skips initial developer instructions; keep the configured prompt for compaction. Do not apply it to main, `/parallel`, or ordinary saved forks. It does not replace side boundaries, permissions, or capability restrictions.
+- Optional top-level `side_model`, `side_reasoning_effort`, and `side_service_tier` (for example, `"fast"` or `"default"`) independently override parent settings for temporary `/side` and `/btw` forks, including `/sync`. Unset values inherit current parent settings. Do not apply them to saved forks. Preserve native-runtime fork admission restrictions, including Claude’s same-model requirement.
+- Optional top-level `side_prompt` adds default developer instructions to temporary `/side` and `/btw` conversations, including `/sync`, and recognized Desktop side chats. For example: `side_prompt = "Act as a critical reviewer. Keep answers concise."` Unset or whitespace-only values preserve existing behavior. Preserve nonblank text and append it before the built-in side policy, without duplicating it on `/sync`. Forks also append the custom developer message once after their reference-only boundary because inherited context skips initial developer instructions; keep the configured prompt for compaction. Do not apply it to main or ordinary saved forks. It does not replace side boundaries, permissions, or capability restrictions.
 - Remote Desktop side chats also use these settings as initial defaults, including attached forks and new side threads. Recognize only the complete shipped Desktop 26.1027.51404 developer block; unknown wording leaves ordinary behavior unchanged. Recognize the complete shipped side boundary at the start of its user message, either alone or followed by a paragraph separator. Treat appended reference paragraphs as opaque context, not a protocol to parse; changed boundary wording remains unrecognized. Do not change the signed Desktop bundle or API shapes. Synchronize effective settings after client context injection; correct only the first new side thread turn's known inherited settings, including its inherited null effort/tier. Explicit picker settings win per field, persist normally, and are never replaced on later turns or resume. Keep ordinary saved forks and prediction forks unchanged.
 - `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only instructions, no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
 - Side has no extra question-only, non-mutating inspection, or explicit-mutation/escalation instruction gate; normal permissions and approvals still apply. Preserve reference-only inherited history, waiting for a new request, the subagent prohibition, and the ephemeral/worktree attachment restrictions in both boundary and developer instructions.
@@ -1123,18 +1123,9 @@ For all three visibility/tool settings above, do not update setup-managed profil
   - Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history.
   - Default `<main title> (fork)` or `Untitled (fork)`; keep explicit names.
   - Keep raw replay in memory only for temporary root forks. Normally append only new items; copy retained history only on explicit save. Temporary chats stay pathless/unlisted until saved.
-- `/parallel` creates a saved ordinary user fork. Normal permissions/flags/platform/busy checks control commands. Inherited history is reference, not instructions to continue parent work/control its agents. Parallel may own goals/subagents. Do not add a separate explicit-mutation/escalation instruction gate in its boundary or developer policy; normal permissions and approvals apply. Keep initial transcript clean without stored/model-history rewrites.
-- Keep one non-nested main/companion pair:
-  - `/parallel` from parallel returns to parent/replaces selected companion; older chats stay saved.
-  - Block `/side`/`/btw` while viewing either open-pair member. Restore after closure; saved closed chats do not block.
-  - Temporary sides retain upstream restrictions, including rejection of another companion. Only added exceptions: `/sendlast`, `/sync`, non-navigating `/fork`.
-- Ctrl+/ switches without stopping. Empty-composer/no-modal Ctrl+C stops parallel, pauses active goal, returns to parent, and preserves history. Selecting subagents must not stop it.
-- Ordinary `/new`, `/clear`, `/resume`, `/fork`, `/cd`, `/worktree` navigation exits parallel. Archive/delete affects displayed parallel and returns to parent.
-- Persist pairing/transcript-display boundaries in client-local ASM state per app-server target:
-  - Resume only selected session as ordinary chat, parent or parallel. Never restore pair/attach counterpart. Keep saved boundaries without file migration/history rewrites. Pair navigation exists only during active `/parallel`.
-  - Closing selections must not delete conversations. Do not encode UI relationships with analytics source classification or false ancestry.
-  - Pair metadata cannot block history. Log unreadable transcript-display metadata. Confirmed paired-thread deletion clears stale selection, not saved history/child record. Temporary connection/permission failures retain pairing. Missing parents cannot trap Ctrl+C.
-- Stock clients see ordinary threads through unchanged APIs; companion switching is unnecessary there. Files/explicit global config remain shared.
+- `/parallel` is removed. Existing saved parallel conversations remain ordinary threads with unchanged IDs, history, permissions, and reference-only boundaries. Do not rewrite history, restore pairs, attach counterpart threads, or delete saved conversations.
+- Read legacy child transcript-display boundaries from client-local `asm-side-conversations` metadata per app-server target. Keep the existing namespace and display trimming across legacy reads, rollout reads, and paginated history. Unreadable metadata logs a warning and never blocks history. Do not write new pairing records or clean up personal metadata.
+- Preserve upstream Side lifecycle, including attached workspace sides and tab controls. Keep temporary Side restrictions and the `/sendlast`, `/sync`, and non-navigating `/fork` exceptions above. Stock clients continue to see ordinary threads through unchanged APIs; files and explicit global config remain shared.
 
 ### Recap session ID
 
@@ -1333,7 +1324,7 @@ Vim Insert/Replace use the editor newline binding; Vim Normal retains its editin
 
 ### Composer destination
 
-Keep the active prompt destination visible in the composer’s top-right padding: Main, Side, or Parallel. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
+Keep the active prompt destination visible in the composer’s top-right padding: Main or Side. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
 
 ### Built-in agent role descriptions
 

@@ -143,7 +143,6 @@ impl App {
                     | AppEvent::SelectAgentThread(_)
                     | AppEvent::StartSide { .. }
                     | AppEvent::SideConversationAction { .. }
-                    | AppEvent::StartParallel { .. }
                     | AppEvent::ForkCurrentSession { .. }
                     | AppEvent::StartManagedWorktree {
                         mode: crate::app_event::ManagedWorktreeMode::Fork,
@@ -1253,14 +1252,6 @@ impl App {
                         && self.chat_widget.submit_op(AppCommand::interrupt())
                     {
                         self.chat_widget.pause_active_goal_for_interrupt();
-                    } else if self
-                        .side_threads
-                        .get(&thread_id)
-                        .is_some_and(|state| state.kind == CompanionKind::Parallel)
-                    {
-                        if let Err(error) = self.interrupt_side_thread(app_server, thread_id).await {
-                            self.chat_widget.add_error_message(error);
-                        }
                     } else if self.side_threads.contains_key(&thread_id)
                         && let Err(error) = self
                             .try_submit_active_thread_op_via_app_server(
@@ -3449,7 +3440,7 @@ impl App {
                 user_message,
                 mode: _,
             } => {
-                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Side, user_message)).await;
+                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, user_message)).await;
             }
             AppEvent::SideCreated {
                 backend_id: _,
@@ -3461,9 +3452,6 @@ impl App {
             }
             AppEvent::SideConversationAction { action } => {
                 Box::pin(self.apply_side_conversation_action(tui, app_server, action)).await?;
-            }
-            AppEvent::StartParallel { parent_thread_id, user_message } => {
-                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, CompanionKind::Parallel, user_message)).await;
             }
             AppEvent::SideChatRemovalFinished { backend_id, target, request, action, result } => {
                 if backend_id == app_server.backend_id()
@@ -4290,15 +4278,10 @@ impl App {
                 .add_error_message("A thread must start before it can be archived.".to_string());
             return Ok(AppRunControl::Continue);
         };
-        if self
-            .side_threads
-            .get(&thread_id)
-            .is_some_and(|state| state.kind == CompanionKind::Side)
-        {
+        if self.side_threads.contains_key(&thread_id) {
             self.chat_widget.add_error_message("'/archive' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.".to_string());
             return Ok(AppRunControl::Continue);
         }
-        let side_parent_thread_id = self.active_side_parent_thread_id();
 
         if !self
             .shutdown_side_threads(app_server, Some(thread_id))
@@ -4313,26 +4296,6 @@ impl App {
             app_server.thread_archive(thread_id).await
         }
         .await;
-        if result.is_ok()
-            && let Some(parent_thread_id) = side_parent_thread_id
-        {
-            self.track_agents_overview_notification(&ServerNotification::ThreadArchived(
-                codex_app_server_protocol::ThreadArchivedNotification {
-                    thread_id: thread_id.to_string(),
-                },
-            ));
-            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
-                self.chat_widget.add_error_message(format!(
-                    "Failed to save the closed side selection: {error}"
-                ));
-            }
-            self.discard_thread_local_state(thread_id).await;
-            self.agents_overview.input_states.remove(&thread_id);
-            self.agents_overview.dispatched_requests.remove(&thread_id);
-            self.select_agent_thread(tui, app_server, parent_thread_id)
-                .await?;
-            return Ok(AppRunControl::Continue);
-        }
         Ok(match result {
             Ok(()) => {
                 self.track_agents_overview_notification(&ServerNotification::ThreadArchived(
@@ -4362,15 +4325,10 @@ impl App {
                 .add_error_message("A thread must start before it can be deleted.".to_string());
             return Ok(AppRunControl::Continue);
         };
-        if self
-            .side_threads
-            .get(&thread_id)
-            .is_some_and(|state| state.kind == CompanionKind::Side)
-        {
+        if self.side_threads.contains_key(&thread_id) {
             self.chat_widget.add_error_message("'/delete' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.".to_string());
             return Ok(AppRunControl::Continue);
         }
-        let side_parent_thread_id = self.active_side_parent_thread_id();
 
         if !self
             .shutdown_side_threads(app_server, Some(thread_id))
@@ -4387,26 +4345,6 @@ impl App {
                 .await
         }
         .await;
-        if result.is_ok()
-            && let Some(parent_thread_id) = side_parent_thread_id
-        {
-            self.track_agents_overview_notification(&ServerNotification::ThreadDeleted(
-                codex_app_server_protocol::ThreadDeletedNotification {
-                    thread_id: thread_id.to_string(),
-                },
-            ));
-            if let Err(error) = self.close_side_selection(parent_thread_id, thread_id) {
-                self.chat_widget.add_error_message(format!(
-                    "Failed to save the closed side selection: {error}"
-                ));
-            }
-            self.discard_thread_local_state(thread_id).await;
-            self.agents_overview.input_states.remove(&thread_id);
-            self.agents_overview.dispatched_requests.remove(&thread_id);
-            self.select_agent_thread(tui, app_server, parent_thread_id)
-                .await?;
-            return Ok(AppRunControl::Continue);
-        }
         Ok(match result {
             Ok(()) => {
                 self.track_agents_overview_notification(&ServerNotification::ThreadDeleted(

@@ -36,7 +36,6 @@ struct PreparedSlashCommandArgs {
 }
 
 const SIDE_STARTING_CONTEXT_LABEL: &str = "Side starting...";
-const PARALLEL_STARTING_CONTEXT_LABEL: &str = "Parallel starting...";
 const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
     "Press Ctrl+C to return to the main thread first.";
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
@@ -151,19 +150,6 @@ impl ChatWidget {
         };
 
         self.request_side_conversation(parent_thread_id, /*user_message*/ None);
-    }
-
-    fn request_parallel_conversation(
-        &mut self,
-        parent_thread_id: ThreadId,
-        user_message: Option<UserMessage>,
-    ) {
-        self.set_side_conversation_context_label(Some(PARALLEL_STARTING_CONTEXT_LABEL.to_string()));
-        self.request_redraw();
-        self.app_event_tx.send(AppEvent::StartParallel {
-            parent_thread_id,
-            user_message,
-        });
     }
 
     fn emit_raw_output_mode_changed(&self, enabled: bool) {
@@ -331,12 +317,7 @@ impl ChatWidget {
                             ..Default::default()
                         },
                         SelectionItem {
-                            name: if self.parallel_conversation_active() {
-                                "Yes, delete and return to main"
-                            } else {
-                                "Yes, delete and return to command center"
-                            }
-                            .to_string(),
+                            name: "Yes, delete and return to command center".to_string(),
                             description: Some("Permanently delete this session now".to_string()),
                             actions: vec![Box::new(|tx| {
                                 tx.send(AppEvent::DeleteCurrentThread);
@@ -482,15 +463,6 @@ impl ChatWidget {
             }
             SlashCommand::Side | SlashCommand::Btw => {
                 self.request_empty_side_conversation(cmd);
-            }
-            SlashCommand::Parallel => {
-                let Some(parent_thread_id) = self.thread_id else {
-                    self.add_error_message(
-                        "'/parallel' is unavailable before the session starts.".to_string(),
-                    );
-                    return;
-                };
-                self.request_parallel_conversation(parent_thread_id, /*user_message*/ None);
             }
             SlashCommand::Agents => {
                 self.app_event_tx.send(AppEvent::OpenAgentsOverview);
@@ -1224,9 +1196,7 @@ impl ChatWidget {
                     self.clear_live_goal_submission();
                 }
             }
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
-                if !trimmed.is_empty() =>
-            {
+            SlashCommand::Side | SlashCommand::Btw if !trimmed.is_empty() => {
                 let Some(parent_thread_id) = self.thread_id else {
                     let command = cmd.command();
                     self.add_error_message(format!(
@@ -1242,11 +1212,7 @@ impl ChatWidget {
                     mention_bindings,
                     source,
                 );
-                if cmd == SlashCommand::Parallel {
-                    self.request_parallel_conversation(parent_thread_id, Some(user_message));
-                } else {
-                    self.request_side_conversation(parent_thread_id, Some(user_message));
-                }
+                self.request_side_conversation(parent_thread_id, Some(user_message));
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 self.submit_op(AppCommand::review(ReviewTarget::Custom {
@@ -1483,7 +1449,6 @@ impl ChatWidget {
             | SlashCommand::Btw
             | SlashCommand::SendLast
             | SlashCommand::Sync
-            | SlashCommand::Parallel
             | SlashCommand::Keymap
             | SlashCommand::Agents
             | SlashCommand::MultiAgents
@@ -1555,11 +1520,7 @@ impl ChatWidget {
     }
 
     fn ensure_side_command_allowed_outside_review(&mut self, cmd: SlashCommand) -> bool {
-        if !matches!(
-            cmd,
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
-        ) || !self.review.is_review_mode
-        {
+        if !matches!(cmd, SlashCommand::Side | SlashCommand::Btw) || !self.review.is_review_mode {
             return true;
         }
 

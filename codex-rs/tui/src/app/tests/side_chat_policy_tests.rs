@@ -75,10 +75,10 @@ async fn temporary_side_chat_sends_policy_on_its_first_request() -> Result<()> {
     let fork = server
         .sidebar_fork(
             app.local_settings.clone(),
-            app.side_fork_config(CompanionKind::Side),
+            app.side_fork_config(),
             parent,
             /*profile*/ None,
-            app.side_boundary_items(CompanionKind::Side),
+            app.side_boundary_items(),
             crate::app_server_session::SideChatStorage::Temporary,
         )
         .await?;

@@ -695,7 +695,6 @@ pub(crate) struct ChatWidget {
     thread_name: Option<String>,
     thread_rename_block_message: Option<String>,
     active_side_conversation: bool,
-    active_parallel_conversation: bool,
     blocks_direct_input: bool,
     show_interagent_communication: bool,
     external_writer_view: bool,

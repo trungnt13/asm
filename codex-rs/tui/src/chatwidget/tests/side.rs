@@ -371,7 +371,6 @@ async fn side_context_label_shows_hidden_side_snapshot() {
 async fn temporary_side_rejects_navigation_and_mutating_commands() {
     for command in [
         SlashCommand::Btw,
-        SlashCommand::Parallel,
         SlashCommand::Rename,
         SlashCommand::New,
         SlashCommand::Clear,

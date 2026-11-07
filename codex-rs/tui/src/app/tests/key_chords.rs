@@ -1,7 +1,6 @@
 use super::App;
 use super::AppEvent;
 use super::AppServerSession;
-use super::CompanionKind;
 use super::Result;
 use super::RuntimeKeymap;
 use super::ThreadId;
@@ -1399,14 +1398,8 @@ async fn sidebar_chooser_preserves_the_parent_draft_and_starts_a_side_chat() -> 
         crate::app::sidebar::SidebarContent::Chooser,
         crate::app::sidebar::PaneFocus::Main,
     );
-    app.start_companion_conversation(
-        &mut tui,
-        &mut server,
-        parent,
-        CompanionKind::Side,
-        Some("second prompt".into()),
-    )
-    .await?;
+    app.start_companion_conversation(&mut tui, &mut server, parent, Some("second prompt".into()))
+        .await?;
     let narrow = super::side_frame(&mut app, &mut tui, ratatui::layout::Size::new(30, 8))?;
     insta::assert_snapshot!("sidebar_failed_creation", narrow);
     super::side_frame(&mut app, &mut tui, size)?;
