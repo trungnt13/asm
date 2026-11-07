@@ -41,6 +41,7 @@ pub(crate) fn app_server_scope(target: &AppServerTarget) -> String {
         // The implicit local daemon uses this invocation's CODEX_HOME. Explicit daemon
         // endpoints are Remote targets, so unrelated servers never share this namespace.
         AppServerTarget::Embedded | AppServerTarget::LocalDaemon { .. } => "local".into(),
+        AppServerTarget::Cloud => "cloud".into(),
         AppServerTarget::Remote { endpoint } => {
             let endpoint = match endpoint {
                 RemoteAppServerEndpoint::WebSocket { websocket_url, .. } => websocket_url.clone(),

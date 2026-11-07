@@ -369,7 +369,8 @@ async fn schedule_startup_prewarm_inner(
                 crate::agent::host::service_tier(
                     &session,
                     startup_turn_context.initial_settings.service_tier.clone(),
-                ),
+                )
+                .await,
                 &session.features(),
                 &preconnect_model_info,
             ),

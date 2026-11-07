@@ -385,6 +385,7 @@ pub(crate) async fn apply_spawn_agent_service_tier(
         .as_ref()
         .or(model_info.default_reasoning_level.as_ref());
     let inherited_tier = crate::agent::host::service_tier(session, config.service_tier.clone())
+        .await
         .filter(|tier| {
             tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE || model_info.supports_service_tier(tier)
         });

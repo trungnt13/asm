@@ -22,6 +22,7 @@ impl ChatComposer {
         ComposerDraftSnapshot {
             quote_comments: draft.quote_comments,
             quotes: draft.quotes,
+            vim_normal_mode: self.draft.textarea.is_vim_normal_mode(),
             text: draft.text,
             shell_mode: self
                 .config

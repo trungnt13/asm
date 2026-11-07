@@ -576,7 +576,18 @@ cancels the previous attempt and waits for its callback listener to close. Use
 `account/login/cancel` to cancel explicitly. Start a fresh session after success to
 use the saved grant.
 
+# Account identity
+
+`account/read` returns a nullable `userId` alongside `account`. For ChatGPT and
+personal access token sessions, this is the canonical ChatGPT user ID from the
+authenticated account metadata, when available. API-only and signed-out sessions
+return `null`. The ID belongs to the same account snapshot as the rest of the
+response. Clients should also accept an absent field from older app servers.
+PAT sessions continue to return no bearer token from `getAuthStatus`.
+
 # Selected workspace routing
+
+`account/securitySetup/read` returns an optional backend-owned security reminder for the saved ChatGPT login. A returned notice includes its account and user IDs; clients must discard it after an account change and validate its copy and action URL before rendering. Ineligible, unavailable, and timed-out reads return `notice: null`. Older app-servers may not support this optional read.
 
 The experimental `account/read.workspaceRouting` response field returns the selected ChatGPT workspace's `chatgptAccountId`, resolved HTTPS `backendOrigin`, and backend-provided `accountRoutingOverride`. The routing value is `us`, `us_cr`, or the explicit `NO_CONSTRAINT` value. API-only and signed-out accounts return `null` and do not need `accounts/check`.
 

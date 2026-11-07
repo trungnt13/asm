@@ -102,6 +102,8 @@ mod resume_shutdown_tests;
 mod safety_buffering;
 #[path = "tests/session_lifecycle_requests.rs"]
 mod session_lifecycle_requests;
+#[path = "tests/side_chat_policy_tests.rs"]
+mod side_chat_policy_tests;
 mod startup;
 #[path = "tests/startup_frame_tests.rs"]
 mod startup_frame_tests;
@@ -2289,9 +2291,8 @@ async fn token_usage_update_refreshes_status_line_with_runtime_context_window() 
             token_usage_notification(thread_id, "turn-1", Some(window)),
         )));
         assert!(matches!(
-            (extensions, app.chat_widget.status_line_content()),
-            (false, Some(FooterContent::HyperlinkLine(_)))
-                | (true, Some(FooterContent::Extension { .. }))
+            app.chat_widget.status_line_content(),
+            Some(FooterContent::HyperlinkLine(_))
         ));
         let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 60);
         assert!(
@@ -4329,6 +4330,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     app.enqueue_thread_notification(parent, delta).await?;
     let streaming = side_frame(&mut app, &mut tui, size)?;
     let item = ThreadItemPayload::AgentMessage {
+        moderation: None,
         id: "reply".into(),
         text: "Already visible while unfocused.".into(),
         phase: None,
@@ -4518,7 +4520,8 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
 
     // Open a sibling from the chooser, then revisit each retained conversation.
     let chooser_key = KeyEvent::from(KeyCode::Char('t'));
-    let [up, down, enter] = [KeyCode::Up, KeyCode::Down, KeyCode::Enter].map(KeyEvent::from);
+    let [up, down, enter] =
+        [KeyCode::Char('k'), KeyCode::Char('j'), KeyCode::Enter].map(KeyEvent::from);
     side_frame(&mut app, &mut tui, even)?;
     let sidebar_x = app.conversation_frame.chat_strip.unwrap().x;
     keys!(prefix, chooser_key, down, enter);
@@ -4556,7 +4559,65 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(draft, "sibling draft");
     assert!(side_frame(&mut app, &mut tui, even)?.contains("sibling-24"));
 
-    keys!(prefix, main);
+    let colors = crate::terminal_probe::DefaultColors {
+        fg: (224, 224, 224),
+        bg: (20, 20, 20),
+    };
+    let mut tab_styles = Vec::new();
+    let mut redraws = crate::tui::test_support::record_frame_requests(&mut tui);
+    for (focus, owner) in [("sidebar", sibling), ("main", parent_thread_id)] {
+        assert_eq!(app.current_displayed_thread_id(), Some(owner));
+        side_frame(&mut app, &mut tui, even)?;
+        let strip = app.conversation_frame.chat_strip.unwrap();
+        let (tabs, _) = app
+            .sidebar()
+            .unwrap()
+            .chat_tabs()
+            .strip()
+            .strip_targets(strip);
+        let [inactive, selected] = tabs
+            .map(|(_, _, area)| area.x + 1)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("both side-chat tabs are visible");
+        for (state, column, row, palette, redraw) in [
+            ("rest", selected, strip.y + 1, Some(colors), None),
+            ("hover", inactive, strip.y, Some(colors), Some(true)),
+            ("fallback", inactive + 1, strip.y, None, Some(false)),
+            ("selected", selected, strip.y, Some(colors), Some(true)),
+            ("leave", selected, strip.y + 1, Some(colors), Some(false)),
+        ] {
+            while redraws.try_recv().is_ok() {}
+            let event = mouse(MouseEventKind::Moved, column, row);
+            boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, event)).await?;
+            if let Some(redraw) = redraw {
+                assert_eq!(redraws.try_recv().is_ok(), redraw, "{focus} {state}");
+            }
+            crate::terminal_palette::with_test_default_colors(palette, || {
+                side_frame(&mut app, &mut tui, even)
+            })?;
+            let buffer = tui.terminal.previous_buffer();
+            let style = |x| {
+                let cell = &buffer[(x, strip.y)];
+                format!("{:?}/{:?}/{:?}", cell.fg, cell.bg, cell.modifier)
+            };
+            tab_styles.push(format!(
+                "{focus} {state}  inactive {}  selected {}",
+                style(inactive),
+                style(selected),
+            ));
+        }
+        if owner == sibling {
+            keys!(prefix, KeyCode::Char('r').into());
+            assert!(app.pane_resize.is_some());
+            let event = mouse(MouseEventKind::Moved, inactive, strip.y);
+            boxed_future!(app.handle_tui_event(&mut tui, &mut app_server, event)).await?;
+            assert_eq!(app.hovered_sidebar_tab(tui.link_hover.position()), None);
+            keys!(KeyCode::Esc.into(), prefix, main);
+        }
+    }
+    assert_app_snapshot!("side_chat_tab_hover", tab_styles.join("\n"));
+
     app.chat_widget
         .dispatch_command(crate::slash_command::SlashCommand::Side);
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
@@ -5986,6 +6047,7 @@ async fn active_thread_file_change_approval_recovers_buffered_changes() {
                 thread_id.to_string(),
                 "turn-active-approval".to_string(),
                 ThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "agent-1".to_string(),
                     text: "streaming".to_string(),
                     phase: None,
@@ -7216,17 +7278,26 @@ async fn app_scoped_mcp_startup_notifications_do_not_render_in_active_thread() {
 async fn active_side_thread_renders_live_mcp_startup_notifications() {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     while app_event_rx.try_recv().is_ok() {}
-    let sentry_config = toml::from_str::<toml::Value>("command = 'true'")
-        .expect("test MCP config should parse")
-        .try_into()
-        .expect("test MCP config should deserialize");
+    app.config
+        .features
+        .enable(Feature::McpLazyStdioStartup)
+        .unwrap();
     app.config
         .mcp_servers
-        .set(std::collections::HashMap::from([(
-            "sentry".to_string(),
-            sentry_config,
-        )]))
-        .expect("test MCP servers should accept any configuration");
+        .set(
+            toml::from_str(
+                r#"
+        [first]
+        command = "first"
+        required = true
+        [second]
+        command = "second"
+        required = true
+    "#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
     let app_server = crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref())
         .await
         .expect("embedded app server");
@@ -7257,16 +7328,21 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
     );
     app.sync_side_thread_ui();
 
-    for status in [
-        McpServerStartupState::Starting,
-        McpServerStartupState::Failed,
+    // The plugin contributes sentry, so it is absent from the explicit server list.
+    for (name, status, busy) in [
+        ("first", McpServerStartupState::Starting, true),
+        ("first", McpServerStartupState::Ready, true),
+        ("second", McpServerStartupState::Starting, true),
+        ("second", McpServerStartupState::Ready, false),
+        ("sentry", McpServerStartupState::Starting, true),
+        ("sentry", McpServerStartupState::Failed, false),
     ] {
         app.handle_app_server_event(
             &app_server,
             codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
                 ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
                     thread_id: Some(side_thread_id.to_string()),
-                    name: "sentry".to_string(),
+                    name: name.to_string(),
                     status,
                     error: matches!(status, McpServerStartupState::Failed)
                         .then(|| "sentry is not logged in".to_string()),
@@ -7275,18 +7351,18 @@ async fn active_side_thread_renders_live_mcp_startup_notifications() {
             )),
         )
         .await;
-    }
-
-    let mut active_thread_events = Vec::new();
-    let active_thread_rx = app
-        .active_thread_rx
-        .as_mut()
-        .expect("side thread receiver should be active");
-    while let Ok(event) = active_thread_rx.try_recv() {
-        active_thread_events.push(event);
-    }
-    for event in active_thread_events {
+        let event = app
+            .active_thread_rx
+            .as_mut()
+            .expect("side thread receiver")
+            .try_recv()
+            .expect("startup notification");
         app.handle_thread_event_now(event);
+        assert_eq!(
+            app.chat_widget.is_task_running_for_test(),
+            busy,
+            "{name} {status:?}"
+        );
     }
 
     let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
@@ -10779,6 +10855,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                             }],
                         }),
                         ThreadItem::untimed(ThreadItemPayload::AgentMessage {
+                            moderation: None,
                             id: "assistant-2".to_string(),
                             text: "done".to_string(),
                             phase: None,

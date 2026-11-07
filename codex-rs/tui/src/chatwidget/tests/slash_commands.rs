@@ -1646,6 +1646,7 @@ async fn slash_copy_picker_uses_completed_commentary_during_active_turn() {
             current_thread_id,
             "active".to_string(),
             AppServerThreadItemPayload::AgentMessage {
+                moderation: None,
                 id: "active-commentary".to_string(),
                 text: commentary.to_string(),
                 phase: Some(MessagePhase::Commentary),
@@ -2601,7 +2602,7 @@ async fn copy_shortcut_can_be_remapped() {
         let paste = KeyEvent::new(code, modifiers);
         assert_matches!(
             chat.handle_key_event(paste),
-            crate::chatwidget::KeyEventAction::PasteImage { text_fallback }
+            crate::chatwidget::KeyEventAction::PasteImage { text_fallback, .. }
                 if text_fallback == (cfg!(windows) && modifiers == KeyModifiers::CONTROL)
                     .then_some(code)
         );
@@ -2618,7 +2619,8 @@ async fn copy_shortcut_can_be_remapped() {
         assert_matches!(
             chat.handle_key_event(shift_insert),
             KeyEventAction::PasteImage {
-                text_fallback: Some(KeyCode::Insert)
+                text_fallback: Some(KeyCode::Insert),
+                ..
             }
         );
         assert_eq!(chat.bottom_pane.composer_text(), "q");
