@@ -154,9 +154,7 @@ impl SlashCommand {
             SlashCommand::Goal => "set or view the goal for a long-running task",
             SlashCommand::Agents => "open the agent command center",
             SlashCommand::MultiAgents => "switch between this session's subagents",
-            SlashCommand::Side | SlashCommand::Btw => {
-                "start a side conversation in an ephemeral fork"
-            }
+            SlashCommand::Side | SlashCommand::Btw => "start a side conversation",
             SlashCommand::SendLast => "send the last side reply to main with optional instructions",
             SlashCommand::Sync => "replace side history with the latest main context",
             SlashCommand::Permissions => "choose what ASM is allowed to do",

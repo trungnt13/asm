@@ -101,7 +101,9 @@ impl App {
                 }
             }
             SideConversationAction::Sync => {
-                let config = self.side_fork_config();
+                let mut config = self.current_thread_fork_config();
+                config.daybreak_enabled = false;
+                config.side_prompt = self.config.side_prompt.clone();
                 let selected_profile = self.selected_server_profile(thread_id);
                 let fork = match app_server
                     .sidebar_fork(
