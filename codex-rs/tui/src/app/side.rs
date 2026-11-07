@@ -6,10 +6,6 @@
 use super::*;
 use crate::app_server_session::SideChatStorage;
 use crate::chatwidget::InterruptedTurnNoticeMode;
-use codex_app_server_protocol::ThreadUnsubscribeParams;
-use codex_app_server_protocol::ThreadUnsubscribeResponse;
-use codex_app_server_protocol::TurnInterruptParams;
-use codex_app_server_protocol::TurnInterruptResponse;
 use codex_context_fragments::ContextualUserFragment;
 use codex_context_fragments::SideConversationPolicy;
 use codex_context_fragments::side_conversation_boundary;
@@ -235,10 +231,15 @@ impl App {
             clear_side_ui(&mut self.chat_widget);
             return;
         };
-        let Some((parent_thread_id, parent_status, kind)) = self
-            .side_threads
-            .get(&active_thread_id)
-            .map(|state| (state.parent_thread_id, state.parent_status, state.kind))
+        let Some((parent_thread_id, parent_status, kind, storage)) =
+            self.side_threads.get(&active_thread_id).map(|state| {
+                (
+                    state.parent_thread_id,
+                    state.parent_status,
+                    state.kind,
+                    state.storage,
+                )
+            })
         else {
             clear_side_ui(&mut self.chat_widget);
             if let Some(state) = self
