@@ -81,6 +81,7 @@ fn validate_response_item_image_urls(items: &[ResponseItem]) -> Result<(), JSONR
 #[derive(Clone)]
 pub(crate) struct TurnRequestProcessor {
     thread_manager: Arc<ThreadManager>,
+    thread_store: Arc<dyn codex_thread_store::ThreadStore>,
     outgoing: Arc<OutgoingMessageSender>,
     analytics_events_client: AnalyticsEventsClient,
     config: Arc<Config>,
@@ -139,6 +140,7 @@ impl TurnRequestProcessor {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         thread_manager: Arc<ThreadManager>,
+        thread_store: Arc<dyn codex_thread_store::ThreadStore>,
         outgoing: Arc<OutgoingMessageSender>,
         analytics_events_client: AnalyticsEventsClient,
         config: Arc<Config>,
@@ -151,6 +153,7 @@ impl TurnRequestProcessor {
     ) -> Self {
         Self {
             thread_manager,
+            thread_store,
             outgoing,
             analytics_events_client,
             config,
@@ -1688,6 +1691,7 @@ impl TurnRequestProcessor {
     fn listener_task_context(&self) -> ListenerTaskContext {
         ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
+            thread_store: Arc::clone(&self.thread_store),
             thread_state_manager: self.thread_state_manager.clone(),
             outgoing: Arc::clone(&self.outgoing),
             pending_thread_unloads: Arc::clone(&self.pending_thread_unloads),

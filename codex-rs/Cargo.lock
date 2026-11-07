@@ -2163,6 +2163,7 @@ dependencies = [
  "codex-web-search-extension",
  "codex-websocket-auth",
  "codex-windows-sandbox",
+ "codex-worktree",
  "core_test_support",
  "flate2",
  "futures",

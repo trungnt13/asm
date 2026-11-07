@@ -152,6 +152,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     conversation_id: ThreadId,
     conversation: Arc<CodexThread>,
     thread_manager: Arc<ThreadManager>,
+    thread_store: Option<Arc<dyn codex_thread_store::ThreadStore>>,
     outgoing: ThreadScopedOutgoingMessageSender,
     thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     thread_watch_manager: ThreadWatchManager,
@@ -1162,6 +1163,19 @@ pub(crate) async fn apply_bespoke_event_handling(
                 outgoing.send_server_notification(notification).await;
             }
             if let Some(params) = dynamic_tool_call_params {
+                if crate::desktop_worktrees::handles(&params) {
+                    let outgoing = outgoing.clone();
+                    tokio::spawn(async move {
+                        crate::desktop_worktrees::execute(
+                            params,
+                            conversation,
+                            thread_store,
+                            outgoing,
+                        )
+                        .await;
+                    });
+                    return;
+                }
                 let call_id = params.call_id.clone();
                 let (_pending_request_id, rx) = outgoing
                     .send_request(ServerRequestPayload::DynamicToolCall(params))
@@ -2434,6 +2448,7 @@ mod tests {
                 self.conversation_id,
                 self.conversation.clone(),
                 self.thread_manager.clone(),
+                /*thread_store*/ None,
                 self.outgoing.clone(),
                 self.thread_state.clone(),
                 self.thread_watch_manager.clone(),
@@ -3272,6 +3287,7 @@ mod tests {
             conversation_id,
             Arc::clone(&conversation),
             Arc::clone(&thread_manager),
+            /*thread_store*/ None,
             outgoing.clone(),
             Arc::clone(&thread_state),
             thread_watch_manager.clone(),
@@ -3313,6 +3329,7 @@ mod tests {
                 conversation_id,
                 Arc::clone(&conversation),
                 Arc::clone(&thread_manager),
+                /*thread_store*/ None,
                 outgoing.clone(),
                 Arc::clone(&thread_state),
                 thread_watch_manager.clone(),
@@ -3361,6 +3378,7 @@ mod tests {
                 conversation_id,
                 Arc::clone(&conversation),
                 Arc::clone(&thread_manager),
+                /*thread_store*/ None,
                 outgoing.clone(),
                 Arc::clone(&thread_state),
                 thread_watch_manager.clone(),
@@ -3400,6 +3418,7 @@ mod tests {
                 conversation_id,
                 Arc::clone(&conversation),
                 Arc::clone(&thread_manager),
+                /*thread_store*/ None,
                 outgoing.clone(),
                 Arc::clone(&thread_state),
                 thread_watch_manager.clone(),
@@ -3483,6 +3502,7 @@ mod tests {
             conversation_id,
             conversation,
             thread_manager,
+            /*thread_store*/ None,
             outgoing,
             new_thread_state(),
             thread_watch_manager.clone(),
@@ -3573,6 +3593,7 @@ mod tests {
             conversation_id,
             conversation,
             thread_manager,
+            /*thread_store*/ None,
             outgoing,
             new_thread_state(),
             ThreadWatchManager::new(),
