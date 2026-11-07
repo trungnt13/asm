@@ -365,7 +365,10 @@ impl AppServerSession {
             if let Some(side) = &side {
                 side.trim_turns(&mut thread.turns);
             }
-            self.history_pagination.entry(thread_id).or_default();
+            self.history_pagination
+                .entry(thread_id)
+                .or_default()
+                .side_boundary = side.and_then(|side| side.last_inherited_turn);
             return Ok(());
         }
 
