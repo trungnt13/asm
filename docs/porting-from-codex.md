@@ -98,6 +98,10 @@ After approved integration, reuse PR checks and the verified binary pair only wh
 - Record created session IDs, commands, binary/source identity, expected/actual results. Before cleanup, retain rollouts, output, and diagnostic logs in private task evidence. Never report or commit credentials.
 - Keep failed test homes until triage finishes. Remove only task-owned state after retaining required evidence. Titles alone do not make personal sessions disposable.
 
+### Desktop SSH tests
+
+Use the [asm-desktop-ssh-test skill](../.agents/skills/asm-desktop-ssh-test/SKILL.md) for isolated Desktop SSH tests. It covers setup, reuse, candidate updates, and Desktop verification. Keep the normal backend unchanged. The build and real-session rules in this guide still apply.
+
 ### Commit, open a PR, report
 
 Use PRs for implementation, documentation, and syncs. The lead owns delegated work too. After validation and owner decisions, commit the task branch, push, and open a PR against `main`.
