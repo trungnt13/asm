@@ -137,9 +137,9 @@ For syncs or changes that affect saved caches or wire formats, apply these steps
 
 #### Known upstream cold-history limitation
 
-Unmodified Codex `rust-v0.168.0-alpha.7` returns an empty cold child timeline when a fresh home contains canonical rollouts but no derived history database. Its timeline reader does not first rebuild that projection; resuming the chat builds it and exposes the saved messages. The same missing catch-up remains in upstream `a037e65ead`. ASM already rebuilds the projection before querying; this sync does not introduce that difference. No history loss was observed in the isolated checks.
+Unmodified Codex `rust-v0.168.0-alpha.7` returns an empty cold child timeline when a fresh home contains canonical rollouts but no derived history database. Its timeline reader does not first rebuild that projection; resuming the chat builds it and exposes the saved messages. The same missing catch-up remains through upstream `33b3f80a09`. Independent stock `rust-v0.169.0-alpha.2` also returned an empty first cold timeline for valid real saved history; resume restored its readable projection and saved permissions. ASM already rebuilds the projection before querying; this sync does not introduce that difference. No history loss was observed in the isolated checks.
 
-The owner accepts this upstream limitation for the sync through `a037e65ead` and its ensuing release. Record cold-stock reading as unresolved, not passed; successful resume-assisted handoff is separate evidence. This acceptance does not waive other compatibility checks or authorize changes to personal history or caches.
+The owner accepts this upstream limitation for the sync through `33b3f80a09` and its ensuing release. Record cold-stock reading as unresolved, not passed; successful resume-assisted handoff is separate evidence. This acceptance does not waive other compatibility checks or authorize changes to personal history or caches.
 
 ### Live backend model catalog
 
@@ -153,9 +153,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `57a808a3920f05f2d4b9eab2d0493e1df136ae6b`.
+- Last incorporated commit: `33b3f80a0935e51a49cbbda7d6473ef757d4241b`.
 - Date: 2026-11-07.
-- Subject: Preserve code mode dispatch errors in rollout traces (#60122).
+- Subject: Wire incremental exec tool updates into Code Mode sessions (#60163).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:

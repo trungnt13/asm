@@ -1105,6 +1105,7 @@ impl App {
         if self.abandoned_side_threads.contains(&thread_id) {
             return Ok(());
         }
+        self.track_side_chat_title(thread_id, &notification);
         if self.current_displayed_thread_id() == Some(thread_id)
             && let ServerNotification::TurnCompleted(notification) = &notification
         {
@@ -2282,6 +2283,28 @@ impl App {
             // thread, so unrelated shutdowns cannot consume this marker.
             self.pending_shutdown_exit_thread_id = None;
         }
+        // Sidebar chats use their first prompt until they receive an explicit name.
+        let automatic_title_user_message = if self.chat_widget.thread_name().is_none()
+            && !(self.side_retention_enabled(tui) && self.active_side_parent_thread_id().is_some())
+            && let ThreadBufferedEvent::Notification(notification) = &event
+            && let ServerNotification::ItemCompleted(notification) = notification.as_ref()
+            && let ThreadItemPayload::UserMessage { content, .. } = &notification.item.payload
+        {
+            Some(
+                content
+                    .iter()
+                    .filter_map(|item| match item {
+                        codex_app_server_protocol::UserInput::Text { text, .. } => {
+                            Some(crate::user_prompt::extract_prompt_request_with_offset(text).0)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            )
+        } else {
+            None
+        };
         let had_active_modal = self.chat_widget.has_active_modal();
         self.handle_live_thread_event(app_server, event).await;
         if !had_active_modal

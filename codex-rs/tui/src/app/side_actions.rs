@@ -114,6 +114,7 @@ impl App {
                         config,
                         state.parent_thread_id,
                         selected_profile.as_ref(),
+                        crate::app_server_session::SideChatStorage::Temporary,
                     )
                     .await
                 {

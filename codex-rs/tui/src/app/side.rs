@@ -4,6 +4,7 @@
 //! Saved-only policy belongs in `app::parallel`.
 
 use super::*;
+use crate::app_server_session::SideChatStorage;
 use crate::chatwidget::InterruptedTurnNoticeMode;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
@@ -184,6 +185,8 @@ pub(super) struct SideThreadState {
     /// Parent-thread condition that changed while this side thread is visible.
     pub(super) parent_status: Option<SideParentStatus>,
     pub(super) opening_message: Option<crate::chatwidget::UserMessage>,
+    pub(super) close_request: Option<uuid::Uuid>,
+    pub(super) storage: SideChatStorage,
 }
 
 impl SideThreadState {
@@ -193,6 +196,8 @@ impl SideThreadState {
             kind: CompanionKind::Side,
             parent_status: None,
             opening_message: None,
+            close_request: None,
+            storage: SideChatStorage::Temporary,
         }
     }
 
@@ -287,8 +292,15 @@ impl App {
         ) {
             label_parts.push(format!("{} to switch", binding.display_label()));
         }
+        let action = if storage == SideChatStorage::Attached
+            && self.local_settings.workspace_enabled(&self.config)
+        {
+            "archive"
+        } else {
+            "close"
+        };
         label_parts.push(format!(
-            "{} to close",
+            "{} to {action}",
             crate::key_hint::ctrl(KeyCode::Char('c')).display_label()
         ));
         let mode = match kind {
@@ -426,6 +438,7 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
+        _key: KeyEvent,
     ) -> bool {
         if self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
@@ -571,57 +584,36 @@ impl App {
         self.abandoned_side_threads.insert(thread_id);
         self.pending_app_server_requests
             .cancel_thread_verification(&thread_id.to_string());
-        let turn_id = self
-            .active_turn_id_for_thread(thread_id)
-            .await
-            .unwrap_or_default();
-        let request_handle = app_server.request_handle();
-        let interrupt_request_id = app_server.next_request_id();
-        let retry_interrupt_request_id = app_server.next_request_id();
-        let unsubscribe_request_id = app_server.next_request_id();
+        let turn_id = self.active_turn_id_for_thread(thread_id).await;
+        let attachment = self
+            .thread_event_channels
+            .get(&thread_id)
+            .map(ThreadEventChannel::attachment);
+        let mut view = app_server.request_view();
 
+        let saved_parent = self
+            .side_threads
+            .get(&thread_id)
+            .filter(|side| side.storage == SideChatStorage::Attached)
+            .map(|side| side.parent_thread_id);
         self.discard_thread_local_state(thread_id).await;
 
-        tokio::spawn(async move {
-            let interrupt_result = request_handle
-                .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
-                    request_id: interrupt_request_id,
-                    params: TurnInterruptParams {
-                        thread_id: thread_id.to_string(),
-                        turn_id: turn_id.clone(),
-                    },
-                })
-                .await;
-            let interrupt_result = if let Err(error) = &interrupt_result
-                && let Some(actual_turn_id) = active_turn_interrupt_race(error)
+        let cleanup = tokio::spawn(async move {
+            if let Err(error) = interrupt_for_close(&mut view, thread_id, turn_id, attachment).await
             {
-                request_handle
-                    .request_typed::<TurnInterruptResponse>(ClientRequest::TurnInterrupt {
-                        request_id: retry_interrupt_request_id,
-                        params: TurnInterruptParams {
-                            thread_id: thread_id.to_string(),
-                            turn_id: actual_turn_id,
-                        },
-                    })
-                    .await
-            } else {
-                interrupt_result
-            };
-            if let Err(error) = interrupt_result {
                 tracing::warn!(%error, "failed to interrupt side conversation");
             }
-            if let Err(error) = request_handle
-                .request_typed::<ThreadUnsubscribeResponse>(ClientRequest::ThreadUnsubscribe {
-                    request_id: unsubscribe_request_id,
-                    params: ThreadUnsubscribeParams {
-                        thread_id: thread_id.to_string(),
-                    },
-                })
-                .await
-            {
+            if let Err(error) = view.thread_unsubscribe(thread_id).await {
                 tracing::warn!(%error, "failed to unsubscribe side conversation");
             }
         });
+        if let Some(parent) = saved_parent {
+            self.sidebars
+                .entry(Some(parent))
+                .or_default()
+                .closing_chats
+                .insert(thread_id, cleanup);
+        }
     }
 
     pub(super) async fn discard_closed_side_thread(&mut self, thread_id: ThreadId) {
@@ -657,7 +649,7 @@ impl App {
         if let Some(side) = self.side_threads.remove(&thread_id)
             && let Some(pane) = self.sidebars.get_mut(&Some(side.parent_thread_id))
         {
-            pane.remove_chat(thread_id);
+            pane.remove_chat(thread_id, side.storage);
         }
         self.side_companions.remove(&thread_id);
         self.agent_navigation.remove(thread_id);
@@ -713,28 +705,16 @@ impl App {
                     })?;
             }
         }
-        let interrupt_result =
-            if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
-                app_server.turn_interrupt(thread_id, turn_id).await
-            } else {
-                app_server.startup_interrupt(thread_id).await
-            };
-        // Replay-only sides may still be running after reconnect, so always interrupt.
-        // If the ephemeral thread is gone, let unsubscribe and local cleanup finish.
-        if let Err(TypedRequestError::Server { method, source }) = &interrupt_result
-            && method == "turn/interrupt"
-            && source.code == -32600
-            && source.message == format!("thread not found: {thread_id}")
-            && self
-                .thread_event_channels
-                .get(&thread_id)
-                .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::ReplayOnly)
-        {
-            return Ok(());
-        }
-        interrupt_result.map_err(|err| {
-            format!("Failed to close side conversation {thread_id}; it is still open: {err}")
-        })
+        let turn_id = self.active_turn_id_for_thread(thread_id).await;
+        let attachment = self
+            .thread_event_channels
+            .get(&thread_id)
+            .map(ThreadEventChannel::attachment);
+        interrupt_for_close(app_server, thread_id, turn_id, attachment)
+            .await
+            .map_err(|err| {
+                format!("Failed to close side conversation {thread_id}; it is still open: {err}")
+            })
     }
 
     async fn keep_side_thread_visible_after_cleanup_failure(
@@ -752,7 +732,7 @@ impl App {
         }
     }
 
-    async fn discard_side_thread_or_keep_visible(
+    pub(super) async fn discard_side_thread_or_keep_visible(
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
@@ -1109,6 +1089,7 @@ impl App {
             parent_thread_id,
             self.selected_server_profile(parent_thread_id),
             self.side_boundary_items(kind),
+            SideChatStorage::Temporary,
         );
         let create = async move {
             fork.await
@@ -1272,6 +1253,7 @@ impl App {
                     CompanionKind::Side => SideThreadState::new(parent_thread_id),
                     CompanionKind::Parallel => SideThreadState::parallel(parent_thread_id),
                 };
+                child.storage = fork.storage;
                 child.parent_status = self
                     .side_thread_for_parent(parent_thread_id)
                     .and_then(|id| self.side_threads.get(&id))
@@ -1348,6 +1330,36 @@ impl App {
                 self.chat_widget.add_error_message(err);
             }
         }
+    }
+}
+
+/// A cached turn can finish or be replaced before the server handles an interrupt.
+pub(super) async fn interrupt_for_close(
+    server: &mut AppServerSession,
+    thread: ThreadId,
+    turn: Option<String>,
+    attachment: Option<ThreadEventAttachment>,
+) -> std::result::Result<(), TypedRequestError> {
+    let mut result = match turn {
+        Some(turn) => server.turn_interrupt(thread, turn).await,
+        None => server.startup_interrupt(thread).await,
+    };
+    if let Err(error) = &result
+        && let Some(current) = active_turn_interrupt_race(error)
+    {
+        result = server.turn_interrupt(thread, current).await;
+    }
+    match result {
+        Err(TypedRequestError::Server { method, source })
+            if method == "turn/interrupt"
+                && source.code == -32600
+                && (source.message == "no active turn to interrupt"
+                    || (attachment == Some(ThreadEventAttachment::ReplayOnly)
+                        && source.message == format!("thread not found: {thread}"))) =>
+        {
+            Ok(())
+        }
+        result => result,
     }
 }
 

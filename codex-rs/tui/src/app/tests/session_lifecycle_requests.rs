@@ -1668,6 +1668,7 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
                 side_config.clone(),
                 thread_id,
                 /*selected_profile*/ None,
+                crate::app_server_session::SideChatStorage::Temporary,
             )
             .await?;
         let side_id = side.session.thread_id;
@@ -1684,7 +1685,8 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
                     &app.local_settings,
                     side_config,
                     thread_id,
-                    /*selected_profile*/ None
+                    /*selected_profile*/ None,
+                    crate::app_server_session::SideChatStorage::Temporary,
                 )
                 .await
                 .is_err()
@@ -1934,6 +1936,7 @@ async fn cancelling_saved_side_pauses_goal_and_preserves_running_parent() -> Res
                 app.config.clone(),
                 parent_id,
                 /*selected_profile*/ None,
+                crate::app_server_session::SideChatStorage::Temporary,
             )
             .await?;
         let side_id = side.session.thread_id;
@@ -2121,6 +2124,7 @@ async fn archive_current_thread_returns_to_agents() -> Result<()> {
                     side_config,
                     thread_id,
                     /*selected_profile*/ None,
+                    crate::app_server_session::SideChatStorage::Temporary,
                 )
                 .await?
                 .session
@@ -4083,6 +4087,7 @@ async fn paginated_workflows_never_request_full_thread_history() -> Result<()> {
         side_config,
         paginated_thread_id,
         /*selected_profile*/ None,
+        crate::app_server_session::SideChatStorage::Temporary,
     ))
     .await?;
 
@@ -5055,8 +5060,24 @@ terminal_visualization_instructions = true
     Ok(())
 }
 
-#[tokio::test]
-async fn changing_directory_preserves_project_trust_permissions_history_and_hooks() -> Result<()> {
+#[test]
+fn changing_directory_preserves_project_trust_permissions_history_and_hooks() -> Result<()> {
+    // The TUI and embedded app-server load full configurations on the same test thread.
+    const TEST_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
+    std::thread::Builder::new()
+        .name("tui-change-directory".into())
+        .stack_size(TEST_STACK_SIZE_BYTES)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(boxed_future!(change_directory_scenario()))
+        })?
+        .join()
+        .expect("directory change test thread panicked")
+}
+
+async fn change_directory_scenario() -> Result<()> {
     use codex_protocol::config_types::TrustLevel as T;
     use serde_json::json;
     use std::fs;

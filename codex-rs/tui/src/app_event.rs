@@ -500,7 +500,7 @@ pub(crate) enum AppEvent {
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
 
-    /// Open a transient side conversation for the current thread.
+    /// Open a side conversation for the current thread.
     StartSide {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
@@ -522,6 +522,25 @@ pub(crate) enum AppEvent {
     StartParallel {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,
+    },
+
+    SideChatRemovalFinished {
+        backend_id: crate::backend_id::BackendId,
+        target: ThreadId,
+        request: uuid::Uuid,
+        action: SideChatRemoval,
+        result: Result<(), String>,
+    },
+    SideChatArchived {
+        backend_id: crate::backend_id::BackendId,
+        target: ThreadId,
+    },
+
+    SavedSideChatsLoaded {
+        backend_id: crate::backend_id::BackendId,
+        parent: ThreadId,
+        request: uuid::Uuid,
+        result: Result<Vec<crate::app_server_session::SideChat>, String>,
     },
 
     /// Submit an op to the specified thread, regardless of current focus.
@@ -2002,4 +2021,11 @@ pub(crate) enum FeedbackCategory {
 pub(crate) enum SideStartMode {
     Reuse,
     New,
+}
+
+/// Whether a sidebar action closes a live tab or also archives its saved conversation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SideChatRemoval {
+    CloseTab,
+    Archive,
 }
