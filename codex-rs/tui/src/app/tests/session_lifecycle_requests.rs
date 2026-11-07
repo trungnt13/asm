@@ -1986,7 +1986,14 @@ async fn cancelling_saved_side_pauses_goal_and_preserves_running_parent() -> Res
             .await?;
             assert_matches!(control, AppRunControl::Continue);
         } else {
-            assert!(app.maybe_return_from_side(&mut tui, &mut server).await);
+            assert!(
+                app.maybe_return_from_side(
+                    &mut tui,
+                    &mut server,
+                    KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+                )
+                .await
+            );
         }
 
         assert_eq!(app.current_displayed_thread_id(), Some(parent_id));

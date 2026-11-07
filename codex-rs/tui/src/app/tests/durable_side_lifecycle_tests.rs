@@ -92,7 +92,14 @@ async fn parallel_replacement_and_cancel_keep_history_and_resume_events() -> Res
         &app.app_server_target,
     );
     let open_pair = store.side(second_id)?.expect("saved parallel record");
-    assert!(Box::pin(app.maybe_return_from_side(&mut tui, &mut server)).await);
+    assert!(
+        Box::pin(app.maybe_return_from_side(
+            &mut tui,
+            &mut server,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ))
+        .await
+    );
     assert_eq!(app.current_displayed_thread_id(), Some(parent_id));
     assert!(app.side_threads.is_empty());
     assert!(app.abandoned_side_threads.contains(&second_id));
