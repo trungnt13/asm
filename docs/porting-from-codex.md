@@ -141,9 +141,9 @@ For syncs or changes that affect saved caches or wire formats, apply these steps
 
 #### Known upstream cold-history limitation
 
-Unmodified Codex `rust-v0.168.0-alpha.7` returns an empty cold child timeline when a fresh home contains canonical rollouts but no derived history database. Its timeline reader does not first rebuild that projection; resuming the chat builds it and exposes the saved messages. The same missing catch-up remains through upstream `33b3f80a09`. Independent stock `rust-v0.169.0-alpha.2` also returned an empty first cold timeline for valid real saved history; resume restored its readable projection and saved permissions. ASM already rebuilds the projection before querying; this sync does not introduce that difference. No history loss was observed in the isolated checks.
+Unmodified Codex `rust-v0.168.0-alpha.7` returns an empty cold child timeline when a fresh home contains canonical rollouts but no derived history database. Its timeline reader does not first rebuild that projection; resuming the chat builds it and exposes the saved messages. The same missing catch-up remains through upstream `748ab55ca7`. Independent stock `rust-v0.169.0-alpha.2` also returned an empty first cold timeline for valid real saved history; resume restored its readable projection and saved permissions. ASM already rebuilds the projection before querying; this sync does not introduce that difference. No history loss was observed in the isolated checks.
 
-The owner accepts this upstream limitation for the sync through `33b3f80a09` and its ensuing release. Record cold-stock reading as unresolved, not passed; successful resume-assisted handoff is separate evidence. This acceptance does not waive other compatibility checks or authorize changes to personal history or caches.
+The owner accepts this upstream limitation for the sync through `748ab55ca7` and its ensuing release. Record cold-stock reading as unresolved, not passed; successful resume-assisted handoff is separate evidence. This acceptance does not waive other compatibility checks or authorize changes to personal history or caches.
 
 ### Live backend model catalog
 
