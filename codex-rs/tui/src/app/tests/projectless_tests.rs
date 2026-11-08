@@ -71,7 +71,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             app.chat_widget.thread_id().expect("fresh task"),
-            vec![App::side_boundary_prompt_item()],
+            vec![codex_context_fragments::side_conversation_boundary()],
         )
         .await?;
     let fresh_destination = tempfile::tempdir()?;
@@ -105,7 +105,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             saved.session.thread_id,
-            vec![App::side_boundary_prompt_item()],
+            vec![codex_context_fragments::side_conversation_boundary()],
         )
         .await?;
     tui.pause_events();
@@ -220,7 +220,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             app.chat_widget.thread_id().expect("new project task"),
-            vec![App::side_boundary_prompt_item()],
+            vec![codex_context_fragments::side_conversation_boundary()],
         )
         .await?;
     app.change_working_directory(&mut tui, &mut server, source.path().abs())

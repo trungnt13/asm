@@ -212,7 +212,6 @@ mod session_resume;
 mod session_start;
 mod session_state;
 mod shortcut_help;
-mod side_conversations;
 mod sidebar_chooser;
 mod sidebar_tab_strip;
 mod skills_helpers;
@@ -684,8 +683,7 @@ pub(crate) async fn start_app_server_for_picker(
     .await?;
     Ok(
         AppServerSession::new(backend_id, app_server, target.thread_params_mode())
-            .with_local_codex_home(&config.codex_home)
-            .with_side_conversations(&config.codex_home, &target),
+            .with_local_codex_home(&config.codex_home),
     )
 }
 
@@ -716,8 +714,7 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         app_server,
         target.thread_params_mode(),
     )
-    .with_local_codex_home(&config.codex_home)
-    .with_side_conversations(&config.codex_home, &target))
+    .with_local_codex_home(&config.codex_home))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1367,7 +1364,6 @@ async fn run_ratatui_app(
                 app_server_target.thread_params_mode(),
             )
             .with_local_codex_home(&initial_config.codex_home)
-            .with_side_conversations(&initial_config.codex_home, &app_server_target)
         }
         Ok(Err(err)) => {
             terminal_restore_guard.restore_silently();
@@ -2073,7 +2069,6 @@ async fn run_ratatui_app(
                     app_server_target.thread_params_mode(),
                 )
                 .with_local_codex_home(&config.codex_home)
-                .with_side_conversations(&config.codex_home, &app_server_target)
                 .with_remote_cwd_override(remote_cwd_override.clone())
             }
             Ok(Err(err)) => {
@@ -2187,8 +2182,7 @@ async fn run_ratatui_app(
                     client,
                     app_server_target.thread_params_mode(),
                 )
-                .with_local_codex_home(&config.codex_home)
-                .with_side_conversations(&config.codex_home, &app_server_target);
+                .with_local_codex_home(&config.codex_home);
             }
             #[cfg(target_os = "windows")]
             {

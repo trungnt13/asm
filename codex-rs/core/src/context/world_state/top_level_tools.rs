@@ -14,6 +14,8 @@ use crate::context::DeveloperInstructions;
 use codex_code_mode::ExecDefinition;
 use codex_code_mode::PUBLIC_TOOL_NAME;
 use codex_extension_api::ExtensionMetrics;
+use codex_otel::EXEC_TOOL_ENTRY_UPDATES_METRIC;
+use codex_otel::EXEC_TOOL_UPDATE_BYTES_METRIC;
 use codex_otel::TOOL_INCREMENTAL_UPDATES_METRIC;
 use codex_otel::TOOL_SPEC_DESCRIPTION_BYTES_METRIC;
 use codex_otel::TOOL_SPEC_DESCRIPTION_BYTES_METRIC_BUCKETS;
@@ -36,9 +38,6 @@ use std::sync::Arc;
 const ACTION_ADDED: &str = "added";
 const ACTION_REMOVED: &str = "removed";
 const ACTION_SCHEMA_CHANGED: &str = "schema_changed";
-
-const EXEC_TOOLS_UPDATE_HINT: &str = "Use these definitions and namespace instructions with `functions.exec`. Each replaces its earlier version in full. Unlisted tools keep their latest definitions and `tools` methods.";
-const EXEC_TOOLS_REMOVED_DEFINITIONS_HEADER: &str = "Listed `Tool:` entries are unavailable until redefined or rediscovered. `Namespace instructions:` removes guidance only. Unlisted entries are unchanged.";
 
 /// The exact serialized Responses Lite declarations visible in one captured step.
 pub(crate) struct TopLevelToolsState {
@@ -389,9 +388,36 @@ impl TopLevelToolsState {
                     })
                     .collect::<Vec<_>>();
                 if !changed.is_empty() {
-                    updates.push(
-                        WorldStateUpdate::fragment(render_exec_update(&changed)).standalone(),
-                    );
+                    let update =
+                        render_exec_update(&changed, &self.messages.exec_tools_update_hint);
+                    if let Some(metrics) = self.metrics.as_deref() {
+                        let added = changed
+                            .iter()
+                            .filter(|entry| {
+                                !previous_exec
+                                    .is_some_and(|previous| previous.contains_key(&entry.key))
+                            })
+                            .count();
+                        for (action, count) in [
+                            (ACTION_ADDED, added),
+                            (ACTION_SCHEMA_CHANGED, changed.len() - added),
+                        ] {
+                            if count > 0 {
+                                metrics.counter(
+                                    EXEC_TOOL_ENTRY_UPDATES_METRIC,
+                                    i64::try_from(count).unwrap_or(i64::MAX),
+                                    &[("action", action)],
+                                );
+                            }
+                        }
+                        metrics.histogram_with_boundaries(
+                            EXEC_TOOL_UPDATE_BYTES_METRIC,
+                            i64::try_from(update.0.len()).unwrap_or(i64::MAX),
+                            TOOL_SPEC_DESCRIPTION_BYTES_METRIC_BUCKETS.as_slice(),
+                            &[],
+                        );
+                    }
+                    updates.push(WorldStateUpdate::fragment(update).standalone());
                 }
             } else if previous.is_some() {
                 // Install the full catalog when enabling granular updates or restoring exec.
@@ -422,8 +448,19 @@ impl TopLevelToolsState {
                     .cloned()
                     .collect::<Vec<_>>();
                 if !removed.is_empty() {
+                    if let Some(metrics) = self.metrics.as_deref() {
+                        metrics.counter(
+                            EXEC_TOOL_ENTRY_UPDATES_METRIC,
+                            i64::try_from(removed.len()).unwrap_or(i64::MAX),
+                            &[("action", ACTION_REMOVED)],
+                        );
+                    }
                     updates.push(
-                        WorldStateUpdate::fragment(RemovedExecDefinitions(removed)).standalone(),
+                        WorldStateUpdate::fragment(RemovedExecDefinitions {
+                            header: self.messages.exec_tools_removed_definitions_header.clone(),
+                            names: removed,
+                        })
+                        .standalone(),
                     );
                 }
             }
@@ -515,19 +552,28 @@ impl ContextualUserFragment for RemovedTools {
 }
 
 /// Render a nonempty batch of complete replacement definitions with the exec update hint.
-fn render_exec_update(definitions: &[&ExecDefinition]) -> IncrementalToolsUpdate {
+fn render_exec_update(definitions: &[&ExecDefinition], hint: &str) -> IncrementalToolsUpdate {
     let description = definitions
         .iter()
         .map(|entry| entry.description.as_str())
         .collect::<Vec<_>>()
         .join("\n\n");
-    IncrementalToolsUpdate(format!(
-        "{EXEC_TOOLS_UPDATE_HINT}\n\n## Namespace: functions\n{description}"
-    ))
+    let mut text = hint.to_owned();
+    if !text.is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str("## Namespace: functions\n");
+    text.push_str(&description);
+    IncrementalToolsUpdate(text)
 }
 
 /// Removal notice containing the stable keys of withdrawn tools or namespace instructions.
-struct RemovedExecDefinitions(Vec<String>);
+struct RemovedExecDefinitions {
+    /// Guidance preceding the removed keys; an empty header emits only the keys.
+    header: String,
+    /// Stable entry keys that are no longer present in the current catalog.
+    names: Vec<String>,
+}
 
 impl ContextualUserFragment for RemovedExecDefinitions {
     fn role(&self) -> &'static str {
@@ -547,10 +593,13 @@ impl ContextualUserFragment for RemovedExecDefinitions {
     }
 
     fn body(&self) -> ContentItem {
-        input_text(format!(
-            "{EXEC_TOOLS_REMOVED_DEFINITIONS_HEADER}\n- {}",
-            self.0.join("\n- ")
-        ))
+        let mut text = self.header.clone();
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("- ");
+        text.push_str(&self.names.join("\n- "));
+        input_text(text)
     }
 }
 

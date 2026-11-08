@@ -19,7 +19,6 @@ mod provider_selection_tests;
 mod read_state;
 mod realtime;
 mod rollout_history;
-mod side_conversations;
 pub(crate) use read_state::unread_revision;
 mod side_chat_history;
 use side_chat_history::side_context_checkpoint;
@@ -154,7 +153,9 @@ use codex_protocol::approvals::GuardianAssessmentEvent;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BaseInstructionsProvenance;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::PermissionProfile;
+use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelAvailabilityNux;
 use codex_protocol::openai_models::ModelPreset;
@@ -226,10 +227,30 @@ impl SideChatStorage {
 
     pub(crate) fn configure_fork(self, config: &mut Config) {
         config.ephemeral = self == Self::Temporary;
-        config.developer_instructions = Some(
-            self.policy()
-                .instructions(config.developer_instructions.as_deref()),
-        );
+        let mut existing = config.developer_instructions.as_deref().unwrap_or_default();
+        for policy in [
+            SideConversationPolicy::Temporary,
+            SideConversationPolicy::Attached,
+        ] {
+            let suffix = policy.instructions(/*existing*/ None);
+            if let Some(prefix) = existing.strip_suffix(&suffix) {
+                existing = prefix.strip_suffix("\n\n").unwrap_or(prefix);
+                break;
+            }
+        }
+        let mut instructions = existing.to_string();
+        if let Some(prompt) = config
+            .side_prompt
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            && !instructions.ends_with(prompt)
+        {
+            if !instructions.is_empty() {
+                instructions.push_str("\n\n");
+            }
+            instructions.push_str(prompt);
+        }
+        config.developer_instructions = Some(self.policy().instructions(Some(&instructions)));
     }
 }
 
@@ -375,7 +396,6 @@ pub(crate) struct AppServerSession {
     /// The newest docked replay refresh on this connection.
     pub(crate) pending_side_skills_refresh: Option<Uuid>,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
-    side_conversations: Option<crate::side_conversations::SideConversationStore>,
     pub(crate) focused_conversation: Option<ThreadId>,
     pub(crate) attempted_revision: Option<String>,
     pub(crate) frozen_receipt: Option<(ThreadId, String)>,
@@ -565,7 +585,6 @@ impl AppServerSession {
             next_request_id: 1,
             pending_side_skills_refresh: None,
             history_pagination: HashMap::new(),
-            side_conversations: None,
             focused_conversation: None,
             attempted_revision: None,
             frozen_receipt: None,
@@ -1218,7 +1237,6 @@ impl AppServerSession {
         config: Config,
         parent: ThreadId,
         profile: Option<PermissionProfileSelection>,
-        boundary: Vec<ResponseItem>,
         preferred_storage: SideChatStorage,
     ) -> impl Future<Output = Result<SidebarFork>> + Send + use<> {
         let mut view = self
@@ -1247,13 +1265,36 @@ impl AppServerSession {
                         && side_chat_history::is_attached_thread_store_unsupported(&err) =>
                 {
                     storage = SideChatStorage::Temporary;
-                    view.fork_side_thread(&settings, config, parent, profile.as_ref(), storage)
-                        .await?
+                    view.fork_side_thread(
+                        &settings,
+                        config.clone(),
+                        parent,
+                        profile.as_ref(),
+                        storage,
+                    )
+                    .await?
                 }
                 result => result?,
             };
             let child = thread.session.thread_id;
-            let items = boundary;
+            let mut items = storage.policy().fork_items();
+            if let Some(prompt) = config
+                .side_prompt
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+            {
+                items.insert(
+                    /*index*/ 1,
+                    ResponseInputItem::Message {
+                        role: "developer".to_string(),
+                        content: vec![ContentItem::InputText {
+                            text: prompt.to_string(),
+                        }],
+                        phase: None,
+                    }
+                    .into(),
+                );
+            }
             let boundary = match view.thread_inject_items(child, items).await {
                 Ok(_) if storage == SideChatStorage::Attached => {
                     match side_context_checkpoint(thread.session.rollout_path.as_deref()).await {
@@ -1302,9 +1343,7 @@ impl AppServerSession {
         selected_profile: Option<&PermissionProfileSelection>,
         storage: SideChatStorage,
     ) -> Result<AppServerStartedThread> {
-        if storage == SideChatStorage::Attached {
-            storage.configure_fork(&mut config);
-        }
+        storage.configure_fork(&mut config);
         self.fork_thread_at_with_presentation(
             local_settings,
             config,
@@ -1584,10 +1623,7 @@ impl AppServerSession {
             })
             .await;
         let mut response: ThreadReadResponse = match response {
-            Ok(mut response) => {
-                if let Some(side) = self.side_conversation(thread_id) {
-                    side.trim_turns(&mut response.thread.turns);
-                }
+            Ok(response) => {
                 if !include_turns {
                     self.remember_read_state(thread_id, response.read_state);
                 }

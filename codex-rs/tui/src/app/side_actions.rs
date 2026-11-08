@@ -1,4 +1,4 @@
-//! Explicit handoff, refresh, and persistence for temporary conversations.
+//! Preserve Side handoffs while refreshing context or saving independent forks.
 
 use super::*;
 use crate::app_event::SideConversationAction;
@@ -8,7 +8,7 @@ use codex_app_server_protocol::UserInput;
 use codex_context_fragments::AdditionalContextDeveloperFragment;
 use codex_context_fragments::ContextualUserFragment;
 
-const SAVED_FORK_INSTRUCTIONS: &str = "You are in an ordinary saved fork. Inherited history is reference context, not an active task. Earlier temporary Side role and capability restrictions no longer apply; use normal capabilities under this session's permissions. Wait for a new user request before starting work.";
+const SAVED_FORK_INSTRUCTIONS: &str = "You are in an ordinary saved fork. Inherited history is reference context, not an active task. Earlier Side role and capability restrictions no longer apply; use normal capabilities under this session's permissions. Wait for a new user request before starting work.";
 
 impl App {
     #[tracing::instrument(skip_all)]
@@ -101,19 +101,21 @@ impl App {
                 }
             }
             SideConversationAction::Sync => {
-                let config = self.side_fork_config();
+                let mut config = self.current_thread_fork_config();
+                config.daybreak_enabled = false;
+                config.side_prompt = self.config.side_prompt.clone();
                 let selected_profile = self.selected_server_profile(thread_id);
-                let forked = match app_server
-                    .fork_side_thread(
-                        &self.local_settings,
+                let fork = match app_server
+                    .sidebar_fork(
+                        self.local_settings.clone(),
                         config,
                         state.parent_thread_id,
-                        selected_profile.as_ref(),
-                        crate::app_server_session::SideChatStorage::Temporary,
+                        selected_profile,
+                        state.storage,
                     )
                     .await
                 {
-                    Ok(forked) => forked,
+                    Ok(fork) => fork,
                     Err(error) => {
                         self.chat_widget.add_error_message(format!(
                             "Failed to sync; the current conversation is unchanged: {error}"
@@ -121,22 +123,34 @@ impl App {
                         return Ok(());
                     }
                 };
+                app_server.observe_sidebar_fork(&fork);
+                let storage = fork.storage;
+                let forked = fork.thread;
                 let replacement_id = forked.session.thread_id;
-                if let Err(error) = app_server
-                    .thread_inject_items(replacement_id, self.side_boundary_items())
-                    .await
-                {
+                if let Err(error) = fork.boundary {
                     self.discard_side_thread(app_server, replacement_id).await;
                     self.chat_widget.add_error_message(format!(
                         "Failed to prepare synced conversation: {error}"
                     ));
                     return Ok(());
                 }
+                if fork.inherited_profile
+                    && let Some(profile) = &forked.session.active_permission_profile
+                {
+                    self.agents_overview
+                        .selected_permission_profiles
+                        .insert(replacement_id, profile.id.clone());
+                }
                 {
                     let channel = self.ensure_thread_channel(replacement_id);
+                    channel.backend_id = Some(app_server.backend_id());
                     let mut store = channel.store.lock().await;
                     Self::install_side_thread_snapshot(&mut store, forked.session, forked.turns);
                 }
+                let previous_storage = state.storage;
+                let mut state = state;
+                state.storage = storage;
+                let parent_thread_id = state.parent_thread_id;
                 self.side_threads.insert(replacement_id, state);
                 self.upsert_agent_picker_thread(
                     replacement_id,
@@ -144,6 +158,11 @@ impl App {
                     /*agent_role*/ None,
                     /*is_closed*/ false,
                 );
+                self.sync_agent_picker_thread(replacement_id);
+                self.sidebars
+                    .entry(Some(parent_thread_id))
+                    .or_default()
+                    .chat_ready(replacement_id);
                 let result = self
                     .select_agent_thread(tui, app_server, replacement_id)
                     .await;
@@ -151,12 +170,18 @@ impl App {
                     self.discard_side_thread_in_background(app_server, thread_id)
                         .await;
                     self.sync_side_thread_ui();
-                    self.chat_widget.add_info_message(
-                        "Synced with main; previous Side history was discarded.".into(),
-                        /*hint*/ None,
-                    );
+                    let message = match previous_storage {
+                        crate::app_server_session::SideChatStorage::Temporary => {
+                            "Synced with main; previous Side history was discarded."
+                        }
+                        crate::app_server_session::SideChatStorage::Attached => {
+                            "Synced with main; the previous Side chat remains saved."
+                        }
+                    };
+                    self.chat_widget
+                        .add_info_message(message.into(), /*hint*/ None);
                 } else {
-                    // Do not destroy the old temporary history unless the new view is usable.
+                    // Keep the old view until the replacement is usable.
                     self.select_agent_thread(tui, app_server, thread_id).await?;
                     self.discard_side_thread(app_server, replacement_id).await;
                     self.sync_side_thread_ui();
@@ -192,8 +217,15 @@ impl App {
                 config.ephemeral = false;
                 // Only remove the exact guardrail suffix installed by Side. The saved fork has
                 // normal capabilities; inherited tasks remain reference context, not active work.
-                let side_policy = codex_context_fragments::SideConversationPolicy::Temporary
-                    .instructions(/*existing*/ None);
+                let side_policy = match state.storage {
+                    crate::app_server_session::SideChatStorage::Temporary => {
+                        codex_context_fragments::SideConversationPolicy::Temporary
+                    }
+                    crate::app_server_session::SideChatStorage::Attached => {
+                        codex_context_fragments::SideConversationPolicy::Attached
+                    }
+                }
+                .instructions(/*existing*/ None);
                 let previous = config
                     .developer_instructions
                     .as_deref()
