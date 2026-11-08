@@ -1202,9 +1202,6 @@ pub struct Config {
     /// Additional parameters for the web search tool when it is enabled.
     pub web_search_config: Option<WebSearchConfig>,
 
-    /// Search overrides keyed by the current inference provider ID.
-    pub web_search_model_providers: BTreeMap<String, ModelProviderInfo>,
-
     /// Whether to register the experimental request_user_input tool.
     pub experimental_request_user_input_enabled: bool,
 
@@ -4226,28 +4223,20 @@ impl Config {
             })?
             .clone();
 
-        let mut web_search_model_providers = BTreeMap::new();
-        if let Some(tools) = cfg.tools.as_ref() {
-            for (source_id, search_id) in &tools.standalone_web_search_providers {
-                if !model_providers.contains_key(source_id) {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("Standalone web search inference provider `{source_id}` not found"),
-                    ));
-                }
-                let provider = model_providers.get(search_id).ok_or_else(|| {
+        for provider in model_providers.values() {
+            if let Some(search_id) = provider.standalone_web_search_provider.as_ref() {
+                let search_provider = model_providers.get(search_id).ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::NotFound,
                         format!("Standalone web search provider `{search_id}` not found"),
                     )
                 })?;
-                if !provider.is_openai() {
+                if !search_provider.is_openai() {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidInput,
                         "Separate standalone web search requires an OpenAI provider",
                     ));
                 }
-                web_search_model_providers.insert(source_id.clone(), provider.clone());
             }
         }
 
@@ -4985,7 +4974,6 @@ impl Config {
             forced_login_method,
             web_search_mode: constrained_web_search_mode.value,
             web_search_config,
-            web_search_model_providers,
             experimental_request_user_input_enabled,
             update_plan_enabled,
             tool_registry,

@@ -229,6 +229,9 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the standalone web-search endpoint.
     #[serde(default)]
     pub supports_standalone_web_search: bool,
+    /// Use a separately authenticated OpenAI provider for standalone search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone_web_search_provider: Option<String>,
     /// Runtime-only opt-in for internal metadata, independent of the destination check.
     /// This cannot be loaded from or written to serialized provider configuration.
     #[serde(skip)]
@@ -609,6 +612,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: true,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            standalone_web_search_provider: None,
             capabilities: None,
             project_id: None,
             location: None,
@@ -652,6 +656,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             capabilities: None,
             project_id: None,
             location: None,
@@ -692,6 +697,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             project_id: None,
             location: None,
             credential_file: None,
@@ -800,6 +806,7 @@ pub fn merge_configured_model_providers(
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
     for (key, mut provider) in configured_model_providers {
+        let search_provider = provider.standalone_web_search_provider.take();
         if key == "openai" {
             // Keep the built-in identity, inference routing, and authentication.
             // Only catalog routing is configurable through this provider entry.
@@ -847,7 +854,12 @@ pub fn merge_configured_model_providers(
         } else if key == GCP_PROVIDER_ID {
             merge_gcp_provider_overrides(model_providers.get_mut(&key), provider)?;
         } else {
-            model_providers.entry(key).or_insert(provider);
+            model_providers.entry(key.clone()).or_insert(provider);
+        }
+        if let Some(search_provider) = search_provider
+            && let Some(provider) = model_providers.get_mut(&key)
+        {
+            provider.standalone_web_search_provider = Some(search_provider);
         }
     }
 
@@ -937,6 +949,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,

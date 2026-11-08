@@ -47,8 +47,10 @@ struct WebSearchExtensionConfig {
 impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
         let search_provider = config
-            .web_search_model_providers
-            .get(&config.model_provider_id);
+            .model_provider
+            .standalone_web_search_provider
+            .as_ref()
+            .map(|id| &config.model_providers[id]);
         let provider = search_provider.unwrap_or(&config.model_provider);
         Self {
             provider_supports_search: provider.is_openai()

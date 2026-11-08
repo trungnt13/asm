@@ -358,10 +358,10 @@ do not add HTTP provider bindings or change native model/runtime selection.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
 
-Standalone search may select independent OpenAI authentication per inference provider ID:
-`[tools.standalone_web_search_providers]` with `fireworks = "openai"`. Resolve this map
-against the selected model's current provider, including external catalogue bindings and
-model switches. A matching override enables the existing standalone path without a global
+Standalone search may select independent OpenAI authentication in any provider definition:
+`[model_providers.fireworks]` with `standalone_web_search_provider = "openai"`. Resolve
+this setting from the selected model's current provider, including external catalogue bindings
+and model switches. A matching override enables the existing standalone path without a global
 feature flag; disabled search, provider capabilities, and MCP/backend exclusions still apply.
 Reuse the upstream search extension, native defaults, and existing tool-output/history path;
 do not silently fall back between services. Separate search sends its usual recent context
