@@ -257,455 +257,126 @@ Optional `macos_concurrency_experiment` compares cold same-commit `macos-15` bui
 
 ### Desktop app-context filtering
 
-`app_context_filter` defaults to an empty list. App-server removes only exact named
-`###` sections inside Desktop `<app-context>` instructions before session creation.
-Keep unknown sections, surrounding instructions, per-turn additional context, and
-existing rollout history unchanged. Filtered session instructions remain consistent
-when rebuilding initial context. Use a fresh chat after changing the filter.
+`app_context_filter` defaults to `[]`. Before session creation, remove only exact named `###` sections from Desktop `<app-context>` instructions. Preserve unknown sections, surrounding instructions, per-turn context, and rollout history. Keep filtered instructions consistent when rebuilding initial context. After filter changes, use a fresh chat.
 
 ### External runtime boundary
 
-Keep ASM's inference and tool runtime separate from external CLI execution. Use
-`core/src/external_runtime` for ASM session integration and `ext/external-runtime`
-for shared process/framing/cleanup plumbing plus separate Claude and Cursor drivers.
-Shared session starts, prompts, and outcomes use neutral types; each driver owns its
-CLI protocol encoding. Preserve the legacy `claude-runtime` checkpoint directory,
-canonical history encoding, and checkpoint hashes when changing internal names.
-Thread deletion removes ASM-owned linkage and private Cursor configuration only after
-exclusive runtime ownership is available; leave native CLI conversation history untouched.
-Record bounded CLI versions from protocol initialization in opt-in failure diagnostics,
-without extra CLI launches or version-number admission gates. Shared errors use neutral names.
+Keep ASM inference/tools separate from external CLI execution. Use `core/src/external_runtime` for session integration. Use `ext/external-runtime` for shared process, framing, and cleanup code, with separate Claude/Cursor drivers. Use neutral shared start, prompt, outcome, and error types. Each driver owns its protocol encoding. Preserve the legacy `claude-runtime` checkpoint directory, canonical history encoding, and checkpoint hashes across internal renames.
+
+Delete ASM linkage and private Cursor configuration only with exclusive runtime ownership. Preserve native conversation history. In opt-in failure diagnostics, record bounded CLI versions from protocol initialization. Do not launch extra CLIs or add version-number admission gates.
 
 ### Catalog-bound model providers
 
-When `load_external_models_json` is true, merge bundled external models into custom
-`model_catalog_json` catalogs in memory; exact custom IDs retain all their metadata overrides.
-When false, keep the custom catalog alone. Provider routing remains bundled and exact-match-only.
-
-Bundled `external_models.json` entries may select an existing named `model_provider`.
-Accept the bundled entry’s optional provider- or runtime-qualified `alias` as well as its canonical slug.
-Normalize aliases before validation and requests; persist the canonical model/provider pair so
-alias changes cannot reroute resumed chats. Preserve custom canonical-ID metadata overrides,
-existing full IDs, and managed provider requirements. Do not infer routing from slash-separated
-names or accept routing metadata from remote catalogs. Keep endpoints and
-credentials in user provider configuration and enforce managed provider requirements.
-DeepSeek V4.1 Flash 1017 selects `fireworks`; its alias is
-`fireworks/deepseek-v4.1-flash`. No profile or custom agent role is required.
-Show aliases in picker entries while retaining canonical selection identity. Native-runtime entries use
-`claude/…` and `cursor/…` aliases for their existing `claude-code/…` and `cursor-agent/…` IDs;
-do not add HTTP provider bindings or change native model/runtime selection.
-Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
-Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
-Provider changes in the picker start fresh sessions and preserve the old chat.
-Input and resume admission keep valid catalog-bound and native-runtime routes independent
-of the global HTTP-provider default. Validate saved and requested identities separately;
-request overrides cannot grant an exception to an unrelated saved chat. Keep mandatory
-provider policy, configuration errors, missing-provider checks, and history/runtime boundaries.
-Ordinary unbound API models retain upstream saved-provider admission rules. Bound and native
-input routes still require their current provider definition and valid configuration, without
-requiring the global provider default to match. Route classification uses existing in-memory
-model bindings and runtime detection, not discovery.
-Cross-provider subagents require `fork_turns="none"`; reject cross-provider history
-reuse and preserve saved provider identity on resume. Build a provider-specific
-model manager for bound models rather than reuse the parent's discovery identity.
-User-spawned subagents using a catalog-bound provider ID must select an explicitly
-bound model or a native runtime, including descendants and cold resumes. Reject
-unbound selections before startup rather than guessing reverse provider routing.
-For unbound custom subagent models, configure a separate provider ID. Ordinary
-main sessions and internal workers retain their existing provider behavior.
-Keep upstream catalog/API model types unchanged. Disabling bundled catalog display
-does not disable explicit selection, matching native external model behavior.
+- With `load_external_models_json = true`, merge bundled entries into custom `model_catalog_json` in memory. Exact custom IDs retain all metadata overrides. With `false`, retain only the custom catalog. Routing remains bundled and exact-match-only.
+- Bundled `external_models.json` entries can select an existing named `model_provider`. Accept canonical slugs and optional provider/runtime-qualified aliases. Normalize aliases before validation/requests. Persist canonical model/provider identity so alias changes cannot reroute resumed chats. Preserve existing full IDs and managed provider requirements. Do not infer routing from slashes or remote catalog metadata. Keep endpoints/credentials in user provider configuration.
+- DeepSeek V4.1 Flash 1017 selects `fireworks`, alias `fireworks/deepseek-v4.1-flash`, without a profile or custom role. Default its context to 300,000 tokens; allow explicit overrides through 1,000,000. Select direct tools: live checks could not execute Code Mode's custom tool through Fireworks.
+- Show picker aliases but retain canonical identity. Native aliases `claude/…` and `cursor/…` retain `claude-code/…` and `cursor-agent/…` IDs. Do not add HTTP bindings or change native model/runtime selection. Picker provider changes start fresh sessions and preserve old chats.
+- Admit valid bound/native input and resume independently of the global HTTP-provider default. Validate saved/requested identities separately. Overrides cannot exempt unrelated saved chats. Preserve mandatory policy, configuration errors, missing-provider checks, and history/runtime boundaries. Require the current provider definition and valid configuration. Classify routes from in-memory bindings/runtime detection, not discovery. Unbound API models retain upstream saved-provider admission.
+- Cross-provider subagents require `fork_turns="none"`. Reject history reuse; preserve saved provider identity on resume. Bound models use their own provider-specific model manager, not parent discovery identity.
+- For user-spawned children with a catalog-bound provider ID, require an explicitly bound model or native runtime, including descendants/cold resumes. Reject unbound selections before startup; do not infer reverse routing. Use a separate provider ID for unbound custom subagent models. Preserve ordinary main/internal-worker provider behavior.
+- Keep upstream catalog/API model types unchanged. Hiding bundled entries does not disable explicit selection.
 
 ### Claude Code thread runtime
 
-Explicit `claude-code/<model>` IDs select the official persistent `claude -p` CLI
-for main threads and ASM-managed children. Versioned `sonnet-` and `opus-` suffixes
-are expanded to native `claude-` model names at CLI launch; other native suffixes pass
-through unchanged. Saved session model IDs remain unchanged for safe resume.
-Other models retain upstream inference.
-Native sessions keep their original executor and working directory. Allow ASM-only
-workspace-root, configuration, and capability metadata updates without treating them
-as a native environment switch; genuine executor or directory changes still require
-a fresh thread.
-Keep upstream `models.json` unchanged. Bundle Claude Code entries separately in
-[`external_models.json`](../codex-rs/models-manager/external_models.json).
-Top-level `load_external_models_json` defaults to `true`; set it to `false` to
-hide bundled external entries. Explicit `claude-code/<model>` selection remains available.
-Append external entries when reading the default catalog, including remote and cached catalogs.
-External entries override duplicate IDs without changing cached payloads.
-Provider-owned catalogs remain authoritative and ignore this flag.
-Explicit custom catalogs honor this flag and retain metadata for duplicate IDs.
-Claude Code owns native model access and effort acceptance; metadata grants no access.
+The shared native rules below also apply to Cursor, except for its listed differences.
 
-Native Claude and Cursor sessions discard inherited service tiers from config files and
-profiles. Explicit request or session-flag tiers remain subject to native startup
-validation: only Default is supported. Reject unsupported persistent and turn-only
-tier updates before committing settings. OpenAI service-tier resolution is unchanged.
+**Selection and settings**
 
-Keep CC entries visible independently of OpenAI login; never bypass filtering by
-marking them API-supported. Preserve ordinary model defaults.
-The model picker starts a fresh session after confirmation when entering/leaving this
-runtime or changing its model. Keep the original history; never replay it
-into the new native conversation or change saved defaults as part of this action.
-Same-model/provider effort changes stay in the current conversation and leave saved
-model defaults untouched. Apply the native control at the next idle turn boundary,
-require confirmation, then save the new effort before submitting input. Preserve the
-native process, session ID and history; never rebuild context for an effort change.
-Cold resume restores saved effort before applying a requested change. Unsupported
-changes fail before prompting without fallback. Native caching remains provider-owned;
-preserve cache-relevant context, but do not promise an identical cache key or fixed hit
-rate. Claude Code gates cache-prefix preservation on its native
-`per_turn_effort_active` feature flag, which the native server can disable.
-ASM child selections use catalog defaults and supported efforts when present; native
-model IDs absent from the catalog remain usable without OpenAI fallback effort metadata.
-When a role changes the selected external model, replace only inherited parent effort
-with that model's catalog default, or leave effort unset when native metadata is absent.
-Preserve explicit spawn, role and configured subagent efforts for normal validation;
-never silently discard unsupported explicit choices. Same-model role selection preserves
-inherited effort. OpenAI role effort behavior is unchanged.
-Keep the V2 spawn tool description explicit: `claude-code/*` requires
-`fork_turns="none"` and a self-contained task message, including with custom tool
-descriptions or hidden catalogs. Do not rely on a failed spawn to teach this constraint.
+- Explicit `claude-code/<model>` selects official persistent `claude -p` for mains and ASM children. At launch, expand versioned `sonnet-`/`opus-` suffixes to native `claude-` names; pass other suffixes unchanged. Preserve saved model IDs. Other models retain upstream inference.
+- Keep the original native executor/cwd. Allow ASM-only workspace-root, config, and capability metadata updates. Actual executor/cwd changes require a fresh thread.
+- Keep upstream `models.json` unchanged. Bundle native entries in [`external_models.json`](../codex-rs/models-manager/external_models.json). `load_external_models_json` defaults to `true`; `false` hides bundled entries, not explicit native selection. Append entries to default catalogs, including cached/remote catalogs. External entries override duplicate IDs without changing cached payloads. Provider-owned catalogs ignore the flag and remain authoritative. Custom catalogs honor it and retain duplicate-ID metadata. Native model/effort access remains native-owned; metadata grants no access.
+- Keep CC entries visible without OpenAI login; do not mark them API-supported to bypass filtering. Preserve ordinary model defaults.
+- Native sessions discard tiers inherited from config/profiles. Only Default passes explicit request/session-flag tier validation. Reject unsupported persistent/turn-only tier changes before committing settings. Preserve OpenAI tier resolution.
+- On picker runtime entry/exit or model changes, require confirmation and start a fresh session. Preserve old history/defaults; never replay history into the new native conversation.
+- Same-model/provider effort changes retain the conversation and saved model defaults. At the next idle turn boundary, apply the native control, require confirmation, then save effort before input. Preserve process, session ID, and history; never rebuild context. Cold resume restores saved effort before requested changes. Reject unsupported changes before prompting, without fallback.
+- Preserve cache-relevant context, but do not promise cache keys/hit rates. Claude cache-prefix preservation depends on server-controlled `per_turn_effort_active`.
+- For ASM children, use available catalog effort defaults/support. Native IDs absent from the catalog remain usable without OpenAI fallback metadata. When a role changes the external model, replace only inherited parent effort with the new catalog default, or leave it unset without metadata. Validate explicit spawn, role, and configured subagent efforts; do not discard unsupported choices. Same-model roles retain inherited effort. Preserve OpenAI role behavior.
+- Even with custom descriptions/hidden catalogs, V2 spawn descriptions must state: `claude-code/*` requires `fork_turns="none"` and a self-contained task. Do not rely on failed spawns to teach this.
 
-- ASM owns thread identity, queues, user input, output display and process lifecycle.
-  Claude Code owns conversation context, instructions, skills, tools, permissions,
-  hooks and its internal subagents. All external runtimes share one input policy before
-  native dispatch or mailbox delivery. Forward explicitly queued plaintext ASM context and
-  tool outputs in labeled JSON context blocks separate from the actual user message.
-  Skip encrypted injected items with a warning, preserving the actual prompt. Do not
-  forward ciphertext or replay previously ignored history. Persist a projection marker
-  for newly forwarded context so warm turns and cold resume retain native input accounting.
-  Persist newly requested idle `!` shell output through that same labeled context projection
-  for the next native turn; do not start inference or backfill older shell history.
-  Do not synchronize generated ASM instructions or approval receipts. The instruction
-  exceptions are root Claude communication guidance and a spawned child's selected role.
-  For children, append only the selected role's own
-  `developer_instructions` through `--append-system-prompt`, preserving Claude's
-  default prompt. Pass the text as one argument, without shell interpolation or a
-  temporary prompt file. Process arguments expose the text and OS argument-size
-  limits apply; never truncate or silently fall back to a file. Never forward merged
-  or inherited ASM instructions.
-  Root Claude sessions append only the original Claude Code paragraph beginning
-  "Assume users can't see most tool calls or thinking" to request a short update
-  before tools and at material milestones. Do not add this paragraph to ASM subagents,
-  internal sessions or temporary side conversations; child role prompts remain unchanged.
-  Preserve native root prompt snapshots and native internal-agent behavior; this
-  startup policy does not rewrite existing context or guarantee model compliance.
-  Keep loaded role instructions during warm turns. On cold reload, recover the role
-  through normal child configuration and supply its current text on native startup.
-  Do not pin role text to saved linkage or reject changes to the same role. Native
-  prompt snapshots must not retain an older role after cold reload. For managed
-  Claude children, pass `--system-prompt-snapshot off` even when the current role
-  has no instructions, so removing instructions also clears the old role. This
-  requires Claude Code 2.1.257 or later; fail rather than silently retain a snapshot
-  on an unsupported CLI. Claude rebuilds the prompt each request, which can affect
-  cache reuse and retained thinking. Keep loaded role text fixed during warm turns;
-  preserve native defaults for root and side sessions. Managed Claude children also
-  set `FORCE_PROMPT_CACHING_5M=1` in their process environment and flag settings,
-  requesting five-minute caching for the child and its native helper requests.
-  Apply this on new sessions and cold resume, including children without a role;
-  keep native caching-disable controls and managed policy authoritative. Do not change
-  personal configuration or cache policy for root, side, Cursor, or OpenAI sessions.
-  Managed Claude children also set `disableClaudeAiConnectors: true` in the same
-  inline settings object to skip automatically fetched claude.ai connectors. Preserve
-  configured local MCP servers, built-in coding tools, and the ASM communication bridge;
-  do not disable connectors for root or side sessions or change personal settings.
-  Set `syncClaudeAiSkills: false` only in the child's inline settings to skip account-synced
-  skills without deleting their shared cache. Preserve personal, project, plugin and
-  bundled skills, and retain root and side skill defaults.
-  Keep runtime-setting and uncertain-turn recovery checks unchanged.
-  Native main sessions receive no role instruction injection. Cursor children use the
-  capability-gated ACP path below, not a CLI prompt flag.
-- Main sessions and sides have no injected ASM communication tools. ASM-managed
-  MultiAgentV2 children use one authenticated loopback JSON dispatcher, without MCP:
-  Claude registers tools through a session-local native mod; Cursor calls the existing
-  ASM binary's private helper through its native shell. No external JavaScript or Python
-  runtime is required. Claude's native tool names still start with `mcp__asm__`;
-  that naming does not imply an MCP transport. Preserve other native user integrations.
-  Discovery exposes only canonical collaboration tools other than `spawn_agent`.
-  `disable_direct_message` removes `send_message` and `followup_task`;
-  `wait_agent` follows `wait_agent_enabled`; `interrupt_agent` and `list_agents` stay;
-  `disable_native_tools` removes them all. `agent_message_board` adds the extension's
-  nine discussion tools, bound to the child at thread start with its own storage gates,
-  independent of `disable_native_tools`. Reuse canonical registration and handlers;
-  duplicate names fail the turn. Never forward arbitrary ASM tools or create another
-  agent registry. The private child directory contains an owner-only credential
-  descriptor; prompts and argv carry no token. Calls are active-turn scoped, serialize
-  through the existing execution gate, and are not retried automatically. Both use
-  the helper's timeout covering eight queued maximum waits plus 30 seconds. Claude
-  invokes it with native `$.process.spawn`: `$.http.fetch` has a 30-second deadline,
-  and `$.process.run` is capped at ten minutes in Claude Code 2.1.310. Preserve native
-  tool-search defaults rather than forcing every schema into each model prompt.
-  Board notifications reach only a running turn: Claude folds them in at its next
-  tool boundary; Cursor can read them through its CLI wait result during an active
-  prompt. Neither wakes an idle child.
-- Deliver messages during a busy Claude child's native run as UUID-stamped queued
-  user input, never Send now or another interrupt. Native folds it in at its next tool
-  boundary, so running tools finish instead of returning a rejection that tells the
-  model to stop. Enable this only when `system/init` advertises `interrupt_send_now_v1`,
-  which identifies the verified CLI generation whose command lifecycle reconciles
-  queued input; otherwise retain turn-boundary delivery. Persist input before
-  submission; reconcile every submitted command before saving clean idle. Idle
-  `send_message` remains queue-only and Codex delivery stays unchanged. Redirect
-  urgently with explicit `interrupt_agent`, then `followup_task`; explicit
-  interruption retains its separate confirmed-idle or kill-and-dirty rules.
-- Native idle is not final while `background_tasks_changed` lists live non-ambient
-  tasks: their completion notification starts another native turn. Keep that work in
-  the same ASM turn until a later idle without live background work, so a parent does
-  not see completion before the child can wake. Notifications confer no new authority.
-  Long-lived background tasks keep the turn running until they end or are interrupted.
-  A plain interrupt leaves background shells running; its confirmation rules are
-  unchanged. A notification result answers a turn only after that turn's own input
-  succeeded, so a notification turn that ran between ASM turns cannot answer new input.
-- Project native tool, skill and task activity into existing MCP display cells for
-  streaming, disclosure, grouping and replay. These are display events, not tool
-  execution requests or model-context items. Attribute native child activity without
-  inventing ASM threads; preserve failures and avoid duplicate bridge-tool events.
-  Include distinct observed native child tasks in the completed turn's `ag` count,
-  deduplicated across lifecycle events and display replay. Historical child activity
-  must not inflate a currently active ancestor turn's count.
-- Use native Claude Code settings and subscription login; resolve `claude` through
-  PATH. Do not extract subscription credentials or enable API billing implicitly.
-  Provide deterministic conversational subscription login through the shared
-  app-server path, using existing chat requests and responses without Desktop changes.
-  Explicit `claude login` and `cursor login` select the authentication provider in any
-  main chat, including GPT parents authenticating native subagents, without changing
-  the chat model. Keep the provider in the pending login session rather than infer it
-  from the chat model. Subagents cannot start interactive login. Login exchanges are
-  display-only and must not enter the main chat's model history or persisted rollout.
-  Intercept login replies before normal turn ingestion, history, hooks, or inference;
-  send one-time authorization codes only to the official Claude login subprocess.
-  Never include codes in model requests, backend logs, or rollouts. Client-local
-  drafts and prompt recall are accepted. Expired or interrupted login exchanges stay
-  fail-closed: unrecognized replies receive fixed restart instructions, never normal
-  turn ingestion. Only explicit non-secret actions may exit or restart login mode.
-  Retain a code-free pending-login marker across backend restart and thread resume;
-  never store authorization codes or OAuth state in that marker or alter checkpoints.
-  Keep login output private and errors fixed;
-  verify subscription authentication rather than falling back to Console, API keys,
-  or cloud providers. Login does not authorize replaying failed input or clearing an
-  uncertain execution checkpoint.
-  Do not disable native tools, skills or instructions to emulate ASM inference. The one
-  exception: ASM thread-spawned children (V1 and V2) launch with
-  `--disallowedTools AskUserQuestion`, because nobody can answer a headless child's
-  questions. Main sessions keep native question behavior.
-- Claude permissions govern Claude tools. ASM sandbox and approval settings do not
-  govern them; display that distinction clearly. By user decision, every Claude session,
-  main and children, runs in native bypass mode (`--dangerously-skip-permissions`).
-  Native deny rules, hooks and managed policy still apply. Keep
-  `--permission-prompts none`, so anything that still prompts fails explicitly; never
-  grant protocol approval requests. Configured native hooks remain native.
-  If managed policy requires an ASM-managed sandbox, refuse external execution.
-- Keep one CLI process per loaded Claude session, with private external-session
-  linkage and unfinished-turn state. Resume only a known clean session; never replay
-  an uncertain submitted turn or completed tool calls automatically.
-- On interrupt, stop native work and retain the process only after a matching
-  successful interrupt acknowledgement with an explicit empty queued-input receipt,
-  explicit idle, and termination of observed
-  native child tasks. Track a local agent task by ID and its latest run ID: a resumed
-  task keeps its ID with a new, later-sorting run ID. An older-run or run-less start or
-  terminal never replaces or clears a known newer run. Persist clean linkage before allowing another turn. Missing
-  confirmation, timeout, disconnect or forced abort kills the owned group and keeps
-  linkage dirty. Give only external tasks a bounded cleanup grace period.
-  UUID-stamp submitted native user inputs so the receipt accounts for queued work.
-  Native aborted-streaming and aborted-tools results are resumable only after an
-  ASM-requested interrupt, for the submitted UUID with its cancelled-command receipt
-  and the confirmed cleanup above. Continue with new input; never replay the interrupted
-  input or assume its tools had no side effects. A structured Claude authentication
-  failure may leave the turn failed but resumable only after its submitted commands
-  are reconciled, native idle is confirmed, and no tool work or active child tasks
-  make the outcome uncertain. Persist the consumed input and clean linkage before
-  reporting the authentication failure. Allow only new input after login; never
-  resend the failed prompt automatically. Missing confirmation and other execution
-  errors keep the no-replay guard and require explicit recovery. Do not clear older
-  unfinished checkpoints based on their error text.
-- Bound framing, stderr and cleanup waits. Kill only owned native processes; preserve
-  primary failures and retain diagnostics only when requested. Record the first
-  process state before cleanup separately from its final exit status; cleanup must not
-  erase whether the native CLI had already exited or was still running.
-  Give each native CLI a unique inherited process-ownership marker so ordinary detached tools remain identifiable
-  after their CLI exits. Combine marker ownership with verified live ancestry. Never
-  signal ASM’s own process group. This is lifecycle cleanup, not a sandbox: processes
-  that clear the marker and leave observable ancestry can escape cleanup.
-- Forward native user images as typed content blocks, preserving text/image
-  order and delivery checkpoints. Accept inline image data and local attachments through
-  existing image processing; keep injected ASM context plaintext-only. Native history keeps
-  prepared image bytes inline, without OpenAI uploads or replay transformations. Bound
-  Claude image user frames to 31 MiB with a 32 MiB echoed-frame limit; validate before
-  recording input or advancing its checkpoint. Keep ordinary text/control frames at
-  1 MiB. These are ASM transport bounds, not provider limits. Reject unsupported history forks,
-  rollback, runtime switches and native-only operations explicitly. Suppress native
-  model prewarm, title inference and System1 for external threads. Native memory
-  extraction may summarize their saved ASM transcripts.
-- Claude history forks only into temporary `/side`/`/btw` (and its `/sync`), whole and at
-  main's model. Admission requires a loaded, idle main with no native background work and a
-  clean checkpoint whose delivered input equals the forked history. The checkpoint's
-  optional `fork_point` is the final top-level assistant message UUID of the last
-  successful, uninterrupted turn; older checkpoints lack it, so `/side` refuses until main
-  completes a new turn. The side's first turn starts a separate process with `--resume
-  <main> --resume-session-at <fork_point> --fork-session --no-session-persistence
-  --session-id <new>`, so later main turns are excluded. This relies on Claude's hidden
-  cutoff flag, verified on 2.1.309: an unknown UUID fails closed, without fallback to
-  latest. Native agent, task and worktree controls (Agent, Task, TaskStop, SendMessage,
-  ListAgents, CronCreate, CronDelete, ScheduleWakeup, EnterWorktree, ExitWorktree) are
-  disallowed. A short boundary is sent once, because ASM side instructions are not native
-  context; it keeps Side's reference-only, no-agent and no-worktree rules. Never replay
-  history or copy session files. The side checkpoint stays in memory and the side thread
-  unloads as soon as it is closed, ending its process; a lost process or closed side
-  cannot cold-resume. Cursor sides, saved `/fork` and historical cuts of
-  native history stay rejected.
-- External threads use Default collaboration mode only and never use guardian
-  approval review. Mandatory managed-execution restrictions still apply.
-- Native turns have no total-duration deadline; cancellation and bounded cleanup
-  remain available while tools and background agents are running.
-- Do not impose a separate approximate-token prompt cap or truncate instructions.
-  Claude Code manages its context; transport bounds still apply.
-- Explicit child role context limits, otherwise exact V2
-  `subagent_model_context_windows` entries, set native `--autocompact` windows.
-  Accept only 100000–1000000 tokens; reject unsupported values, never ignore them.
-  Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the child environment and flag settings
-  so inherited environment and user/project settings cannot override the explicit
-  value. Native managed policy retains precedence. Unmatched children retain native
-  defaults and environment settings.
-  New root sessions use explicit `model_context_window` the same way, with the same
-  range check; when unset, they retain native defaults and environment settings.
-  Catalog metadata never sets this window.
-  Bind the configured window to native linkage. Changing it requires a new child
-  chat; main chats and their forks keep the window saved when the main chat started.
-  This is a soft compaction window, not a hard maximum context capacity or an
-  exact trigger. Native model capacity still clamps it; Claude subtracts output
-  reserve and compaction headroom. Native 2.1.296 uses a 20000-token output reserve
-  and 13000-token headroom, so 272000 triggers at 239000 with that output reserve.
-  Preserve native automatic-compaction enable/disable controls, memory and hooks;
-  the setting cannot force disabled compaction to run. Keep reported context fill
-  based on native model capacity, not this configured compaction window.
-- Report checked per-process usage deltas from native cumulative model counters.
-  First cold-resume usage and missing/reset counters are unknown, not zero; warn
-  that ASM totals and token-budget accounting are partial in those cases.
-- Thinking is a reported subset of output, never an additional output charge.
-  Display context fill from the latest main request input, not cumulative billing
-  or child requests. Use its native model window; hide unknown context metrics.
-  Cache rate is the cached share of that latest main request.
-- Require native stream-json result followed by session-idle completion; CLI 2.1.296
-  is the verified protocol target. Queued delivery and background continuation were
-  verified with 2.1.309. Revalidate compatibility when upgrading it.
-- Keep opt-in until real Claude-main and Sol-parent/Claude-child sessions pass with
-  the intended installed CLI. Never replace installed binaries or global profiles
-  as part of testing. Cross-runtime context parity is not a requirement.
+**Ownership and input**
+
+- ASM owns thread IDs, queues, user input, display, and process lifecycle. The native CLI owns context, instructions, skills, tools, permissions, hooks, and internal agents.
+- Apply one input policy before native dispatch/mailbox delivery. Forward explicitly queued plaintext ASM context/tool output in labeled JSON blocks, separate from user input. Warn and skip encrypted injected items; preserve the actual prompt. Never forward ciphertext or backfill ignored history.
+- Persist projection markers for newly forwarded context to retain warm/cold input accounting. Project newly requested idle `!` output the same way for the next native turn. Do not start inference or backfill old shell history.
+- Do not synchronize generated ASM instructions or approval receipts. Only root Claude communication guidance and the child's selected role are instruction exceptions. Never forward merged/inherited ASM instructions. Native mains receive no role injection.
+- For Claude children, append only the selected role's `developer_instructions` through `--append-system-prompt`, preserving the default prompt. Pass one argument without shell interpolation or temporary files. Arguments expose text and have OS limits; never truncate or fall back to files. Cursor uses its gated ACP path.
+- Keep loaded role text fixed during warm turns. On cold reload, recover current text from normal child configuration. Do not pin text to linkage, or reject same-role edits. For managed Claude children, always pass `--system-prompt-snapshot off`, including empty roles. Require Claude Code 2.1.257+; fail on unsupported CLIs. Prompt rebuilding can affect caching/retained thinking. Preserve root/side snapshot defaults and runtime-setting/uncertain-turn recovery checks.
+- Root Claude appends only the original paragraph beginning "Assume users can't see most tool calls or thinking". It requests updates before tools and at milestones. Exclude ASM children, internal sessions, and temporary sides. Preserve child role prompts, root snapshots, and native internal agents. This startup policy neither rewrites context nor guarantees compliance.
+- For managed Claude children, including roleless children and cold resume, set `FORCE_PROMPT_CACHING_5M=1` in environment and flag settings. Request five-minute caching for children/helpers; preserve native cache-disable controls and managed policy. Do not change personal settings or root/side/Cursor/OpenAI cache policy.
+- In the same child inline settings, set `disableClaudeAiConnectors: true` and `syncClaudeAiSkills: false`. Skip fetched claude.ai connectors/account skills without deleting shared skill caches. Preserve configured local MCP servers, built-in tools, ASM bridge, and personal/project/plugin/bundled skills. Preserve root/side connector and skill defaults and personal settings.
+
+**Communication and display**
+
+- Do not inject ASM communication tools into mains/sides. Managed MultiAgentV2 children use one authenticated loopback JSON dispatcher, not MCP. Claude uses a session-local native mod; Cursor uses the existing ASM binary's private helper through native shell. No external JavaScript/Python runtime is required. Claude's `mcp__asm__` names do not imply MCP. Preserve other native integrations.
+- Discover only canonical collaboration tools except `spawn_agent`. `disable_direct_message` removes `send_message`/`followup_task`. `wait_agent` follows `wait_agent_enabled`; retain `interrupt_agent`/`list_agents`. `disable_native_tools` removes all these tools. Independently, `agent_message_board` adds nine extension discussion tools at thread start, with its storage gates.
+- Reuse canonical registration/handlers; duplicate names fail the turn. Do not forward arbitrary ASM tools or add a registry. Keep credentials in an owner-only descriptor in the private child directory, never prompts/argv. Scope calls to active turns, serialize through the execution gate, and do not retry automatically.
+- Both bridges use the helper timeout: eight queued maximum waits plus 30 seconds. Claude uses native `$.process.spawn`; `$.http.fetch` has a 30-second deadline, and `$.process.run` has a ten-minute cap in 2.1.310. Preserve native tool-search defaults; do not force every schema into prompts.
+- Board notices reach running turns only: Claude at the next tool boundary; Cursor through active-prompt CLI wait results. Never wake idle children.
+- Busy Claude children receive UUID-stamped queued user input, never Send now/another interrupt. Native delivery occurs at a tool boundary without rejecting running tools. Require `system/init` capability `interrupt_send_now_v1`; otherwise deliver at turn boundaries. Persist input before submission and reconcile every submitted command before clean idle. Idle `send_message` stays queue-only; preserve Codex delivery. For urgent redirection, use `interrupt_agent`, then `followup_task`, with normal interrupt safeguards.
+- While `background_tasks_changed` lists live non-ambient tasks, native idle is not final. Keep completion-triggered native turns in the same ASM turn until idle without live work. Long-lived tasks keep it running until completion/interruption. Notifications grant no authority. Plain interrupt leaves background shells running; retain confirmation rules. A notification result answers new input only after that input succeeded, not from a turn between ASM turns.
+- Project native tool/skill/task activity into existing MCP display cells for streaming, disclosure, grouping, and replay. These are display events, not execution/context items. Attribute native child activity without ASM threads. Preserve failures; avoid duplicate bridge events. Count distinct observed native child tasks in completed-turn `ag`, deduplicated across lifecycle/replay. Historical activity must not inflate active ancestor counts.
+
+**Login and permissions**
+
+- Resolve `claude` through PATH; use native settings/subscription login. Do not extract subscription credentials or enable API billing implicitly. Preserve native tools/skills/instructions, except V1/V2 ASM-spawned Claude children use `--disallowedTools AskUserQuestion`. Mains retain native questions.
+- Use deterministic subscription login through shared app-server chat requests/responses, without Desktop changes. Explicit `claude login`/`cursor login` selects the provider in any main chat, including GPT parents, without changing models. Store that provider in pending login state; never infer it from the chat model. Children cannot start interactive login.
+- Keep login exchanges display-only, outside model history/rollouts. Intercept replies before normal ingestion, history, hooks, or inference. Send authorization codes only to the official Claude login subprocess. Never put codes in model requests, logs, or rollouts; client drafts/recall are accepted.
+- Expired/interrupted exchanges fail closed. Unrecognized replies get fixed restart instructions, not normal ingestion. Only explicit non-secret actions exit/restart login. Preserve a code-free pending marker across backend restart/resume, without codes/OAuth state or checkpoint changes. Keep output private and errors fixed. Verify subscription auth; never fall back to Console/API keys/cloud providers.
+- Login never authorizes replay or uncertain-checkpoint recovery. Display that native permissions, not ASM sandbox/approvals, govern native tools. Refuse external execution when managed policy requires an ASM sandbox.
+- Every Claude main/child uses `--dangerously-skip-permissions` and `--permission-prompts none`. Preserve native denies, hooks, and managed policy. Remaining prompts fail explicitly; never grant protocol approvals. Configured native hooks stay native.
+
+**Recovery and cleanup**
+
+- Keep one CLI process per loaded Claude session, private native linkage, and unfinished-turn state. Resume only known-clean sessions. Never automatically replay uncertain submitted input or completed tools. Other execution errors require explicit recovery; error text cannot clear older unfinished checkpoints.
+- UUID-stamp native input. After an ASM interrupt, retain the process only with matching successful acknowledgement, explicit empty queued-input receipt, explicit idle, and stopped observed native children. Persist clean linkage before another turn. Otherwise, on missing confirmation, timeout, disconnect, or forced abort, kill the owned group and keep linkage dirty. Give only external tasks bounded cleanup grace.
+- Track native tasks by ID/latest run ID. Resumes retain task IDs with later-sorting run IDs. Older-run/run-less starts or terminals cannot replace/clear a known newer run.
+- Resume aborted-streaming/aborted-tools results only after an ASM-requested interrupt with the submitted UUID's cancelled-command receipt and confirmed cleanup above. Continue with new input; do not assume tools had no effects.
+- A structured Claude auth failure can be failed but resumable only after command reconciliation, confirmed idle, and no uncertain tools/children. Persist consumed input/clean linkage before reporting failure. After login, accept new input only; do not resend failed prompts.
+- Bound frames, stderr, and cleanup waits. Kill only owned processes; preserve primary failures and retain diagnostics only when requested. Record pre-cleanup process state separately from final exit status, including whether the CLI was already stopped.
+- Give each native CLI a unique inherited ownership marker. Combine marker ownership with verified live ancestry to identify detached tools after CLI exit. Never signal ASM's process group. Cleanup is not sandboxing; processes that clear markers and leave observable ancestry can escape.
+
+**Images and lifecycle**
+
+- Forward user images as typed blocks in text/image order, preserving delivery checkpoints. Use existing processing for inline data/local attachments. Injected ASM context stays plaintext-only. Keep prepared image bytes inline in native history, without OpenAI uploads/replay transformations.
+- Validate before recording input/advancing checkpoints. Image input frames have a 31 MiB limit; echoed/replay frames, 32 MiB; ordinary text/control frames, 1 MiB. These are ASM transport limits, not provider limits.
+- Explicitly reject unsupported history forks, rollback, runtime switches, and native-only operations. Suppress native prewarm, title inference, and System1. Native memory extraction can summarize saved ASM transcripts.
+- Claude forks only whole history into temporary `/side`/`/btw` and `/sync`, at main's model. Require loaded idle main, no native background work, and a clean checkpoint whose delivered input matches forked history. Optional `fork_point` is the last successful uninterrupted turn's final top-level assistant UUID. Without it, refuse `/side` until a new main turn completes.
+- Start Side's first turn separately with `--resume <main> --resume-session-at <fork_point> --fork-session --no-session-persistence --session-id <new>`. Exclude later main turns. The hidden cutoff flag was verified on 2.1.309; unknown UUIDs fail closed, never fall back to latest.
+- In Claude Side, disallow native Agent, Task, TaskStop, SendMessage, ListAgents, CronCreate, CronDelete, ScheduleWakeup, EnterWorktree, and ExitWorktree. Send one short boundary to preserve Side's reference-only/no-agent/no-worktree rules; ASM side instructions are not native context. Never replay history/copy session files. Keep side checkpoints in memory; closing unloads the thread/process. Lost/closed sides cannot cold-resume. Reject Cursor sides, saved `/fork`, and historical native cuts.
+- External threads use Default collaboration only, never guardian review. Keep mandatory managed-execution restrictions. Native turns have no total deadline; retain cancellation/bounded cleanup during tools/background agents. Do not add an approximate-token prompt cap or truncate instructions; Claude manages context within transport limits.
+
+**Claude context and usage**
+
+- Explicit child role context limits, otherwise exact V2 `subagent_model_context_windows`, set native `--autocompact` windows. Accept only 100000–1000000 tokens; reject unsupported values. Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in child environment and flag settings. Explicit values override inherited environment/user/project settings, not native managed policy. Unmatched children retain native defaults/environment.
+- New roots use explicit `model_context_window` with the same range/precedence; unset retains native defaults/environment. Catalog metadata never sets it. Bind the window to linkage. Changes require a new child chat; mains/forks keep main's original window.
+- The window is soft, not a hard capacity/exact trigger. Native capacity clamps it; output reserves/compaction headroom reduce it. Preserve native compaction enable/disable controls, memory, and hooks; do not force disabled compaction. Base context fill on native model capacity, not the configured window.
+- Report checked process deltas from native cumulative model counters. First cold-resume usage and missing/reset counters are unknown, not zero. Warn that ASM totals/token budgets are partial. Thinking is an output subset, not an extra charge. Use latest main request input/native capacity for context fill, not cumulative billing/children. Hide unknown metrics. Cache rate is that request's cached input share.
+- Require stream-json result followed by session-idle completion. Verified protocol target: 2.1.296; queued delivery/background continuation: 2.1.309. Revalidate upgrades.
+- Keep opt-in until real Claude-main and Sol-parent/Claude-child checks pass with the intended installed CLI. Do not replace installed binaries/global profiles for tests. Cross-runtime context parity is not required.
 
 ### Cursor Agent thread runtime
 
-Explicit `cursor-agent/<model>` IDs select the official Cursor CLI over ACP (`agent acp`,
-JSON-RPC on stdio) for main threads and ASM-managed children. It extends the Claude Code
-runtime above: the same rules apply except where listed here, including plaintext context
-blocks and warning/skip behavior for encrypted input. Keep this policy shared; only the
-transport and supported delivery timing differ. Do not add a separate runtime
-copy, backend hierarchy or event vocabulary; branch only where the protocols differ.
+Explicit `cursor-agent/<model>` selects official Cursor ACP (`agent acp`, JSON-RPC over stdio) for mains/ASM children. Apply shared native rules above, including plaintext context and encrypted-input warnings. Do not add runtime copies, backend hierarchies, or event vocabularies. Branch only for protocol/transport/delivery differences below.
 
-```bash
-codex --no-daemon --model 'cursor-agent/gpt-5.6-luna'
-```
-
-- Bundle Cursor model and effort metadata in `external_models.json`, like Claude Code.
-  Catalog loading and startup must not launch or authenticate either native CLI.
-  Negotiate ACP `parameterizedModelPicker` only when starting a Cursor session. Validate
-  the requested model and effort against that session's advertised choices, apply the
-  actual parameter ID from the `thought_level` category, and require confirmation before
-  prompting. Preserve saved automatic model IDs: prefer an exact advertised match, then
-  translate `auto` or `auto-smart` to ACP `default` only when that value is advertised.
-  This is Auto identity translation, not fallback to another model. Other unavailable
-  choices fail without fallback. Saved bracket-encoded model IDs
-  retain their native parameters; an explicit effort replaces that parameter. Custom
-  catalogs remain authoritative; bundled metadata grants no native model access.
-- Forward user images through ACP `session/prompt` image blocks only when the agent
-  advertises `promptCapabilities.image`. Reject unsupported image input before recording
-  history or advancing the native checkpoint; never drop images or replace them with paths.
-  Preserve inline image history. Bound ACP image prompts to 31 MiB and image replay
-  frames to 32 MiB; ordinary text/control frames retain the 1 MiB bound.
-- The concrete runtime is part of identity. Claude and Cursor threads never resume, fork or
-  switch into each other; the checkpoint keeps the full model ID. Cursor reuses the Claude
-  checkpoint path and format, storing the session ID that Cursor assigns.
-- Keep conversational login orchestration and process safety in provider-neutral `native_login`;
-  separate Claude and Cursor adapters own their CLI, environment, URL, reply and status policies.
-  Preserve the legacy `claude-runtime` pending-marker path for interrupted exchange compatibility.
-- Support `cursor login` through the same deterministic backend chat interception as Claude,
-  using official `agent login` with browser opening disabled and an allowlisted sign-in URL.
-  Browser authentication stays with the native CLI; accept only `done` to check completion,
-  never keys or tokens. Keep pending replies fail-closed across expiry and backend restart,
-  and never replay the failed prompt or bypass dirty-session safeguards.
-- Use Cursor's native authenticated ACP bootstrap and detect typed auth-required errors
-  (`error.code = -32000`) during setup and turns. Route them into the shared login-required
-  guard and fixed provider-specific instructions; never classify arbitrary assistant prose
-  or generic provider errors as expired authentication. Do not invoke ACP `authenticate`,
-  which can open its own browser flow outside shared interception. Preserve dirty checkpoints
-  on uncertain prompt failures. Installed Cursor versions that swallow established-turn auth
-  failures into ordinary assistant text cannot provide reliable automatic expiry detection;
-  those sessions still require explicit `cursor login` until the native protocol exposes it.
-- Remove `CURSOR_API_KEY` and `CURSOR_AUTH_TOKEN` from the child. By user
-  decision, every Cursor session, main and children, launches as `agent --force acp`
-  (native run-everything mode). Explicit Cursor denies and team auto-run controls still
-  apply; never pass `--approve-mcps`, `--trust` or `--sandbox`. Cursor ACP has no supported
-  control to remove its question tool, so children keep it; questions are refused, not
-  disabled. Answer remaining approval requests with a reject option,
-  plans with `rejected`, questions with `skipped`, and other agent requests with an error, so
-  that a turn cannot hang or fall back to a local plan. Show each refusal.
-- Cursor saves session model selections in its config directory. Give each thread a private
-  `CURSOR_CONFIG_DIR` beside its checkpoint. Refresh it on every spawn with private copies of
-  the user's `cli-config.json` and `permissions.json`, using Cursor's directory precedence, so
-  that native permissions still apply and the user's default model never changes. Login,
-  rules, skills, hooks and MCP settings stay in their native locations; never copy or extract
-  credentials.
-- Negotiate ACP subagents (`clientCapabilities._meta.subagents`); require the agent to
-  advertise `sessionCapabilities.subagents`. Cursor then publishes native child sessions and
-  makes the prompt wait for background children, so their completion drives the parent
-  follow-up within the same ASM turn. Accept updates only for the session and announced
-  children. Show child tools and text in a child-scoped activity cell, not the main
-  transcript; children stay native, with no ASM threads. A prompt response stays clean only
-  after every announced child reported `completed`, `failed` or `cancelled`. Cursor also
-  answers after its cancel wait times out and marks children `disconnected`; that does not
-  prove a stop, so the turn fails and the linkage stays dirty.
-- Cursor reports finished tools as `completed`. Mark a tool failed from typed top-level
-  `rawOutput` fields only: nonzero `exitCode`, a string `error`, `rejected: true` or
-  `permissionDenied: true`. A missing field means unknown; a failed tool does not fail the
-  turn.
-- Forward only selected child-role instructions through ACP `systemPrompt` with
-  `mode = "append"` on both `session/new` and `session/load`. Require an advertised
-  `sessionCapabilities.systemPrompt` object before authentication or session creation/loading.
-  Unsupported Cursor versions fail explicitly; never fall back to user-message prefixes,
-  replacement prompts, or shared rule files. Supply current loaded role text on
-  cold reload, without comparing it to saved role text. Omit the field entirely when
-  no role text applies.
-- Child role context limits and `subagent_model_context_windows` set no Cursor compaction
-  window and skip the Claude window validation; Cursor manages its own context.
-- Bound each login and session setup request (60 s), including stdin submission; Cursor
-  can stall before reading a request. Native turns stay unbounded.
-- `session/load` replays native history before it responds; discard that replay so the ASM
-  transcript does not get duplicates. Set the model again after every new or loaded session.
-- Cursor starts shell tools in their own process groups below the ACP process. Use the
-  shared native ownership-marker cleanup, including after the ACP leader exits. Never kill
-  by socket, path or name. Cleanup succeeds only after identified owned processes stop;
-  marker-clearing processes outside observable ancestry remain outside its guarantee.
-  On interrupt, send `session/cancel`. After `stopReason: cancelled`, stop the process tree and keep the linkage
-  clean only when descendant cleanup succeeded; the next turn loads the session. A missing
-  acknowledgement, failed cleanup or any other failure leaves the linkage dirty.
-- Cursor reports no token usage or context fill. Show them as unavailable, never zero, in ASM
-  usage accounting and `/status`. Known gap: `codex exec --json` `turn.completed.usage` has
-  required numeric fields and reports zeros when usage is unknown; the session warning says
-  usage is unavailable. Keep that wire shape until the owner approves an API change.
-- Cursor children deliberately use the local CLI bridge, not ACP MCP servers:
-  `session/new` and `session/load` carry empty `mcpServers`. Team MCP policy blocked the
-  previous transport; do not reintroduce it or bypass native policy. Cursor mail
-  and board notices can be delivered inside an active prompt through the canonical
-  wait tool's CLI result. The owning runtime records mail and advances its dirty checkpoint
-  before returning it, so the next prompt does not replay it. Each nonempty delivery gets
-  a unique receipt. Save clean linkage only after Cursor reports that receipt in a
-  successful root shell tool result; internal bridge receipt or HTTP completion alone
-  is insufficient. Missing or truncated confirmation requires explicit recovery, without
-  retrying potentially side-effecting tools. Queued user input and followups with
-  next-turn options stay ordered for the next prompt. ASM still returns
-  Cursor's final answer; there is no Send now. Cursor children saved before this bridge recorded no messaging; their
-  cold resume fails closed and needs a new thread. Mains are unaffected.
-- Verified with Cursor CLI 2026.10.22-27dcf5f. Revalidate the protocol when upgrading it.
+- Bundle Cursor model/effort metadata in `external_models.json`. Catalog loading/startup must not launch/authenticate either CLI. At Cursor session start only, negotiate `parameterizedModelPicker`. Validate model/effort against advertised choices; apply the actual `thought_level` parameter ID and confirm before prompting.
+- Preserve saved Auto identity: prefer exact advertised IDs, otherwise translate `auto`/`auto-smart` to advertised ACP `default` only. This is not model fallback. Other unavailable choices fail. Saved bracket-encoded IDs retain parameters; explicit effort replaces that parameter. Custom catalogs stay authoritative; metadata grants no access.
+- Require `promptCapabilities.image` for ACP `session/prompt` image blocks. Reject unsupported images before history/checkpoint changes; never discard images or replace them with paths. Apply shared inline-history and 31/32/1 MiB limits.
+- Native runtime is identity. Never resume/fork/switch between Claude and Cursor. Store full model IDs. Reuse Claude checkpoint path/format with Cursor-assigned session IDs.
+- Keep login orchestration/process safety in neutral `native_login`. Separate adapters own CLI, environment, URL, reply, and status policies. Preserve legacy `claude-runtime` pending-marker paths.
+- `cursor login` uses official `agent login`, disabled browser opening, and an allowlisted sign-in URL through shared interception. Native CLI owns browser auth. Accept only `done` to check completion, never keys/tokens. Preserve shared fail-closed pending replies/recovery rules.
+- Use native authenticated ACP bootstrap. Detect only typed auth-required `error.code = -32000` during setup/turns. Use shared login guards/fixed provider instructions, never arbitrary assistant prose/generic errors. Do not invoke ACP `authenticate` and its separate browser flow. Keep uncertain checkpoints dirty. CLIs that hide established-turn auth failures in assistant prose still need explicit `cursor login`; automatic expiry detection remains unavailable.
+- Remove child `CURSOR_API_KEY`/`CURSOR_AUTH_TOKEN`. Every main/child uses `agent --force acp`. Keep Cursor denies/team auto-run policy; never pass `--approve-mcps`, `--trust`, or `--sandbox`. Cursor cannot disable its question tool: children retain it, but refuse questions. Reject remaining approvals, return `rejected` for plans, `skipped` for questions, and errors for other requests. Show refusals; do not hang/fall back to local plans.
+- Give each thread private `CURSOR_CONFIG_DIR` beside its checkpoint. On every spawn, refresh private user `cli-config.json`/`permissions.json` copies using native directory precedence. Preserve native permissions/user model defaults. Keep login/rules/skills/hooks/MCP settings native; never copy/extract credentials.
+- Negotiate `clientCapabilities._meta.subagents`; require `sessionCapabilities.subagents`. Keep native children/background completion in the same ASM turn. Accept updates only for the session/announced children. Show child tools/text in child activity cells, not main transcript or ASM threads. A response is clean only after all announced children report `completed`, `failed`, or `cancelled`. `disconnected` after cancellation timeout does not prove stopping: fail and keep dirty linkage.
+- Cursor marks finished tools `completed`. Infer failure only from top-level typed `rawOutput`: nonzero `exitCode`, string `error`, `rejected: true`, or `permissionDenied: true`. Missing fields mean unknown; tool failure does not fail the turn.
+- Append only selected child-role text through ACP `systemPrompt`, `mode = "append"`, on `session/new`/`session/load`. Before auth/session creation/loading, require advertised `sessionCapabilities.systemPrompt` object. Unsupported CLIs fail; never use user prefixes/replacement prompts/shared rule files. Use current role text on cold reload, without saved-text comparison; omit the field without applicable text.
+- Child role limits and `subagent_model_context_windows` do not set Cursor compaction windows or trigger Claude range validation. Cursor owns context.
+- Limit each login/setup request, including stdin submission, to 60 s. Turns remain unbounded. Discard `session/load`'s native-history replay; reset the model after every new/loaded session.
+- Cursor shell groups can outlive ACP. Use shared ownership-marker cleanup after leader exit; never kill by socket/path/name. Require all identified owned processes to stop. On interrupt, send `session/cancel`. After `stopReason: cancelled`, stop the process tree; clean linkage requires successful descendant cleanup. The next turn loads the session. Missing acknowledgement, cleanup failure, or other failure keeps linkage dirty.
+- Cursor usage/context fill is unavailable, never zero, in ASM accounting/`/status`. Exception: required numeric `codex exec --json` `turn.completed.usage` fields remain zero when unknown, with the unavailable-usage warning. Keep this wire shape until owner-approved API changes.
+- Children use the local CLI bridge, not ACP MCP: `session/new`/`session/load` send empty `mcpServers`. Do not restore the policy-blocked transport/bypass team policy. Deliver active-prompt mail/board notices through canonical wait CLI results. Record mail and advance dirty checkpoints before returning it, without next-prompt replay.
+- Give each nonempty delivery a unique receipt. Clean linkage requires Cursor to report it in a successful root shell result, not just bridge/HTTP completion. Missing or truncated confirmation requires explicit recovery, without retrying potentially side-effecting tools. Keep queued input/next-turn followups ordered. Return Cursor's final answer; no Send now. Pre-bridge children have no messaging record: cold resume fails closed and requires a new thread. Mains are unaffected.
+- Verified CLI: 2026.10.22-27dcf5f. Revalidate upgrades.
 
 ### Minimal diagnostics
 
