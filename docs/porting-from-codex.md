@@ -380,42 +380,49 @@ Explicit `cursor-agent/<model>` selects official Cursor ACP (`agent acp`, JSON-R
 
 ### Minimal diagnostics
 
-- Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. Disabled capture cannot be enabled by `RUST_LOG`, `log_dir`, or recorder environment variables.
-- Opt in with `diagnostic_log_capture = true`; restart affected processes. Existing filters then apply. Explicit `log_dir` also routes SQLite logs unless managed `sqlite_home` overrides it. Propagate policy to code-mode helper; inherited helper settings cannot override it. Standalone helpers without user config need explicit opt-in.
-- When disabled, do not allocate feedback capture, install its tracing layers, open/migrate diagnostic databases, or run insertion/pruning/reclamation workers. Ordinary startup leaves historical files unchanged.
-- Explicit history inspection/feedback export may read old logs without capture. Thread deletion removes historical diagnostic records through existing-only on-demand access; never create missing files. Preserve feedback submission/upload errors; never invent evidence.
-- Preserve direct errors/warnings, exit status, protocol events, saved conversation/tool history, subagent relationships, memory, and operational state. Detached-daemon startup/fatal stderr and Windows sandbox security-audit logs remain separate. Do not suppress them or weaken security. Keep product analytics/account usage unchanged.
-- Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Opt-in `runtime_metrics` uses a manual reader without timer/network exporter when none is configured. No unsolicited session-storage size telemetry scan. Check fork-disabled paths with focused real-binary scenarios under the validation rules, not broad upstream retesting.
+- Default `diagnostic_log_capture = false`. This startup policy controls Rust stderr/file logs, persistent diagnostics, feedback ring/continuous tags, optional TUI replay, and rollout-trace recorders. `RUST_LOG`, `log_dir`, and recorder environment variables cannot enable disabled capture.
+- To opt in, set `diagnostic_log_capture = true` and restart affected processes. Keep existing filters. Explicit `log_dir` also routes SQLite logs unless managed `sqlite_home` overrides it. Propagate policy to the code-mode helper; inherited helper settings cannot override it. Standalone helpers without user config require explicit opt-in.
+- With capture disabled, do not allocate feedback capture, install its tracing layers, open/migrate diagnostic databases, or run insertion/pruning/reclamation workers. Leave historical files unchanged during ordinary startup.
+- Explicit history inspection/feedback export may read old logs without capture. For thread deletion, remove historical diagnostics through existing-only, on-demand access. Never create missing files. Preserve feedback submission/upload errors; do not invent evidence.
+- Preserve direct errors/warnings, exit status, protocol events, saved conversation/tool history, subagent relationships, memory, and operational state. Keep detached-daemon startup/fatal stderr and Windows sandbox security-audit logs separate and active. Do not weaken security. Keep product analytics/account usage unchanged.
+- Disable the built-in Statsig metrics exporter, including optimized releases/account reloads. Keep its config spelling; default `otel.metrics_exporter` to `none`. Preserve explicit OTLP collectors. Without a configured exporter, opt-in `runtime_metrics` uses a manual reader without a timer/network exporter. Do not scan session-storage sizes for unsolicited telemetry. Validate disabled paths with focused real-binary scenarios, not broad upstream retesting.
 
 ### System1
 
-Task and steering ingestion precedes skipped checks and invalidates stale decisions; bounded evidence rendering follows cadence, trigger, and recovery gates. Rendering keeps the original deadline and must finish before client setup.
+Use opt-in `[system1]` in the shared backend, not the TUI. Toggle it with `/system1`. Require `features.step_model_switching` and `features.reasoning_effort_override`. Clients must use this backend; System1 does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
 
-The canonical feature name is System1, configured with `[system1]` and toggled with `/system1`. Accept the former `[adaptive_reasoning]` table when reading existing configuration, including deny-only roles, and former rollout fields when resuming saved sessions. Emit only canonical names. Preserve layer precedence across old and new spellings, but reject both tables in one layer. Before writing canonical settings into a file that still uses the old table, rename that table; reject conflicting writes without changing the file.
-
-Use opt-in `[system1]` in the shared backend, not the TUI. Require `features.step_model_switching` and `features.reasoning_effort_override`.
+Accept former `[adaptive_reasoning]` config, including deny-only roles, and former rollout fields on resume. Emit only canonical names. Preserve layer precedence across both spellings; reject both tables in one layer. Before canonical writes, rename an existing old table. Reject conflicting writes without changing the file.
 
 | Setting | Default | Validation |
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in only |
-| `profile` | Absent: legacy OpenAI configuration | User-defined name in `profiles`; cannot mix with legacy model/key settings |
-| `profiles.<name>` | Empty map | Required `protocol` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env`; optional full `endpoint` URL |
+| `profile` | Absent: legacy OpenAI configuration | Name in `profiles`; cannot mix with legacy model/key settings |
+| `profiles.<name>` | Empty map | Explicit `protocol` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env`; optional full `endpoint` URL |
 | `decision_model` | `"gpt-6-luna"` | Nonblank |
 | `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
 | `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
 | `decision_timeout_ms` | `200` | 1–5000 ms |
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
-| `update_on` | `["turn_start", "tool_result"]` | Only these trigger types |
-| `decision_every_n_turns` | `1` | Positive integer; adapt turns 1, 1 + N, 1 + 2N, ... |
-| `decision_every_n_steps` | `1` | Positive integer; next due step is the last accepted decision step + N |
-| `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` / `max_effort_description` | Built-in descriptions below | Nonblank; each at most 4096 UTF-8 bytes |
-| `rubric_instructions` | Built-in rubric when absent | Nonblank; at most 4096 UTF-8 bytes |
+| `update_on` | `["turn_start", "tool_result"]` | Only these triggers |
+| `decision_every_n_turns` / `decision_every_n_steps` | `1` / `1` | Positive integers; [cadence rules](#space-decision-calls-by-turn-and-step) below |
+| `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` / `max_effort_description` | Built-in text below | Nonblank; each at most 4096 UTF-8 bytes |
+| `rubric_instructions` | Built-in rubric | Nonblank; at most 4096 UTF-8 bytes |
 
-Failure warnings use yellow chat text with the error category, current fallback effort, and runtime cooldown duration (or recovery blocked). Show a warning when the error category changes within a failure episode; keep identical errors quiet. Old/restored events without recovery details must not invent a cooldown. Transport failures include bounded send/body-read codes, using typed HTTP classifications where available; never expose raw error messages, URLs, or credentials. Legacy transport events remain readable.
+**Connections.** Profiles select connection settings, not adaptation policies. Share bounds, cadence, evidence limits, timeout, and rubric. Profile names have no built-in meaning. Do not infer protocol from names, endpoints, or credentials. Accept `backend` as an alias for `protocol`; reject both together. Validate every profile. Reject unknown profiles/protocols without fallback. Without `profile`, retain legacy OpenAI defaults and explicit overrides. Reject a selected profile with either legacy model/key setting, even when it equals its default.
 
-Generate main-step selection guidance from the model default, not fixed effort labels: the default is the normal-work reference; a `max` default uses the preceding catalog-supported ordinary effort to reserve `max` for exceptional difficulty. Compute the reference before applying configured bounds. The existing low/medium/high/xhigh description fields are shared difficulty templates for one-below-reference/at-reference/one-above-reference/further-above-reference choices; efforts further below the reference use fixed mechanical-execution guidance; `max_effort_description` always describes max. None/minimal retain direct-execution guidance. Without a supported model default, retain effort-labeled guidance. Never alter the task baseline to compute the reference. Model meaning stays catalog-owned.
+Resolve the connection once per session on first use, including failed credential attempts. Keep protocol/endpoint/model fixed across warmup, decisions, and config reloads. Both adapters share cancellation, deadline, allowed-choice validation, and recovery. Do not use automatic failover or adapter-internal retries.
 
-Choice descriptions are separate from the selection/safety rubric. Main decisions send only allowed choices; warmup retains its synthetic low/medium pair. Replacing the rubric must not remove or duplicate their descriptions. `none` and `minimal` retain fixed descriptions; `max_effort_description` configures max guidance with its previous fixed text as the default.
+Without `endpoint`, use the protocol's official HTTPS endpoint. Overrides are full destination URLs, not format selectors; append no path. Require HTTPS except loopback HTTP. Reject URL credentials and fragments. Reject blank endpoints during config validation. Reject other invalid URLs during client construction without exposing them in errors.
+
+The endpoint receives bounded conversation evidence and the `api_key_env` credential. A custom endpoint need not belong to OpenAI or TypeSafe. Choose it deliberately. Keep authentication separate from the main model and sanitize diagnostics. Read only the profile's `api_key_env` or legacy named variable, default `DECISION_API_KEY`. Retain explicit variable-name overrides. Never fall back to `OPENAI_API_KEY`, provision credentials, or log keys/evidence. Do not route Decisions through Guardian.
+
+**Choices.** Adapt ordinary roots and spawned subagents, not internal workers. Use the selected backend to choose supported effort within bounds. Keep Ultra/Persistent, models, service tiers, execution modes, permissions, and saved defaults unchanged. With fewer than two efforts, skip Decisions and warmup; retain current effort.
+
+Generate selection guidance from the supported model default before applying bounds. Use that default as the normal-work reference. For a `max` default, use the preceding catalog-supported ordinary effort instead. Do not change the task baseline. Model meaning remains catalog-owned.
+
+Use low/medium/high/xhigh descriptions for one-below-reference/at-reference/one-above-reference/further-above-reference choices. Use fixed mechanical-execution guidance further below reference. Always use `max_effort_description` for max and fixed direct-execution descriptions for `none`/`minimal`. Without a supported default, keep effort-labeled guidance.
+
+Keep choice descriptions separate from the selection/safety rubric. Send only allowed main choices; warmup retains its synthetic low/medium pair. A replacement rubric must not remove or duplicate descriptions. Default description text:
 
 ```toml
 [system1]
@@ -426,146 +433,56 @@ xhigh_effort_description = "Extensive reasoning for exceptionally difficult prob
 max_effort_description = "Exceptionally difficult problems requiring the maximum supported reasoning budget."
 ```
 
-Profiles name connection settings, not separate adaptation policies. Keep effort bounds,
-cadence, evidence limits, timeout, and rubric shared. Profile names have no built-in
-meaning. Require explicit protocol, model, and credential-variable name in each
-profile; do not infer a protocol from its name, endpoint, or credentials. Keep
-`backend` as a compatibility alias for `protocol`; specifying both is an error.
-Validate all defined profiles and reject unknown selections/protocols rather than falling back. Without
-`profile`, preserve legacy OpenAI defaults and explicit overrides. Selecting a
-profile together with either legacy `decision_model` or `decision_model_api_env`
-is an error, even if the legacy value matches its default.
+If configured, replace the built-in rubric with unchanged `rubric_instructions`. In both backends, prefix decision instructions with trusted baseline context, separate from evidence:
 
-```toml
-[system1]
-enabled = true
-profile = "jev"
+- Report separate `model_default_effort`, `task_baseline_effort`, and `current_effort`; use unspecified for absent values. Do not infer baseline provenance.
+- Use the turn's configured effort as baseline. Refresh it on accepted manual effort/model changes, never adaptive selections. The model default is its normal operating point; the baseline indicates task difficulty. Weigh both with next-step evidence. Neither is a floor or ceiling. Current effort is state, not independent difficulty evidence.
+- Add the next step's canonical model name and catalog description as JSON-quoted metadata. Trim descriptions to 1024 UTF-8 bytes at character boundaries. Use `unavailable` for missing, blank, or fallback metadata. Keep the decision-service model and warmup unchanged.
+- For each allowed choice, send labeled `Model meaning` and `Selection guidance` sections. Trim catalog meaning to 1024 UTF-8 bytes; use `unavailable` for missing, blank, or fallback metadata. Preserve full configured guidance, capped at 4096 bytes. The API caps each combined description at 8192 UTF-8 bytes.
+- The built-in rubric reassesses each next step. For equal reasoning demands, favor lower effort for more capable models and higher effort for less capable models. Treat baseline as guidance, not a ceiling. Enforce choices and runtime limits in code. Keep instructions/results outside the main conversation.
 
-[system1.profiles.jev]
-protocol = "typesafe"
-model = "jev-latest"
-api_key_env = "TYPESAFE_API_KEY"
+**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, images, and encrypted reasoning. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
 
-[system1.profiles.decision_api]
-protocol = "openai"
-model = "gpt-6-luna"
-api_key_env = "DECISION_API_KEY"
+**P0 manual review:** combined choice descriptions can exceed 1000 tokens. Review both sections and their bounds. Meaning, guidance, and labels must fit the API cap above. Bound evidence and rubric separately. Split larger evidence into ordered OpenAI messages or TypeSafe state-array strings, each at most 8192 UTF-8 bytes. Prefer line boundaries. Preserve text and the default single-message request. TypeSafe uses a string state when one chunk suffices. The 4096-byte rubric cap excludes the bounded description/baseline prefix. Items can exceed 1000 tokens but must remain below the 10K-token item limit through their byte caps. Keep evidence outside the main conversation.
 
-[system1.profiles.local_gateway]
-protocol = "openai"
-endpoint = "http://127.0.0.1:8080/v1/decisions"
-model = "my-decision-model"
-api_key_env = "LOCAL_DECISION_KEY"
-```
+**Execution.** Ingest tasks and steering before skipped checks; invalidate stale decisions. Apply cadence, trigger, and recovery gates before bounded evidence rendering. Keep the original deadline; finish rendering before client setup.
 
-Resolve the connection profile once on first use in each session, including failed
-credential attempts. Keep its protocol/endpoint/model together across warm-up and decisions;
-configuration reloads do not switch an active session's profile. Both adapters use
-the same cancellation, deadline, allowed-choice validation, and recovery policy.
-No automatic failover or adapter-internal retries. Without `endpoint`, use the
-official HTTPS endpoint for the selected protocol. An override is the full endpoint
-URL; append no path. It selects the destination, not the request/response format.
-Require HTTPS, except HTTP on loopback for local gateways. Reject URL credentials
-and fragments. Blank endpoints fail config validation; other invalid URLs fail
-client construction without exposing the URL in errors.
+- At eligible session start, send one tiny synthetic background warmup with separate minimal instructions. Skip it without triggers or supported effort within bounds. Reuse its pooled client. Discard its answer; keep history/settings unchanged. Limit it to three seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warmup settings. It can add one billable request; backend/connection warmth is not guaranteed.
+- Before each selected main step with an enabled trigger, collect current evidence. Await Decisions and validation in the turn task, without a separate job or completion channel. Capture immutable step settings, then run the model. Do not retry or wait for a busy settings-publication permit. Only warmup and log writing run in the background.
+- Publish current results through live next-step settings within the original deadline. Do not change captured requests. New accepted user/assistant/tool evidence invalidates pending decisions, not applied settings. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
+- Reuse live validation/publication. Preserve the request-effort pin, trusted append-only updates, reconnects, and explicit compaction handling.
+- In shared history-to-request projection, exclude effort updates without harness provenance. After filtering, retain the last complete envelope in each adjacent update run. Keep retained messages, reasoning, tool declarations, and results as separators. Do not change stored history or the request-effort pin. Apply this to filtered forks/replayed checkpoints without transport workarounds. A changed tail can lose prefix/cache reuse. Let incremental checks choose full input; do not force a session reset.
 
-The selected endpoint receives bounded conversation evidence and the credential
-from `api_key_env`. A custom endpoint does not necessarily belong to OpenAI or
-TypeSafe, even when it uses their protocol. Choose the destination deliberately;
-keep credentials separate from main-model authentication and diagnostics sanitized.
+**Mode and display.** Manual model/effort changes invalidate pending decisions but retain adaptation mode. Refresh baseline on effort changes and active-turn baseline on persistent thread settings. Keep captured requests and the live-step contract unchanged. Unsupported models skip adaptation without disabling it. Log mode transitions. Ordinary turn-start/spawn settings do not disable it. `/system1` toggles only the current runtime, not saved defaults; keep mode separate from captured settings.
 
-- Adapt ordinary root conversations and spawned subagents. Keep internal workers unchanged. Use the selected decision backend to select supported effort within bounds. Keep Ultra/Persistent selections, models, service tiers, execution modes, permissions, and saved defaults unchanged.
-- If fewer than two efforts remain, skip Decisions and warm-up; keep current effort.
-- Read credentials only from the selected profile's `api_key_env`, or the legacy named backend environment variable (default `DECISION_API_KEY`). Do not fall back to `OPENAI_API_KEY`; explicit variable-name overrides remain supported. Keep main-model authentication separate. Do not provision credentials or log keys or evidence. Do not route Decisions requests through Guardian.
-- If set, use `rubric_instructions` instead of the built-in rubric, preserving its text. Prefix both backends’ decision instructions with trusted configured reasoning baseline context, separate from evidence: report separate `model_default_effort`, `task_baseline_effort`, and `current_effort` fields; use the turn’s configured effort as the task baseline, refreshed on accepted manual effort/model updates but never System1 selections; report unspecified for absent values. Consider the model default and task baseline together whenever available: the model default is its normal operating point, while the task baseline is task-difficulty guidance. Neither is a floor or ceiling; weigh both alongside concrete next-step evidence. Current effort is state, not independent difficulty evidence. For every allowed choice, send both labeled sections: `Model meaning` from the trimmed catalog effort description, bounded to 1024 UTF-8 bytes (`unavailable` for missing, blank, or fallback metadata), and `Selection guidance` from the existing System1 effort description, preserving its full configured text. The combined choice description is bounded by 8192 UTF-8 bytes at the API layer; configuration guidance remains capped at 4096 bytes. Do not infer baseline provenance. Include the next step’s canonical model name and catalog description as JSON-quoted metadata alongside baseline context in both backends. Bound descriptions to 1024 UTF-8 bytes at a character boundary; use `unavailable` for missing, blank, or fallback metadata. Keep the decision-service model and warmup unchanged. For the same reasoning demands, the built-in rubric favors lower effort for more capable models and higher effort for less capable models. It treats baseline as guidance rather than a ceiling and reassesses the next step. Enforce choices and runtime limits in code. Keep instructions and results outside the main conversation.
-- Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, images, and encrypted reasoning. Scale scan limits with the byte budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. These scan limits and the byte budget can still omit older history; they do not promise a complete transcript.
-- **P0 manual review:** combined effort-choice descriptions can exceed 1000 tokens; manually review both sections and bounds (1024-byte meaning plus at most 4096-byte guidance and fixed labels, below the 8192-byte API cap). Bound total evidence and rubric separately using the table limits. Split larger evidence into ordered OpenAI input messages or TypeSafe state-array strings of at most 8192 UTF-8 bytes each, preferring line boundaries. TypeSafe keeps a string state when one chunk suffices. Preserve text and the default single-message request. Configured rubric instructions remain at most 4096 bytes; the bounded description and baseline prefix is additional. Each item can exceed 1000 tokens, but its byte cap keeps it below the 10K-token item limit. Keep this evidence outside the main conversation.
-- At eligible session start, send one tiny synthetic warm-up in the background. Without triggers or supported effort within bounds, skip it. Reuse its pooled Decisions client. Keep separate minimal instructions. Discard its answer. Keep history and settings unchanged.
-- Limit warm-up to three seconds. At shutdown, abort and join it. Do not retry, ping periodically, or add warm-up settings. Warm-up can add one billable request. It does not guarantee a warm backend or connection.
-- Before each cadence-selected main step with an enabled trigger, collect current evidence and await Decisions and validation in the turn task, without a separate step job or completion channel. Then capture immutable step settings and run the model. Do not retry or wait for a busy settings-publication permit. Keep only warm-up and log writing in the background.
-- Publish a current result within its original deadline through live next-step settings. Keep captured requests unchanged. Later evidence invalidates pending decisions, not already applied settings.
-- After a current main-step decision failure, restore the latest trusted configured/manual baseline for the next request and during cooldown or blocked recovery. Use the model default when the baseline is unset. Never replace the baseline with an adaptive selection. Preserve current effort for unsupported models/efforts, Ultra/Persistent, cancellation, or warmup-only failures. Role bounds restrict adaptive choices, not the configured/manual fallback. A Decisions failure must not stop the main step.
-- On accepted user, assistant, or tool evidence, invalidate old decisions. Reject results after cancellation, task replacement, shutdown, settings changes, or deadline expiry.
-- Reuse live step-settings validation and publication. Preserve the original request-effort pin, trusted append-only updates, reconnect behavior, and explicit compaction handling.
-- In the shared history-to-request projection, exclude effort updates without harness provenance and keep the last complete envelope in each adjacent update run after filtering. Preserve retained messages, reasoning, tool declarations, and tool results as separators. Do not change stored history or the request-effort pin. This repairs filtered forks and replayed checkpoints without a separate transport workaround. A changed projected tail can lose prefix/cache reuse; let existing incremental-request checks choose full input rather than force a session reset.
-- `/system1 status` reads the current thread's mode, selected and last captured effort, and reported health without changing settings or sending a model turn. Show decision backend/protocol, model, named profile or legacy configuration, and client initialization from the session-fixed resolved connection. Capture the profile name with its resolved settings; never present reloaded configuration as the connection used by an existing client. Before resolution report that identity is not resolved; initialization is not proof of a successful provider request. Do not resolve a profile, inspect credentials, or start warmup for status. It also queries fixed-size in-memory decision totals for the currently loaded backend runtime. Exclude warmup, cadence/backoff skips, and incomplete tasks; accepted includes unchanged decisions, effort changes include only applied changes. Count local client setup failures separately. Show total/last completed-decision wall time, not estimated net overhead, cost, or savings. Totals reset on runtime unload/restart; children have separate totals. Do not scan rollouts, persist totals, add per-step notifications, expose credentials/endpoints, or resume unloaded threads for this read. Older servers show stats unavailable.
-- Manual model and effort changes preserve adaptation’s on/off state and invalidate pending decisions. Effort changes refresh the baseline for subsequent decisions. Unsupported models skip adaptation without disabling it. Persistent thread settings refresh the active turn’s baseline without changing already captured requests or the existing live-step settings contract. Log mode transitions. Ordinary turn-start and spawn settings do not turn it off. Use `/system1` to toggle it for the current thread, without changing saved defaults. Keep runtime state separate from captured step settings.
-- Report runtime mode and its revision at thread attachment and on each transition. Ignore older revisions so delayed notifications cannot restore old mode. Show `<effort>·auto` when adaptation is on without an outstanding error, including startup and the wait before a decision. Show `<effort>·err` after a Decisions error; keep adaptation on and follow the main-step failure fallback rule above. When off, show only effort. Use the baseline before the first captured step. The marker reports runtime health, not a promised effort change. Unsupported steps keep their effort without a Decisions call. Before each eligible main request, report captured effort through `turn/reasoningEffortUpdated`, including fallback steps. Keep mode and captured effort separate; toggles do not change already-running steps.
-- A spawned subagent copies its parent’s runtime mode once at spawn. Later parent toggles do not change that child. Preserve the child’s own mode across live eviction and reload, not backend restarts. Do not apply this rule to internal workers. If the assigned task is encrypted and no readable task is available, log the fallback and keep current effort; never forward ciphertext or guess the task.
-- Retain captured effort and turn identity in live TUI thread snapshots, outside saved history. Restore them after switching threads without accepting stale history settings. Clear them for a new turn or manual settings change.
-- Deliver transient effort notifications directly to clients, without entering rollout persistence before the main request.
-- Clients must use this backend. The feature does not replace Desktop's backend. Use HTTP for Decisions, not the Responses WebSocket.
-- Report errors through backend runtime state, independent of diagnostics. Include health at attachment and after live child reload. New children inherit mode, not parent errors. Deduplicate visible warnings by failure episode. Clear errors only after a current main-step decision passes acceptance guards, including unchanged effort. Warm-up errors count for health, but never arm the main-step effort fallback. Warm-up timeouts do not change recovery failures, cooldown, or blocked state. Other warm-up errors retain normal recovery behavior. Warm-up success, cancellation, and supersession do not clear errors. Identify warm-up timeouts explicitly with their deadline in the visible warning; record backend, model, elapsed time, and remaining deadline at request start in diagnostic tracing, without message content or endpoints.
-- With `diagnostic_log_capture = true`, append sanitized attempt metadata to a separate per-session `decision.jsonl`. Include credential failures, API outcome, and acceptance outcome. Do not log evidence, rubric text, bodies, or authentication headers. With capture off, create no log file or writer. Bound buffering and storage; never wait for disk on the decision path. Report dropped records or writer failures separately. Crash-interrupted attempts can lack an end record.
-- Report decision latency and fallbacks without sensitive input. The deadline bounds result eligibility and local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance with real-binary scenarios under the isolation and cost limits before making claims.
+Spawned children copy parent mode once, not later toggles or parent errors. Preserve child mode across live eviction/reload, not backend restart. Internal workers remain unchanged. For encrypted assignments without readable tasks, log fallback and retain effort; do not forward ciphertext or guess tasks.
+
+Report mode/revision at attachment and transitions; ignore older revisions. Report errors through backend runtime state, independently of diagnostics. Include health at attachment and live child reload. Show `<effort>·auto` when enabled without an error, including startup/decision waits; show `<effort>·err` after errors, without disabling adaptation. When off, show effort alone. Before the first captured step, use baseline. Markers show health, not promised changes. Unsupported steps retain effort without Decisions. Before eligible main requests, send captured effort through `turn/reasoningEffortUpdated`, including fallbacks. Toggles do not change running steps.
+
+Keep captured effort/turn identity in live TUI snapshots, outside saved history. Restore on view switches without stale history settings. Clear on a new turn or manual change. Send transient effort notifications directly to clients, without rollout persistence before the main request.
+
+**Status.** `/system1 status` reads current mode, selected/last captured effort, health, and session-fixed connection identity. Show backend/protocol, model, captured profile name or legacy config, and client initialization. Do not present reloaded config as the active connection. Before resolution, show unresolved identity. Initialization does not prove a successful request. Do not change settings, send a turn, resolve profiles, inspect credentials, or start warmup.
+
+Read fixed-size in-memory totals only for the loaded runtime. Exclude warmup, cadence/backoff skips, and incomplete tasks. Accepted includes unchanged decisions; effort changes count only applied changes. Count client setup failures separately. Show total/last completed-decision wall time, not estimated net overhead, cost, or savings. Totals reset on unload/restart; children have separate totals. Do not scan rollouts, persist totals, add per-step notifications, expose credentials/endpoints, or resume unloaded threads. Older servers show unavailable stats.
+
+**Errors and logs.** Use yellow warnings with error category, fallback effort, and cooldown duration or recovery-blocked state. Deduplicate by failure episode; warn on category changes, not identical errors. Do not invent cooldowns for old/restored events. Use bounded send/body-read codes and typed HTTP classifications where available. Preserve legacy transport events. Do not expose raw errors, URLs, or credentials. Identify warmup timeouts and their deadline visibly. At request start, trace backend, model, elapsed time, and remaining deadline, without content/endpoints.
+
+With `diagnostic_log_capture = true`, append sanitized attempt metadata to per-session `decision.jsonl`: credential failures, API outcomes, and acceptance outcomes. Do not log evidence, rubric, bodies, or authentication headers. With capture off, create no file/writer. Bound buffers/storage; never wait for disk on the decision path. Report dropped records/writer failures separately. Crashes can leave attempts without end records.
+
+Report latency/fallbacks without sensitive input. Deadlines bound result eligibility/local publication, not API latency. Preserved prefixes do not guarantee cache hits. Verify live update order and backend acceptance with real binaries under isolation/cost limits before making claims.
 
 #### Space decision calls by turn and step
 
-A turn is one request and its resulting work. A step is one ordinary model request
-within that turn, not an individual tool call. Defaults select every turn and every
-eligible step. With eligible steps and no failures, decide before steps 1, 2, 3, ... .
-For nondefault two-step spacing, set `decision_every_n_steps = 2`; decisions then
-precede steps 1, 3, 5, ... .
+A turn is a request and its resulting work. A step is one ordinary model request, not one tool call. Defaults select every turn/eligible step. Select turns 1, 1 + N, 1 + 2N, ... . Reset step numbering and accepted-decision spacing each turn, not recovery.
 
-```toml
-[system1]
-enabled = true
-decision_every_n_turns = 1
-decision_every_n_steps = 1
-```
-
-- Turn selection is unchanged: every N turns selects turns 1, 1 + N, 1 + 2N, ... .
-  Reset step numbering and successful-decision spacing at each new turn. With
-  every 2 turns / 3 steps, turns 1, 3, ... are selected; acceptance at step 1
-  makes step 4 due, and acceptance at step 4 makes step 7 due.
-- In a selected turn, the first eligible step is due. After a **current accepted**
-  decision at step S,
-  the next due step is S + N, including when the accepted effort is unchanged.
-  Due steps must still pass `update_on` and eligibility checks. Ineligible, failed,
-  cancelled, or superseded decisions never advance spacing; try at a later eligible
-  step when recovery permits. Collect fresh bounded evidence then.
-- Keep current effective effort between decisions, except for the failure fallback
-  above. Skipped turns do not force a new effort without a main-step failure.
-- Each agent owns recovery state across turns. A transient failure starts a
-  one-second cooldown; consecutive failures double it, capped at 30 seconds.
-  After expiry, probe on the next due eligible step. Never sleep the main turn or
-  schedule a background recovery timer. Cooldown skips do not extend cooldown.
-- Missing/invalid credentials, invalid requests, rejected settings, and HTTP 4xx
-  errors other than 408/429 block Decisions until
-  adaptation is explicitly turned off and on. This resets recovery and makes the
-  next eligible step due, even before a normally skipped turn. It does not reload
-  a successfully initialized client's cached credentials; changing those requires
-  a backend restart. Missing credentials are not cached: set them in the backend
-  environment and retry off/on. An HTTP credential failure retried after off/on
-  uses the same backend client.
-- Only a current accepted main-step decision clears error health; it also resets
-  recovery. Explicit off/on resets recovery, not error health. Warm-up errors
-  affect health; timeouts leave recovery unchanged, while other errors affect recovery.
-  Warm-up success never clears errors
-  or anchors spacing. Cancellation and supersession do not clear errors either.
-
-Example with defaults, all shown steps eligible, and times measured from session start:
-
-| Turn / step | Time | Decisions behavior |
-| --- | --- | --- |
-| 1 / 1 | 0.0s | Accepted; next due step is 2 |
-| 1 / 2 | 0.2s | Accepted unchanged effort; next due step is 3 |
-| 1 / 3 | 0.4s | Transient failure; cooldown until 1.4s; step remains due |
-| 1 / 4 | 0.8s | Use the baseline during cooldown |
-| 2 / 1 | 1.0s | New turn resets spacing, not cooldown; use its baseline |
-| 2 / 2 | 1.5s | Probe fails; cooldown doubles to 2s, until 3.5s |
-| 2 / 3 | 3.6s | Accepted unchanged effort; clear error/recovery; next due step is 4 |
-| 2 / 4 | 3.8s | Accepted; next due step is 5 |
-| 2 / 5 | 4.0s | Due again |
-
-- Children inherit cadence configuration, not parent counters or recovery state.
-- Count an ordinary turn when it starts, before setup. Setup failure or cancellation
-  still counts; continuing that turn does not count again. Warm-up, compaction, and
-  transport retries do not count as ordinary steps or separate ordinary turns.
-- Counters and recovery are runtime-only. Resume, backend restart, or session
-  eviction starts turn numbering at 1; do not rewrite conversation history.
-- Larger intervals reduce decision frequency, not necessarily total runtime. They
-  can retain unsuitable effort between steps; do not claim speedups without measurement.
+- In selected turns, the first eligible step is due. After a current accepted decision at step S, the next due step is S + N. Include unchanged-effort acceptance. With `decision_every_n_steps = 2`, decide before steps 1, 3, 5, ... when eligible and successful.
+- Due steps must pass `update_on` and eligibility checks. Ineligible, failed, cancelled, or superseded decisions do not advance spacing. Retry at a later eligible step when recovery permits, with fresh bounded evidence.
+- Retain effective effort between decisions and across skipped turns, except after current main-step decision failure. Then restore the latest trusted configured/manual baseline for the next request and during cooldown/blocked recovery. Use the model default if baseline is unset. Never substitute an adaptive selection for baseline. Role bounds restrict choices, not manual/configured fallback. Preserve effort for unsupported models/efforts, Ultra/Persistent, cancellation, and warmup-only failures. Never stop the main step because Decisions failed.
+- Keep per-agent recovery across turns. Transient failures start a one-second cooldown; consecutive failures double it, capped at 30 seconds. After expiry, probe on the next due eligible step. Cooldown skips do not extend it. Do not sleep the main turn or add background recovery timers.
+- Missing/invalid credentials, invalid requests, rejected settings, and HTTP 4xx except 408/429 block Decisions until explicit off/on. Off/on resets recovery and makes the next eligible step due, even in a normally skipped turn. It does not clear health or reload initialized credentials; changing cached credentials requires restart. Missing credentials are not cached: set them in the backend environment and retry off/on. HTTP credential failures retry with the same client.
+- Only a current main decision that passes acceptance guards clears health and resets recovery, including unchanged effort. Warmup errors affect health but never arm main-step fallback. Warmup timeout leaves failure count/cooldown/blocked state unchanged; other warmup errors use normal recovery. Warmup success, cancellation, and supersession neither clear health nor anchor spacing.
+- Children inherit cadence config, not counters/recovery. Count ordinary turns at start, before setup, including setup failure/cancellation. Continuing a turn does not count again. Exclude warmup, compaction, and transport retries from ordinary steps/separate turns.
+- Counters/recovery are runtime-only. Resume, restart, and eviction reset turn numbering to 1; do not rewrite history. Larger intervals reduce decision frequency, not necessarily runtime. They can retain unsuitable effort; do not claim speedups without measurement.
 
 ### CLI resume matching
 
