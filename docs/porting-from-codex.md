@@ -486,446 +486,313 @@ A turn is a request and its resulting work. A step is one ordinary model request
 
 ### CLI resume matching
 
-`asm resume <text>` accepts a trimmed, lowercase-normalized substring of a displayed
-session name (or preview for unnamed sessions), or a UUID prefix. Search active
-sessions under the existing provider/source eligibility rules, across working
-directories. Resume a unique match directly; open the existing resume picker
-restricted to the matching IDs when several match. A full UUID retains direct
-lookup. Do not give exact names priority over other partial matches. Preserve
-exact matching and duplicate rejection for fork, archive/delete, and queue commands.
+`asm resume <text>` matches trimmed, lowercase-normalized substrings of displayed names, unnamed-session previews, or UUID prefixes. Search eligible active sessions across working directories under existing provider/source rules. Resume a unique match. For multiple matches, restrict the existing picker to matching IDs. Keep direct full-UUID lookup. Do not prefer exact names over partial matches. Keep exact matching and duplicate rejection for fork, archive/delete, and queue commands.
 
 ### TUI automatic session names
 
-`[auto_rename]` is TUI-only. Preserve Desktop naming, conversation model/history, and `/rename` suggestions. Defaults: enabled, first user message, user-message context, one-time naming, 36 characters, 960-byte initial prompt.
+Keep `[auto_rename]` TUI-only. Preserve Desktop naming, conversation model/history, and `/rename` suggestions. Defaults: enabled, first user message, user-message context, initial naming only, 36 characters, 960-byte initial prompt.
 
-Prefer `gpt-6-luna`/low only with OpenAI, ChatGPT account, and available catalog entry; otherwise conversation model. Manual `/rename` retains upstream model selection.
+Use `gpt-6-luna`/low only for OpenAI with a ChatGPT account and an available catalog entry. Otherwise use the conversation model. Keep upstream model selection for manual `/rename`.
 
-- `enabled`: default true. `model`/`reasoning_effort` affect only titles; omissions keep defaults. Server must preserve explicit models. Unavailable models fail, not fall back. Custom-provider models need no catalog entry.
-- `first_trigger`: `first_user_message` (default) or `first_completed_turn`; ignore failed/interrupted completions.
-- `context`: `user_message` (default) or `recent_conversation`. Recent context includes initial request/substantive user/assistant messages, not commentary/tool output.
-- `max_context_bytes`: 128–8192 source bytes, excluding added guidance. Omission keeps original budget.
-- `recent_message_limit`: 1–32, default 8, including initial request; 1 keeps only latest. Tight byte budgets drop earlier messages to keep markup complete.
-- `max_title_chars`: 1–128, default 36. Optional positive integer `max_title_words` is prompt-only. Omission keeps “under five words where possible”; explicit values request at most that many. Never truncate by words. Captured prompt/character limit belong to the originating request.
-- `additional_naming_guidance`: append at most 512 UTF-8 bytes; never replace fixed rules/prompt. No `instructions` alias. Complete prompt cap: 9500 bytes. **P0 manual review:** larger opt-in budgets can exceed 1000 tokens; keep the 10K-token item limit.
-- `auto_update`: default false, initial-only. Refresh requires `enabled` and `auto_update`:
-  - Include captured previous title as bounded JSON-string data. Ask the model to retain it unless the task meaningfully changes. When updating, preserve its core subject and wording. Routine progress does not justify renaming.
-  - Keep initial/manual prompts unchanged. Fit guidance in existing cap without splitting markup.
-  - Persist each successfully generated title in one client-local `CODEX_HOME` record, scoped to local/remote app server. Restore eligibility only if record matches saved name.
-  - Protect named sessions with missing/corrupt/mismatched records; `/autorename` can opt in. Persist initial automatic names even with updates disabled, allowing refresh on later resume.
-  - View switches retain counters. Resume resets interval and excludes completed turns.
-- `auto_update_interval_turns`: positive integer, default 5:
-  - Count successful user-turn completions while displayed. Ignore duplicate/failed/interrupted/background/helper/replay events.
-  - At most one attempt per interval. Reset on start, not success. Failures retain ownership and wait another interval.
-  - Count during pending requests, but start no new request until settlement.
-  - Track unnamed opt-in threads before initial requests; ownership requires successful save.
-  - Retain only latest user-turn/item IDs, one ordering anchor, and at most 8192 UTF-8 user bytes. Long turns/pending initial generation must retain context after event-buffer eviction.
-  - First-user-message titles saved before assistant completion count that completion. Completed-turn initial titles count later completions.
+- `enabled`: default true. `model`/`reasoning_effort` affect titles only; omissions keep defaults. Preserve explicit models server-side. Fail unavailable models without fallback. Custom-provider models need no catalog entry.
+- `first_trigger`: `first_user_message` (default) or `first_completed_turn`. Exclude failed/interrupted completions.
+- `context`: `user_message` (default) or `recent_conversation`. Recent context includes the initial request and substantive user/assistant messages, not commentary/tools.
+- `max_context_bytes`: 128–8192 source bytes, excluding added guidance. Omission keeps the original budget.
+- `recent_message_limit`: 1–32, default 8, including the initial request; 1 retains only the latest message. Under byte pressure, drop earlier messages and keep markup complete.
+- `max_title_chars`: 1–128, default 36. Optional positive integer `max_title_words` is prompt-only: request at most that count. Omission keeps “under five words where possible.” Never truncate by words. Bind prompt/character limits to their originating request.
+- `additional_naming_guidance`: append at most 512 UTF-8 bytes; preserve fixed rules/prompt. No `instructions` alias. Cap the complete prompt at 9500 bytes. **P0 manual review:** larger opt-in budgets can exceed 1000 tokens. Keep the 10K-token item limit.
+- `auto_update`: default false. Refresh requires both `enabled` and `auto_update`. Include the captured previous title as bounded JSON-string data. Request changes only for meaningful task changes, preserving the core subject and wording. Routine progress is insufficient. Keep initial/manual prompts unchanged and fit guidance without splitting markup.
+- Save each generated title in one client-local `CODEX_HOME` record, scoped to the local/remote app server. Eligibility requires a record matching the saved name. Protect named sessions with missing/corrupt/mismatched records; `/autorename` can opt in. Save initial automatic titles even when updates are disabled, for later resume. Keep counters across view switches. Resume resets the interval and excludes completed turns.
+- `auto_update_interval_turns`: positive integer, default 5. Count successful displayed user-turn completions, not duplicate/failed/interrupted/background/helper/replay events. Start at most one attempt per interval. Reset on attempt start, not success. Failures keep ownership and wait another interval. Count while requests are pending; start none until settlement.
+- Track unnamed opt-in threads before initial requests; ownership requires a successful save. Retain only the latest user-turn/item IDs, one ordering anchor, and at most 8192 UTF-8 user bytes. Preserve context through event-buffer eviction during long turns or pending initial naming. For first-user-message naming saved before completion, count that completion. For completed-turn initial naming, count later completions.
 
-`/autorename`:
+`/autorename` immediately generates/applies one title with the same context/model/effort/budgets/limits/guidance. Ignore `enabled`, `first_trigger`, `auto_update`, and interval only for this explicit action. Later refresh obeys them.
 
-- Generate/apply one title immediately with the same context/model/effort/budgets/limits/guidance. Ignore `enabled`, `first_trigger`, `auto_update`, and interval for this explicit action; flags gate later refresh.
-- Use latest substantive user text or shared bounded recent collector. May replace existing/resumed names. Preserve `/rename` suggestions/supplied names.
-- Supersede pending background naming. Successful generation restores persisted eligibility, even with identical title. Failure leaves name/eligibility unchanged.
-- Deduplicate; retain titles on failure and report explicit failures. Discard results for undisplayed threads or changed saved names. Reuse app-server APIs; no Desktop changes.
+- Use the latest substantive user text or shared bounded recent collector. Allow replacement of existing/resumed names. Preserve `/rename` suggestions/supplied names.
+- Supersede pending background naming. Success restores persisted eligibility, even for an identical title. Failure preserves name/eligibility. Deduplicate and report explicit failures. Discard results for undisplayed threads or changed saved names. Reuse app-server APIs; do not change Desktop.
 
 Naming safety:
 
-- Keep background requests, manual-name precedence, cancellation, and originating-thread checks. Compare current server name with captured name before replacement. Identical generated names need no RPC.
-- `/rename`, dashboard naming, and explicit `set_thread_title` intent remove eligibility before RPC, including same-name requests. Removal failure aborts RPC with an error. Later RPC failure may leave refresh disabled.
+- Preserve background requests, manual-name precedence, cancellation, and originating-thread checks. Before replacement, compare the current server name with the captured name. Identical generated names need no RPC.
+- Before RPC, remove eligibility for `/rename`, dashboard naming, or explicit `set_thread_title`, including same-name requests. Abort on removal failure. A later RPC failure can leave refresh disabled.
 - Generic cancellation clears only in-memory ownership. External name changes cancel automatic work.
-- Records: at most 512 UTF-8 bytes/128 characters; validate reads and write atomically. Read only on attachment or recurring attempt/save, not streaming/rendering.
-- Recheck persisted eligibility before refresh to respect another TUI's opt-out. Corrupt/unreadable records fail closed; report persistence errors.
-- File/server writes cannot be jointly atomic. Same-name external renames and concurrent read/write races remain best-effort. No shared APIs, rollout records, or Desktop policy changes to solve them.
+- Cap records at 512 UTF-8 bytes/128 characters. Validate reads and write atomically. Read only at attachment or recurring attempt/save, not streaming/rendering.
+- Before refresh, recheck persisted eligibility for another TUI's opt-out. Fail closed on corrupt/unreadable records; report persistence errors.
+- File/server writes are not jointly atomic. Same-name external renames and concurrent reads/writes remain best-effort. Do not add shared APIs, rollout records, or Desktop policy to solve them.
 
 ### Account-security setup reminder
 
-Do not fetch/display optional Daybreak setup reminders, including reconnect/account refresh. Suppress loaded events too. Preserve authentication, security enforcement, approvals, account email, backend usage banners, and upstream reminder rendering/checks. Never weaken security requirements.
+Do not fetch/display optional Daybreak setup reminders, including reconnect/account refresh. Suppress loaded events. Preserve authentication, security enforcement, approvals, account email, backend usage banners, and upstream reminder rendering/checks. Never weaken security.
 
 ### Content-provenance wire compatibility
 
-Retain upstream per-content provenance in local history, prompt assembly, and compaction. Until deployed endpoint support is established, omit only `content_item_metadata` from the shared ordinary Responses HTTP/WebSocket request copy, including Responses Lite. Preserve other internal metadata and the original prompt. Responses Lite selection alone is not a capability guarantee. This temporary compatibility constraint withholds server-side per-part attribution; it does not enable full provenance on the wire.
+Keep upstream per-content provenance in local history, prompt assembly, and compaction. Until deployed endpoint support is established, omit only `content_item_metadata` from shared ordinary Responses HTTP/WebSocket request copies, including Responses Lite. Keep other internal metadata and the original prompt. Responses Lite does not guarantee capability. This constraint withholds server-side per-part attribution. It does not enable full wire provenance.
 
 ### Standalone request audit
 
-- Keep `debug prompt-input`. `debug prompt-request` exports versioned JSON: effective base instructions, production request, ordered input, full advertised tool definitions, Responses Lite prefixes, optional output schema.
-- Reuse app-server extension installer/request builder. No audit work in ordinary inference paths.
-- Default ephemeral. Session records/persistent state-backed tools require `--allow-session-state`; setup may opt in within isolated temporary homes. Never dispatch queued input.
-- Label fresh standalone debug turn, not live-session/exact transport capture. Report omitted history, hooks, input-triggered skill/plugin injections, uncaptured tools, auth-dependent metadata, and server additions.
-- Never send inference or claim startup lacks network/state effects. Exports can contain sensitive instructions/tool content.
+- Keep `debug prompt-input`. Export versioned JSON with `debug prompt-request`: effective base instructions, production request, ordered input, full advertised tool definitions, Responses Lite prefixes, and optional output schema.
+- Reuse the app-server extension installer/request builder. Do no audit work in ordinary inference paths.
+- Default to ephemeral. Require `--allow-session-state` for session records/persistent state-backed tools. Setup can opt in within isolated temporary homes. Never dispatch queued input.
+- Label this a fresh standalone debug turn, not a live-session/exact transport capture. Report omitted history, hooks, input-triggered skill/plugin injections, uncaptured tools, auth-dependent metadata, and server additions.
+- Never send inference or claim startup has no network/state effects. Exports can contain sensitive instructions/tool content.
 
 ### Model catalog ownership
 
-- [`codex-rs/models-manager/models.json`](../codex-rs/models-manager/models.json) is upstream-owned. Accept upstream sync changes, not personal/fork edits; never freeze it.
-- Personal edits belong only in `/home/trungnt13/codes/tngo-workflow/configs/model-catalogs/models.json`. Never copy them into the built-in catalog.
+- Keep [`codex-rs/models-manager/models.json`](../codex-rs/models-manager/models.json) upstream-owned. Accept upstream sync changes. Do not freeze it or make personal/fork edits.
+- Put personal edits only in `/home/trungnt13/codes/tngo-workflow/configs/model-catalogs/models.json`. Never copy them into the built-in catalog.
 
 ### Role-scoped skill visibility
 
-Optional `allowed_agent_roles` on a `[[skills.config]]` entry limits its normal catalog visibility and skill selection to the listed child roles:
+Optional `allowed_agent_roles` in `[[skills.config]]` restricts normal catalog visibility and skill selection to listed child roles. Example: `name = "review"`, `enabled = true`, `allowed_agent_roles = ["reviewer"]`.
 
-```toml
-[[skills.config]]
-name = "review"
-enabled = true
-allowed_agent_roles = ["reviewer"]
-
-[[skills.config]]
-name = "oracle"
-enabled = true
-allowed_agent_roles = ["reviewer"]
-```
-
-- Match the current child's explicit role, never an ancestor's role or the displayed TUI view. Omission keeps existing visibility; an empty list hides the matching skills from every role.
-- Root, ordinary Side, saved user forks, and unnamed/nonmatching children do not match. Explicit reviewer children match with fresh or V2 full-history context; resume restores their own role. Preserve V1 full-history role restrictions.
-- Keep parent enablement and permission boundaries. Roles remain deny-only for skill overrides; a matching role cannot re-enable an otherwise disabled skill. Scope restrictions also survive enables using another matching selector.
-- Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Respect scope in both config-aware and cwd cache paths. Keep prompt lists stable and use existing append-only availability updates and context budgets.
-- This is visibility, not access isolation. Do not change filesystem, script execution, sandbox, network, or approval permissions. Inherited history can retain old lists or previously read skill content; never scrub history to conceal it.
-- Configure the two skills only after using a supporting binary. Keep reviewer role descriptions generic so root's role list does not disclose their skill inventory.
+- Match the current child's explicit role, not an ancestor or displayed TUI view. Omission keeps existing visibility; `[]` hides matching skills from all roles.
+- Root, ordinary Side, saved user forks, and unnamed/nonmatching children do not match. Reviewer children match in fresh or V2 full-history context; resume restores their role. Preserve V1 full-history restrictions.
+- Keep parent enablement and permissions. Role overrides are deny-only and cannot re-enable disabled skills, including through another matching selector.
+- Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Apply scope in config-aware and cwd caches. Keep prompt lists stable, append-only availability updates, and existing context budgets.
+- This controls visibility, not access. Preserve filesystem/script/sandbox/network/approval permissions. History can retain old lists or read skill content; never scrub it.
+- Configure `review` and `oracle` only after using a supporting binary. Keep reviewer descriptions generic so root's role list does not disclose its skills.
 
 ### Role configuration restrictions
 
-Role TOML files may disable web search with `web_search = "disabled"` and System1 with `[system1] enabled = false`. Only explicit disabling is
-applied; omitted fields retain inheritance, including the parent's live System1 toggle.
-Role settings cannot enable either capability against parent restrictions. System1
-restrictions survive child spawn and reload. Roles may override `min_effort` and
-`max_effort` independently in `[system1]`; omitted bounds retain inherited values.
-Validate the merged range with the ordinary-effort rules. Intersect it with the
-current model's supported efforts; fewer than two choices skips Decisions.
-Bounds follow the applied role through model changes and child reload. New
-children resolve their own role without inheriting ancestor role bounds; V1
-full-history forks retain their role bounds. Other System1 settings remain inherited.
-This is a decision-choice range, not a clamp on manual effort or fallback requests.
-After a supporting release is published and installed, set the personal reviewer
-to `min_effort = "high"` and `max_effort = "xhigh"`; do not change it before then.
-Keep the projected role layer aligned with runtime settings. This does not add support
-for arbitrary role configuration fields or change session authority.
+Role TOML can explicitly disable web search with `web_search = "disabled"` or System1 with `[system1] enabled = false`. Omission keeps inheritance, including the parent's live System1 toggle. Roles cannot enable either against parent restrictions. Keep System1 restrictions through child spawn/reload.
+
+Roles can independently override `[system1] min_effort` and `max_effort`; omitted bounds inherit. Validate the merged ordinary-effort range. Intersect it with model-supported efforts; fewer than two choices skips Decisions. Keep role bounds through model changes/reload. New children resolve their own role, without ancestor role bounds; V1 full-history forks retain their role bounds. Other System1 settings inherit. Bounds constrain decision choices, not manual effort or fallback.
+
+After a supporting release is published and installed, set the personal reviewer to `min_effort = "high"`, `max_effort = "xhigh"`. Do not change it earlier. Align the projected role layer with runtime settings. Do not add arbitrary role fields or change session authority.
 
 ### Model catalog instruction visibility
 
-Top-level `include_model_catalog_in_spawn_agent_list`, default `true`:
+Top-level `include_model_catalog_in_spawn_agent_list` defaults to `true`.
 
-- False removes generated model/effort/tier lists from V1/V2 spawn descriptions and `<model_catalog>`, plus guidance pointing there.
-- Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists stop applying.
-- Inclusion is independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` argument exposure.
+- False removes generated model/effort/tier lists and references from V1/V2 spawn descriptions and `<model_catalog>`. Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists cease to apply.
+- Keep inclusion independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` arguments.
 
-Compact external-model alias discovery follows `load_external_models_json`:
+`load_external_models_json` controls compact exact-alias discovery independently of full-catalog visibility and placement. True (default) includes it in V1/V2 spawn descriptions; false omits it.
 
-- When true (the default), include a compact exact-alias list in V1/V2 spawn descriptions, independently of the full catalog visibility setting and context placement. When false, omit this list.
-- List only picker-visible, backend-compatible catalog entries with bundled aliases: native runtimes or configured API providers permitted by managed requirements. Discovery does not prove runtime, credentials, or service availability.
-- Keep the list hidden when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: V1 `fork_context=false`, V2 `fork_turns="none"`.
-- Do not change personal configuration automatically. Unknown-model errors identify truncated model previews as partial.
+- List only picker-visible, backend-compatible entries with bundled aliases: native runtimes or configured API providers allowed by managed requirements. Discovery proves no runtime, credentials, or service availability.
+- Hide the list when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: V1 `fork_context=false`, V2 `fork_turns="none"`.
+- Do not change personal configuration automatically. Identify truncated model previews as partial in unknown-model errors.
 
 ### MCP resource tools
 
-Top-level `mcp_resource_tools_enabled`, default `true`:
-
-- False removes `list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource` registration, callable entries, and declarations from direct tools, Code Mode, and `ALL_TOOLS`.
-- Enabled keeps existing registration conditions. Keep MCP connections, other server tools, apps/plugins, and shared TypeScript preamble independent.
-- Apply on config load; no new live reload/history rewrites.
+Top-level `mcp_resource_tools_enabled` defaults to `true`. False removes `list_mcp_resources`, `list_mcp_resource_templates`, and `read_mcp_resource` registration, calls, and declarations from direct tools, Code Mode, and `ALL_TOOLS`. True keeps existing registration conditions. Keep MCP connections, other server tools, apps/plugins, and the shared TypeScript preamble independent. Apply at config load; do not add live reload or rewrite history.
 
 ### Web search copyright instruction visibility
 
-Top-level `include_web_search_copyright_compliance`, default `true`:
+Top-level `include_web_search_copyright_compliance` defaults to `true`. False removes only terminal Copyright compliance from local `web.run` descriptions. Preserve preceding quotation/word limits, arguments, execution, search modes, history, hosted `web_search` instructions, and model safeguards. If the subsection changes or is not terminal, warn and keep the full description. Apply to standalone cached/indexed/live modes.
 
-- False removes only terminal Copyright compliance from local `web.run` description.
-- Preserve preceding quotation/word limits, arguments, execution, search modes, history, hosted `web_search` instructions, and model safeguards.
-- If subsection changes or is not terminal, warn and retain full description.
-- Apply to standalone cached/indexed/live modes.
-
-For all three visibility/tool settings above, do not update setup-managed profiles before a supporting CLI release.
+For all three visibility/tool settings above, wait for a supporting CLI release before updating setup-managed profiles.
 
 ### Saved forks and upstream sides
 
-- Stack-budget exception to async instrumentation: leave `start_companion_conversation` and `select_agent_thread_and_discard_side` uninstrumented. Their tracing wrappers duplicate large futures in unoptimized poll frames and exhaust the unchanged 16 MiB UI stack. Keep companion event-dispatch futures boxed; do not increase stack limits. Construct startup and run-loop event futures through a separate non-inlined closure boundary at the existing allocation sites, so their construction temporaries do not remain in the run-loop poll frame. Do not add a nested selection allocation as a substitute.
-
-- Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist for resume/further forks. Old rollouts need no ancestor lookups. Keep upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
-- Optional top-level `side_model`, `side_reasoning_effort`, and `side_service_tier` (for example, `"fast"` or `"default"`) independently override parent settings for temporary `/side` and `/btw` forks, including `/sync`. Unset values inherit current parent settings. Do not apply them to saved forks. Preserve native-runtime fork admission restrictions, including Claude’s same-model requirement.
-- Optional top-level `side_prompt` adds default developer instructions to temporary `/side` and `/btw` conversations, including `/sync`, and recognized Desktop side chats. For example: `side_prompt = "Act as a critical reviewer. Keep answers concise."` Unset or whitespace-only values preserve existing behavior. Preserve nonblank text and append it before the built-in side policy, without duplicating it on `/sync`. Forks also append the custom developer message once after their reference-only boundary because inherited context skips initial developer instructions; keep the configured prompt for compaction. Do not apply it to main or ordinary saved forks. It does not replace side boundaries, permissions, or capability restrictions.
-- Remote Desktop side chats also use these settings as initial defaults, including attached forks and new side threads. Recognize only the complete shipped Desktop 26.1027.51404 developer block; unknown wording leaves ordinary behavior unchanged. Recognize the complete shipped side boundary at the start of its user message, either alone or followed by a paragraph separator. Treat appended reference paragraphs as opaque context, not a protocol to parse; changed boundary wording remains unrecognized. Do not change the signed Desktop bundle or API shapes. Synchronize effective settings after client context injection; correct only the first new side thread turn's known inherited settings, including its inherited null effort/tier. Explicit picker settings win per field, persist normally, and are never replaced on later turns or resume. Keep ordinary saved forks and prediction forks unchanged.
-- `/side` and `/btw` retain upstream temporary lifecycle: restricted commands, reference-only instructions, no subagents/saved pairing. Ctrl+/ switches; Ctrl+C returns/discards. Ordinary picker navigation discards sides too. Preserve helper names/constants/tests where practical; avoid needless upstream rewrites.
-- Side has no extra question-only, non-mutating inspection, or explicit-mutation/escalation instruction gate; normal permissions and approvals still apply. Preserve reference-only inherited history, waiting for a new request, the subagent prohibition, and the ephemeral/worktree attachment restrictions in both boundary and developer instructions.
-- In temporary Side, `/sendlast [extra message]` forwards raw last completed assistant reply plus optional text as main user input. No prefix/navigation/settings change; atomically start or steer main. Reject complete items above 10,000 UTF-8 bytes, never truncate. Explicit item can exceed 1K tokens; require manual review when changed.
-- `/sync` replaces idle temporary Side with main's latest context, retaining model/effort/tier. Discard old history only after replacement setup/selection succeeds. Keep Side pairing/boundaries. Context refresh does not guarantee cache hits.
-- In idle temporary Side, `/fork [name]` saves an independent ordinary conversation:
-  - No navigation, pairing changes, or automatic work. Copy retained inherited replay/temporary history. After paginated main compacts, do not recover older raw entries outside model context.
-  - Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history.
-  - Default `<main title> (fork)` or `Untitled (fork)`; keep explicit names.
-  - Keep raw replay in memory only for temporary root forks. Normally append only new items; copy retained history only on explicit save. Temporary chats stay pathless/unlisted until saved.
-- `/parallel` is removed. Existing saved parallel conversations remain ordinary threads with unchanged IDs, history, permissions, and reference-only boundaries. Do not rewrite history, restore pairs, attach counterpart threads, or delete saved conversations.
-- Read legacy child transcript-display boundaries from client-local `asm-side-conversations` metadata per app-server target. Keep the existing namespace and display trimming across legacy reads, rollout reads, and paginated history. Unreadable metadata logs a warning and never blocks history. Do not write new pairing records or clean up personal metadata.
-- Preserve upstream Side lifecycle, including attached workspace sides and tab controls. Keep temporary Side restrictions and the `/sendlast`, `/sync`, and non-navigating `/fork` exceptions above. Stock clients continue to see ordinary threads through unchanged APIs; files and explicit global config remain shared.
+- Leave `start_companion_conversation` and `select_agent_thread_and_discard_side` uninstrumented: tracing duplicates large futures and exceeds the unchanged 16 MiB UI stack. Keep companion dispatch futures boxed. Do not increase stack limits. At existing allocation sites, construct startup/run-loop event futures through a separate non-inlined closure boundary. Keep construction temporaries outside the run-loop poll frame. Do not substitute a nested selection allocation.
+- Saved/temporary root forks keep the parent's effective prompt-cache routing key independently of thread/session ID. Persist it through resume/further forks. Old rollouts need no ancestor lookups. Preserve upstream guardian/subagent routing. Shared routing does not guarantee cache hits.
+- Top-level `side_model`, `side_reasoning_effort`, and `side_service_tier` independently override temporary `/side`/`/btw` settings, including `/sync`. Omitted values inherit current parent settings. Exclude saved forks. Preserve native admission restrictions, including Claude's same-model rule.
+- Optional `side_prompt` adds default developer instructions to temporary `/side`/`/btw`, `/sync`, and recognized Desktop sides. Unset/blank keeps existing behavior. Preserve nonblank text before built-in side policy. Do not duplicate it on `/sync`. Forks also append it once after the reference-only boundary; inherited context skips initial developer instructions. Retain it for compaction. Exclude main/ordinary saved forks. Keep side boundaries, permissions, and capability restrictions.
+- Remote Desktop sides use these initial defaults for attached forks and new side threads. Recognize only the complete shipped Desktop 26.1027.51404 developer block. Unknown wording keeps ordinary behavior. Require the complete shipped side boundary at the user-message start, alone or followed by a paragraph separator. Treat appended references as opaque context. Leave changed boundary wording unrecognized. Do not change the signed bundle or API shapes.
+- For recognized remote Desktop sides, after client context injection, synchronize effective settings. Correct only the first new side turn's known inherited settings, including null effort/tier. Explicit picker settings win per field and persist; never replace them on later turns/resume. Preserve ordinary saved forks and prediction forks.
+- Keep upstream temporary Side lifecycle, including attached workspace sides and tabs: restricted commands, reference-only instructions/history, waiting for new input, no subagents/saved pairing, and ephemeral/worktree attachment restrictions in both boundary/developer instructions. Ctrl+/ switches; Ctrl+C returns/discards. Picker navigation also discards sides. Preserve helpers/constants/tests where practical.
+- Do not add question-only, non-mutating inspection, or explicit-mutation/escalation gates. Normal permissions/approvals apply.
+- In temporary Side, `/sendlast [extra message]` forwards the raw last completed assistant reply and optional text as main user input. Atomically start/steer main; add no prefix or navigation/settings change. Reject complete items above 10,000 UTF-8 bytes; never truncate. Items can exceed 1K tokens: require manual review when changed.
+- `/sync` replaces idle temporary Side with main's latest context, retaining model/effort/tier and Side pairing/boundaries. Discard old history only after replacement setup/selection succeeds. Refresh does not guarantee cache hits.
+- In idle temporary Side, `/fork [name]` saves an independent ordinary chat. Do not navigate, change pairing, or start work. Copy retained inherited replay/temporary history, not older raw entries outside model context after paginated main compacts. Persist current model/effort/tier through resume. Append durable ordinary-role context; never rewrite history. Default to `<main title> (fork)` or `Untitled (fork)`; preserve explicit names.
+- Keep raw replay in memory only for temporary root forks. Normally append only new items; copy retained history only on explicit save. Temporary chats stay pathless/unlisted until saved.
+- Keep `/parallel` removed. Saved parallel chats remain ordinary threads with unchanged IDs/history/permissions/reference-only boundaries. Never rewrite history, restore pairs, attach counterparts, or delete saved chats.
+- Read legacy child display boundaries from client-local `asm-side-conversations` per app-server target. Keep namespace and trimming in legacy/rollout/paginated reads. Warn on unreadable metadata; do not block history. Do not write new pairing records or clean personal metadata.
+- Keep stock clients' ordinary-thread APIs unchanged. Files and explicit global config remain shared. Keep the temporary restrictions and `/sendlast`, `/sync`, non-navigating `/fork` exceptions above.
 
 ### Recap session ID
 
-End manual/automatic TUI recaps after any next action with dimmed `Session: <id>`. Use displayed conversation ID, not recap-generation thread. Preserve generation/timing.
+End manual/automatic TUI recaps, after any next action, with dimmed `Session: <id>`. Use the displayed conversation ID, not the generation thread. Preserve generation/timing.
 
 ### Turn completion footer
 
 Use one dimmed logical line: `Worked for 5s • 11:05 AM • 12.4k in • 9.8k cc • 820|600 ou • 3ag • <session-id>`.
 
 - Preserve timing, optional runtime metrics, and narrow wrapping. Use displayed conversation ID, not turn ID.
-- Show provider-reported conversation-turn totals, including compaction. Cached input belongs to input; reasoning to output. Omit unknown counts; never substitute context estimates/session totals. Reuse saved usage; paginated history may omit counts without migration.
-- `Nag` counts distinct related subagents seen running during a live turn, including descendants/already-running agents. Retain across client view switches. Omit restored-turn counts if start was not observed. Tokens remain parent-only. No request/accounting changes.
+- Show provider-reported turn totals, including compaction. Cached input belongs to input; reasoning belongs to output. Omit unknown counts; do not substitute context estimates/session totals. Reuse saved usage. Paginated history can omit counts without migration.
+- `Nag` counts distinct related subagents observed running during a live turn, including descendants/already-running agents. Keep counts across view switches. Omit restored counts without an observed start. Keep tokens parent-only and requests/accounting unchanged.
 
 ### Copy session ID
 
-`/copyid` copies only displayed session ID via existing clipboard. No `/status`, assistant reply, or picker. Allow during tasks, sides, and parent-owned subagent views. Report missing IDs/clipboard failures. Preserve `/copy` and platform support.
+`/copyid` copies only the displayed session ID through the existing clipboard. Do not open `/status`, reply, or show a picker. Allow during tasks, sides, and parent-owned child views. Report missing IDs/clipboard failures. Preserve `/copy` and platforms.
 
 ### ASM branding
 
-Use ASM in README heading, repo description, release titles/introduction, workflow step descriptions, fork TUI labels, and terminal title. Credit OpenAI Codex. Preserve actual upstream service/product names.
+Use ASM for README heading, repo description, release titles/introduction, workflow step descriptions, fork TUI labels, and terminal title. Credit OpenAI Codex. Keep actual upstream product/service names.
 
-Local CLI help descriptions and TUI messages use ASM; displayed command hints use `asm`, including resume, agents, login, and MCP setup. Keep underlying executable names, CLI parsing names, internal identifiers, model-visible prompts and parsed markers, upstream product names, and installer commands unchanged. Command hints require a user-provided `asm` alias or wrapper.
+Use ASM in local CLI help/TUI messages and `asm` in command hints, including resume, agents, login, and MCP setup. Hints require a user-provided alias/wrapper. Preserve executable/CLI parsing names, internal identifiers, model-visible prompts/parsed markers, upstream names, and installer commands. Keep the `codex` executable/version prefix and crate/config/state/archive/tag/workflow/job/check identifiers. Never redirect upstream links/installers for branding.
 
-Keep `codex` executable/version prefix, crate/config/state/archive/tag/workflow/job/check identifiers. Never redirect upstream links/installers for branding.
-
-On Linux, normal CLI, app-server, code-mode-host, and exec-server processes set only
-`/proc/self/comm` to `asm`, `asm-app-server`, `asm-code-host`, and `asm-exec-server`,
-respectively. Preserve executable filenames, command-line arguments, helper dispatch,
-package discovery, and protocol identity. Other platforms remain unchanged. A label
-failure warns without blocking startup; process viewers showing full command lines
-still show the canonical executable names. External name-based monitoring must use
-the new labels. UI plugin helpers intentionally share the `asm-code-host` label
-with the regular code-mode host. CLI-dispatched sandbox and filesystem helper
-modes retain upstream labels.
+On Linux, set only `/proc/self/comm` for normal CLI/app-server/code-mode-host/exec-server to `asm`/`asm-app-server`/`asm-code-host`/`asm-exec-server`. Preserve filenames, argv, helper dispatch, package discovery, and protocol identity. Keep other platforms unchanged. Warn on label failure without blocking startup. Full-command viewers still show canonical filenames; external name-based monitoring must use new labels. UI plugin helpers share `asm-code-host`. CLI-dispatched sandbox/filesystem helpers retain upstream labels.
 
 ### Background terminal waits
 
-Top-level `background_terminal_min_timeout` / `background_terminal_max_timeout`, milliseconds, defaults 5000 / 300000. Reject zero/reversed/unrepresentable bounds. Clamp empty `write_stdin` polls; show bounds in description and finish early on exit.
-
-Preserve initial/nonempty waits and Code Mode outer `exec`/`wait` limits. Exit alone does not resume idle model turns.
+Top-level `background_terminal_min_timeout`/`background_terminal_max_timeout` use milliseconds; defaults 5000/300000. Reject zero/reversed/unrepresentable bounds. Clamp empty `write_stdin` polls, show bounds in descriptions, and finish early on exit. Preserve initial/nonempty waits and Code Mode outer `exec`/`wait` limits. Exit alone does not resume idle model turns.
 
 ### Memory reasoning effort
 
-Optional `[memories]` `extract_reasoning_effort` / `consolidation_reasoning_effort` for V1/V2 use existing effort type. Defaults `low` / `medium`, independent of parent. Preserve models/other memory behavior.
+Optional `[memories] extract_reasoning_effort`/`consolidation_reasoning_effort` use the existing effort type for V1/V2. Defaults: `low`/`medium`, independent of parent. Preserve models and other memory behavior.
 
 ### Compact Markdown links
 
-- Render named web and resolvable local file links as OSC 8 labels, without destination suffixes.
-- Keep bare URLs visible. Do not require terminal detection for compact labels.
-- Resolve relative paths against the session cwd lexically; never read the filesystem or frontend home.
-- Preserve path encoding and location fragments. Opening a line depends on the terminal/editor.
-- Keep unsupported or unresolved destinations visible, and retain destinations in text-only output.
-- Reuse existing hyperlink layout and output transport; keep trusted artifact capabilities separate.
+- Render named web/resolvable local file links as OSC 8 labels without destination suffixes. Keep bare URLs visible. Do not require terminal detection.
+- Resolve relative paths lexically against session cwd. Do not read the filesystem/frontend home. Preserve encoding/location fragments. Line opening depends on terminal/editor.
+- Show unsupported/unresolved destinations and retain destinations in text-only output. Reuse hyperlink layout/output transport. Keep trusted artifact capabilities separate.
 
 ### Conversation switching
 
-Owned fullscreen switches keep the displayed frame and terminal diff buffer until the destination's replay is complete, then draw the new conversation once. Continue collecting background progress and replay current history in order; a parked screen is not authoritative conversation state. Keep native-scrollback clearing unchanged. This behavior does not require the experimental workspace feature.
+During owned fullscreen switches, retain the displayed frame/terminal diff buffer until destination replay completes. Draw the destination once. Continue background collection and ordered current-history replay. A parked screen is not authoritative state. Preserve native-scrollback clearing. No experimental workspace feature is required.
 
-Creating a side conversation while Main runs a tool snapshots inherited history, not live execution. Complete pending calls only in the fork's persisted interrupted suffix; leave Main and referenced ancestor records unchanged. The side must remain valid after cold resume and must not execute or cancel Main's pending work.
+When Main runs a tool, side creation snapshots inherited history, not execution. Complete pending calls only in the fork's persisted interrupted suffix. Keep Main/ancestor records unchanged. Preserve cold resume; never execute/cancel Main's pending work.
 
 ### Transcript spacing
 
-Keep Markdown paragraphs/code blocks/list items adjacent while streaming and completed. Preserve blanks inside code blocks, raw output, message boundaries, and user padding.
+Keep Markdown paragraphs/code blocks/list items adjacent during streaming and completion. Preserve blanks within code blocks, raw output, message boundaries, and user padding.
 
 ### Click-to-quote
 
-`[tui] click_to_quote = true` is opt-in; default `false`:
+`[tui] click_to_quote = true` is opt-in, default `false`. Apply only to owned fullscreen transcripts; preserve native scrollback.
 
-- Only the owned fullscreen transcript supports this gesture; native scrollback is unchanged.
-- Fresh mouse selections still copy normally. Clicking the existing composer attaches the selected text, not clipboard contents, as a frozen removable preview above the comment draft.
-- Clipboard-confirmed deselection retains the pending quote. Explicit deselection, navigation, or thread changes clear pending selection; no timed expiration.
-- Attached quotes belong to their chat draft and survive switching away and back. Whole-draft replacement installs its own quote state; quote-only drafts cannot be overwritten by plain history navigation.
-- Markdown quoted references are literal: they do not auto-activate skill or app mentions. Unquoted comment references and explicit structured mentions retain normal resolution.
-- Fresh selections append references in selection order without replacing earlier references. Each [×] removes only its reference; preview text does not remove it. Mouse wheel scrolls the combined reference/image list when height is limited, keeping the comment visible.
-- Number references from 1 in both previews and submitted blockquotes. Keep global indices while scrolling; renumber remaining references after removal. Include numbering bytes in the existing size bound.
-- Each attachment appends a numbered comment below existing text in the same composer, with a grey “Add an optional comment…” hint that is never submitted. Keep pretyped general text unnumbered and preserve earlier entered comments; remove only empty generated comment rows. Preserve custom and restricted-input hints.
-- Plain Enter on an empty generated comment clears its number and keeps a blank line for a general message, without submitting. Preserve references and earlier comments; modified submit keys keep their normal behavior.
-- Track generated comment prefixes separately from user-written numbered lists. Escape generated comment numbering in submitted Markdown so omitted comments do not change displayed indices. Submit every reference and only entered comments; removing a reference renumbers associated comments and keeps its entered comment as ordinary draft text. Preserve associations across draft restoration; changed external-editor text may detach them rather than guess.
-- Removing a quote preserves the draft. Clicking never sends a model request; Enter uses the existing submission pipeline with a Markdown blockquote and optional comment.
-- Reject an attachment if the cumulative formatted references alone exceed 10,000 UTF-8 bytes, preserving the existing references and comment. No reference-count limit.
-- Reject the complete quote-plus-comment item above 10,000 UTF-8 bytes, including quoting and expanded pastes. Never truncate. Ordinary unquoted drafts retain their existing limits.
-- Quote items can exceed 1K tokens and require manual review when changed. No new hidden instructions, API fields, or history rewriting.
+- Fresh selections copy normally. A composer click attaches selected text, not clipboard contents, as a frozen removable preview above the comment draft. It sends no model request.
+- Clipboard-confirmed deselection retains pending quotes. Explicit deselection/navigation/thread changes clear pending selection. Do not expire it by time.
+- Attach quotes to chat drafts and retain across switches. Whole-draft replacement installs its own quote state. Plain history navigation cannot overwrite quote-only drafts.
+- Treat quoted references literally; do not auto-activate skills/apps. Keep normal resolution for unquoted comments and explicit structured mentions.
+- Append selections in order; do not replace prior references. [×] removes only its reference; preview text does not remove it. With limited height, wheel-scroll the combined reference/image list and keep comments visible.
+- Number previews/submitted blockquotes from 1. Keep global indices during scrolling; renumber after removal. Count numbering bytes toward size limits.
+- Each attachment appends a numbered comment below existing composer text. Use grey “Add an optional comment…” as an unsubmitted hint. Keep pretyped general text unnumbered and prior comments intact. Remove only empty generated comment rows. Preserve custom/restricted-input hints.
+- Plain Enter on an empty generated comment clears its number, leaves a general-message blank line, and does not submit. Preserve references/prior comments and modified-submit behavior.
+- Track generated prefixes separately from user numbered lists. Escape generated comment numbers in submitted Markdown so omitted comments do not change displayed indices. Submit all references and only entered comments. On reference removal, renumber associated comments and retain entered text as ordinary draft text. Restore associations with drafts; external-editor changes can detach them rather than guess.
+- Quote removal preserves the draft. Enter uses the existing pipeline with a Markdown blockquote and optional comment.
+- Reject attachments when formatted references alone exceed 10,000 UTF-8 bytes; preserve existing references/comments. Do not limit reference count. Reject complete quote-plus-comment items above 10,000 UTF-8 bytes, including quoting/expanded pastes. Never truncate. Keep ordinary unquoted limits.
+- Items can exceed 1K tokens; require manual review when changed. Do not add hidden instructions/API fields or rewrite history.
 
 ### Collapsed tool calls
 
-`[tui] collapse_tool_calls = true` is opt-in; default `false`. Rich fullscreen behavior:
+`[tui] collapse_tool_calls = true` is opt-in, default `false`. In rich fullscreen:
 
-- Collapse consecutive shell/MCP/dynamic calls, routine V2 subagent interactions, normal agent starts/completions, and routine waits into one expandable summary.
-- Separate counts for calls/starts/completions. Lifecycle notifications are not calls/running tools. Show distinct command/tool names or agent paths in first-use order.
-- Count each successful subagent message/follow-up once; matching wait start/end previews once per contiguous displayed group. Completed waits cannot stay running. Keep waits with results/failures/interruption visible.
-- Replace overflowing names with `+N more`. Positive integer `[tui] collapse_tool_calls_max_lines` defaults to `1`. Budget applies to each new header's counts/names; larger values wrap. Retained reading snapshots keep captured content on resize and may wrap further. Ellipsize if even counts cannot fit.
-- Interruptions, other activity, and chat messages split groups. Keep active tool in a separate short row until committed history includes it.
-- Expansion restores original previews/order. Keep failures/approvals visible. Preserve execution/model history/raw output/full transcript. Disabled keeps existing rendering.
+- Collapse consecutive shell/MCP/dynamic calls, routine V2 interactions, normal agent starts/completions, and routine waits into one expandable summary.
+- Count calls/starts/completions separately. Lifecycle notices are not calls/running tools. List distinct command/tool names or agent paths in first-use order.
+- Count each successful child message/follow-up once. Count matching wait start/end previews once per contiguous displayed group. Completed waits cannot remain running. Keep result/failure/interrupted waits visible.
+- Replace overflowing names with `+N more`. Positive integer `[tui] collapse_tool_calls_max_lines` defaults to `1`. Apply to new headers' counts/names; wrap larger budgets. Preserve captured reading snapshots on resize; they can wrap further. Ellipsize if counts alone cannot fit.
+- Split groups on interruption, other activity, or chat messages. Keep active tools in separate short rows until committed history includes them.
+- Expansion restores previews/order. Keep failures/approvals visible and preserve execution/model history/raw output/full transcript. Disabled retains existing rendering.
 
 ### Completed turn activity
 
-- In the rich owned transcript, show commentary and tools live. When the final answer starts, fold that turn's commentary, reasoning, and successful tool previews under an expandable `Worked for …` row. Unphased legacy output folds at successful completion, excluding the last answer.
-- Keep user messages, notices, failures, approvals, and final answers visible. Interrupted turns without a final answer remain unfolded. Raw/full transcript, copy sources, execution and model history retain their original cells. Native terminal scrollback is unchanged.
-- Reuse activity disclosure controls. Index appended cells once; rebuild only after structural history changes. Bound rendered fold layouts to 64 entries; do not format hidden output.
+- In rich owned transcripts, show commentary/tools live. At final-answer start, fold that turn's commentary/reasoning/successful tool previews under expandable `Worked for …`. Fold unphased legacy output at successful completion, excluding the last answer.
+- Keep user messages/notices/failures/approvals/final answers visible. Leave interrupted turns without final answers unfolded. Preserve original cells in raw/full transcript, copy sources, execution/model history. Keep native scrollback unchanged.
+- Reuse disclosure controls. Index appended cells once; rebuild only for structural history changes. Cap rendered fold layouts at 64 entries. Do not format hidden output.
 
 ### Compact status line
 
-- Join with `·`, no spaces. Use `CtxN%` for used context, `CtxN%left` for remaining context, and `F:on` / `F:off` for fast mode.
-- Context capacity: compact token count only, no `window` suffix, including `/statusline` previews.
-- Lowercase model labels; remove `gpt-`; retain at most first three letters, including custom aliases. Append all version digits without separators: `GPT-6-Astra` → `ast6`, `GPT-6.1-Sol` → `sol61`, `Terra 5.6` → `ter56`. No digits means no suffix.
-- Reasoning: first three letters, including model-with-reasoning: `medium` → `med`, `high` → `hig`, `xhigh` → `xhi`.
-- Apply to footer, `/statusline` preview, `/subagents` model info. Preserve IDs, other picker labels, terminal titles. Remove role-leading space only in footer: `Main[default]`. Preserve paths/roles/colors/order/single-row truncation.
-- Opt-in `cache-hit-rate` in `/statusline`/`tui.status_line`; defaults unchanged. Show current thread's latest reported request cached/input ratio as `CchN.N%`, rounded to one decimal. Use existing usage; no averages/totals/new requests/APIs. Hide unknown/zero-input usage. Missing cache detail remains indistinguishable from reported zero.
-- Offer opt-in `output-tps` with unchanged defaults. Show `Ntps`, rounded to the nearest whole number, for the latest successful ordinary Responses request or native Claude message: provider-reported non-reasoning output tokens (`output_tokens - reasoning_output_tokens`), divided by the duration from its first nonempty text or tool-argument delta to completion. Exclude failed attempts, retry waits, compaction, warmup, tools, and other threads. Exclude initial request latency. This is observed streaming generation throughput, not pure decoding speed: stream buffering can affect the estimate. Exclude reasoning deltas from the timing start so hidden reasoning is not divided by the visible output interval. Require an explicit reasoning-token breakdown; never treat missing details as zero for TPS. Native Claude uses the matching root message_delta output/thinking usage and message_stop boundary, never whole-turn cumulative usage; ignore native child streams. Cursor TPS remains unavailable. Omit requests with no generated delta or a zero-millisecond generation duration. Calculate once at live response completion and carry the result on the existing token-usage event. Cache the formatted value in the TUI and use its existing refresh without another notification, redraw request, timer, or streaming estimate. Retain the latest valid result across failed requests; omit unavailable timing or usage and do not reconstruct it from replayed history.
+- Join with `·`, without spaces. Use `CtxN%`/`CtxN%left` for used/remaining context and `F:on`/`F:off` for fast mode. Show capacity as a compact token count without `window`, including `/statusline` previews.
+- For model labels, lowercase, remove `gpt-`, and keep at most three letters, including aliases. Append all version digits without separators: `GPT-6-Astra` → `ast6`, `GPT-6.1-Sol` → `sol61`, `Terra 5.6` → `ter56`. Without digits, omit the suffix.
+- Abbreviate effort to three letters, including model-with-reasoning: `medium` → `med`, `high` → `hig`, `xhigh` → `xhi`.
+- Apply to footer, `/statusline` previews, and `/subagents` model info. Preserve IDs, other picker labels, titles, paths/roles/colors/order/single-row truncation. Remove role-leading space only in footer: `Main[default]`.
+- Opt-in `cache-hit-rate` in `/statusline`/`tui.status_line` keeps defaults unchanged. Show the current thread's latest reported cached/input ratio as `CchN.N%`, rounded to one decimal. Reuse usage; no averages/totals/requests/APIs. Hide unknown/zero-input usage. Missing cache detail remains indistinguishable from reported zero.
+- Opt-in `output-tps` keeps defaults unchanged. Show rounded whole-number `Ntps` for the latest successful ordinary Responses request/native Claude message. Divide reported `output_tokens - reasoning_output_tokens` by time from its first nonempty text/tool-argument delta to completion. Exclude reasoning deltas from the timing start. Require explicit reasoning-token breakdown; missing is not zero.
+- Exclude failures, retry waits, compaction, warmup, tools, other threads, and initial latency. This measures observed streaming throughput, not pure decoding; buffering can affect it. For Claude, use matching root `message_delta` output/thinking usage and `message_stop`, not turn totals or native children. Cursor TPS is unavailable. Omit requests without generated deltas or with zero-millisecond duration.
+- Calculate TPS once at live completion. Carry it on the existing usage event. Cache formatted text in the TUI; use existing refresh without extra notifications/redraw requests/timers/streaming estimates. Retain the latest valid result across failures. Omit unavailable timing/usage; do not reconstruct from replay.
 
 ### Continue through model capacity failures
 
-Top-level `continue_when_model_at_capacity = true` opts ordinary model requests
-and foreground compaction into unlimited retries for `ServerOverloaded` errors.
-Omission or `false` preserves upstream retry behavior. Children inherit the setting.
+Top-level `continue_when_model_at_capacity = true` enables unlimited `ServerOverloaded` retries for ordinary requests and foreground compaction. Children inherit it. False/omission keeps upstream behavior.
 
-- Retry the failed request on the same model, without restarting the task or
-  deliberately replaying completed tools. Keep ordinary retry budgets separate.
-- Without server advice, wait 30, 60, 120, 240, then 300 seconds between attempts;
-  subsequent local waits remain capped at five minutes. A valid `Retry-After`
-  takes precedence, including deadlines beyond five minutes; reporting time must
-  count toward that deadline.
-- With the option enabled, pass structured HTTP 503 overloads directly to this
-  waiter instead of running the ordinary short HTTP retry burst first. Keep
-  unrelated HTTP failures and non-Responses endpoint retry policies unchanged.
-- Surface the next retry delay, attempt count, and elapsed capacity-wait time.
-  Preserve cancellation and sampling input preemption. Do not add periodic redraws
-  or retry background compaction candidates indefinitely.
-- Leave other error classifications unchanged, including policy-restricted capacity,
-  Flex, quota, authentication, and invalid requests. Overload codes do not prove
-  eventual recovery: a backend that mislabels a permanently disabled model as
-  overloaded will also keep waiting until cancellation. Do not classify backend
-  prose with string heuristics or promise completion if capacity never recovers.
+- Retry the same model without task restart or deliberate completed-tool replay. Keep ordinary retry budgets separate.
+- Without server advice, wait 30, 60, 120, 240, then 300 seconds; cap later local waits at five minutes. Valid `Retry-After` overrides this, even beyond five minutes. Include reporting time in its deadline.
+- Send structured HTTP 503 overloads directly to this waiter, skipping the ordinary short HTTP burst. Preserve unrelated HTTP/non-Responses retry policies.
+- Report next delay, attempts, and elapsed capacity wait. Keep cancellation and sampling-input preemption. Do not add periodic redraws or unlimited background-compaction retries.
+- Preserve other classifications: policy-restricted capacity, Flex, quota, authentication, invalid requests. Overload codes do not prove recovery. Mislabelled permanent disablement waits until cancellation. Do not classify prose with string heuristics or promise eventual completion.
 
 ### Multi-agent V2 depth
 
-- Apply `[agents] max_depth` to V2 child creation, counting root as depth 0. The existing default is 1, so omitted settings allow only direct children. Reject deeper spawns before preparing a child; keep existing agents and communication tools available.
+Apply `[agents] max_depth` to V2 creation, with root at 0. Default 1 permits direct children only. Reject deeper creation before child preparation. Keep existing agents/communication available.
 
 ### Subagent context windows, service tiers, and picker
 
-Optional top-level `subagent_model_context_windows = { "gpt-6-astra" = 272000, "gpt-6.1-sol" = 272000 }`:
+Optional top-level `subagent_model_context_windows` maps exact final model IDs to positive `i64` token counts. Apply only to V2 spawned children at startup/model changes/reload. Missing entries keep scalar/model fallback. Keep original `model_context_window` so matches cannot spill into unmatched grandchildren. Preserve clamping/headroom/compaction. Keep root/review/guardian unchanged; add no API/rollout fields.
 
-- Positive `i64` integers; exact final model-ID matches only for V2 spawned children through startup/model changes/reload. Missing entries retain scalar/model fallback.
-- Keep original `model_context_window` so matches cannot spill into unmatched grandchildren. Preserve maximum clamping, usable headroom, and compaction settings. Root/review/guardian unchanged; no API/rollout fields.
+A positive role TOML `model_context_window` overrides map/scalar fallback at startup/model changes/reload. New children resolve their own role, not parent role limits. V1 full-history forks keep role inheritance. Preserve clamping/headroom/compaction and root/internal workers. The picker shows top-level map/scalar configuration, not effective role limits.
 
-Role TOML may set a positive `model_context_window`, for example `model_context_window = 128000`. An applied child role overrides the map and scalar fallback through startup, model changes, and reload. New children resolve their own role; do not inherit the parent role limit. V1 full-history forks retain existing role inheritance. Keep maximum clamping, usable headroom, compaction settings, and root/internal-worker behavior unchanged. The picker still shows top-level map/scalar configuration, not the effective role limit.
-
-`[subagent_service_tiers]`, e.g. `gpt-6-sol = { high = "fast" }`:
-
-- Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched follows upstream; root requests unchanged.
-- Reject unsupported matched tiers and Fast when disabled. No spawn-argument exposure.
+`[subagent_service_tiers]` maps model/effort to tiers, e.g. `gpt-6-sol = { high = "fast" }`. Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched/root behavior stays upstream. Reject unsupported matched tiers and Fast when disabled. Do not expose spawn arguments.
 
 `/subagents` labels:
 
-- Append known compact model/effort to main/child titles: `gpt-6.1-sol-high-fast` → `sol61-hig-fast`, `gpt-6-astra-xhigh` → `ast6-xhi`.
-- `-fast` only for matched Fast or inherited Fast; matched `default` suppresses inheritance. Do not guess settings/remove thread-ID descriptions/change navigation.
-- Append known positive configured capacity: `sol61-hig-fast-272k` / `sol61-max-272k`. Exact map applies only to canonical-path V2 spawned children, never main/V1. Otherwise use configured scalar, including main. Omit unknown/nonpositive values, not catalog guesses.
-- Labels show config, not confirmed routing/runtime capacity/usage/remaining context. Capacity precedes model clamping/headroom. Keep TUI-only with other metadata/navigation unchanged; no new APIs/request tracking.
+- Append known model/effort using [compact status rules](#compact-status-line). Append `-fast` only for matched/inherited Fast; matched `default` suppresses inheritance. Do not guess settings, remove thread-ID descriptions, or change navigation.
+- Append known positive configured capacity: `sol61-hig-fast-272k` or `sol61-max-272k`. Use exact map only for canonical-path V2 children, not main/V1. Otherwise use configured scalar, including main. Omit unknown/nonpositive values; do not infer catalog values.
+- Labels show configuration before clamping/headroom, not confirmed routing/runtime capacity/usage/remaining context. Keep other metadata/navigation and TUI-only scope. Add no APIs/request tracking.
 
 ### Plaintext inter-agent messages
 
-Multi-Agent V2 sends parent/child messages as plaintext. Upstream marks `message` on `spawn_agent`, `send_message`, and `followup_task` as `encrypted`, so the server returns ciphertext that only the backend can read.
+V2 sends parent/child messages as plaintext. Upstream marks `message` on `spawn_agent`, `send_message`, and `followup_task` as `encrypted`.
 
-- Bundled schemas omit the marker. Catalog parameter overrides drop `encrypted` from top-level properties, where the server places it; nested markers are not stripped. A catalog schema that omits `message` is accepted like other V2 catalog schemas instead of falling back.
-- Spawn and message tools always deliver `AgentMessage::Plaintext`, for direct, code-mode, and namespaced calls, whatever `encrypted_function_args` the server reports. Responses Lite omits that field for unmarked tools, so the upstream rule would treat plaintext as ciphertext.
-- Keep reasoning, compaction, and output-replay encryption unchanged. Old rollouts keep ciphertext and replay it through the unchanged `AgentMessage::Encrypted` delivery branch. Message delivery APIs stay unchanged; raw response items, transcripts, and tool-result logs outside the `collaboration` namespace now show message text. The subagent transcript display adds a typed `interAgentMessage` item to app-server history and notifications.
-- V2 child transcripts show the original supplied spawn arguments below the initial assignment, excluding the already displayed message. Render them in the TUI as a dimmed `key: value` list matching the turn completion footer, without JSON braces or string quotes. Expose them separately as typed transcript display metadata and rebuild derived history caches on upgrade; never identify them by parsing assignment text. Persist these as local display metadata only; do not infer omitted settings or add them to model context. Old transcripts without this metadata remain unchanged.
-- The TUI shows full plaintext incoming assignments/messages and outgoing communication in parent-owned subagent transcripts, live and on replay. Initial task headers show the child’s actual role when available. Main transcripts keep their existing summaries. This is presentation only: do not change model context or delivery, rewrite history, or attempt to display encrypted payloads. Keep the renderer isolated from upstream generic tool rendering. Thread-history migration `0009_inter_agent_communication_projection.sql` clears only derived SQLite history so existing plaintext is projected again; preserve this cache rebuild when resolving an upstream migration-number conflict. Rebuild invalidated projections only as paginated reads visit segments, including newer turn-shadowing dependencies; do not eagerly replay unused ancestors for bounded recent-history pages. Serialize catch-up for each visited segment. A committed batch does not prove completion; retry failed or cancelled rebuilds. Reuse completed catch-up only while its source revision and SQLite checkpoint still match, without decoding unchanged compressed history again. Older outgoing messages without display records are not backfilled. Paginated incoming records require saved turn metadata; records without it are not assigned to a guessed turn.
-- Store fork display projections in `asm_thread_history_1.sqlite`, not stock `thread_history_1.sqlite`. Follow the [shared compatibility gate](#shared-compatibility-gate) for cache versions, wire consumers, validation, and manual stock-cache recovery. The new namespace does not repair stock caches written by older ASM. Cold reads lazily replay visited rollout segments. Warm reads reuse checkpoints. The separate cache costs disk space and first-read replay, not another lookup layer per request.
-- After initialization, `asmTranscript/enable` with `version: 1` enables fork transcript display on that connection. ASM TUI opts in before history reads and after reconnects. Without opt-in, omit typed `interAgentMessage` from snapshots, paginated display items, and live notifications. Preserve ordinary history, actual collaboration summaries, model context, and storage pagination cursors. For unsupported clients, skip display-only item/timeline pages until a visible row or EOF. Never truncate history on an empty filtered page. Do not disguise communication as user messages.
-- Include live transcript display and Desktop rendering in affected consumer checks. A stock reader pass does not prove Desktop rendering.
-- On every upstream sync, search for new `with_encrypted`, `encrypted` schema markers, and `AgentMessage::Encrypted` producers on agent tools. A missed marker sends ciphertext to a child as plaintext text.
+- Omit the marker in bundled schemas. For catalog overrides, drop `encrypted` from top-level properties only, not nested markers. Accept schemas without `message` without fallback.
+- Always deliver `AgentMessage::Plaintext` for direct/code-mode/namespaced spawn/message calls, regardless of `encrypted_function_args`. Responses Lite omits that field for unmarked tools; do not misclassify plaintext as ciphertext.
+- Preserve reasoning/compaction/output-replay encryption and old ciphertext replay through `AgentMessage::Encrypted`. Keep delivery APIs. Raw items/transcripts/tool-result logs outside `collaboration` now expose message text. Add typed `interAgentMessage` to app-server history/notifications.
+- Below V2 child assignments, show original supplied spawn arguments except the displayed message. Use dimmed `key: value` lists matching the completion footer, without braces/string quotes. Expose typed display metadata separately; never parse assignments. Persist locally for display only; do not infer omitted settings or add model context. Preserve old transcripts without metadata. Rebuild derived history caches on upgrade.
+- Show full plaintext incoming assignments/messages and outgoing communication in parent-owned child transcripts, live/replayed. Use actual role in initial headers when known. Preserve main summaries. Do not change context/delivery/history or display ciphertext. Keep the renderer separate from generic upstream tool rendering.
+- Keep `0009_inter_agent_communication_projection.sql` clearing only derived SQLite history to reproject plaintext. Preserve this rebuild when resolving migration-number conflicts. Replay invalidated projections only for paginated visited segments and newer turn-shadowing dependencies. Do not eagerly replay unused ancestors for bounded recent pages. Serialize segment catch-up. Retry failed/cancelled rebuilds; committed batches do not prove completion. Reuse catch-up only with matching source revision/SQLite checkpoint, without decoding unchanged compressed history. Do not backfill old outgoing messages without display records. Incoming paginated records require saved turn metadata; never guess their turn.
+- Store projections in `asm_thread_history_1.sqlite`, not `thread_history_1.sqlite`. Apply the [shared compatibility gate](#shared-compatibility-gate), including cache versions, consumers, validation, and manual stock-cache recovery. The namespace does not repair previously contaminated stock caches. Cold reads lazily replay visited segments; warm reads reuse checkpoints. This costs disk/first-read replay, not an extra per-request lookup layer.
+- After initialization, `asmTranscript/enable` with `version: 1` enables connection-local display. TUI opts in before history reads and after reconnects. Without opt-in, omit `interAgentMessage` from snapshots/paginated display/live notifications. Preserve ordinary history/collaboration summaries/context/storage cursors. For unsupported clients, skip display-only item/timeline pages until a visible row or EOF. Never truncate on empty filtered pages or disguise communication as user messages.
+- Check live display and Desktop rendering for affected consumers. Stock-reader success does not prove Desktop rendering.
+- At each upstream sync, search agent tools for new `with_encrypted`, `encrypted` schema markers, and `AgentMessage::Encrypted` producers. Missed markers deliver ciphertext as plaintext.
 
 ### Multiline-aware Enter
 
-Opt-in `[tui] multiline_enter = true` keeps plain Enter sending single-line drafts and
-inserting a newline into multiline drafts, including collapsed pending paste content.
-Require plain Enter in both submit and editor newline bindings; preserve custom keymaps
-and popup actions. Modified submit bindings always send, flushing pending paste bursts.
-The default is unchanged. Example explicit newline/send bindings:
+Opt-in `[tui] multiline_enter = true` makes plain Enter send single-line drafts and insert newlines in multiline drafts, including collapsed pending pastes. Keep defaults unchanged. Require plain Enter in both submit/editor-newline bindings. Preserve custom keymaps/popup actions. Modified submit always sends and flushes pending pastes.
 
-```toml
-[tui]
-multiline_enter = true
-
-[tui.keymap.composer]
-submit = ["enter", "ctrl-enter"]
-
-[tui.keymap.editor]
-insert_newline = ["enter", "shift-enter"]
-```
-
-Use Shift+Enter to start a multiline draft, Ctrl+Enter to send it. Terminals must support
-the configured modified keys. Queue bindings retain their existing behavior.
-Vim Insert/Replace use the editor newline binding; Vim Normal retains its editing semantics.
+Example bindings: `[tui.keymap.composer] submit = ["enter", "ctrl-enter"]`; `[tui.keymap.editor] insert_newline = ["enter", "shift-enter"]`. Use Shift+Enter to start multiline input and Ctrl+Enter to send. Terminals must support configured modifiers. Keep queue bindings unchanged. Vim Insert/Replace use editor-newline bindings; Normal retains editing semantics.
 
 ### Composer destination
 
-Keep the active prompt destination visible in the composer’s top-right padding: Main or Side. Use a bold filled badge with one space on each side: neutral for Main and magenta for companions, with contrasting text. Do not add borders or recolor prompt markers or typed text. Derive the destination from active thread state, not footer text, and preserve input geometry.
+Show Main or Side in the composer's top-right padding. Use a bold filled badge with one space each side: neutral for Main, magenta for companions, contrasting text. Do not add borders or recolor markers/input. Derive destination from active thread state, not footer text. Preserve input geometry.
 
 ### Built-in agent role descriptions
 
-Explicit spawn `model` overrides the role model; the role model overrides inheritance.
-Resolve the final model before validating effort and selecting the runtime. Preserve
-role effort and other constraints; incompatible effective settings fail instead of
-switching runtimes. Keep the public `agent_type` spelling.
+Resolve model before effort validation/runtime selection: explicit spawn `model` > role model > inheritance. Preserve role effort/constraints. Fail incompatible settings; do not switch runtimes. Keep `agent_type` spelling.
 
-Keep the built-in explorer purpose and original delegation Rules block in the spawn-agent schema. Keep the worker task list and concise Rules requiring explicit task/file ownership, preservation of concurrent edits, and one owner for shared prerequisites. Coordinate ownership before continuing overlapping work; continue independent work meanwhile.
+Keep the explorer purpose/original delegation Rules in spawn schemas. Keep worker tasks and concise Rules: explicit task/file ownership, concurrent-edit preservation, one shared-prerequisite owner. Coordinate before overlapping edits; continue independent work meanwhile.
 
 ### Subagent global instructions
 
-For spawned subagents, `$CODEX_HOME/SUBAGENTS.md`, when present, replaces the global
-user-instruction contribution from `AGENTS.md` or `AGENTS.override.md`. An empty
-file clears that contribution. A missing file retains the existing inheritance
-contract; other read errors fail startup rather than silently use root instructions.
-Resolve the file at child startup, including cold reload, for fresh and full-history
-children. Keep project instructions, host thread instructions, and root/internal
-worker behavior unchanged. Full-history children retain history and receive the
-replacement through normal incremental context updates, not history rewriting.
+At child startup/cold reload, `$CODEX_HOME/SUBAGENTS.md` replaces global user instructions from `AGENTS.md`/`AGENTS.override.md`. Empty clears them; missing retains inheritance; other read failures stop startup. Apply to fresh/full-history children. Keep project/host instructions and root/internal workers unchanged. Full-history children retain history and receive normal incremental updates, not rewritten history.
 
 ### Wait and sleep intent reminders
 
-`clock.sleep`, V2 `agents.wait_agent`, Code Mode
-`wait`, ASM TUI `wait_threads` (including its MCP exposure), and empty-input
-`write_stdin` polls require a `reason`. Nonempty terminal input stays unchanged.
-Trim reasons and reject more than 500 characters. Always return continuation
-guidance naming the wait tool; an empty reason omits only its context line.
-Return nonempty reasons as JSON-quoted tool
-context, separate from command/script output and its truncation budget.
+Require `reason` for `clock.sleep`, V2 `agents.wait_agent`, Code Mode `wait`, ASM TUI `wait_threads` including MCP, and empty `write_stdin` polls. Keep nonempty input unchanged. Trim reasons; reject over 500 characters. Always return continuation guidance naming the tool. Empty reason omits only its context line. Return nonempty reasons as JSON-quoted tool context, outside command/script output and truncation budgets.
 
-When new input interrupts a wait, remind the model to understand the user's intent;
-a status question alone does not cancel or pause pending work. If work remains
-pending, give status as commentary and call the named wait tool again with valid
-current arguments rather than ending the turn. Use neutral guidance when a return
-does not identify interruption. Preserve running children, cells, processes,
-and collected terminal output. Explicit stop and cell termination must not prompt
-resumption. Reminders are guidance, not guaranteed continuation or automatic waits.
-Code Mode, terminal polling, and TUI waits use the existing `instant_interrupt`
-steering signal; disabling that feature preserves their normal wait behavior.
-An interrupted TUI wait returns `interrupted: true` with no target snapshots;
-it cancels only the observation, not the target chats. Limit MCP early cancellation
-to the marked `codex_tui.wait_threads` tool and preserve its MCP result envelope.
-Do not rewrite user messages, add persistent reminder state, or change app-server
-schemas. Amend effective tool schemas after catalog overrides. Legacy V1 waits,
-environment readiness, desktop-owned tools, and initial command execution are
-outside this change.
+- On input interruption, remind the model to understand intent. A status question alone does not cancel or pause work. If work remains, give commentary and call the named wait again with current valid arguments. Otherwise-unidentified returns use neutral guidance.
+- Preserve children/cells/processes/collected output. Explicit stop/termination must not prompt resumption. Reminders do not guarantee continuation or automatic waits.
+- Use existing `instant_interrupt` for Code Mode, terminal polls, and TUI waits. Disabling it preserves normal waits. Interrupted TUI waits return `interrupted: true` without snapshots and cancel observation only.
+- Limit MCP early cancellation to marked `codex_tui.wait_threads`; preserve its envelope. Do not rewrite user messages, persist reminders, or change app-server schemas. Amend effective schemas after catalog overrides.
+- Exclude V1 waits, environment readiness, desktop-owned tools, and initial command execution.
 
 ### Test-only dependencies
 
-Keep `codex-ollama`'s `wiremock` dependency under `[dev-dependencies]` while only tests use it. This removes its test-server dependency chain from production builds, not necessarily the linked binary. Drop this drift if upstream adopts it; restore the normal dependency if production code needs it.
+Keep `codex-ollama`'s `wiremock` under `[dev-dependencies]` while only tests use it. This removes the test-server chain from production builds, not necessarily the linked binary. Drop drift if upstream adopts it; restore the normal dependency if production needs it.
 
 ### Advertised subagent models
 
-Top-level `subagent_model_list` optionally selects advertised model IDs in user order for both the spawn-tool description and `<model_catalog>` context. Omission retains automatic picker-visible selection; `[]` advertises no choices. Explicit IDs may select hidden models from the loaded catalog. Duplicate IDs are deduplicated; only the first five choices are advertised, and the context catalog retains its 1,000-byte bound. All configured IDs are checked against the loaded catalog and spawning-backend compatibility before truncation; an invalid ID renders a configuration error instead of falling back. This setting does not restrict runtime spawning or change the model picker.
+Optional top-level `subagent_model_list` selects advertised model IDs in user order for spawn descriptions and `<model_catalog>`. Omission keeps automatic picker-visible selection; `[]` advertises none. Explicit IDs can select hidden loaded models. Deduplicate and advertise only the first five; keep the catalog's 1,000-byte context bound. Before truncation, validate every ID against the loaded catalog and spawning backend. Fail invalid IDs without fallback. Do not restrict runtime spawning or change the picker.
 
 ### Flat reasoning-effort picker
 
-Show all model-supported reasoning efforts, including Max and Ultra, in one list.
-Do not gate them behind a “More reasoning…” submenu. Preserve selection persistence,
-Plan-mode scope, and the explicit picker requirement for raising into Ultra by shortcut.
+Show all model-supported efforts, including Max/Ultra, in one list without “More reasoning…”. Keep persistence, Plan-mode scope, and explicit-picker requirements for shortcuts that raise effort to Ultra.
 
 ### GNU malloc arena cap
 
-At the start of `main`, the Linux GNU `codex` calls `mallopt(M_ARENA_MAX, 4)` before any thread starts. A set `MALLOC_ARENA_MAX` takes precedence. glibc otherwise allows up to 8 arenas per CPU, and many-core hosts keep idle heap in them. Keep the GNU system allocator: upstream uses jemalloc only on musl, to replace the musl allocator. Mock-model runs (64 CPUs, 32 conversations × 4 turns, 3 runs) measured 6–15% lower RSS and 10–28% lower anonymous memory after unload, with no measurable wall or CPU cost. The effect on real sessions is unmeasured. Drop this drift if upstream caps glibc arenas itself.
+Before threads start, Linux GNU `codex` calls `mallopt(M_ARENA_MAX, 4)` at `main` start unless `MALLOC_ARENA_MAX` is set. Reduce idle heap retained by glibc's CPU-scaled arenas. Keep the GNU system allocator; upstream jemalloc replaces only musl's allocator. Mock-model runs showed memory savings without measurable wall/CPU cost; real-session effects remain unmeasured. Drop this drift if upstream caps glibc arenas.
 
 ### Session HTTP transport reuse
 
-Keep one model API transport per session and reuse the existing route-aware pool. Rebuild it when the resolved client factory, endpoint, redirect policy, authentication owner, runtime, or default headers change. Resolve provider authentication for every request; token refresh alone does not discard connections. Preserve existing TLS, CA, proxy, cookie, redirect, and managed destination-policy behavior. Route selection and policy checks still run for every request. This change covers model HTTP requests, not auxiliary clients or WebSocket lifetime.
+Reuse one model HTTP transport per session through the existing route-aware pool. Rebuild on resolved client factory/endpoint/redirect-policy/authentication-owner/runtime/default-header changes. Resolve authentication and run routing/policy checks per request. Token refresh alone retains connections. Preserve TLS/CA/proxy/cookie/redirect/managed-destination policy. Exclude auxiliary clients and WebSocket lifetime.
 
 ### Tokio worker cap
 
-On Linux, the runtime builder starts at most `min(CPUs, 8)` Tokio workers unless `TOKIO_WORKER_THREADS` is set. Tokio otherwise starts one worker per CPU, 64 on the primary host. Mock-model runs with the glibc arena cap (64 CPUs; 32 conversations × 30 turns and 64 × 20) measured 9–15% lower RSS and about 21% lower total CPU than the default, with no wall-time loss. The effect on real sessions and on peak async CPU is unmeasured. macOS and Windows keep Tokio's default. Drop this drift if upstream caps workers itself.
+On Linux, cap Tokio workers at `min(CPUs, 8)` unless `TOKIO_WORKER_THREADS` is set. Reduce CPU-scaled worker overhead. Keep macOS/Windows defaults. Mock-model runs with the arena cap showed memory/CPU savings without wall-time loss; real-session/peak-async-CPU effects remain unmeasured. Drop this drift if upstream caps workers.
 
 ### Desktop agent-created worktrees
 
-ASM app-server handles the recognized `codex_app.create_worktree` and `attach_worktree` dynamic tools on the thread execution host. Create or attach a durable managed worktree without changing the chat cwd, workspace roots, or skill context. Return the worktree path for explicit command execution; do not invoke the desktop handler that changes the chat workspace. Keep explicit user navigation unchanged. Match TUI trust behavior: reject explicitly untrusted chat and source projects; an unset trust level is allowed. Require a non-ephemeral chat, local execution environment, and durable attachment storage. Creation can complete immediately even when `allowAsync` is true. Preserve partial-registration recovery without creating duplicate checkouts. Desktop attachment rendering and subsequent-turn skill retention require validation in the actual desktop client; backend-only checks do not establish them.
+On the thread host, app-server handles recognized `codex_app.create_worktree`/`attach_worktree` dynamic tools. Create/attach durable managed worktrees without changing chat cwd, workspace roots, or skills. Return paths for explicit execution; do not call the Desktop handler that changes workspace. Preserve explicit navigation.
+
+Reject explicitly untrusted chat/source projects; allow unset trust, like TUI. Require non-ephemeral chats, local execution, and durable attachments. Immediate completion is allowed with `allowAsync: true`. Preserve partial-registration recovery without duplicate checkouts. Verify attachment rendering and subsequent-turn skill retention in actual Desktop; backend checks are insufficient.
