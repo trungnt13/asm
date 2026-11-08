@@ -46,16 +46,16 @@ struct WebSearchExtensionConfig {
 
 impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
-        let provider = config
-            .web_search_model_provider
-            .as_ref()
-            .unwrap_or(&config.model_provider);
+        let search_provider = config
+            .web_search_model_providers
+            .get(&config.model_provider_id);
+        let provider = search_provider.unwrap_or(&config.model_provider);
         Self {
             provider_supports_search: provider.is_openai()
                 || provider.uses_openai_actor_authorization()
                 || provider.supports_standalone_web_search,
-            separate_search_auth: config.web_search_model_provider.is_some(),
-            flat_tool: config.model_provider_id == "fireworks",
+            separate_search_auth: search_provider.is_some(),
+            flat_tool: search_provider.is_some() && !config.model_provider.is_openai(),
             include_copyright_compliance: config.include_web_search_copyright_compliance,
             http_client_factory: config.http_client_factory(),
             provider: provider.clone(),

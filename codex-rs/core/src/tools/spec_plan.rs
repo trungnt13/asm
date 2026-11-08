@@ -1265,6 +1265,10 @@ fn standalone_web_search_enabled(turn_context: &TurnContext, model_info: &ModelI
         && (model_info.use_responses_lite
             || turn_context
                 .config
+                .web_search_model_providers
+                .contains_key(&turn_context.config.model_provider_id)
+            || turn_context
+                .config
                 .features
                 .get()
                 .enabled(Feature::StandaloneWebSearch))
