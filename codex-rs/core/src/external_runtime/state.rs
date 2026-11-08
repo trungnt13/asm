@@ -121,6 +121,7 @@ enum TemporaryFork {
 
 pub(crate) struct ExternalSession {
     pub(super) runtime: RuntimeProcess,
+    pub(super) page_context: codex_config::PageContextPolicy,
     pub(super) bridge: Option<ExternalMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
@@ -206,7 +207,8 @@ impl ExternalSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
         bridge: Option<&ExternalMessageBridge>,
-        disallowed_tools: Vec<String>,
+        mut disallowed_tools: Vec<String>,
+        claude_config: &codex_config::ClaudeCodeConfig,
         role_instructions: Option<String>,
         session_kind: codex_external_runtime::ClaudeSessionKind,
         checkpoint: &mut Checkpoint,
@@ -251,6 +253,11 @@ impl ExternalSession {
                 codex_external_runtime::ClaudeSession::Fork { parent, at, id }
             }
         };
+        disallowed_tools.extend(claude_config.disallowed_tools.iter().cloned());
+        let skill_overrides = serde_json::to_value(&claude_config.skill_overrides)?
+            .as_object()
+            .context("Claude skill overrides must be an object")?
+            .clone();
         ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
@@ -261,6 +268,7 @@ impl ExternalSession {
             role_instructions,
             session,
             disallowed_tools,
+            skill_overrides,
             bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
         })
         .await

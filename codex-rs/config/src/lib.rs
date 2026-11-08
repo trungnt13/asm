@@ -33,6 +33,7 @@ mod mcp_types;
 mod merge;
 mod model_provider_defaults;
 mod model_provider_requirements;
+mod native_runtimes;
 mod overrides;
 mod path_context;
 pub mod permissions_toml;
@@ -55,6 +56,11 @@ mod tui_keymap;
 mod tui_mouse_scroll;
 mod tui_rendering;
 pub mod types;
+
+pub use native_runtimes::ClaudeCodeConfig;
+pub use native_runtimes::NativeRuntimesConfig;
+pub use native_runtimes::PageContextPolicy;
+pub use native_runtimes::SkillVisibility;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 

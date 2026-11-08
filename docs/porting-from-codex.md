@@ -322,6 +322,45 @@ The shared native rules below also apply to Cursor, except for its listed differ
 - In Claude Side, disallow native Agent, Task, TaskStop, SendMessage, ListAgents, CronCreate, CronDelete, ScheduleWakeup, EnterWorktree, and ExitWorktree. Send one short boundary to preserve Side's reference-only/no-agent/no-worktree rules; ASM side instructions are not native context. Never replay history/copy session files. Keep side checkpoints in memory; closing unloads the thread/process. Lost/closed sides cannot cold-resume. Reject Cursor sides, saved `/fork`, and historical native cuts.
 - External threads use Default collaboration only, never guardian review. Keep mandatory managed-execution restrictions. Native turns have no total deadline; retain cancellation/bounded cleanup during tools/background agents. Do not add an approximate-token prompt cap or truncate instructions; Claude manages context within transport limits.
 
+**ASM-only Claude launch configuration**
+
+`[native_runtimes.claude_code]` applies only to Claude processes launched by ASM,
+including roots, children, Side and cold resume. Unset controls preserve native defaults.
+Never modify Claude user/project settings, skill files, installation or authentication.
+Native managed policy and ASM's mandatory child/Side restrictions remain authoritative.
+
+- `disallowed_tools` adds native tool exclusions, including `Agent(name)` selectors.
+- `skill_overrides` maps native skill names to `on`, `name-only`, `user-invocable-only`
+  or `off`. Pass these through one native `--settings` overlay, merged with ASM's
+  existing launch settings. Native Claude owns name resolution and plugin limitations.
+- `page_context` is `inherit` (default), `when_present` or `off`. Filter only queued
+  Page snapshot/instruction blocks, never actual user messages or unrelated context.
+  `when_present` omits Page context only when the queued snapshots explicitly show no
+  Page and native history has no earlier Page context. Preserve clearing snapshots after
+  a Page was forwarded; missing or malformed snapshots preserve context. Cursor and saved
+  history are unchanged.
+- Capture launch settings per process; config edits do not restart a live process.
+  Page filtering remains fixed while loaded. Cold launch/resume uses current config;
+  previously saved native prompt snapshots may still retain earlier context.
+
+Example (opt-in, not installed defaults):
+
+```toml
+[native_runtimes.claude_code]
+disallowed_tools = ["ReportFindings", "Agent(statusline-setup)"]
+page_context = "when_present"
+
+[native_runtimes.claude_code.skill_overrides]
+"claude-api" = "off"
+"plugin-authoring" = "off"
+"anthropic-skills:built-in-browser" = "off"
+"anthropic-skills:chrome-browser" = "off"
+"anthropic-skills:computer-use" = "off"
+"anthropic-skills:google-workspace" = "off"
+"anthropic-skills:morning" = "off"
+"anthropic-skills:skill-creator" = "off"
+```
+
 **Claude context and usage**
 
 - Explicit child role context limits, otherwise exact V2 `subagent_model_context_windows`, set native `--autocompact` windows. Accept only 100000–1000000 tokens; reject unsupported values. Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in child environment and flag settings. Explicit values override inherited environment/user/project settings, not native managed policy. Unmatched children retain native defaults/environment.

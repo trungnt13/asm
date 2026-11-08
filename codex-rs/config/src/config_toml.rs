@@ -168,6 +168,9 @@ pub struct FeatureToggleToml {
 pub struct ConfigToml {
     /// Optional override of model selection.
     pub model: Option<String>,
+    /// Launch-only settings for native runtimes, leaving standalone CLI settings unchanged.
+    #[serde(default)]
+    pub native_runtimes: crate::NativeRuntimesConfig,
     /// Retry model overloads until recovery or cancellation. Defaults to false.
     pub continue_when_model_at_capacity: Option<bool>,
     /// Default Daybreak preference for new threads and non-interactive turns.

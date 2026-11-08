@@ -655,6 +655,7 @@ pub struct Config {
     pub model: Option<String>,
     /// Retry model overloads until recovery or cancellation.
     pub continue_when_model_at_capacity: bool,
+    pub native_runtimes: codex_config::NativeRuntimesConfig,
     /// Default Daybreak preference for new threads and non-interactive turns.
     pub daybreak_enabled: bool,
 
@@ -4919,6 +4920,7 @@ impl Config {
             model_catalog,
             load_external_models_json: cfg.load_external_models_json.unwrap_or(true),
             continue_when_model_at_capacity: cfg.continue_when_model_at_capacity.unwrap_or(false),
+            native_runtimes: cfg.native_runtimes,
             model_verbosity: cfg.model_verbosity,
             chatgpt_base_url_is_explicit,
             chatgpt_base_url: cfg
