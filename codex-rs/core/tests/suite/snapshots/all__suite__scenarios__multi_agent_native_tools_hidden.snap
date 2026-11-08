@@ -16,13 +16,13 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=86f9b73f5dfb93f7):
-        - namespace/functions; hash=b141cd314947cacc
+00:additional_tools/developer (2; hash=e925fadba28742a3):
+        - namespace/functions; hash=de78850fea6d0764
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
+        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
 01:message/developer:
     You are Codex, an agent based on GPT-6. You and the user share one workspace, and your job is to collabo...them until their intended goal is completely handled. [hash=efa50f074efa5803]
@@ -81,5 +81,5 @@ Settings:
     Check which agents are working under /root before delegating more work.
 06:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-07:function_call/collaboration.list_agents:{"path_prefix":"/root"}
-08:function_call_output:unsupported call: collaborationlist_agents
+07:function_call/asm_agents.list_agents:{"path_prefix":"/root"}
+08:function_call_output:unsupported call: asm_agentslist_agents

@@ -6,15 +6,15 @@ Scenario: With retention disabled, the client can still send retain=true. Tool o
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=240eeae30b56ee98):
-        - namespace/functions; hash=b141cd314947cacc
+00:additional_tools/developer (3; hash=9195922802b9fee3):
+        - namespace/functions; hash=de78850fea6d0764
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
+        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -45,15 +45,15 @@ Scenario: With retention disabled, the client can still send retain=true. Tool o
 
 ## Window 2 (after request 3: input diverged at item 11)
 -- request 4 (compaction) --
-00:additional_tools/developer (3; hash=240eeae30b56ee98):
-        - namespace/functions; hash=b141cd314947cacc
+00:additional_tools/developer (3; hash=9195922802b9fee3):
+        - namespace/functions; hash=de78850fea6d0764
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
+        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -84,15 +84,15 @@ Scenario: With retention disabled, the client can still send retain=true. Tool o
 
 ## Window 3 (after request 4: input diverged at item 06)
 -- request 5 (turn) --
-00:additional_tools/developer (3; hash=240eeae30b56ee98):
-        - namespace/functions; hash=b141cd314947cacc
+00:additional_tools/developer (3; hash=9195922802b9fee3):
+        - namespace/functions; hash=de78850fea6d0764
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
+        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

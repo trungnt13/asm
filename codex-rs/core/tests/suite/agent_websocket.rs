@@ -69,7 +69,7 @@ async fn spawned_agent_prewarm_handshake_inherits_effective_root_service_tier(
                 ev_response_created("root-spawn"),
                 ev_function_call_with_namespace(
                     "spawn-worker",
-                    "collaboration",
+                    "asm_agents",
                     "spawn_agent",
                     &json!({ "message": "hello", "task_name": "worker", "fork_turns": "none" })
                         .to_string(),

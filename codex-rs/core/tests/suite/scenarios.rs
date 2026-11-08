@@ -1794,7 +1794,7 @@ async fn child_completion_wakes_parent_after_final_answer() -> Result<()> {
         sse(vec![
             ev_function_call_with_namespace(
                 "spawn-worker",
-                "collaboration",
+                "asm_agents",
                 "spawn_agent",
                 r#"{"task_name":"worker","fork_turns":"none","message":"Check whether the release is ready."}"#,
             ),
@@ -2220,7 +2220,7 @@ async fn multi_agent_catalog_parameters(
                 ev_response_created("agents-response"),
                 ev_function_call_with_namespace(
                     "agents-call",
-                    "collaboration",
+                    "asm_agents",
                     "list_agents",
                     r#"{"path_prefix":"/root"}"#,
                 ),
@@ -2317,7 +2317,7 @@ async fn astra_settings_release_check_with_direct_and_code_mode_tools() -> Resul
         vec![
             sse(vec![
                 ev_response_created("agents-response"),
-                ev_function_call_with_namespace("agents-call", "collaboration", "list_agents", "{}"),
+                ev_function_call_with_namespace("agents-call", "asm_agents", "list_agents", "{}"),
                 ev_completed("agents-response"),
             ]),
             sse(vec![
@@ -3788,7 +3788,7 @@ async fn astra_async_compaction_keeps_work_added_after_its_snapshot(
             compaction_chunk(
                 Some(foreground_gate),
                 vec![
-                    ev_function_call_with_namespace("team", "collaboration", "list_agents", "{}"),
+                    ev_function_call_with_namespace("team", "asm_agents", "list_agents", "{}"),
                     ev_completed_with_tokens(
                         "team-response",
                         /*total_tokens*/ if over_budget { 9_000 } else { 75_000 },
@@ -4107,7 +4107,7 @@ async fn async_compaction_reuses_pending_work(
     if !manual {
         responses.push(immediate(response(
             "second",
-            ev_function_call_with_namespace("team", "collaboration", "list_agents", "{}"),
+            ev_function_call_with_namespace("team", "asm_agents", "list_agents", "{}"),
             /*tokens*/ if over_budget { 9_000 } else { 91_000 },
         )));
     }
