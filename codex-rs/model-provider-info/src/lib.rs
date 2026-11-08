@@ -334,12 +334,13 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             http_headers: None,
+            standalone_web_search_provider: None,
             ..self.clone()
         };
         if unsupported_fields != Self::default() {
             return Err("only supports changing \
 `base_url`, `auth`, `http_headers`, `aws.profile`, `aws.region`, `aws.credential_export`, \
-and `aws.auth_refresh`; \
+`aws.auth_refresh`, and `standalone_web_search_provider`; \
 other non-default provider fields are not supported"
                 .to_string());
         }
