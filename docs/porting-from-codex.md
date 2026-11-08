@@ -9,6 +9,8 @@
 
 This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.md). Its validation and platform limits replace upstream defaults. Other coding, formatting, test-authoring, and generator rules still apply. Recorded intent does not prove implementation, integration, or publication.
 
+The linked task skills and their procedures are required parts of this guide for applicable tasks. Read them before those tasks. This guide controls conflicts. Skill use grants no new authority.
+
 ## Development workflow
 
 ### Start or resume
@@ -21,15 +23,11 @@ This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.m
 
 ### Build the binary first
 
+Before local builds or binary handoffs, use [asm-build](../.agents/skills/asm-build/SKILL.md). Keep the CLI/helper pair from matching source, target, and profile. Preserve copied-pair identity and require permission before installed-binary replacement.
+
 For runtime/UI edits, inspect affected paths, including streaming and completed output. Make the smallest coherent change.
 
 - Before Cargo, verify disk space. Rebase/release maintenance may remove verified inactive local build caches under existing path, lock, and process checks. Record measurements and removals. Preserve active/uncertain artifacts, source, user state, and verified binaries. If safe cleanup cannot provide space, ask.
-- Local `just` recipes default to main's `codex-rs/target`. Preserve explicit `CARGO_TARGET_DIR` and Cargo target-directory options.
-- Keep native host mode, toolchain, profile, features, flags, checkout, and cache stable. Do not add `--target` merely to name the host. Timestamp, source, version, and other input changes can force rebuilds.
-- Reuse matching verified [fork V8](#v8-dependency-release). Export the same verified absolute `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`. Old Cargo fingerprints do not prove validity.
-- Export `AWS_LC_SYS_NO_JITTER_ENTROPY=1` consistently; changes rebuild AWS-LC and dependents.
-- From `codex-rs`, run `just build-dev`. Prioritize `codex` and `codex-code-mode-host` with matching source, native target, and `dev-small` profile. Serialize Cargo jobs sharing a target directory. Verify the producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
-- Before releasing shared-cache ownership, verify real copies of both executable siblings in one task-owned directory under the checkout, e.g. `.agents/test-bin/<build-id>/`. Do not use symlinks or hard links. Record source commit, build inputs, absolute paths, and SHA-256 hashes. Test and hand off this unchanged pair with its evidence, not overwriteable shared-target executables.
 
 The local Cargo wrapper must:
 
@@ -41,10 +39,6 @@ The local Cargo wrapper must:
 - Keep the two-day cleanup rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not establish checkout inactivity; removal can force active checkouts to rebuild.
 - Block reusable-checkout release/switching during active wrapper commands. Direct Cargo bypasses protection; finish it before releasing the checkout.
 - Keep interactive `cargo run` I/O without holding the cache lock for the live app. Leave CI and Windows unchanged.
-
-For ordinary runtime/UI checks, use the verified absolute copied CLI with `--no-daemon` and [real-session isolation](#real-session-checks). This uses the embedded backend and sibling helper without changing/stopping the shared daemon. Check daemon/remote behavior separately when needed; `codex agents` and `--remote` cannot use `--no-daemon`.
-
-Before handoff, verify both files, CLI `--version`, both `--help` commands, and pair source identity. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. After runtime edits, rebuild and copy both; never present old binaries as current. Get permission before replacing installed `codex`.
 
 Local profile rules:
 
@@ -72,14 +66,12 @@ After approved integration, reuse checks and the verified binary pair only with 
 
 ### Real-session checks
 
+Before real-provider validation, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md). Follow its isolation, evidence, and cleanup procedure.
+
 - Every PR needs a successful real-provider live check before review or merge readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions. Release smoke remains separately required.
 - Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
 - Use existing sign-in only as authorized. New paid API/provider/model tests require approval for endpoint, model, request/token limits, and spend cap. Never invent a dollar budget.
 - Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers; preserve release defaults. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
-- Use private temporary `CODEX_HOME` with `diagnostic_log_capture = true`, not ephemeral mode. Retain diagnostic history outside personal history. Securely provision only needed config, authentication, and resources. Preserve intended profile/model. Put sessions, databases, and logs inside that home. Never copy personal history or symlink shared mutable state.
-- Unless behavior needs a specific checkout, use a temporary working directory. Use `--no-daemon`; for daemon/remote checks, use an isolated server, never the personal shared daemon.
-- Record session IDs, commands, binary/source identity, and expected/actual results. Before cleanup, retain private rollouts, output, and diagnostics. Never report or commit credentials.
-- Keep failed homes until triage ends. Remove only task-owned state after retaining evidence. Titles do not make personal sessions disposable.
 
 ### Desktop SSH tests
 
@@ -108,6 +100,8 @@ Use PRs against `main` for implementation, documentation, and syncs. The lead al
 
 ## Upstream sync
 
+Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-upstream-sync/SKILL.md). Follow its conflict-reuse and evidence procedure.
+
 ### Shared compatibility gate
 
 For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and real-session rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
@@ -131,21 +125,11 @@ The owner accepts this limitation only for the sync through `748ab55ca7` and its
 
 Every upstream rebase/sync must fetch the live authenticated backend catalog. Source, cached, and bundled catalogs cannot establish current availability; backend models can change without source changes.
 
-- Use the configured backend and authorized sign-in. Follow client path `models?client_version=<client version>`, authentication, account routing, and discovery settings. Never send credentials to an unverified endpoint. This read-only request is not inference.
-- Save successful raw JSON as timestamped private task-owned `models.json` outside tracked source. Validate model-list shape. Record fetch time, backend URL, client version, and returned IDs. Keep credentials/authentication headers out of evidence, logs, and commits.
-- Compare with the bundled catalog. Report new models, visibility, and relevant capabilities; link saved JSON in the rebase report. Catalog presence does not prove execution. Do not automatically change model/config defaults.
-- If authentication, connectivity, or discovery policy blocks a fresh fetch, report the reason. Do not substitute cached data or claim live availability was checked.
-
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
 Last incorporated commit: `748ab55ca7de0b647d9a7a9d9a8e70e00f28666d`, 2026-11-08. Subject: Increase Bazel core unit test shards from 8 to 16 (#60206).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
-- For each sync command, enable reviewed conflict reuse without shared Git config changes. Preserve chosen strategy/history options, e.g. `--rebase-merges`. Use `git -c rerere.enabled=true -c rerere.autoupdate=false merge <upstream-target>` or `git -c rerere.enabled=true -c rerere.autoupdate=false rebase <upstream-target>`. Review reused resolutions before staging; validate affected behavior. Rerere does not prove correctness.
-- After manual resolution, run `git -c rerere.enabled=true -c rerere.autoupdate=false rerere`. Continue with `git -c rerere.enabled=true -c rerere.autoupdate=false rebase --continue` or `git -c rerere.enabled=true -c rerere.autoupdate=false merge --continue`.
-- For full syncs, capture baseline and target first; include the chosen upstream `main` commit and all ancestors. Report that fixed range. Focus on fork differences and affected upstream changes. Follow development validation/integration rules.
-- After each rebase, group upstream changes by idea, not commit. Give one short plain sentence per idea, user effect, and source link. Keep status/validation separate.
-- After full sync, update the marker in that PR. Cherry-picks do not advance it. Verify `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and ancestry to the fork branch.
 
 ## Platforms and CI
 
@@ -162,20 +146,14 @@ Use standard GitHub-hosted runners; paid larger runners need explicit approval. 
 
 ### Operate a release
 
-1. **Prepare:** require an explicit release request. Prioritize the complete installable package over unrelated features. Use the existing workflow and explicit repo `gh ... -R trungnt13/asm`. Resume unfinished candidates first; preserve their pinned source. For a new release, fetch upstream with tags/prune. Capture latest `upstream/main`; rebase onto that fixed target under sync/PR/validation/push rules. Verify the V8 prerequisite before source pushes to `origin/main`. Push the intended commit before dispatch; never release unpushed work. Publication grants no install/shared-server-restart authority.
-2. **Check CI:** inspect failures; fix relevant code/package errors. For runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not infer code defects or change build settings from runner failure alone. If the owner requires recovery first, verify retry success before dispatch. Read prior candidate logs in memory with supported GitHub CLI raw-output opt-in. Never render untrusted log escapes to a terminal.
-3. **Check live use:** before dispatch, run one local turn with default config and existing sign-in. Do not substitute cheaper profiles/models without approval. This smoke has standing approval for required System1/helpers through configured endpoints/models. Use the release-source CLI/helper pair and [real-session rules](#real-session-checks). Limit to 120 seconds and the smallest read-only Code Mode task. Stop at proof or first failure. Require a real response and successful read-only Code Mode output. Failure, timeout, or missing authentication blocks dispatch. Broader tests, new endpoints/models, and unrelated paid calls need approval.
-4. After every smoke attempt, report actual request counts, elapsed time, input/cached-input/output/reasoning tokens, and required helper usage separately where reported. Distinguish totals/subtotals and unavailable fields. Include failed-attempt usage; never replace actual usage with estimates. Planning estimate: 20–60K input and 1–5K output/reasoning plus helpers, not a cap or actual usage claim. Report source/live result separately from package checks. Keep credentials out of CI.
-5. **Dispatch:** run [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. Let it select version, create candidate, build, publish, verify, and update remote `main`. Do not repeat these manually or wait for postmerge builds. Candidates build/reuse archives. Ordinary branch dispatch is build-only; a `main` push does not request publication.
+Before release operations, use [asm-release](../.agents/skills/asm-release/SKILL.md). Require an explicit release request. Publication grants no installation or shared-server-restart authority. The procedure covers preparation, CI recovery, live smoke, dispatch, and finishing.
+
 6. **Recover:** after interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Preserve original version/commit despite upstream advances. Never invent versions or replace tags. Report failures needing owner decisions. Only with explicit approval, supersede a source-defective failed unpublished candidate with a new immutable candidate. Record old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`. Preparation must verify that record and reject publication or asset drift. Preserve old candidate/tag/assets and occupied version. Never apply this exception to published or partially ready releases.
 7. **Verify:** a platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Legacy `v*` pushes/dispatches require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
-8. **Finish:** fetch and safely fast-forward local `main`. Preserve local edits/concurrent commits. Report release commit, upstream baseline, checks, remote/local integration, and blocked updates.
 
 ### Release notes
 
-Publish notes on GitHub and in the final report. Compare with the previous completed release; include only packaged changes. Keep separate `ASM` and `Codex` headings. Write `No changes` in empty sections. Use ASD-STE100: short active sentences and consistent terms.
-
-Use one flat source-line item per feature/fix: `**Name:** What changed. User effect or required action.` Include relevant defaults, limits, experimental status, and supporting commit/file links. Keep version, platform readiness, and validation outside feature lists. Never claim unverified effects.
+For release notes, use the notes section of [asm-release](../.agents/skills/asm-release/SKILL.md).
 
 ### Workflow requirements
 
@@ -216,9 +194,8 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 
 #### V8 dependency release
 
-Build V8 separately only when version/target/baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) and `asm-v8-v<exact resolved v8 crate version>-glibc2.35.2`. The suffix identifies the GNU baseline generation and matching macOS pair. Preserve the old MUSL release.
+For V8 dependency preparation or publication, use [asm-v8-release](../.agents/skills/asm-v8-release/SKILL.md). Its procedure defines workflow dispatch and tag identity. Keep the contracts below.
 
-- Manual branch dispatch defaults to build-only. Explicit `publish=true` builds/smokes, then tags/publishes at that commit. Tag pushes also publish. Tag moves or published-asset replacement need approval.
 - Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebases/releases has standing approval only with independent proof of Cargo ABI, bindings, and full dependency-closure compatibility. Native consumer build/JavaScript/sandbox checks must pass. Record omitted source-recipe fixes; never claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
 - Do not reuse V8 152.2.0's original `glibc2.35` pair: CppGC sizes and typed-array threshold bindings are stale. Preserve its assets. `glibc2.35.2` rebuilds matching source-generated archives/bindings with Chromium C++ runtime isolation.
 - Build only optimized sandbox/pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
