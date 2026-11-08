@@ -3,13 +3,9 @@
 //! Keep upstream lifecycle helpers here to limit rebase conflicts despite this module's size.
 
 use super::*;
+use crate::app_event::SideStartMode;
 use crate::app_server_session::SideChatStorage;
 use crate::chatwidget::InterruptedTurnNoticeMode;
-use codex_context_fragments::ContextualUserFragment;
-use codex_context_fragments::SideConversationPolicy;
-use codex_context_fragments::side_conversation_boundary;
-use codex_protocol::models::ContentItem;
-use codex_protocol::models::ResponseItem;
 
 const SIDE_RENAME_BLOCK_MESSAGE: &str = "Side conversations are ephemeral and cannot be renamed.";
 const SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE: &str =
@@ -75,11 +71,15 @@ impl SideParentStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_context_fragments::SideConversationPolicy;
+    use codex_context_fragments::side_conversation_boundary;
+    use codex_protocol::models::ContentItem;
+    use codex_protocol::models::ResponseItem;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn side_boundary_prompt_marks_inherited_history_reference_only() {
-        let item = App::side_boundary_prompt_item();
+        let item = side_conversation_boundary();
         let ResponseItem::Message { role, content, .. } = item else {
             panic!("expected hidden side boundary prompt to be a user message");
         };
@@ -124,10 +124,8 @@ mod tests {
 
     #[test]
     fn side_developer_instructions_appends_existing_policy() {
-        let developer_instructions = App::side_developer_instructions(
-            Some("Existing developer policy."),
-            /*side_prompt*/ None,
-        );
+        let developer_instructions =
+            SideConversationPolicy::Temporary.instructions(Some("Existing developer policy."));
 
         assert!(developer_instructions.contains("Existing developer policy."));
         assert!(
@@ -243,8 +241,12 @@ impl App {
             return;
         };
 
-        self.chat_widget
-            .set_thread_rename_block_message(SIDE_RENAME_BLOCK_MESSAGE);
+        match storage {
+            SideChatStorage::Attached => self.chat_widget.clear_thread_rename_block(),
+            SideChatStorage::Temporary => self
+                .chat_widget
+                .set_thread_rename_block_message(SIDE_RENAME_BLOCK_MESSAGE),
+        }
         self.chat_widget
             .set_side_conversation_active(/*active*/ true);
         self.chat_widget
@@ -409,15 +411,35 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
-        _key: KeyEvent,
+        key: KeyEvent,
     ) -> bool {
         if self.overlay.is_none()
             && self.chat_widget.no_modal_or_popup_active()
             && self.chat_widget.composer_is_empty()
-            && let Some(parent_thread_id) = self.active_side_parent_thread_id()
+            && let Some(target) = self.current_displayed_thread_id()
+            && let Some(side) = self.side_threads.get(&target)
         {
+            if matches!(key.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'c'))
+                && self.side_retention_enabled(tui)
+                && self.sidebar_chooser_available()
+                && !self.transcript_view.owns_interaction_key(key)
+                && side.storage == SideChatStorage::Attached
+            {
+                if let Err(err) = sidebar_close::request(
+                    self,
+                    tui,
+                    app_server,
+                    target,
+                    sidebar_close::Action::Archive,
+                )
+                .await
+                {
+                    self.chat_widget.add_error_message(err.to_string());
+                }
+                return true;
+            }
             if self
-                .select_agent_thread_and_discard_side(tui, app_server, parent_thread_id)
+                .select_agent_thread_and_discard_side(tui, app_server, side.parent_thread_id)
                 .await
                 .is_err()
             {
@@ -434,13 +456,8 @@ impl App {
         target_thread_id: ThreadId,
     ) -> Option<ThreadId> {
         let active_thread_id = self.current_displayed_thread_id()?;
-        let (&side_thread_id, state) = self.side_threads.iter().next()?;
-        if target_thread_id == side_thread_id || target_thread_id == active_thread_id {
-            return None;
-        }
-
-        (active_thread_id == side_thread_id || active_thread_id == state.parent_thread_id)
-            .then_some(side_thread_id)
+        let state = self.side_threads.get(&active_thread_id)?;
+        (target_thread_id == state.parent_thread_id).then_some(active_thread_id)
     }
 
     pub(super) async fn toggle_side_conversation(
@@ -451,12 +468,9 @@ impl App {
         let Some(active_thread_id) = self.current_displayed_thread_id() else {
             return Ok(());
         };
-        let Some((&side_thread_id, state)) = self.side_threads.iter().next() else {
-            return Ok(());
-        };
-        let target_thread_id = if active_thread_id == side_thread_id {
+        let target_thread_id = if let Some(state) = self.side_threads.get(&active_thread_id) {
             state.parent_thread_id
-        } else if active_thread_id == state.parent_thread_id {
+        } else if let Some(side_thread_id) = self.side_thread_for_parent(active_thread_id) {
             side_thread_id
         } else {
             return Ok(());
@@ -650,56 +664,6 @@ impl App {
         }
     }
 
-    pub(super) fn side_developer_instructions(
-        existing_instructions: Option<&str>,
-        side_prompt: Option<&str>,
-    ) -> String {
-        let policy = SideConversationPolicy::Temporary.instructions(/*existing*/ None);
-        let instructions = match side_prompt.filter(|prompt| !prompt.trim().is_empty()) {
-            Some(prompt) => format!("{prompt}\n\n{policy}"),
-            None => policy,
-        };
-        match existing_instructions {
-            Some(existing_instructions) if existing_instructions.ends_with(&instructions) => {
-                existing_instructions.to_string()
-            }
-            Some(existing_instructions) if !existing_instructions.trim().is_empty() => {
-                format!("{existing_instructions}\n\n{instructions}")
-            }
-            _ => instructions,
-        }
-    }
-
-    pub(super) fn side_boundary_prompt_item() -> ResponseItem {
-        side_conversation_boundary()
-    }
-
-    pub(super) fn side_boundary_items(&self) -> Vec<ResponseItem> {
-        let mut items = vec![Self::side_boundary_prompt_item()];
-        if let Some(prompt) = self
-            .config
-            .side_prompt
-            .as_deref()
-            .filter(|text| !text.trim().is_empty())
-        {
-            items.push(ResponseItem::Message {
-                status: None,
-                encrypted_content: None,
-                id: None,
-                role: "developer".to_string(),
-                content: vec![ContentItem::InputText {
-                    text: prompt.to_string(),
-                }],
-                phase: None,
-                internal_chat_message_metadata_passthrough: None,
-            });
-        }
-        items.push(ContextualUserFragment::into(
-            SideConversationPolicy::Temporary,
-        ));
-        items
-    }
-
     pub(super) fn current_thread_fork_config(&self) -> Config {
         let mut fork_config = self.chat_widget.config_ref().clone();
         let parent_model = self.chat_widget.current_model();
@@ -713,7 +677,6 @@ impl App {
 
     pub(super) fn side_fork_config(&self) -> Config {
         let mut fork_config = self.current_thread_fork_config();
-        fork_config.ephemeral = true;
         if let Some(model) = &self.config.side_model {
             fork_config.model = Some(model.clone());
         }
@@ -728,10 +691,7 @@ impl App {
             );
         }
         fork_config.daybreak_enabled = false;
-        fork_config.developer_instructions = Some(Self::side_developer_instructions(
-            fork_config.developer_instructions.as_deref(),
-            self.config.side_prompt.as_deref(),
-        ));
+        fork_config.side_prompt = self.config.side_prompt.clone();
         fork_config
     }
 
@@ -808,10 +768,14 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
-        mut parent_thread_id: ThreadId,
+        parent_thread_id: ThreadId,
         mut user_message: Option<crate::chatwidget::UserMessage>,
+        mode: SideStartMode,
     ) -> Result<AppRunControl> {
         let workspace = self.side_retention_enabled(tui);
+        let existing = (mode == SideStartMode::Reuse || !workspace)
+            .then(|| self.side_thread_for_parent(parent_thread_id))
+            .flatten();
         if let Some(pane) = self.sidebars.get_mut(&Some(parent_thread_id))
             && pane.creation.is_some()
         {
@@ -824,38 +788,12 @@ impl App {
             self.restore_side_user_message(user_message);
             return Ok(AppRunControl::Continue);
         }
-        if self.sidebars.values().any(|pane| pane.creation.is_some()) {
-            self.restore_side_user_message(user_message.take());
-            self.chat_widget
-                .add_error_message("Finish or cancel the pending side conversation first.".into());
-            return Ok(AppRunControl::Continue);
-        }
+
         if let Some(message) = self.side_start_block_message() {
             self.restore_side_user_message(user_message.take());
             self.sync_side_thread_ui();
             self.chat_widget.add_error_message(message.to_string());
             return Ok(AppRunControl::Continue);
-        }
-        if let Some(existing) = self.side_thread_for_parent(parent_thread_id) {
-            self.select_agent_thread(tui, app_server, existing).await?;
-            if self.active_thread_id == Some(existing) {
-                if let Some(message) = user_message.take() {
-                    self.chat_widget
-                        .submit_user_message_as_plain_user_turn(message);
-                }
-            } else {
-                self.restore_side_user_message(user_message.take());
-            }
-            return Ok(AppRunControl::Continue);
-        }
-        if let Some(parent) = self.active_side_parent_thread_id() {
-            self.select_agent_thread(tui, app_server, parent).await?;
-            if self.current_displayed_thread_id() != Some(parent) {
-                self.restore_side_user_message(user_message.take());
-                self.sync_side_thread_ui();
-                return Ok(AppRunControl::Continue);
-            }
-            parent_thread_id = parent;
         }
         if self.pending_server_profiles.contains_key(&parent_thread_id) {
             self.restore_side_user_message(user_message.take());
@@ -865,20 +803,19 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
 
-        self.refresh_in_memory_config_from_disk_best_effort("starting a side conversation")
-            .await;
-
-        let fork_config = self.side_fork_config();
-
-        if let Some(&side_thread_id) = self.side_threads.keys().next() {
-            if !self.thread_event_channels.contains_key(&side_thread_id) {
-                // Restored UI pairing does not imply this client attached the saved side.
-                self.discard_closed_side_thread(side_thread_id).await;
-            } else if !self.discard_side_thread(app_server, side_thread_id).await {
+        if let Some(side_thread_id) = existing {
+            self.select_agent_thread(tui, app_server, side_thread_id)
+                .await?;
+            if self.active_thread_id == Some(side_thread_id) {
+                if let Some(user_message) = user_message.take() {
+                    let _ = self
+                        .chat_widget
+                        .submit_user_message_as_plain_user_turn(user_message);
+                }
+            } else {
                 self.restore_side_user_message(user_message.take());
-                self.sync_side_thread_ui();
-                return Ok(AppRunControl::Continue);
             }
+            return Ok(AppRunControl::Continue);
         }
 
         self.session_telemetry.counter(
@@ -904,13 +841,30 @@ impl App {
             let size = tui.prepare_draw_size()?;
             self.render_chat_widget_frame(tui, size)?;
         }
+        self.refresh_in_memory_config_from_disk_best_effort("starting a side conversation")
+            .await;
+
+        let storage = if workspace
+            && app_server.can_list_saved_side_chats(parent_thread_id)
+            && !codex_protocol::openai_models::is_native_runtime_model(
+                self.chat_widget.current_model(),
+            )
+            && !self
+                .config
+                .side_model
+                .as_deref()
+                .is_some_and(codex_protocol::openai_models::is_native_runtime_model)
+        {
+            SideChatStorage::Attached
+        } else {
+            SideChatStorage::Temporary
+        };
         let fork = app_server.sidebar_fork(
             self.local_settings.clone(),
-            fork_config,
+            self.side_fork_config(),
             parent_thread_id,
             self.selected_server_profile(parent_thread_id),
-            self.side_boundary_items(),
-            SideChatStorage::Temporary,
+            storage,
         );
         let create = async move {
             fork.await
@@ -1081,7 +1035,7 @@ impl App {
                     self.active_thread_id = None;
                 }
                 if let Err(err) = self
-                    .select_agent_thread_and_discard_side(tui, app_server, child_thread_id)
+                    .select_agent_thread(tui, app_server, child_thread_id)
                     .await
                 {
                     let discarded = self
