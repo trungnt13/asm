@@ -63,6 +63,7 @@ pub struct ClaudeOptions {
     pub bridge_directory: Option<PathBuf>,
     /// Native tool names removed from this session, such as questions for headless children.
     pub disallowed_tools: Vec<String>,
+    pub skill_overrides: serde_json::Map<String, Value>,
 }
 
 pub struct ClaudeRuntime {
@@ -181,10 +182,18 @@ impl ClaudeRuntime {
             flag_env.insert("CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_owned(), json!(window));
             command.arg("--autocompact").arg(window);
         }
+        if !options.skill_overrides.is_empty() {
+            flag_settings["skillOverrides"] = Value::Object(options.skill_overrides);
+        }
         if !flag_env.is_empty() {
             // Settings can reapply env after startup; flag settings beat user/project settings.
             // Native managed policy still has precedence.
             flag_settings["env"] = json!(flag_env);
+        }
+        if flag_settings
+            .as_object()
+            .is_some_and(|settings| !settings.is_empty())
+        {
             command.arg("--settings").arg(flag_settings.to_string());
         }
         if let Some(effort) = options.effort {

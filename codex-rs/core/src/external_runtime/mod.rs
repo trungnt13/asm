@@ -293,6 +293,15 @@ async fn run_conversation(
     // Native children get ASM messaging tools through a session MCP server. Cursor team policy
     // can block it without telling ASM; mail still arrives between Cursor turns.
     let messaging = child_agent;
+    let page_context = if native_runtime == NativeRuntime::ClaudeCode {
+        let lease = RuntimeLease::take(&session.external_runtime)?;
+        lease.runtime.as_ref().map_or(
+            turn.config.native_runtimes.claude_code.page_context,
+            |runtime| runtime.page_context,
+        )
+    } else {
+        codex_config::PageContextPolicy::Inherit
+    };
     let mut last_message = None;
     loop {
         if cancellation.is_cancelled() {
@@ -309,6 +318,10 @@ async fn run_conversation(
                 .get_pending_input(&session.active_turn)
                 .await;
             *input = pending;
+        }
+        if page_context != codex_config::PageContextPolicy::Inherit {
+            let history = session.clone_history().await;
+            input::filter_page_context(input, page_context, history.raw_items());
         }
         if input::prepare_input(input)? > 0 {
             session
@@ -482,6 +495,7 @@ async fn run_conversation(
             let runtime = ExternalSession::spawn_runtime(
                 bridge.as_ref(),
                 disallowed_tools,
+                &turn.config.native_runtimes.claude_code,
                 role_instructions,
                 if thread_spawn_child {
                     codex_external_runtime::ClaudeSessionKind::ManagedChild
@@ -499,6 +513,7 @@ async fn run_conversation(
             .await?;
             lease.runtime = Some(ExternalSession {
                 runtime,
+                page_context,
                 bridge,
                 checkpoint,
                 checkpoint_path,
@@ -626,6 +641,10 @@ async fn run_conversation(
                         pending_activity = None;
                         session.input_queue.accept_mailbox_delivery_for_current_turn(&session.active_turn, &turn.sub_id).await;
                         let (mut pending, _) = session.input_queue.get_pending_input(&session.active_turn).await;
+                        if page_context != codex_config::PageContextPolicy::Inherit {
+                            let history = session.clone_history().await;
+                            input::filter_page_context(&mut pending, page_context, history.raw_items());
+                        }
                         match input::prepare_input(&mut pending) {
                             Ok(0) => {},
                             Ok(_) => session.send_event(turn, EventMsg::Warning(WarningEvent { message: "Encrypted ASM input was ignored; the user prompt is preserved.".to_owned() })).await,

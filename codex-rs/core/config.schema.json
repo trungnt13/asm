@@ -741,6 +741,37 @@
         }
       ]
     },
+    "ClaudeCodeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "disallowed_tools": {
+          "default": [],
+          "description": "Additional native tool exclusions; ASM's mandatory restrictions remain active.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "page_context": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/PageContextPolicy"
+            }
+          ],
+          "default": "inherit",
+          "description": "Controls queued Desktop Page context without changing native history."
+        },
+        "skill_overrides": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SkillVisibility"
+          },
+          "default": {},
+          "description": "Native skill visibility overrides, applied only to ASM-launched Claude processes.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "CloudToml": {
       "additionalProperties": false,
       "description": "Cloud-owned feature settings.",
@@ -3548,6 +3579,24 @@
       },
       "type": "object"
     },
+    "NativeRuntimesConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "claude_code": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ClaudeCodeConfig"
+            }
+          ],
+          "default": {
+            "disallowed_tools": [],
+            "page_context": "inherit",
+            "skill_overrides": {}
+          }
+        }
+      },
+      "type": "object"
+    },
     "NetworkDomainPermissionToml": {
       "enum": [
         "allow",
@@ -4227,6 +4276,14 @@
         }
       },
       "type": "object"
+    },
+    "PageContextPolicy": {
+      "enum": [
+        "inherit",
+        "when_present",
+        "off"
+      ],
+      "type": "string"
     },
     "PermissionProfileToml": {
       "additionalProperties": false,
@@ -5056,6 +5113,15 @@
         "enabled"
       ],
       "type": "object"
+    },
+    "SkillVisibility": {
+      "enum": [
+        "on",
+        "name-only",
+        "user-invocable-only",
+        "off"
+      ],
+      "type": "string"
     },
     "SkillsConfig": {
       "additionalProperties": false,
@@ -9127,6 +9193,21 @@
         }
       ],
       "description": "Optional verbosity control for GPT-5 models (Responses API `text.verbosity`)."
+    },
+    "native_runtimes": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/NativeRuntimesConfig"
+        }
+      ],
+      "default": {
+        "claude_code": {
+          "disallowed_tools": [],
+          "page_context": "inherit",
+          "skill_overrides": {}
+        }
+      },
+      "description": "Launch-only settings for native runtimes, leaving standalone CLI settings unchanged."
     },
     "notice": {
       "allOf": [
