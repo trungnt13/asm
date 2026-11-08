@@ -1897,7 +1897,11 @@ pub(crate) fn build_prompt(
         turn_context,
         &step_context.settings.model_info,
     ) {
-        crate::tools::harness_tool_search::specs_for_history(&step_context.tool_router, &input)
+        crate::tools::harness_tool_search::specs_for_history(
+            &step_context.tool_router,
+            &input,
+            &step_context.settings.model_info,
+        )
     } else {
         step_context.tool_router.model_visible_specs()
     };

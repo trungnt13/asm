@@ -4,13 +4,17 @@ use crate::tools::handlers::ToolSearchHandler;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::router::ToolRouter;
+use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
+use codex_tools::IndirectNamespacePrefixes;
+use codex_tools::LoadableToolSpec;
 use codex_tools::ResponsesApiNamespaceTool;
 use codex_tools::ResponsesApiTool;
 use codex_tools::TOOL_SEARCH_TOOL_NAME;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+use codex_tools::coalesce_loadable_tool_specs;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -73,7 +77,11 @@ struct SearchResult {
     tools: Vec<ToolName>,
 }
 
-pub(crate) fn specs_for_history(router: &ToolRouter, input: &[ResponseItem]) -> Arc<[ToolSpec]> {
+pub(crate) fn specs_for_history(
+    router: &ToolRouter,
+    input: &[ResponseItem],
+    model: &ModelInfo,
+) -> Arc<[ToolSpec]> {
     let mut search_calls = HashSet::new();
     let mut discovered = BTreeSet::new();
     for item in input {
@@ -108,7 +116,7 @@ pub(crate) fn specs_for_history(router: &ToolRouter, input: &[ResponseItem]) -> 
         }
     }
 
-    let mut specs = router.model_visible_specs().to_vec();
+    let mut selected_specs = Vec::new();
     for name in discovered {
         let Some(tool) = router
             .registered_tool(&name)
@@ -117,10 +125,12 @@ pub(crate) fn specs_for_history(router: &ToolRouter, input: &[ResponseItem]) -> 
             continue;
         };
         // Re-resolve saved discoveries against the current policy and definitions.
-        let mut spec = Arc::unwrap_or_clone(tool.spec());
-        match &mut spec {
-            ToolSpec::Function(function) => function.defer_loading = None,
-            ToolSpec::Namespace(namespace) => {
+        let spec = match Arc::unwrap_or_clone(tool.spec()) {
+            ToolSpec::Function(mut function) => {
+                function.defer_loading = None;
+                LoadableToolSpec::Function(function)
+            }
+            ToolSpec::Namespace(mut namespace) => {
                 namespace.tools.retain_mut(|tool| match tool {
                     ResponsesApiNamespaceTool::Function(function) => {
                         function.defer_loading = None;
@@ -128,13 +138,24 @@ pub(crate) fn specs_for_history(router: &ToolRouter, input: &[ResponseItem]) -> 
                     }
                     ResponsesApiNamespaceTool::Custom(_) => false,
                 });
+                LoadableToolSpec::Namespace(namespace)
             }
             ToolSpec::Freeform(_) | ToolSpec::ToolSearch { .. } | ToolSpec::WebSearch { .. } => {
                 continue;
             }
-        }
-        specs.push(spec);
+        };
+        selected_specs.push(spec);
     }
+    let model_messages = ResolvedModelMessages::from_model(model);
+    let indirect_prefixes = IndirectNamespacePrefixes::new(
+        model_messages.indirect_description_prefixes(),
+        router.mcp_namespaces(),
+    )
+    .expect("tool router validates indirect namespace prefixes");
+    let mut selected_specs = coalesce_loadable_tool_specs(selected_specs);
+    indirect_prefixes.apply_search(&mut selected_specs);
+    let mut specs = router.model_visible_specs().to_vec();
+    specs.extend(selected_specs.into_iter().map(ToolSpec::from));
     let mcp_namespaces = router.mcp_namespaces().map(|(_, name)| name).collect();
     super::spec_plan::merge_into_namespaces(specs, &mcp_namespaces).into()
 }

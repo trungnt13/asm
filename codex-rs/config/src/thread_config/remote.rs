@@ -238,6 +238,7 @@ fn model_provider_to_proto(
         requires_openai_auth,
         supports_websockets,
         supports_standalone_web_search,
+        standalone_web_search_provider: _,
         include_internal_metadata: _,
         credential_file,
         capabilities,
