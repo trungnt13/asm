@@ -127,7 +127,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `748ab55ca7de0b647d9a7a9d9a8e70e00f28666d`, 2026-11-08. Subject: Increase Bazel core unit test shards from 8 to 16 (#60206).
+Last incorporated commit: `4e4767ffa763ec0d0a19e04cf8ff0163a987297b`, 2026-11-08. Subject: Search task history from the command center (#60286).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
