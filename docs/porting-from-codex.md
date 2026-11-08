@@ -92,9 +92,9 @@ Use PRs against `main` for implementation, documentation, and syncs. The lead al
 ### Push permissions
 
 - Implementation requests authorize task-branch commits, pushes, and PR creation—not direct implementation on `main`.
-- An upstream rebase request also authorizes merging its sync PR after required checks. Do not ask again. Other PRs, including features, require explicit merge approval.
+- An explicit upstream rebase request also authorizes merging its sync PR after required checks. Do not ask again. Other PRs, including features, require explicit merge approval.
 - Within the task, allow `--force-with-lease` on fork branches, including `main`, without separate approval. Plain `--force`, tag moves, discarded work, and releases still require approval.
-- A release request authorizes existing-workflow candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes require PRs.
+- An explicit release request authorizes existing-workflow candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes require PRs.
 - Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited ones, require publication approval.
 - Before lease-protected pushes, fetch and preserve remote-only work, including workflow release commits. Use an explicit lease against the inspected tip. Never refresh a failed lease and retry blindly.
 
@@ -300,7 +300,7 @@ The shared native rules below also apply to Cursor, except for its listed differ
 - Keep login exchanges display-only, outside model history/rollouts. Intercept replies before normal ingestion, history, hooks, or inference. Send authorization codes only to the official Claude login subprocess. Never put codes in model requests, logs, or rollouts; client drafts/recall are accepted.
 - Expired/interrupted exchanges fail closed. Unrecognized replies get fixed restart instructions, not normal ingestion. Only explicit non-secret actions exit/restart login. Preserve a code-free pending marker across backend restart/resume, without codes/OAuth state or checkpoint changes. Keep output private and errors fixed. Verify subscription auth; never fall back to Console/API keys/cloud providers.
 - Login never authorizes replay or uncertain-checkpoint recovery. Display that native permissions, not ASM sandbox/approvals, govern native tools. Refuse external execution when managed policy requires an ASM sandbox.
-- Every Claude main/child uses `--dangerously-skip-permissions` and `--permission-prompts none`. Preserve native denies, hooks, and managed policy. Remaining prompts fail explicitly; never grant protocol approvals. Configured native hooks stay native.
+- Every Claude session, including main, Side, and children, uses `--dangerously-skip-permissions` and `--permission-prompts none`. Preserve native denies, hooks, and managed policy. Remaining prompts fail explicitly; never grant protocol approvals. Configured native hooks stay native.
 
 **Recovery and cleanup**
 
@@ -524,14 +524,14 @@ Optional `allowed_agent_roles` in `[[skills.config]]` restricts normal catalog v
 
 - Match the current child's explicit role, not an ancestor or displayed TUI view. Omission keeps existing visibility; `[]` hides matching skills from all roles.
 - Root, ordinary Side, saved user forks, and unnamed/nonmatching children do not match. Reviewer children match in fresh or V2 full-history context; resume restores their role. Preserve V1 full-history restrictions.
-- Keep parent enablement and permissions. Role overrides are deny-only and cannot re-enable disabled skills, including through another matching selector.
+- Keep parent enablement and permissions. Role overrides are deny-only and cannot re-enable disabled skills. Scope restrictions also survive enables using another matching selector.
 - Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Apply scope in config-aware and cwd caches. Keep prompt lists stable, append-only availability updates, and existing context budgets.
 - This controls visibility, not access. Preserve filesystem/script/sandbox/network/approval permissions. History can retain old lists or read skill content; never scrub it.
 - Configure `review` and `oracle` only after using a supporting binary. Keep reviewer descriptions generic so root's role list does not disclose its skills.
 
 ### Role configuration restrictions
 
-Role TOML can explicitly disable web search with `web_search = "disabled"` or System1 with `[system1] enabled = false`. Omission keeps inheritance, including the parent's live System1 toggle. Roles cannot enable either against parent restrictions. Keep System1 restrictions through child spawn/reload.
+Role TOML can explicitly disable web search with `web_search = "disabled"` or System1 with `[system1] enabled = false`. Apply only explicit disabling. Omission keeps inheritance, including the parent's live System1 toggle. Roles cannot enable either against parent restrictions. Keep System1 restrictions through child spawn/reload.
 
 Roles can independently override `[system1] min_effort` and `max_effort`; omitted bounds inherit. Validate the merged ordinary-effort range. Intersect it with model-supported efforts; fewer than two choices skips Decisions. Keep role bounds through model changes/reload. New children resolve their own role, without ancestor role bounds; V1 full-history forks retain their role bounds. Other System1 settings inherit. Bounds constrain decision choices, not manual effort or fallback.
 
