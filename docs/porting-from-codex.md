@@ -2,235 +2,180 @@
 
 ## Principles
 
-1. **Personal use only:** this fork is for Trung Ngo.
-2. **Keep changes minimal, safe, and minor.** Prefer durable local fixes with few upstream differences and conflicts. Do not sacrifice correctness, maintainability, or runtime performance. Assume upstream tested unchanged code. Check fork changes, conflicts, and packages narrowly; upstream tests do not prove these work.
-3. **Record current intent here:** purpose and constraints for each fork change, not a task log. Ask before contradicting intent. After approval, replace the old rule. Then resolve mechanical conflicts without more approval.
+- This fork is for Trung Ngo's personal use only.
+- Keep changes minimal, safe, and minor. Prefer durable local fixes with little upstream drift or conflict. Preserve correctness, maintainability, and runtime performance.
+- Assume upstream tested unchanged code. Check fork changes, conflicts, and packages narrowly; upstream tests do not prove them.
+- Record current fork purposes and constraints here, not task history. Ask before contradicting intent. After approval, replace the rule; resolve mechanical conflicts without further approval.
 
-This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.md). Its validation/platform limits replace upstream defaults. Other coding, formatting, test-authoring, and generator rules apply. Recorded intent does not prove implementation, integration, or publication.
+This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.md). Its validation and platform limits replace upstream defaults. Other coding, formatting, test-authoring, and generator rules still apply. Recorded intent does not prove implementation, integration, or publication.
 
 ## Development workflow
 
 ### Start or resume
 
-- Before edits or after resume, refresh Git status, branches, and worktrees.
-- Before syncs or pushes, inspect remotes and fork history. For overlap or unexplained changes, inspect relevant repo sessions. Recover context from Git and sessions, not owner memory or a task diary.
-- Before edits or syncs, create a named `codex/` task branch. Isolate concurrent tasks in separate worktrees; these are not deliverables. Coordinate shared files. Assign one staging/commit owner per checkout.
-- Prefer reusable checkouts:
-  - Acquire: `python3 scripts/dev-worktree.py acquire codex/<task>`. Keep the path through builds and validation.
-  - Each slot has an exclusive owner/branch lease. Owner defaults to `CODEX_THREAD_ID`; use `--owner <id>` if unset. Use `--slot <name>` for parallel tasks.
-  - Keep the checkout and lease while its PR is pending. After approved integration includes its branch tip in clean local `main`, release: `python3 scripts/dev-worktree.py release codex/<task>`.
-  - Keep the detached checkout for reuse. Never clear another owner's lease or discard work. Inspect and coordinate abandoned leases.
-- Preserve existing work. If blocked, use another worktree. Get permission before committing or stashing unrelated work. Keep authorized stashes until verified restoration. Never overwrite other work to clean a checkout.
+- Before edits or after resume, refresh Git status, branches, and worktrees. Before syncs or pushes, inspect remotes and fork history. For overlaps or unexplained changes, inspect relevant repo sessions. Recover context from Git and sessions, not owner memory or task diaries.
+- Before edits or syncs, create a named `codex/` task branch. Use separate worktrees for concurrent tasks. Coordinate shared files; assign one staging/commit owner per checkout. Worktrees are not deliverables.
+- Prefer reusable checkouts: `python3 scripts/dev-worktree.py acquire codex/<task>`. Keep the path through builds and validation. Each slot has an exclusive owner/branch lease. The owner defaults to `CODEX_THREAD_ID`; if unset, use `--owner <id>`. Use `--slot <name>` for parallel tasks.
+- While the PR is pending, keep its checkout and lease. After approved integration includes its branch tip in clean local `main`, run `python3 scripts/dev-worktree.py release codex/<task>`. Keep the detached checkout for reuse. Never clear another owner's lease or discard work. Inspect and coordinate abandoned leases.
+- Preserve existing work. If blocked, use another worktree. Get permission before committing or stashing unrelated work. Keep authorized stashes until restoration is verified. Never overwrite others' work to clean a checkout.
 
 ### Build the binary first
 
 For runtime/UI edits, inspect affected paths, including streaming and completed output. Make the smallest coherent change.
 
-- Before Cargo, ensure sufficient disk space. Rebase/release maintenance has standing approval to remove verified inactive local build caches under the existing path, lock, and process checks. Record measurements and removals. Preserve active or uncertain artifacts, source, user state, and verified binaries; ask if safe cleanup cannot provide sufficient space. Local `just` recipes default to main's `codex-rs/target`. Explicit `CARGO_TARGET_DIR` and Cargo target-directory options retain their meaning.
-- Keep native host mode, toolchain, profile, features, flags, checkout, and cache stable. Do not add `--target` just to name the host. Fresh timestamps, source/version changes, and other changed inputs can force rebuilds.
-- Reuse matching verified [fork V8](#v8-dependency-release). Export the same verified absolute `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH` paths. An old Cargo fingerprint does not prove validity.
-- Export `AWS_LC_SYS_NO_JITTER_ENTROPY=1` consistently. Changing or unsetting it rebuilds AWS-LC and dependents.
-- From `codex-rs`, build both binaries with the same source, native target, and `dev-small` profile:
+- Before Cargo, verify disk space. Rebase/release maintenance may remove verified inactive local build caches under existing path, lock, and process checks. Record measurements and removals. Preserve active/uncertain artifacts, source, user state, and verified binaries. If safe cleanup cannot provide space, ask.
+- Local `just` recipes default to main's `codex-rs/target`. Preserve explicit `CARGO_TARGET_DIR` and Cargo target-directory options.
+- Keep native host mode, toolchain, profile, features, flags, checkout, and cache stable. Do not add `--target` merely to name the host. Timestamp, source, version, and other input changes can force rebuilds.
+- Reuse matching verified [fork V8](#v8-dependency-release). Export the same verified absolute `RUSTY_V8_ARCHIVE` and `RUSTY_V8_SRC_BINDING_PATH`. Old Cargo fingerprints do not prove validity.
+- Export `AWS_LC_SYS_NO_JITTER_ENTROPY=1` consistently; changes rebuild AWS-LC and dependents.
+- From `codex-rs`, run `just build-dev`. Prioritize `codex` and `codex-code-mode-host` with matching source, native target, and `dev-small` profile. Serialize Cargo jobs sharing a target directory. Verify the producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
+- Before releasing shared-cache ownership, verify real copies of both executable siblings in one task-owned directory under the checkout, e.g. `.agents/test-bin/<build-id>/`. Do not use symlinks or hard links. Record source commit, build inputs, absolute paths, and SHA-256 hashes. Test and hand off this unchanged pair with its evidence, not overwriteable shared-target executables.
 
-  ```bash
-  just build-dev
-  ```
+The local Cargo wrapper must:
 
-- Prioritize this pair. Serialize Cargo jobs sharing a target directory. Verify their producing checkout; test executables are not this pair. During builds, inspect independent code and affected tests/snapshots.
-- Before another build can use that cache, copy `codex` and `codex-code-mode-host` into one task-owned directory under the working checkout, such as `.agents/test-bin/<build-id>/`. Keep them executable siblings. Use real copies, not symlinks or hard links. Record source commit, build inputs, absolute paths, and SHA-256 hashes; verify both copies before releasing shared-cache build ownership.
-- Test and hand off the copied pair, not shared target executables that another build can overwrite. Keep each tested pair unchanged with its evidence.
+- Set `RUSTC_WORKSPACE_WRAPPER` to the checkout's absolute `scripts/local-rustc-workspace.sh`. Isolate workspace artifacts by checkout while sharing registry dependencies. Do not treat another checkout's old code as fresh. Keep paths stable for warm builds.
+- Preserve explicit wrapper overrides, including disabling. Unless an override isolates checkouts, use a separate target directory.
+- Give Clippy a checkout-private cache, defaulting to main's `clippy/<checkout-path-hash>` subdirectory; Clippy replaces the wrapper. Explicit Clippy target directories must also be private.
+- Lock build/check/Clippy/nextest per effective cache. Save inputs and fingerprint reasons under main's `.agents/dev-build-cache/<date>/`. Preserve explicit `CARGO_LOG` filters. Inspect logs before blaming cache loss.
+- Clean stale artifacts only on Linux with Python 3.11+, complete process visibility, and no cache users or Rust build/editor processes. Hold each profile's native Cargo lock. Use descriptor-relative traversal; reject symlink directories and artifacts outside the physical cache. Log removal counts and skip reasons. Skip other hosts or uncertain activity.
+- Keep the two-day cleanup rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not establish checkout inactivity; removal can force active checkouts to rebuild.
+- Block reusable-checkout release/switching during active wrapper commands. Direct Cargo bypasses protection; finish it before releasing the checkout.
+- Keep interactive `cargo run` I/O without holding the cache lock for the live app. Leave CI and Windows unchanged.
 
-The local Cargo wrapper:
+For ordinary runtime/UI checks, use the verified absolute copied CLI with `--no-daemon` and [real-session isolation](#real-session-checks). This uses the embedded backend and sibling helper without changing/stopping the shared daemon. Check daemon/remote behavior separately when needed; `codex agents` and `--remote` cannot use `--no-daemon`.
 
-- Sets `RUSTC_WORKSPACE_WRAPPER` to the source checkout's absolute `scripts/local-rustc-workspace.sh` path. This namespaces workspace artifacts by checkout while sharing registry dependencies. Older code from another checkout cannot appear fresh. Keep paths stable for warm builds.
-- Preserves explicit wrapper overrides, including disabling it. Use a separate target directory unless the override also isolates checkouts.
-- Gives Clippy a private default cache at main's `clippy/<checkout-path-hash>` target subdirectory because Clippy replaces the wrapper. Explicit Clippy target directories must also be checkout-private.
-- Locks build/check/Clippy/nextest commands per effective cache. Saves inputs and Cargo fingerprint reasons under main's `.agents/dev-build-cache/<date>/`. Explicit `CARGO_LOG` retains its filter. Inspect logs before blaming cache loss.
-- Cleans stale artifacts only on Linux with Python 3.11+, complete process visibility, and no cache users or Rust build/editor processes:
-  - Hold each profile's native Cargo lock during deletion.
-  - Use descriptor-relative traversal. Reject symlink directories and artifacts outside the physical cache.
-  - Log removal counts and skip reasons. Skip other hosts or uncertain activity.
-  - Keep the two-day rule: `incremental` directory modification time, or latest `deps` file access/modification time. Age does not prove checkout inactivity. Removal can force even active checkouts to rebuild.
-- Blocks reusable-checkout release/switching during active wrapper commands. Direct Cargo bypasses protection and must finish before checkout release.
-- Keeps interactive I/O for `cargo run` without holding the cache lock for the live app. CI and Windows stay unchanged.
-
-For ordinary runtime/UI checks, run the copied task-owned CLI by its verified absolute path with `--no-daemon`.
-
-Follow [real-session isolation](#real-session-checks). This uses the current embedded backend and sibling `codex-code-mode-host`, without changing/stopping the shared daemon. Check daemon/remote behavior separately when needed; `codex agents` and `--remote` cannot use `--no-daemon`.
-
-Before handoff, verify both binaries exist, CLI `--version`, and both `--help` commands. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. Verify the copied pair's source identity. Rebuild and copy both after runtime edits; never hand off old binaries as current. Get permission before replacing installed `codex`.
+Before handoff, verify both files, CLI `--version`, both `--help` commands, and pair source identity. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. After runtime edits, rebuild and copy both; never present old binaries as current. Get permission before replacing installed `codex`.
 
 Local profile rules:
 
-- Ordinary `just` Cargo recipes, schema generators, source runners, package assembly, and VS Code Rust checks use `dev-small`. Keep its settings. The npm hooks generator uses the same recipe.
-- Explicit `--profile`, nextest `--cargo-profile`, and `--release` take priority where supported. Nextest `--profile` selects runner settings, not Cargo settings.
-- CI, benchmarks, and source-built Dylint retain their profiles. VS Code run/test buttons, inherited Windows setup, and sandbox smoke utilities also retain theirs.
-- Plain Cargo has no local default. Pass `--profile dev-small` for direct build/run/check/clippy; use `just test` for tests.
-- Do not delete caches used by builds/editors. Use optimized/cross-platform local builds only on request or to reproduce affected behavior. Published releases use optimized `--release`.
+- Use unchanged `dev-small` settings for ordinary `just` Cargo recipes, schema generators, source runners, package assembly, and VS Code Rust checks. The npm hooks generator uses the same recipe.
+- Preserve explicit supported `--profile`, nextest `--cargo-profile`, and `--release` overrides. Nextest `--profile` selects runner settings, not Cargo settings.
+- Preserve profiles for CI, benchmarks, source-built Dylint, VS Code run/test buttons, inherited Windows setup, and sandbox smoke utilities.
+- Plain Cargo has no local default. For direct build/run/check/clippy, pass `--profile dev-small`. For tests, use `just test`.
+- Never delete caches used by builds/editors. Use optimized/cross-platform local builds only on request or to reproduce affected behavior. Releases use optimized `--release`.
 
 ### Validate narrowly
 
-Verify the intended outcome with suitable evidence. Select checks from changed inputs, fork interactions, and conflicts, not sync size. Do not default to retesting upstream behavior untouched by the fork. Use focused checks when fork interactions, failures, or unresolved concerns require them. Record the selected checks, reused evidence, and uncertainty. Never label unchecked behavior as verified. Narrow scope does not reduce required evidence.
+Select checks from changed inputs, fork interactions, conflicts, failures, and unresolved concerns—not sync size. Do not retest untouched upstream behavior by default. Record checks, reused evidence, and uncertainty. Narrow scope does not reduce required evidence. Never call unchecked behavior verified; a clean merge is not validation. Verify upstream CI before claiming it passed.
 
-- **Documentation:** review wording/links; run `git diff --check`. Documentation-only changes do not require a rebuild, but every PR still requires the real-provider check below.
-- **Behavior:** use the built binary in a small real user scenario to accept changed fork behavior. Mocked or simulated responses are not acceptance evidence. Do not add mock tests or run them by default. Preserve inherited tests and assertions; do not delete, ignore, or weaken them to follow this rule.
-- **Rust:** run existing non-mock checks only when needed: `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting below and targeted Clippy when needed. Update affected assertions/snapshots together. Exclude unrelated stale expectations. Never disable tests to hide intended output changes.
+- **Documentation:** review wording/links; run `git diff --check`. No rebuild is required. Every PR still needs the live check below.
+- **Behavior:** accept changed fork behavior with the built binary in a small real user scenario. Mocked/simulated responses are not acceptance evidence. Do not add mock tests or run them by default.
+- **Rust:** when needed, run existing non-mock checks with `just test -p <crate> <test-filter>`, not `cargo test`. Use scoped formatting and targeted Clippy. Update affected assertions/snapshots together; exclude unrelated stale expectations.
 - **Workflows/scripts:** run `actionlint` on changed workflows and small checks of the actual script. Build natively only for affected packaging or approved experiments.
-- Do not add tests or extend coverage without an explicit user request. Update existing tests/snapshots only for compile fixes or changed expected output required by production changes; preserve original checks. This overrides upstream integration/snapshot requirements. Report gaps before requesting added coverage.
-- Keep fork-added test files at most 200 lines. In inherited test files, keep fork-added behavioral coverage at most 200 lines per file; preserve upstream coverage and required compile adaptations. Retain the most meaningful user-visible and safety checks. Remove lower-value cases rather than splitting them into more files or compressing formatting to meet the limit.
-- **Formatting:** pass affected checkout-relative or absolute files: `just fmt --files scripts/format.py justfile`. Use `--files -- <paths>` for leading hyphens. Select changed Rust child modules explicitly; selected parents do not format unselected children. Select repository files; this local tool trusts the supplied paths. Unsupported file types fail. Formatters apply their project exclusions and report normal file errors. `just fmt --rust` formats the whole Rust workspace only; use it only when that scope is needed. Unscoped `just fmt` and CI `just fmt-check` remain full-repository commands.
-- Run required generators for changed inputs. Keep schemas, locks, and Bazel data correct without Bazel CI. Reuse upstream outputs only when verified source, generator inputs, output bytes, and provenance match the applied changes, and fork-specific input effects are unchanged. Record that evidence. Regenerate when fork edits or conflict resolution changes generator inputs/outputs, or evidence is uncertain.
-- Do not default to whole-crate/workspace suites. If focused checks cannot verify outcome or safety, explain the gap and ask before expansion. A clean merge is not validation. Verify upstream CI before claiming it passed.
+- Without an explicit user request, do not add tests or extend coverage. Update existing tests/snapshots only for compile fixes or production changes' required output changes. Preserve inherited checks; never delete, ignore, weaken, or disable them to hide output changes or avoid mock tests. This overrides upstream integration/snapshot requirements. Report coverage gaps before asking for new tests or broader checks.
+- Limit fork-added test files to 200 lines. In inherited files, limit fork-added behavioral coverage to 200 lines per file. Preserve upstream coverage and necessary compile adaptations. Keep meaningful user-visible/safety checks; remove lower-value cases rather than split files or compress formatting.
+- **Formatting:** select affected repository files with checkout-relative or absolute paths: `just fmt --files scripts/format.py justfile`. For leading hyphens, use `--files -- <paths>`. Select changed Rust child modules explicitly; parents do not format unselected children. The tool trusts paths, rejects unsupported types, honors formatter exclusions, and reports normal file errors. Use workspace-only `just fmt --rust` only when needed. Unscoped `just fmt` and CI `just fmt-check` remain full-repository commands.
+- Run required generators for changed inputs. Keep schemas, locks, and Bazel data correct without Bazel CI. Reuse upstream outputs only with matching source, generator inputs, output bytes, provenance, and unchanged fork-specific effects. Record proof; regenerate for fork/conflict changes or uncertain evidence.
+- Do not default to whole-crate/workspace suites. If focused checks cannot establish outcome or safety, explain the gap and ask before expansion.
 
-After approved integration, reuse PR checks and the verified binary pair only when effective source, generated files, dependencies, toolchain, features, flags, and pair provenance still match. Preserve checkout-wrapper isolation; never copy Cargo fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and rerun affected checks. Release live/package checks remain required; releases still use optimized `--release`.
+After approved integration, reuse checks and the verified binary pair only with matching effective source, generated files, dependencies, toolchain, features, flags, and pair provenance. Preserve checkout-wrapper isolation; never copy fingerprints to fake freshness. For integration changes or version bumps, rebuild affected binaries and repeat affected checks. Release live/package checks remain separate requirements.
 
 ### Real-session checks
 
-- Every PR requires a successful live check against a real provider before it is ready for review or merge. Select the smallest scenario for the changed behavior and affected fork interactions; state the expected result. Mocked responses, builds, and offline checks do not replace this requirement. If credentials, budget, or a compatible test setup are missing, keep the PR blocked, not ready. Do not replay unrelated upstream features or whole sessions. The release smoke turn remains separately required.
-- Before model calls, set a request/turn count and time limit. Keep input and requested output small; set supported token limits. Stop at the expected proof or first failure, then inspect evidence before another call. Do not run broad replays, model matrices, benchmarks, or repeated cold builds by default.
-- Control cost:
-  - Use existing sign-in only as authorized. New paid API/provider/model tests require approval for the endpoint, model, request/token limits, and spend cap. Do not invent a dollar budget.
-  - Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Include required runtime helper calls in the budget; keep release defaults unchanged.
-  - Record calls, elapsed time, and reported token use. Report money cost only when known; otherwise mark it unknown. If credentials, budget, or a compatible test setup are missing, report the check blocked, not verified.
-- Use private temporary `CODEX_HOME` with `diagnostic_log_capture = true`, not ephemeral mode. Retain history for debugging outside personal history.
-- Securely provision only needed config, authentication, and resources. Keep the intended profile/model. Put session, database, and log paths inside the test home. Do not copy personal history or symlink shared mutable state.
-- Use a temporary working directory unless behavior needs a specific checkout. Use `--no-daemon`; for daemon/remote checks, use an isolated server, never the personal shared daemon.
-- Record created session IDs, commands, binary/source identity, expected/actual results. Before cleanup, retain rollouts, output, and diagnostic logs in private task evidence. Never report or commit credentials.
-- Keep failed test homes until triage finishes. Remove only task-owned state after retaining required evidence. Titles alone do not make personal sessions disposable.
+- Every PR needs a successful real-provider live check before review or merge readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions. Release smoke remains separately required.
+- Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
+- Use existing sign-in only as authorized. New paid API/provider/model tests require approval for endpoint, model, request/token limits, and spend cap. Never invent a dollar budget.
+- Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers; preserve release defaults. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
+- Use private temporary `CODEX_HOME` with `diagnostic_log_capture = true`, not ephemeral mode. Retain diagnostic history outside personal history. Securely provision only needed config, authentication, and resources. Preserve intended profile/model. Put sessions, databases, and logs inside that home. Never copy personal history or symlink shared mutable state.
+- Unless behavior needs a specific checkout, use a temporary working directory. Use `--no-daemon`; for daemon/remote checks, use an isolated server, never the personal shared daemon.
+- Record session IDs, commands, binary/source identity, and expected/actual results. Before cleanup, retain private rollouts, output, and diagnostics. Never report or commit credentials.
+- Keep failed homes until triage ends. Remove only task-owned state after retaining evidence. Titles do not make personal sessions disposable.
 
 ### Desktop SSH tests
 
-Use the [asm-desktop-ssh-test skill](../.agents/skills/asm-desktop-ssh-test/SKILL.md) for isolated Desktop SSH tests. It covers setup, reuse, candidate updates, and Desktop verification. Keep the normal backend unchanged. The build and real-session rules in this guide still apply.
+For isolated Desktop SSH tests, use [asm-desktop-ssh-test](../.agents/skills/asm-desktop-ssh-test/SKILL.md): setup, reuse, candidate updates, and Desktop checks. Preserve the normal backend. Follow the build and real-session rules.
 
 ### Commit, open a PR, report
 
-Use PRs for implementation, documentation, and syncs. The lead owns delegated work too. After validation and owner decisions, commit the task branch, push, and open a PR against `main`.
+Use PRs against `main` for implementation, documentation, and syncs. The lead also owns delegated work. After validation and owner decisions, commit the task branch, push, and open the PR.
 
-**Done means validated changes are committed, pushed, and ready for PR review. Complete authorized merges before reporting done.** A worktree or binary handoff alone is not completion.
+**Done means validated changes are committed, pushed, and ready for review. Finish authorized merges before reporting done.** A worktree or binary handoff is insufficient.
 
 - Stage only finished task changes, tests, generated files, and intent. Inspect the staged diff.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`; fix local config if needed. Ask before attribution-only published-history rewrites.
-- Before branch updates, recheck the PR base. Resolve mechanical conflicts without new approval when they preserve this guide; verify affected behavior against base, fork, and upstream. For unsafe changes, ambiguous intent, or other owner decisions, inspect all exposed conflicts and ask one question with recommendations. Later commits can expose more.
-- Reconcile task-owned duplicate edits without losing other work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
-- Report changes, exact checks/results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference it in later handoffs and integration reports instead of repeating unchanged checks. Refresh changed results/status. PR readiness alone does not authorize merging.
+- Before branch updates, recheck the PR base. Resolve mechanical conflicts without new approval when they preserve this guide. Verify affected behavior against base, fork, and upstream. For unsafe changes, ambiguous intent, or owner decisions, inspect all exposed conflicts; ask one question with recommendations. Later commits can expose more conflicts.
+- Reconcile task-owned duplicate edits without losing others' work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
+- Report changes, exact check results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference unchanged results in later handoffs/integration reports. Refresh changed results/status. Readiness does not authorize merge.
 
 ### Push permissions
 
-- Implementation requests authorize task-branch commits, pushes, and PR creation, not direct implementation on `main`.
-- An explicit upstream rebase request also authorizes merging its sync PR after required checks pass. Do not ask again for that merge. Other PRs, including feature PRs, still need explicit merge approval.
-- Always allow `--force-with-lease` for fork branches, including `main`, within the requested task. Do not ask for separate force-push approval. Plain `--force`, tag moves, discarding work, and releases still need explicit approval.
-- An explicit release request authorizes the existing workflow's candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes still require PRs.
-- Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited workflow tags, require publication approval.
+- Implementation requests authorize task-branch commits, pushes, and PR creation—not direct implementation on `main`.
+- An upstream rebase request also authorizes merging its sync PR after required checks. Do not ask again. Other PRs, including features, require explicit merge approval.
+- Within the task, allow `--force-with-lease` on fork branches, including `main`, without separate approval. Plain `--force`, tag moves, discarded work, and releases still require approval.
+- A release request authorizes existing-workflow candidate publication, verified remote `main` update, and safe local fast-forward. Source fixes require PRs.
+- Push explicit refs with `--no-follow-tags`, never all tags. Release-triggering tags, including inherited ones, require publication approval.
 - Before lease-protected pushes, fetch and preserve remote-only work, including workflow release commits. Use an explicit lease against the inspected tip. Never refresh a failed lease and retry blindly.
 
 ## Upstream sync
 
 ### Shared compatibility gate
 
-For syncs or changes that affect saved caches or wire formats, apply these steps. A conflict-free rebase does not waive them. Select checks from changed inputs and affected fork interactions. Do not retest unrelated upstream behavior or add tests without approval.
+For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and real-session rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
 
-1. Map all affected writers and readers, including stock consumers. Trace saved caches, migrations, serialization, app-server responses, raw events, and live notifications. Review every consumer path, not only the changed producer. For new mandatory handshakes, inspect existing clients, fixtures, and reconnect paths.
-2. Keep fork-only cache formats and migrations in an ASM-owned, versioned cache. Preserve native canonical rollouts, thread IDs, and shared metadata. Never put fork-only formats in stock caches. For incompatible formats or migration-number/checksum collisions, change the ASM namespace. Never rewrite applied migration checksums.
-3. Gate fork wire extensions with an explicit versioned feature capability. Do not treat `experimentalApi`, client names, or client versions as support. Verify ordinary behavior without the capability.
-4. Before any resume or cache warming, check cold timeline, search, turn, and item reads. Use a separate private home for each cold check. Hand off bounded saved history to an independent, supported stock reader. Then check read/resume and warm cache reuse. Cover affected paging directions, hidden-only rows, and cursor contracts. Check opted-in and opted-out ASM clients concurrently where affected.
-5. Record each actual backend and client executable, version, hash, host, and `CODEX_HOME`. Do not substitute a launcher version for backend identity. A resume-assisted stock read does not prove cold reads or UI rendering. Record untested platforms and consumer boundaries as gaps. Simple provider turns and packaging/version checks do not prove interoperability.
-6. For live checks, follow [real-session checks](#real-session-checks). Keep the existing private profile, provider authorization, and budget rules. This gate does not authorize new providers, paid matrices, or broader checks.
-7. Before merge, refresh the actual base. Verify the candidate tree against that base. If the base advances, inspect affected interactions. Rebuild the affected binary pair and repeat focused checks when relevant inputs change. Do not merge first and assume an old build proves the new tree. Reuse evidence only while its relevant inputs still match.
-8. Record known remaining findings as unresolved, not passed. Keep missing boundary evidence blocked. Do not claim readiness or silently expand the authorized fix scope. Ask for decisions outside that scope.
-9. If an older ASM contaminated a stock cache, use manual recovery only. Verify the affected host, actual reader executable/version/hash, and home. Stop all writers. Back up the derived database and its SQLite WAL/SHM. Quarantine or rebuild only that cache. Preserve canonical history and shared state. Do not use the older writer against the recovered home.
+1. Map all affected writers and readers, including stock consumers. Trace caches, migrations, serialization, app-server responses, raw events, and live notifications. Review consumers, not only producers. For new mandatory handshakes, inspect existing clients, fixtures, and reconnects.
+2. Keep fork-only formats/migrations in ASM-owned versioned caches, never stock caches. Preserve native canonical rollouts, thread IDs, and shared metadata. For incompatible formats or migration-number/checksum collisions, change the ASM namespace. Never rewrite applied migration checksums.
+3. Gate fork wire extensions with explicit versioned feature capabilities—not `experimentalApi`, client names, or versions. Verify ordinary behavior without opt-in.
+4. Before resume or warming, check cold timeline, search, turn, and item reads in separate private homes. Hand bounded saved history to an independent supported stock reader. Then check read/resume and warm-cache reuse. Cover affected paging directions, hidden-only rows, and cursor contracts. Where affected, check opted-in/out ASM clients concurrently.
+5. Record actual backend/client executables, versions, hashes, hosts, and `CODEX_HOME`. Launcher versions do not establish backend identity. Resume-assisted reads do not prove cold reads or UI rendering. Record unchecked platforms/consumer boundaries. Provider turns and packaging/version checks do not prove interoperability.
+6. Before merge, refresh the actual base and verify the candidate against it. For base advances, inspect interactions. Rebuild the pair and repeat focused checks when relevant inputs change. Reuse evidence only while inputs match; do not merge first and rely on an old build.
+7. Keep remaining findings unresolved and missing boundary evidence blocked. Do not claim readiness or silently expand scope. Ask for out-of-scope decisions.
+8. For stock-cache contamination by older ASM, recover manually only. Verify host, actual reader executable/version/hash, and home. Stop all writers. Back up the derived database and WAL/SHM. Quarantine/rebuild only that cache; preserve canonical history/shared state. Never reuse the older writer against the recovered home.
 
 #### Known upstream cold-history limitation
 
-Unmodified Codex `rust-v0.168.0-alpha.7` returns an empty cold child timeline when a fresh home contains canonical rollouts but no derived history database. Its timeline reader does not first rebuild that projection; resuming the chat builds it and exposes the saved messages. The same missing catch-up remains through upstream `748ab55ca7`. Independent stock `rust-v0.169.0-alpha.2` also returned an empty first cold timeline for valid real saved history; resume restored its readable projection and saved permissions. ASM already rebuilds the projection before querying; this sync does not introduce that difference. No history loss was observed in the isolated checks.
+Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonical rollouts but no derived history database. Resume builds the projection and exposes messages. This missing catch-up persists through `748ab55ca7`. Independent stock `rust-v0.169.0-alpha.2` also returned an empty first cold timeline for valid real history; resume restored its projection and saved permissions. ASM already rebuilds before querying; this sync did not introduce the difference. Isolated checks found no history loss.
 
-The owner accepts this upstream limitation for the sync through `748ab55ca7` and its ensuing release. Record cold-stock reading as unresolved, not passed; successful resume-assisted handoff is separate evidence. This acceptance does not waive other compatibility checks or authorize changes to personal history or caches.
+The owner accepts this limitation only for the sync through `748ab55ca7` and its ensuing release. Keep cold-stock reading unresolved, not passed. Report resume-assisted handoff separately. This acceptance waives no other checks and permits no personal history/cache changes.
 
 ### Live backend model catalog
 
-Every upstream rebase/sync must also fetch the live authenticated backend model catalog. Source searches and cached or bundled catalogs cannot establish current model availability; the backend can expose new models without a source update.
+Every upstream rebase/sync must fetch the live authenticated backend catalog. Source, cached, and bundled catalogs cannot establish current availability; backend models can change without source changes.
 
-- Use the configured backend and existing authorized sign-in. Follow the client’s catalog request path (`models?client_version=<client version>`), authentication, account routing, and discovery settings; never send credentials to an unverified endpoint. This is a read-only catalog request, not an inference call.
-- Save the successful raw JSON response as a timestamped, private task-owned `models.json` outside tracked source. Validate its model-list shape and record the fetch time, backend URL, client version, and returned model IDs. Never include credentials or authentication headers in evidence, logs, or commits.
-- Compare the live catalog with the bundled catalog and report newly exposed models, including their visibility and relevant capabilities. Link the saved JSON in the rebase report. Do not claim model execution works based on catalog presence alone, or change model/config defaults automatically.
-- If authentication, connectivity, or discovery policy prevents a fresh fetch, report the check as blocked with its reason; do not substitute cached data or claim live availability was checked.
+- Use the configured backend and authorized sign-in. Follow client path `models?client_version=<client version>`, authentication, account routing, and discovery settings. Never send credentials to an unverified endpoint. This read-only request is not inference.
+- Save successful raw JSON as timestamped private task-owned `models.json` outside tracked source. Validate model-list shape. Record fetch time, backend URL, client version, and returned IDs. Keep credentials/authentication headers out of evidence, logs, and commits.
+- Compare with the bundled catalog. Report new models, visibility, and relevant capabilities; link saved JSON in the rebase report. Catalog presence does not prove execution. Do not automatically change model/config defaults.
+- If authentication, connectivity, or discovery policy blocks a fresh fetch, report the reason. Do not substitute cached data or claim live availability was checked.
 
+Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-- Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
-- Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `748ab55ca7de0b647d9a7a9d9a8e70e00f28666d`.
-- Date: 2026-11-08.
-- Subject: Increase Bazel core unit test shards from 8 to 16 (#60206).
+Last incorporated commit: `748ab55ca7de0b647d9a7a9d9a8e70e00f28666d`, 2026-11-08. Subject: Increase Bazel core unit test shards from 8 to 16 (#60206).
 
-- Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
-- Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
-  - Merge: `git -c rerere.enabled=true -c rerere.autoupdate=false merge <upstream-target>`.
-  - Rebase: `git -c rerere.enabled=true -c rerere.autoupdate=false rebase <upstream-target>`.
-  - Review reused resolutions before staging; verify affected behavior under the validation rules. Rerere is not evidence of correctness.
-  - After manual resolution, record it with `git -c rerere.enabled=true -c rerere.autoupdate=false rerere`.
-  - Continue with the same flags: `git -c rerere.enabled=true -c rerere.autoupdate=false rebase --continue` or `git -c rerere.enabled=true -c rerere.autoupdate=false merge --continue`.
-- A full sync includes the chosen upstream `main` commit and all ancestors. Capture baseline and target first; report that fixed range. Focus on fork differences and affected upstream changes. Apply development validation/integration rules.
-- After each rebase, report a short high-level list of upstream changes. Group related changes, not commits. Give one plain sentence per idea, user effect, and source link. Keep status/validation separate.
-- After full sync on the branch, update the marker in that PR. Cherry-picks do not advance it. Verify with `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and confirm ancestry to the fork branch.
+- Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
+- For each sync command, enable reviewed conflict reuse without shared Git config changes. Preserve chosen strategy/history options, e.g. `--rebase-merges`. Use `git -c rerere.enabled=true -c rerere.autoupdate=false merge <upstream-target>` or `git -c rerere.enabled=true -c rerere.autoupdate=false rebase <upstream-target>`. Review reused resolutions before staging; validate affected behavior. Rerere does not prove correctness.
+- After manual resolution, run `git -c rerere.enabled=true -c rerere.autoupdate=false rerere`. Continue with `git -c rerere.enabled=true -c rerere.autoupdate=false rebase --continue` or `git -c rerere.enabled=true -c rerere.autoupdate=false merge --continue`.
+- For full syncs, capture baseline and target first; include the chosen upstream `main` commit and all ancestors. Report that fixed range. Focus on fork differences and affected upstream changes. Follow development validation/integration rules.
+- After each rebase, group upstream changes by idea, not commit. Give one short plain sentence per idea, user effect, and source link. Keep status/validation separate.
+- After full sync, update the marker in that PR. Cherry-picks do not advance it. Verify `git show -s --format='%H%n%cs%n%s' <upstream-commit>` and ancestry to the fork branch.
 
 ## Platforms and CI
 
-Focus on macOS and Linux (Ubuntu). Preserve other inherited code/workflows unless removal is requested; do not add them to fork CI/releases. Other inherited workflow changes need approval. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs with expensive builds conditional on relevant changes; [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
+Focus on macOS and Linux (Ubuntu). Do not add other platforms to fork CI/releases. Preserve other inherited code/workflows unless removal is requested. Other inherited workflow changes need approval. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs; expensive builds depend on relevant changes. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
 
-Use standard GitHub-hosted runners for fork CI; paid larger runners require explicit approval. The V8 canary's Apple Silicon variants use `macos-15` with two Bazel jobs to fit the standard runner's memory budget.
+Use standard GitHub-hosted runners; paid larger runners need explicit approval. V8 canary Apple Silicon variants use `macos-15` and two Bazel jobs for runner memory.
 
-- **[Blocking CI](../.github/workflows/blocking-ci.yml):** manual-only `workflow_dispatch`; never automatic or required. Keep workspace formatting, production Clippy, and result collector. Cover `codex-cli`, `codex-tui`, `codex-core`, `codex-config` on both release targets. Preserve `--lib --bin codex -- -D warnings`. No test-target matrix, `cargo shear`, or warning suppression. Check other affected packages narrowly as needed.
-- **[Postmerge CI](../.github/workflows/postmerge-ci.yml):** manual-only `workflow_dispatch`; never automatic or required. Retain optimized builds, packaging, smoke checks, uploads, diagnostics, and results for targeted cross-platform validation. Releases retain their own build and package checks; do not run postmerge CI for every merge. Publication does not require blocking CI. Report existing failures separately.
-
-Port useful upstream action/toolchain/security/build fixes without broad matrices. Do not repeat CI locally for every edit. No unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, or OpenAI-only infrastructure in fork CI. The two-target V8 build below is not a broad suite/canary.
+- [Blocking CI](../.github/workflows/blocking-ci.yml) and [postmerge CI](../.github/workflows/postmerge-ci.yml) are manual-only `workflow_dispatch`, never automatic or required.
+- Blocking CI keeps workspace formatting, production Clippy, and result collection. Cover `codex-cli`, `codex-tui`, `codex-core`, and `codex-config` on both release targets. Preserve `--lib --bin codex -- -D warnings`. No test-target matrix, `cargo shear`, or warning suppression. Check other affected packages narrowly.
+- Postmerge CI keeps optimized builds, packaging, smoke checks, uploads, diagnostics, and results for targeted cross-platform checks. Do not run it for every merge. Releases retain their own build/package checks; publication does not require blocking CI. Report existing failures separately.
+- Port useful upstream action/toolchain/security/build fixes without broad matrices or routine local CI repetition. Exclude unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, and OpenAI-only infrastructure. The required two-target V8 build is not a broad suite/canary.
 
 ## Releases
 
 ### Operate a release
 
-1. **Prepare.**
-   - Require an explicit release request. Deliver the complete installable package before unrelated features. Use the existing workflow, not another pipeline.
-   - Select the repo explicitly: `gh ... -R trungnt13/asm`.
-   - Resume an unfinished candidate first; follow **Recover**. Do not rebase or replace its pinned source during recovery.
-   - Before a new release, fetch upstream with tags and prune. Capture the latest `upstream/main` commit and rebase the fork onto that fixed target. Follow the sync, PR, validation, and push rules; push the intended `origin/main` before dispatch.
-   - Before source pushes to `origin/main`, verify the V8 prerequisite below. Release the intended `origin/main` commit, not unpushed work.
-   - Publication does not authorize installation or shared-server restart.
-2. **Check CI.**
-   - Inspect failures; fix relevant code/package errors.
-   - For runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not infer code defects or change build settings from runner failure alone.
-   - If the owner requires recovery first, verify successful retry before dispatch.
-   - Read prior candidate job logs in memory with the GitHub CLI raw-output opt-in when supported; never render untrusted log escapes to a terminal.
-3. **Check live use.**
-   - Before dispatch, run one time-limited local live turn with default config/existing sign-in. Do not override profile/model for cheaper testing unless the owner explicitly approves it.
-   - This bounded local release smoke has standing approval, including required System1/helper calls through the existing configured endpoints/models. Do not ask again for each release. Keep one turn, a 120-second limit, and the smallest read-only Code Mode task; stop at proof or first failure. Broader tests, new endpoints/models, and unrelated billable calls still need approval under the cost rules.
-   - After every smoke attempt, report actual request counts, elapsed time, input/cached-input/output/reasoning tokens, and required helper usage separately where reported. Distinguish totals from subtotals; mark unavailable fields explicitly. Never substitute estimates for actual usage or omit failed-attempt usage. The planning estimate is 20–60K input and 1–5K output/reasoning tokens plus helper usage, not a hard cap or a claim of actual use.
-   - Use the release-source CLI/helper pair and [real-session isolation and cost limits](#real-session-checks).
-   - Require a real model response and verified successful read-only Code Mode output.
-   - Failure, timeout, or missing authentication blocks dispatch; never skip this check. Report source/result separately from package checks. Keep credentials out of CI.
-4. **Dispatch.**
-   - Dispatch [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`.
-   - Let it select version, create candidate, build, publish, verify, and update remote `main`. Do not repeat manually or wait for postmerge builds; candidates build/reuse archives.
-   - Ordinary branch dispatch is build-only. A `main` push does not request publication.
-5. **Recover.**
-   - After interruption, rerun failed jobs. A new resume dispatch uses `main`, `publish_release=true`, `resume_run_id=<original run ID>`.
-   - Keep original version/commit despite upstream changes. Never invent versions or replace tags. Report failures needing owner decisions.
-   - With explicit owner approval, a source-defective, failed unpublished candidate may be superseded by a new immutable candidate. Record the exact old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`; preparation must verify that record and reject publication or asset drift. Preserve the old candidate, tag, and assets, and keep its version occupied. This is not permission to modify a published or partially ready release.
-6. **Verify.**
-   - A platform is ready when its checked archive and platform checksum manifest are published.
-   - Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate.
-   - Legacy `v*` pushes/dispatches can publish. Require publication and both native checks, not `sync_main`.
-   - Inspect recorded checks and current metadata. Do not repeat successful checks on unchanged artifacts. Build-only success, tag pushes, or version labels do not prove publication.
-7. **Finish.**
-   - Fetch; fast-forward local `main` only safely. Preserve local edits/concurrent commits.
-   - Report release commit, upstream baseline, checks, remote/local integration, and blocked updates.
+1. **Prepare:** require an explicit release request. Prioritize the complete installable package over unrelated features. Use the existing workflow and explicit repo `gh ... -R trungnt13/asm`. Resume unfinished candidates first; preserve their pinned source. For a new release, fetch upstream with tags/prune. Capture latest `upstream/main`; rebase onto that fixed target under sync/PR/validation/push rules. Verify the V8 prerequisite before source pushes to `origin/main`. Push the intended commit before dispatch; never release unpushed work. Publication grants no install/shared-server-restart authority.
+2. **Check CI:** inspect failures; fix relevant code/package errors. For runner allocation/communication failures, inspect annotations/logs and rerun only failed jobs. Do not infer code defects or change build settings from runner failure alone. If the owner requires recovery first, verify retry success before dispatch. Read prior candidate logs in memory with supported GitHub CLI raw-output opt-in. Never render untrusted log escapes to a terminal.
+3. **Check live use:** before dispatch, run one local turn with default config and existing sign-in. Do not substitute cheaper profiles/models without approval. This smoke has standing approval for required System1/helpers through configured endpoints/models. Use the release-source CLI/helper pair and [real-session rules](#real-session-checks). Limit to 120 seconds and the smallest read-only Code Mode task. Stop at proof or first failure. Require a real response and successful read-only Code Mode output. Failure, timeout, or missing authentication blocks dispatch. Broader tests, new endpoints/models, and unrelated paid calls need approval.
+4. After every smoke attempt, report actual request counts, elapsed time, input/cached-input/output/reasoning tokens, and required helper usage separately where reported. Distinguish totals/subtotals and unavailable fields. Include failed-attempt usage; never replace actual usage with estimates. Planning estimate: 20–60K input and 1–5K output/reasoning plus helpers, not a cap or actual usage claim. Report source/live result separately from package checks. Keep credentials out of CI.
+5. **Dispatch:** run [`fork-rust-release.yml`](../.github/workflows/fork-rust-release.yml) on `main` with `publish_release=true`. Let it select version, create candidate, build, publish, verify, and update remote `main`. Do not repeat these manually or wait for postmerge builds. Candidates build/reuse archives. Ordinary branch dispatch is build-only; a `main` push does not request publication.
+6. **Recover:** after interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Preserve original version/commit despite upstream advances. Never invent versions or replace tags. Report failures needing owner decisions. Only with explicit approval, supersede a source-defective failed unpublished candidate with a new immutable candidate. Record old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`. Preparation must verify that record and reject publication or asset drift. Preserve old candidate/tag/assets and occupied version. Never apply this exception to published or partially ready releases.
+7. **Verify:** a platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Legacy `v*` pushes/dispatches require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
+8. **Finish:** fetch and safely fast-forward local `main`. Preserve local edits/concurrent commits. Report release commit, upstream baseline, checks, remote/local integration, and blocked updates.
 
 ### Release notes
 
-- Publish each release's notes on GitHub and in the final report. Compare with the previous completed release; include only packaged changes.
-- Separate `ASM` and `Codex` headings; use `No changes` for empty sections.
-- Use ASD-STE100: short direct active sentences, one term per concept.
-- One flat item per feature/fix, on one source line: `**Name:** What changed. User effect or required action.`
-- Include relevant defaults, limits, experimental status, and supporting commit/file links on that line.
-- Keep version, platform readiness, and validation outside feature lists. Do not claim unverified effects.
+Publish notes on GitHub and in the final report. Compare with the previous completed release; include only packaged changes. Keep separate `ASM` and `Codex` headings. Write `No changes` in empty sections. Use ASD-STE100: short active sentences and consistent terms.
+
+Use one flat source-line item per feature/fix: `**Name:** What changed. User effect or required action.` Include relevant defaults, limits, experimental status, and supporting commit/file links. Keep version, platform readiness, and validation outside feature lists. Never claim unverified effects.
 
 ### Workflow requirements
 
@@ -238,14 +183,11 @@ These govern release code, not another manual procedure.
 
 #### Version
 
-- Select the highest upstream `rust-v` prerelease tag by Semantic Versioning, not creation/publication time. Publication is unnecessary. Increment only its numeric patch by one; retain suffix: `rust-v0.162.0-alpha.18` → `v0.162.1-alpha.18`.
-- For repeats, append one positive numeric fork counter: `alpha.18.1`, then `alpha.18.2`. Use highest used counter plus one, never gaps. Preserve upstream identifiers; put counter before build metadata. New upstream `alpha.19` starts `v0.162.1-alpha.19`. Installer accepts repeated numeric alpha/beta parts.
-- Resume unfinished releases/candidates first. Prove complete published assets:
-  - Current family and highest fork version also require release, both native checks, and main sync tied to the exact candidate. Successful resumes count.
-  - Older candidates do not require expired Actions logs.
-  - Never overwrite tags/assets. If completion is unproved, no upstream prerelease exists, or proposed version is not above every fork version, stop and ask.
+- Select the highest upstream `rust-v` prerelease tag by Semantic Versioning, regardless of creation/publication time or publication. Increment only its numeric patch by one; retain suffix: `rust-v0.162.0-alpha.18` → `v0.162.1-alpha.18`.
+- For repeats, append one positive numeric counter: highest used plus one, without gaps. Preserve upstream identifiers; put the counter before build metadata. `alpha.18.1` precedes `alpha.18.2`; new upstream `alpha.19` starts `v0.162.1-alpha.19`. Installer accepts repeated numeric alpha/beta parts.
+- Resume unfinished candidates/releases first. Prove complete published assets. For the current family and highest fork version, also prove release, both native checks, and main sync for the exact candidate; successful resumes count. Older candidates need no expired Actions logs. If completion is unproved, no upstream prerelease exists, or the proposed version is not above every fork version, stop and ask.
 - Create immutable `agent/release-<run-id>`, not a `main` version commit. Set `[workspace.package].version` in [`Cargo.toml`](../codex-rs/Cargo.toml) and matching [`Cargo.lock`](../codex-rs/Cargo.lock) workspace versions. Do not change dependencies.
-- Tag, Cargo, and CLI `--version` must agree except prefixes. Renaming a tag cannot change binary bytes. Never move candidates/tags on retries. Keep candidate branches for recovery and pre-policy bumps until the next successful release.
+- Tag, Cargo, and CLI `--version` must agree except prefixes. Tag renames do not change binary bytes. Never overwrite tags/assets or move candidates/tags on retries. Keep candidate branches for recovery and pre-policy bumps until the next successful release.
 
 #### Build and package
 
@@ -256,67 +198,60 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 | macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 90 minutes |
 
-- Normal macOS candidates allow 315 total job minutes, including publication. Two optimized builds exceeded 180 minutes while Rust remained busy under memory pressure. Keep optimization, flags, runner, and candidate unchanged; allow more time. Concurrency experiments keep their 180-minute build limit. Resume existing candidates; never replace ready platform assets.
-- Legacy lookup step limit: 190 minutes; wait guards: macOS 150, Linux 185. Timeout fails, not duplicate builds. Only legacy tag jobs allow 360 minutes total for lookup/build/checks. Candidates allow build limit plus 15 publication minutes. Actual builds keep table limits; fresh candidates do not wait for postmerge.
-- Linux minimum: Ubuntu 22.04 / glibc 2.35. Keep builds/native smoke there; a GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the runtime minimum.
-- Use optimized `--release`, not `dev-small`; `CARGO_PROFILE_RELEASE_STRIP=debuginfo`. Retain function symbols and optimization. Fix timeouts without weakening the profile. Upstream tests do not justify further symbol/dependency removal.
-- Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
-- Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile; pass all three prebuilt executables to canonical packaging. Each `codex-<target>.tar.gz` contains:
-  - `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, `codex-path/rg`.
-  - Linux: `codex-resources/bwrap`, built from the same source/release profile. Embed its final SHA-256 in the CLI before packaging.
-  - Use existing canonical layout/pinned ripgrep manifest. Include only required resources, with regular executable files and matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must validate/recognize the package without host helpers.
-- Final six assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. No source trees/diagnostics.
-- Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if its CLI accepts it. Older candidates keep original contracts.
-- Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before candidate checkout. Never fetch newer controls mid-run. Legacy uses exact tagged SHA; verify tag resolution. Candidate packaging may precede tagging.
-- Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py): CLI and exec-server versions match Cargo; all three binaries' help succeeds with usage; manifest/resources valid; bundled ripgrep/Bubblewrap smoke passes. Code-mode-host `--version` is not required. Record binary/archive sizes.
-- GNU source-built ELF executables require x86_64 GNU loader and glibc symbols no newer than 2.35. Pinned ripgrep may be static; check architecture and minimum-OS execution. Run version/help in a clean Ubuntu 22.04 container with only declared runtime libraries; build runners alone do not prove compatibility.
-
-Package limits:
-
-- No Apple Developer signing/notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners.
-- Bundle only required ripgrep/Linux Bubblewrap. Use system shell; no voice, patched zsh, or optional helpers. Do not change sandbox/security defaults.
-- Fork Linux uses native GNU and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh), not Zig/MUSL wrappers. Keep inherited MUSL tooling for upstream workflows.
-- Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Explicitly install Python 3.11+ on Ubuntu 22.04 for verification.
-- Preserve upstream GNU system allocator, locale, and PTY choices. Do not change Rust platform conditions to mimic MUSL. Use system OpenSSL 3; system liblzma is permitted. Match [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) libraries to ELF dependencies. Do not add ALSA/GStreamer requirements for GNU migration.
+- Candidates allow build limit plus 15 publication minutes: 315 total on macOS. Preserve optimization, flags, runner, and candidate; allow needed time rather than weakening builds. Concurrency experiments retain 180-minute builds. Resume candidates; never replace ready platform assets.
+- Legacy lookup allows 190 minutes; wait guards are macOS 150/Linux 185. Timeout fails; do not duplicate builds. Only legacy tag jobs allow 360 total minutes. Actual builds retain table limits; fresh candidates do not wait for postmerge.
+- Keep Ubuntu 22.04 / glibc 2.35 as the Linux minimum and build/native-smoke baseline. A GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the minimum.
+- Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
+- Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile. Pass all three prebuilt executables to canonical packaging. `codex-<target>.tar.gz` contains `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, and `codex-path/rg`. Linux also contains `codex-resources/bwrap`, built from matching source/release profile; embed its final SHA-256 in the CLI before packaging.
+- Keep canonical layout/pinned ripgrep manifest. Include only required resources as regular executables with matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must recognize/validate the package without host helpers.
+- Publish six final assets: two archives, two `SHA256SUMS-<target>`, aggregate `SHA256SUMS`, and [`install.sh`](../scripts/install/install.sh). Each platform manifest covers its archive and pinned installer. No source trees/diagnostics.
+- Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if supported. Preserve older candidates' original contracts.
+- Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before checkout. Never fetch newer controls mid-run. Legacy uses verified exact tagged SHA. Candidate packaging may precede tagging.
+- Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py). CLI/exec-server versions match Cargo; all three help commands succeed with usage; manifest/resources and bundled ripgrep/Bubblewrap pass. Code-mode-host `--version` is not required. Record binary/archive sizes.
+- GNU source-built ELF requires x86_64 GNU loader and glibc symbols no newer than 2.35. Pinned ripgrep may be static. Check architecture/minimum-OS execution; run version/help in a clean Ubuntu 22.04 container with only declared runtime libraries. Runners alone do not prove compatibility.
+- No Apple signing/notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners. Bundle only required ripgrep/Linux Bubblewrap; use system shell. No voice, patched zsh, or optional helpers. Preserve sandbox/security defaults.
+- Fork Linux uses native GNU and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh), not Zig/MUSL wrappers. Preserve inherited MUSL tooling. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04.
+- Preserve upstream GNU system allocator, locale, and PTY choices; do not mimic MUSL in Rust conditions. Use system OpenSSL 3; system liblzma is permitted. Match [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) libraries to ELF dependencies. Do not add ALSA/GStreamer requirements for GNU migration.
 - Agree intent before adding platforms, DMGs, optional resources, npm, R2, WinGet, or website/OpenAI-only publishing.
 
 #### V8 dependency release
 
-Build V8 separately only if version/target/baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml), tag `asm-v8-v<exact resolved v8 crate version>-glibc2.35.2`. The suffix identifies GNU-baseline generation and matching macOS pair. Do not replace/move the old MUSL release.
+Build V8 separately only when version/target/baseline lacks a verified fork release. Use [`fork-v8-release.yml`](../.github/workflows/fork-v8-release.yml) and `asm-v8-v<exact resolved v8 crate version>-glibc2.35.2`. The suffix identifies the GNU baseline generation and matching macOS pair. Preserve the old MUSL release.
 
-- Manual branch dispatch defaults to build-only. Explicit `publish=true` builds/smokes, then tags/publishes at that commit. Tag pushes publish too. Tag moves or published asset replacement need approval.
-- Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebase/releases also has standing approval when independent review proves Cargo ABI, bindings, and the full dependency closure remain compatible, and native consumer build/JavaScript/sandbox checks pass. Record omitted source-recipe fixes; do not claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
-  - The original V8 152.2.0 `glibc2.35` pair has stale CppGC sizes and typed-array threshold bindings. Do not reuse that pair. Generation `glibc2.35.2` rebuilds source-generated matching archives/bindings and includes the Chromium C++ runtime isolation fix; preserve the original assets.
-- Build only optimized sandbox + pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
-- Require both targets' native `codex-v8-poc` sandbox/JavaScript smoke, including ignored CppGC ABI checks and Ubuntu 22.04 GNU. Reuse GNU Bazel platform and older glibc sysroot.
-- Publish only each target's archive, Rust binding, and two-file manifest. Normal release, **not Latest**, no installer; separate from CLI discovery.
-- Before the first consuming `main` push, publish and verify both new version/generation pairs. CI/CLI releases consume only matching verified fork V8. Verify GitHub SHA-256 digests and exact manifest names/hashes. Missing/bad assets fail; no upstream fallback. Keep upstream action paths for other workflows.
+- Manual branch dispatch defaults to build-only. Explicit `publish=true` builds/smokes, then tags/publishes at that commit. Tag pushes also publish. Tag moves or published-asset replacement need approval.
+- Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebases/releases has standing approval only with independent proof of Cargo ABI, bindings, and full dependency-closure compatibility. Native consumer build/JavaScript/sandbox checks must pass. Record omitted source-recipe fixes; never claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
+- Do not reuse V8 152.2.0's original `glibc2.35` pair: CppGC sizes and typed-array threshold bindings are stale. Preserve its assets. `glibc2.35.2` rebuilds matching source-generated archives/bindings with Chromium C++ runtime isolation.
+- Build only optimized sandbox/pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
+- Require both native `codex-v8-poc` sandbox/JavaScript smokes, including ignored CppGC ABI checks and Ubuntu 22.04 GNU. Reuse GNU Bazel platform/older glibc sysroot.
+- Publish each target's archive, Rust binding, and two-file manifest only. Use a normal release, **not Latest**, without installer; keep it separate from CLI discovery.
+- Before the first consuming `main` push, publish/verify both new version/generation pairs. CI/CLI releases use only matching verified fork V8. Verify GitHub SHA-256 digests and exact manifest names/hashes. Missing/bad assets fail without upstream fallback. Preserve upstream action paths for other workflows.
 
 #### Reuse and publish
 
-Serialize releases. Finish without later chat actions or token-push-triggered workflows. Legacy tags must already have correct Cargo versions.
+Serialize releases. Finish without later chat actions or token-push-triggered workflows. Legacy tags must already contain correct Cargo versions.
 
-Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target for unexpired smoke-checked archives from current dispatch/original candidate run. Do not wait for other platforms or rebuild ready published ones. Legacy may reuse successful same-repo push-to-`main` target jobs at exact tagged SHA. Wait for matching active runs instead of duplicate builds; timeout fails. Build only without usable archives. API errors are failures, not cache misses.
+Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target for unexpired smoke-checked archives from current dispatch/original candidate run. Legacy may reuse successful same-repo `main` push target jobs at exact tagged SHA. Wait for matching active runs, not other platforms. Never duplicate builds or rebuild ready published platforms. Timeouts/API errors fail; API errors are not cache misses. Build only without usable archives.
 
 1. Create pinned tag, draft, and common installer once. Never change candidates, move tags, or replace assets. Resume uploads only with matching names/sizes/digests.
-2. Independently build/reuse/check/upload each platform. Verify archive/installer GitHub digests, then smoke the downloaded archive. Upload `SHA256SUMS-<target>` last as readiness marker.
-3. On first readiness, publish normal non-draft, even `alpha`, **not Latest** while incomplete. Append other checked assets. Payloads are immutable by policy. GitHub's immutable-release setting must remain disabled for append-only publication; never change it automatically.
-4. After both platforms pass, append aggregate manifest for old installers, verify six assets, mark Latest, and retain both final native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Prefer fast-forward updates; necessary history rewrites follow the push permissions above.
-5. Resume only missing work after verifying ready platforms. For archives uploaded before readiness markers, recover/verify exact public bytes, not rebuild, even after Actions expiry. Partial releases are incomplete. Legacy completed four-asset releases remain valid. Candidates whose pinned installer lacks platform manifests keep all-platform publication.
+2. Independently build/reuse/check/upload each platform. Verify GitHub archive/installer digests; smoke the downloaded archive. Upload `SHA256SUMS-<target>` last as readiness marker.
+3. At first readiness, publish non-draft normal release, including `alpha`, **not Latest** while incomplete. Append other checked assets. Keep payloads immutable by policy. GitHub's immutable-release setting must stay disabled for append-only publication; never change it automatically.
+4. After both platforms pass, append aggregate manifest for old installers. Verify six assets, mark Latest, and retain both native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Prefer fast-forwards; necessary rewrites follow push permissions.
+5. Verify ready platforms; resume only missing work. For archives uploaded before readiness markers, recover/verify exact public bytes, even after Actions expiry. Do not rebuild them. Partial releases are incomplete. Legacy completed four-asset releases remain valid. Candidates with installers lacking platform manifests retain all-platform publication.
 
-Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. It selects highest published host-ready version; macOS cannot select Linux-only. Installer defaults to Latest; explicit `--release` may install a ready platform earlier. In-flight runs retain frozen policy.
+Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. Select the highest published host-ready version; macOS must not select Linux-only. Installer defaults to Latest; explicit `--release` may install an earlier ready platform. Preserve frozen policy for in-flight runs.
 
 ### Installer
 
-- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 GNU. Verify GitHub digests and host `SHA256SUMS-<target>` before complete-package installation. Reject incomplete two-binary archives in the current installer. Retain compatibility for older complete canonical packages whose metadata does not declare `execServer`; require the exact regular executable when declared, and reject an undeclared exec-server. Historical incomplete releases keep pinned installers. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
-- Reject unsupported targets/Linux without glibc 2.35+ before metadata downloads/state changes. GNU only, no MUSL fallback. Historical MUSL requires original installer. Use separate target-qualified GNU package directories; preserve MUSL packages and shared config/state.
-- Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, locking, and safe `current` selection. Store under `packages/asm-standalone`; keep upstream packages/update markers and shared Codex config/state and `codex` command unchanged.
-- Only the owner installs externally. No OpenAI/CDN/legacy npm downloads, daemon-only installs, or `auto-update-version` writes. Do not port upstream standalone-release pruning; preserve existing fork packages and installation layout.
-- Disable built-in update checks/prompts/commands/daemon loops regardless of settings/markers. CLI/daemon cannot install/download upstream releases. Preserve ordinary daemon startup/restart independently.
+- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 GNU. Before installing the complete package, verify GitHub digests and host `SHA256SUMS-<target>`. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
+- Reject incomplete two-binary archives. Keep older complete canonical packages without declared `execServer` compatible. If declared, require its exact regular executable; reject undeclared exec-server. Historical incomplete releases keep pinned installers.
+- Before metadata downloads/state changes, reject unsupported targets or Linux without glibc 2.35+. No MUSL fallback; historical MUSL requires its original installer. Use separate target-qualified GNU package directories; preserve MUSL packages and shared config/state.
+- Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, locking, and safe `current` selection. Store in `packages/asm-standalone`. Preserve upstream packages/update markers, shared Codex config/state, and `codex` command.
+- Only the owner installs externally. No OpenAI/CDN/legacy npm downloads, daemon-only installs, or `auto-update-version` writes. Do not port upstream standalone-release pruning. Preserve fork packages/layout.
+- Disable built-in update checks/prompts/commands/daemon loops regardless of settings/markers. CLI/daemon must not install/download upstream releases. Preserve ordinary daemon startup/restart separately.
 
 ### Build experiment
 
-Optional `macos_concurrency_experiment`: compare cold same-commit `macos-15` builds with 2/3 Cargo jobs; other settings equal. Save separate timing/resource/size/smoke results. No postmerge reuse or publication, even on tags. Measure before defaults change; one run does not prove general speedup.
+Optional `macos_concurrency_experiment` compares cold same-commit `macos-15` builds with 2/3 Cargo jobs and otherwise equal settings. Save separate timing/resource/size/smoke results. No postmerge reuse or publication, even on tags. Measure before changing defaults; one run does not prove general speedup.
 
 ## Intentional behavior differences
 
