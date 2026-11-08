@@ -71,7 +71,8 @@ async fn remote_mcp_startup_settles_when_attaching_mid_round() -> Result<()> {
                 AppServerEvent::ServerNotification(Box::new(notification)),
             )
             .await;
-            app.drain_active_thread_events(&mut tui).await?;
+            app.drain_active_thread_events(&mut tui, &app_server)
+                .await?;
             assert_eq!(
                 app.chat_widget.is_task_running_for_test(),
                 running,
@@ -169,7 +170,8 @@ async fn remote_mcp_startup_reports_terminal_only_failures_and_cancellations() -
             AppServerEvent::ServerNotification(Box::new(notification)),
         )
         .await;
-        app.drain_active_thread_events(&mut tui).await?;
+        app.drain_active_thread_events(&mut tui, &app_server)
+            .await?;
         let mut emitted = Vec::new();
         while let Ok(event) = events.try_recv() {
             if let AppEvent::InsertHistoryCell(cell) = event {
