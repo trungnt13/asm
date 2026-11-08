@@ -1,8 +1,5 @@
 //! App-level orchestration tests for the TUI.
 
-#[path = "side_persistence_tests.rs"]
-mod side_persistence_tests;
-
 #[path = "tests/terminal_size_telemetry_tests.rs"]
 mod terminal_size_telemetry_tests;
 
@@ -3403,7 +3400,6 @@ async fn sidebar_reopens_saved_side_chat_after_restart() -> Result<()> {
             config.clone(),
             parent,
             /*profile*/ None,
-            codex_context_fragments::SideConversationPolicy::Attached.fork_items(),
             SideChatStorage::Attached,
         )
         .await?;
@@ -3779,11 +3775,12 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     enable_side_retention(&mut app)?;
     app.local_settings.tui.animations = false;
     tui.set_owned_screen(/*owned*/ true)?;
-    let control = Box::pin(app.start_companion_conversation(
+    let control = boxed_future!(app.start_companion_conversation(
         &mut tui,
         &mut app_server,
         parent_thread_id,
         Some("Side question".into()),
+        crate::app_event::SideStartMode::Reuse,
     ))
     .await?;
 
@@ -3881,8 +3878,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             break;
         }
     }
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)).await?;
     assert_eq!(
         app.config.permissions.permission_profile(),
         &PermissionProfile::read_only()
@@ -3961,8 +3957,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     read_side_history(&mut app, &mut tui, "child")?;
     app.chat_widget.insert_str("child draft");
     app.chat_widget.handle_key_event(KeyCode::Char('!').into());
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     app.select_permission_profile(
         &mut app_server,
@@ -3977,8 +3972,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     read_side_history(&mut app, &mut tui, "parent")?;
     app.chat_widget.insert_str("parent draft");
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let settings = next_thread_settings_updated(&mut app_server, parent_thread_id).await;
     app.enqueue_thread_notification(
@@ -3996,8 +3990,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         ),
     )
     .await?;
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     app.refresh_owned_transcript(&mut tui)?;
     let frame = buffer_text(tui.terminal.previous_buffer());
@@ -4006,8 +3999,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         "{frame}"
     );
 
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     app.enqueue_thread_notification(
         parent_thread_id,
@@ -4019,8 +4011,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         ),
     )
     .await?;
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     app.refresh_owned_transcript(&mut tui)?;
     let frame = buffer_text(tui.terminal.previous_buffer());
@@ -4175,8 +4166,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         // Park an interaction on the parent so both hide shortcuts must clear it on return.
         keys!(prefix, main);
         app.transcript_view.begin_search();
-        app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-            .await?;
+        boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)).await?;
         drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
         side_frame(&mut app, &mut tui, size)?;
         assert!(app.transcript_view.begin_select_mode(&app.transcript_cells));
@@ -4433,8 +4423,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         agent_message_delta_notification(side_thread_id, "live", "reply", "unfinished answer"),
     )
     .await?;
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let frame = side_frame(&mut app, &mut tui, size)?;
     assert_eq!(frame.matches("unfinished answer").count(), 1, "{frame}");
@@ -4806,8 +4795,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         "{finished}"
     );
     // Check feedback after capturing the layout snapshots and before the clipboard toast appears.
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     read_side_history(&mut app, &mut tui, "child")?;
     // The upload finishes before the app event loop can park the now-inactive child.
@@ -4817,11 +4805,9 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         include_logs: false,
         result: Ok("uploaded-thread".to_string()),
     });
-    app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, parent_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
-    app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)).await?;
     drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let frame = side_frame(&mut app, &mut tui, even)?;
     assert!(
@@ -5148,8 +5134,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         .await?;
     assert!(side_frame(&mut app, &mut tui, even)?.contains("discard unsent input"));
     keys!(KeyCode::Esc.into());
-    app.select_agent_thread(&mut tui, &mut app_server, sibling)
-        .await?;
+    boxed_future!(app.select_agent_thread(&mut tui, &mut app_server, sibling)).await?;
     keys!(prefix, KeyCode::Char('w').into());
     side_frame(&mut app, &mut tui, even)?;
     keys!(KeyCode::Right.into(), enter);
@@ -7203,7 +7188,8 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
     let original_approval_policy = app.config.permissions.approval_policy.value();
     let original_sandbox_policy = app.config.legacy_sandbox_policy();
 
-    let fork_config = app.side_fork_config();
+    let mut fork_config = app.side_fork_config();
+    crate::app_server_session::SideChatStorage::Temporary.configure_fork(&mut fork_config);
 
     assert!(fork_config.ephemeral);
     assert_eq!(

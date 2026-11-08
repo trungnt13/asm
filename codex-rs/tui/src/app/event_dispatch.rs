@@ -3432,15 +3432,15 @@ impl App {
                 );
             }
             AppEvent::SelectAgentThread(thread_id) => {
-                self.select_agent_thread_and_discard_side(tui, app_server, thread_id)
+                self.select_agent_thread(tui, app_server, thread_id)
                     .await?;
             }
             AppEvent::StartSide {
                 parent_thread_id,
                 user_message,
-                mode: _,
+                mode,
             } => {
-                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, user_message)).await;
+                return Box::pin(self.start_companion_conversation(tui, app_server, parent_thread_id, user_message, mode)).await;
             }
             AppEvent::SideCreated {
                 backend_id: _,
