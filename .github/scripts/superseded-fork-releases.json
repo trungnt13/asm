@@ -10,5 +10,18 @@
       "digest": "sha256:19b1ef69f7982846f1e8fe173ea39efd9bb58428ffe10a652efed61363182967"
     },
     "reason": "Owner authorized a new immutable candidate on 2026-10-29 to repair the source packaging contract; preserve this failed unpublished candidate and its assets."
+  },
+  {
+    "run_id": 42465703649,
+    "source": "d28290d5df4a7e8b2ca90bbb585b6686135afe02",
+    "tag": "v0.169.1-alpha.3.1",
+    "release_id": 438138836,
+    "conclusion": "cancelled",
+    "installer": {
+      "id": 723450842,
+      "name": "install.sh",
+      "digest": "sha256:408dbe3b09984ac3ee73da2e3b65e9078e9e34dc2aec1b713140a2bdd6293576"
+    },
+    "reason": "Owner explicitly authorized a new immutable candidate from current main on 2026-11-09; preserve this cancelled unpublished candidate, draft, tag and installer unchanged."
   }
 ]
