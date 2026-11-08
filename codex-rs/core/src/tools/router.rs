@@ -227,7 +227,10 @@ impl ToolRouter {
         }
         self.model_visible_specs
             .iter()
-            .any(|spec| matches!(spec, ToolSpec::ToolSearch { .. }))
+            .any(|spec| {
+                matches!(spec, ToolSpec::ToolSearch { .. })
+                    || matches!(spec, ToolSpec::Function(tool) if tool.name == codex_tools::TOOL_SEARCH_TOOL_NAME)
+            })
             && self.registry.entries().any(|tool| {
                 tool.exposure.is_deferred()
                     && tool.runtime.tool_name().with_default_namespace() == name

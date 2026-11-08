@@ -253,6 +253,24 @@ Delete ASM linkage and private Cursor configuration only with exclusive runtime 
 - For user-spawned children with a catalog-bound provider ID, require an explicitly bound model or native runtime, including descendants/cold resumes. Reject unbound selections before startup; do not infer reverse routing. Use a separate provider ID for unbound custom subagent models. Preserve ordinary main/internal-worker provider behavior.
 - Keep upstream catalog/API model types unchanged. Hiding bundled entries does not disable explicit selection.
 
+Standalone search may select independent OpenAI authentication in any provider definition:
+`[model_providers.fireworks]` with `standalone_web_search_provider = "openai"`. Resolve
+this setting from the selected model's current provider, including external catalogue bindings
+and model switches. A matching override enables the existing standalone path without a global
+feature flag; disabled search, provider capabilities, and MCP/backend exclusions still apply.
+Reuse the upstream search extension, native defaults, and existing tool-output/history path;
+do not silently fall back between services. Separate search sends its usual recent context
+to the selected OpenAI backend. A matched non-OpenAI provider exposes the same executor as
+ordinary `web_run` because namespaced Fireworks calls did not produce dispatchable function
+calls in the live check; native OpenAI retains `web.run`.
+
+For Fireworks, defer MCP/app and desktop dynamic tools in the harness, discover them
+through an ordinary function call, and expose only selected tools on subsequent requests.
+Preserve explicitly direct-only namespaces. Keep discovery in the harness: do not send native
+tool-search items or undiscovered schemas to Fireworks. Preserve native tool search for
+providers that support it and resolve discovered tools against current permissions on resume.
+
+
 ### Claude Code thread runtime
 
 The shared native rules below also apply to Cursor, except for its listed differences.

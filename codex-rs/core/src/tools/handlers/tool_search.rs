@@ -220,7 +220,15 @@ impl ToolSearchHandler {
 
         let args = match payload {
             ToolPayload::ToolSearch { arguments } => arguments,
-            ToolPayload::Function { arguments } if nested => super::parse_arguments(&arguments)?,
+            ToolPayload::Function { arguments }
+                if nested
+                    || crate::tools::harness_tool_search::enabled(
+                        &step_context.turn,
+                        &step_context.settings.model_info,
+                    ) =>
+            {
+                super::parse_arguments(&arguments)?
+            }
             _ => {
                 return Err(FunctionCallError::Fatal(format!(
                     "{TOOL_SEARCH_TOOL_NAME} handler received unsupported payload"
@@ -261,6 +269,20 @@ impl ToolSearchHandler {
                     .tool_input_schema_max_bytes,
                 &indirect_prefixes,
             );
+            return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
+                "tools": tools,
+            }))));
+        }
+
+        if crate::tools::harness_tool_search::enabled(
+            &step_context.turn,
+            &step_context.settings.model_info,
+        ) {
+            let tools = self
+                .search_entries(query)
+                .take(limit)
+                .flat_map(ToolSearchEntry::tool_names)
+                .collect::<Vec<_>>();
             return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
                 "tools": tools,
             }))));

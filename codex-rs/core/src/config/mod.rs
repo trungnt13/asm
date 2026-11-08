@@ -4224,6 +4224,23 @@ impl Config {
             })?
             .clone();
 
+        for provider in model_providers.values() {
+            if let Some(search_id) = provider.standalone_web_search_provider.as_ref() {
+                let search_provider = model_providers.get(search_id).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Standalone web search provider `{search_id}` not found"),
+                    )
+                })?;
+                if !search_provider.is_openai() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Separate standalone web search requires an OpenAI provider",
+                    ));
+                }
+            }
+        }
+
         let shell_environment_policy = ShellEnvironmentPolicy::from(cfg.shell_environment_policy);
         let allow_login_shell = cfg.allow_login_shell.unwrap_or(true);
 
