@@ -195,6 +195,7 @@ fn model_provider_from_proto(
         requires_openai_auth: provider.requires_openai_auth,
         supports_websockets: provider.supports_websockets,
         supports_standalone_web_search: provider.supports_standalone_web_search,
+        standalone_web_search_provider: None,
         capabilities: provider
             .capabilities
             .map(|capabilities| ModelProviderCapabilities {
@@ -494,6 +495,7 @@ mod tests {
     fn model_provider_proto_defaults_standalone_web_search_to_false() {
         let expected = ModelProviderInfo {
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             ..expected_provider()
         };
         let proto = model_provider_to_proto("local", expected.clone());
@@ -622,6 +624,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            standalone_web_search_provider: None,
             gateway_oauth: None,
             aws: None,
             capabilities: Some(ModelProviderCapabilities {

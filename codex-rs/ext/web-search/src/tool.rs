@@ -59,6 +59,7 @@ const MAX_SEARCH_ERROR_BYTES: usize = 1024;
 
 pub(crate) struct WebSearchTool {
     pub(crate) session_id: String,
+    pub(crate) flat_tool: bool,
     pub(crate) include_copyright_compliance: bool,
     pub(crate) http_client_factory: HttpClientFactory,
     pub(crate) provider: SharedModelProvider,
@@ -70,7 +71,11 @@ pub(crate) struct WebSearchTool {
 
 impl<'call> ToolExecutor<ToolCall<'call>> for WebSearchTool {
     fn tool_name(&self) -> ToolName {
-        ToolName::namespaced(WEB_NAMESPACE, RUN_TOOL_NAME)
+        if self.flat_tool {
+            ToolName::plain("web_run")
+        } else {
+            ToolName::namespaced(WEB_NAMESPACE, RUN_TOOL_NAME)
+        }
     }
 
     fn spec(&self) -> ToolSpec {
@@ -95,18 +100,28 @@ impl<'call> ToolExecutor<ToolCall<'call>> for WebSearchTool {
             }
         };
 
-        ToolSpec::Namespace(ResponsesApiNamespace {
-            name: WEB_NAMESPACE.to_string(),
-            description: default_namespace_description(WEB_NAMESPACE),
-            tools: vec![ResponsesApiNamespaceTool::Function(ResponsesApiTool {
-                name: RUN_TOOL_NAME.to_string(),
-                description: description.to_string(),
-                strict: false,
-                parameters,
-                output_schema: None,
-                defer_loading: None,
-            })],
-        })
+        let tool = ResponsesApiTool {
+            name: if self.flat_tool {
+                "web_run"
+            } else {
+                RUN_TOOL_NAME
+            }
+            .to_string(),
+            description: description.to_string(),
+            strict: false,
+            parameters,
+            output_schema: None,
+            defer_loading: None,
+        };
+        if self.flat_tool {
+            ToolSpec::Function(tool)
+        } else {
+            ToolSpec::Namespace(ResponsesApiNamespace {
+                name: WEB_NAMESPACE.to_string(),
+                description: default_namespace_description(WEB_NAMESPACE),
+                tools: vec![ResponsesApiNamespaceTool::Function(tool)],
+            })
+        }
     }
 
     fn exposure(&self) -> ToolExposure {

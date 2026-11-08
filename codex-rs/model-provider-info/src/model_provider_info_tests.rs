@@ -96,6 +96,7 @@ base_url = "http://localhost:11434/v1"
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,
@@ -138,6 +139,7 @@ query_params = { api-version = "2025-04-01-preview" }
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,
@@ -184,6 +186,7 @@ supports_standalone_web_search = true
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: true,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,
@@ -379,6 +382,7 @@ fn test_create_amazon_bedrock_provider() {
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             capabilities: None,
             project_id: None,
             location: None,
@@ -770,7 +774,7 @@ fn test_merge_configured_model_providers_rejects_amazon_bedrock_non_default_fiel
             configured_model_providers,
         ),
         Err(
-            "model_providers.amazon-bedrock only supports changing `base_url`, `auth`, `http_headers`, `aws.profile`, `aws.region`, `aws.credential_export`, and `aws.auth_refresh`; other non-default provider fields are not supported"
+            "model_providers.amazon-bedrock only supports changing `base_url`, `auth`, `http_headers`, `aws.profile`, `aws.region`, `aws.credential_export`, `aws.auth_refresh`, and `standalone_web_search_provider`; other non-default provider fields are not supported"
                 .to_string()
         )
     );
