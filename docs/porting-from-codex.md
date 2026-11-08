@@ -157,9 +157,9 @@ Every upstream rebase/sync must also fetch the live authenticated backend model 
 
 - Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm).
 - Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
-- Last incorporated commit: `33b3f80a0935e51a49cbbda7d6473ef757d4241b`.
-- Date: 2026-11-07.
-- Subject: Wire incremental exec tool updates into Code Mode sessions (#60163).
+- Last incorporated commit: `748ab55ca7de0b647d9a7a9d9a8e70e00f28666d`.
+- Date: 2026-11-08.
+- Subject: Increase Bazel core unit test shards from 8 to 16 (#60206).
 
 - Verify the upstream URL before fetching. Sync on a task branch; submit a PR. Use the requested method there. Otherwise, merge upstream to preserve published history; rebase only unpublished branches. Follow push permissions for authorized history rewrites. Use `git cherry-pick -x` for targeted ports.
 - Enable reviewed conflict reuse for each sync command, without changing shared Git config. Keep the chosen strategy/history options, such as `--rebase-merges`; these flags only enable resolution reuse:
