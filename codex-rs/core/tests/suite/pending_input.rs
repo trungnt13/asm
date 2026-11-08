@@ -708,7 +708,7 @@ async fn input_interrupts_wait_agent_and_is_sent_in_follow_up_request(input: Wai
     const WAIT_CALL_ID: &str = "wait-call";
     const INITIAL_PROMPT: &str = "wait for an agent";
     const STEER_PROMPT: &str = "stop waiting and continue";
-    const MULTI_AGENT_V2_NAMESPACE: &str = "asm_agents";
+    const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
 
     let (release_wait, wait_gate) = oneshot::channel();
     let first_chunks = vec![
@@ -781,7 +781,7 @@ async fn input_interrupts_wait_agent_and_is_sent_in_follow_up_request(input: Wai
     assert_eq!(
         serde_json::from_str::<Value>(wait_output).expect("parse wait_agent output"),
         json!({
-            "message": "Wait interrupted by new input. Your asm_agents.wait_agent call was interrupted by new input.\n\nResponse to user input and understand the intention to determine whether the new input cancels, pauses, replaces, or otherwise changes the pending task. A status question alone does not cancel or pause it.\n\nIf the task should continue, check whether the awaited work is complete or blocked. If it remains pending, give any status update as commentary, then call asm_agents.wait_agent again with valid current arguments. Do not end the turn merely because you answered a status question or a delegated agent is still working.",
+            "message": "Wait interrupted by new input. Your collaboration.wait_agent call was interrupted by new input.\n\nResponse to user input and understand the intention to determine whether the new input cancels, pauses, replaces, or otherwise changes the pending task. A status question alone does not cancel or pause it.\n\nIf the task should continue, check whether the awaited work is complete or blocked. If it remains pending, give any status update as commentary, then call collaboration.wait_agent again with valid current arguments. Do not end the turn merely because you answered a status question or a delegated agent is still working.",
             "timed_out": false,
         })
     );

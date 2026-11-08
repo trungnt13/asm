@@ -6,12 +6,12 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=d3ea4e71e45ed1e6):
-        - namespace/functions; hash=2e40034c0e592b54
+00:additional_tools/developer (2; hash=5ee4a5e9300ae5eb):
+        - namespace/functions; hash=fc7bba98b6836100
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -41,17 +41,17 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
 10:message/user:
     Have a worker check both results.
 -- request 3 (turn) --
-11:function_call/asm_agents.spawn_agent:{"fork_turns":"all","message":"Check both inherited results.","task_name":"worker"}
+11:function_call/collaboration.spawn_agent:{"fork_turns":"all","message":"Check both inherited results.","task_name":"worker"}
 12:function_call_output:{"task_name":"/root/worker"}
 
 ## Window 2 (after request 3: input diverged at item 12)
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=d3ea4e71e45ed1e6):
-        - namespace/functions; hash=2e40034c0e592b54
+00:additional_tools/developer (2; hash=5ee4a5e9300ae5eb):
+        - namespace/functions; hash=fc7bba98b6836100
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -79,7 +79,7 @@ Scenario: A worker inherits the parent prefix unchanged and receives its own ins
     The second result is ready.
 10:message/user:
     Have a worker check both results.
-11:function_call/asm_agents.spawn_agent:{"fork_turns":"all","message":"Check both inherited results.","task_name":"worker"}
+11:function_call/collaboration.spawn_agent:{"fork_turns":"all","message":"Check both inherited results.","task_name":"worker"}
 12:function_call_output:aborted
 13:message/developer:
     You are now a newly spawned child agent. The preceding conversation is inherited parent context. Follow ...are not inherited. Report your result to your parent. [hash=0e586a5d405d39db]

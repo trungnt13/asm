@@ -49,7 +49,7 @@ async fn spawn_inherits_captured_settings_after_a_turn_update(
             } else {
                 "none"
             });
-        "asm_agents"
+        "collaboration"
     } else {
         spawn_arguments["fork_context"] =
             json!(matches!(inheritance, EnvironmentInheritanceCase::Fork));

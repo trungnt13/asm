@@ -16,15 +16,15 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=f303b82ac65be947):
-        - namespace/functions; hash=9c685418674788a4
+00:additional_tools/developer (3; hash=b2adfd1afa45db0c):
+        - namespace/functions; hash=81b5d93829f4250c
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
+        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
           - function/sleep
-        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -44,7 +44,7 @@ Settings:
     Ask a worker to check the release, then finish your turn.
 06:configuration_update:reasoning={"effort":"medium"}
 -- request 2 (turn) --
-07:function_call/asm_agents.spawn_agent:{"fork_turns":"none","message":"Check whether the release is ready.","task_name":"worker"}
+07:function_call/collaboration.spawn_agent:{"fork_turns":"none","message":"Check whether the release is ready.","task_name":"worker"}
 08:function_call_output:{"task_name":"/root/worker"}
 -- request 3 (turn) --
 09:message/assistant:
@@ -54,14 +54,14 @@ Settings:
 ## Window 2 (after request 3: input diverged at item 00)
 Settings: same as window 1
 -- request 4 (turn) --
-00:additional_tools/developer (3; hash=a6b195543af7b572):
-        - namespace/functions; hash=fcdcac702399e447
+00:additional_tools/developer (3; hash=4740a80023d65c6b):
+        - namespace/functions; hash=a448bcfb026aac7f
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
+        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
           - function/sleep
-        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

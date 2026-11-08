@@ -25,7 +25,7 @@ use serde_json::json;
 const ROOT_PROMPT: &str = "delegate the cache audit";
 const CHILD_TASK: &str = "inspect the repository";
 const SPAWN_CALL_ID: &str = "spawn-worker";
-const COLLABORATION_NAMESPACE: &str = "asm_agents";
+const COLLABORATION_NAMESPACE: &str = "collaboration";
 
 async fn start_with_prompt_cache_key(test: &mut TestCodex, policy: PromptCacheKey) -> Result<()> {
     let thread = test

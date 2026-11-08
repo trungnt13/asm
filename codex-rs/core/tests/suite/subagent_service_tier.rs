@@ -110,7 +110,7 @@ async fn mount_root_collaboration_call(
             ev_response_created(&response_id),
             ev_function_call_with_namespace(
                 call_id,
-                "asm_agents",
+                "collaboration",
                 "spawn_agent",
                 &arguments.to_string(),
             ),
@@ -317,7 +317,7 @@ async fn root_service_tier_change_updates_existing_subagent(
             ev_response_created("child-paused"),
             ev_function_call_with_namespace(
                 PAUSE_CALL_ID,
-                "asm_agents",
+                "collaboration",
                 "wait_agent",
                 &json!({ "reason":"", "timeout_ms": 30_000 }).to_string(),
             ),

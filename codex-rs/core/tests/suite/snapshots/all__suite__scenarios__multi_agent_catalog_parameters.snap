@@ -16,15 +16,15 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (3; hash=07810d4d854e03a7):
-        - namespace/functions; hash=de78850fea6d0764
+00:additional_tools/developer (3; hash=3818be1e67876e8a):
+        - namespace/functions; hash=b141cd314947cacc
           - custom/exec
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
+        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
           - function/sleep
-        - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=f5bbb425ac9ed235
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=08a93b38be7188ce
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -79,7 +79,7 @@ Settings:
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~234 TOKENS; hash=c2d3e3bcf543d720>
+    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 
@@ -102,5 +102,5 @@ Settings:
     Check which agents are working under /root before delegating more work.
 07:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-08:function_call/asm_agents.list_agents:{"path_prefix":"/root"}
+08:function_call/collaboration.list_agents:{"path_prefix":"/root"}
 09:function_call_output:{"agents":[{"agent_name":"/root","agent_status":"running"}]}

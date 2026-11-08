@@ -15,14 +15,14 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=53ebf8ab10c4ae05):
-    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. `image(imageUrlOrItem: string | { image_url: s...; hash=d8bccf2682552379
-    - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, reason, terminate, yield_time_ms]; hash=7edfe67c1cec3c96
+  tools (7; hash=dacb9ed37dcd461c):
+    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. `image(imageUrlOrItem: string | { image_url: s...; hash=7a155fb92c03484d
+    - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, reason, terminate, yield_time_ms]; hash=be32741c52eca53e
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
-    - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
+    - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
       - function/sleep
-    - namespace/asm_agents: Tools for spawning and managing sub-agents.; hash=dbf8d9ce3c596d7f
+    - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
       - function/followup_task
       - function/interrupt_agent
       - function/list_agents
@@ -83,7 +83,7 @@ Settings:
 
     You can use `spawn_agent` to create a new agent, `followup_task` to give an existing agent a new task an...message to a running agent without triggering a turn. [hash=7d40ff8b58977202]
     `send_message` calls may be read by a human, so ensure they are legible. Always put proper spaces between words and/or numbers.
-    <OMITTED 17 LINES; ~234 TOKENS; hash=c2d3e3bcf543d720>
+    <OMITTED 17 LINES; ~246 TOKENS; hash=780031e2df907944>
     - All agents use the same current working directory.
     - As a result, edits made by one agent are immediately visible to all other agents.
 

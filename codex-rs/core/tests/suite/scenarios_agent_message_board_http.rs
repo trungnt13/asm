@@ -288,7 +288,7 @@ async fn http_board_is_shared_with_children(mode: BoardMode) -> anyhow::Result<(
                 .to_string()
                 .contains("mcp__codex_message_board")
         );
-        assert!(request.tool_by_name("asm_agents", "post").is_none());
+        assert!(request.tool_by_name("collaboration", "post").is_none());
     }
     if mode != BoardMode::InMemory {
         let timestamp = post["created_at"].as_str().context("post timestamp")?;

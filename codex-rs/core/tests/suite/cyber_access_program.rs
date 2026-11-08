@@ -400,11 +400,11 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
         ])
     };
     for (namespace, fork_turns) in [
-        ("asm_agents", "none"),
-        ("asm_agents", "all"),
+        ("collaboration", "none"),
+        ("collaboration", "all"),
         ("multi_agent_v1", "none"),
     ] {
-        let is_v2 = namespace == "asm_agents";
+        let is_v2 = namespace == "collaboration";
         let spawn_arguments = if is_v2 {
             json!({"message": "inspect the repository", "task_name": "worker", "fork_turns": fork_turns})
         } else {

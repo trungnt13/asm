@@ -2388,13 +2388,13 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
                         .iter().find(|tool| tool["name"] == name).expect(name)
                 };
                 let multi_agent_messages = MULTI_AGENT_TOOLS.map(|name| {
-                    let tool = namespace_child_tool(&body, "asm_agents", name).expect(name);
+                    let tool = namespace_child_tool(&body, "collaboration", name).expect(name);
                     (name.to_string(), json!({
                         "description": tool["description"].as_str().expect("tool description").trim(),
                         "parameters": tool["parameters"],
                     }))
                 }).into_iter().collect::<serde_json::Map<String, Value>>();
-                let channel_post = namespace_child_tool(&body, "asm_agents", "post").expect("post");
+                let channel_post = namespace_child_tool(&body, "collaboration", "post").expect("post");
                 json!({
                     "model": body["model"],
                     "async_description": tool("request_user_input_async")["description"],

@@ -400,7 +400,7 @@ async fn spawned_child_has_independent_timing_and_parent_wait_is_tools(
         responses::sse(vec![
             responses::ev_function_call_with_namespace(
                 "spawn-worker",
-                "asm_agents",
+                "collaboration",
                 "spawn_agent",
                 r#"{"task_name":"worker","fork_turns":"none","message":"Run the timing gate."}"#,
             ),
@@ -414,7 +414,7 @@ async fn spawned_child_has_independent_timing_and_parent_wait_is_tools(
         responses::sse(vec![
             responses::ev_function_call_with_namespace(
                 "wait-worker",
-                "asm_agents",
+                "collaboration",
                 "wait_agent",
                 "{}",
             ),
