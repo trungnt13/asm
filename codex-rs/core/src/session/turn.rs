@@ -1884,20 +1884,30 @@ pub(crate) fn build_prompt(
     incremental_tools: bool,
 ) -> Prompt {
     let turn_context = &step_context.turn;
+    let tools = if incremental_tools {
+        // Hosted tools still require top-level Responses configuration.
+        step_context
+            .tool_router
+            .model_visible_specs()
+            .iter()
+            .filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))
+            .cloned()
+            .collect()
+    } else if crate::tools::harness_tool_search::enabled(
+        turn_context,
+        &step_context.settings.model_info,
+    ) {
+        crate::tools::harness_tool_search::specs_for_history(
+            &step_context.tool_router,
+            &input,
+            &step_context.settings.model_info,
+        )
+    } else {
+        step_context.tool_router.model_visible_specs()
+    };
     Prompt {
         input,
-        tools: if incremental_tools {
-            // Hosted tools still require top-level Responses configuration.
-            step_context
-                .tool_router
-                .model_visible_specs()
-                .iter()
-                .filter(|tool| matches!(tool, ToolSpec::WebSearch { .. }))
-                .cloned()
-                .collect()
-        } else {
-            step_context.tool_router.model_visible_specs()
-        },
+        tools,
         parallel_tool_calls: true,
         base_instructions: if incremental_tools {
             BaseInstructions {
@@ -2958,7 +2968,18 @@ async fn try_run_sampling_request(
         step_context.settings.model_info.slug.as_str(),
         turn_context.provider.info().name.as_str(),
     );
-    if client_session.inference_tools_changed(&step_context.tool_router.model_visible_specs()) {
+    let inference_tools = if crate::tools::harness_tool_search::enabled(
+        &turn_context,
+        &step_context.settings.model_info,
+    ) && !sess
+        .current_window_uses_incremental_tools(&step_context)
+        .await
+    {
+        Arc::clone(&prompt.tools)
+    } else {
+        step_context.tool_router.model_visible_specs()
+    };
+    if client_session.inference_tools_changed(&inference_tools) {
         turn_context.turn_timing_state.record_tools_change();
     }
     // Do not enter this span: overlapping tools must not retain it past sampling.
