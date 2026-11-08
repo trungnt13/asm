@@ -398,6 +398,7 @@ async fn new_config(
         forced_login_method: auth_config.forced_login_method,
         web_search_mode: Constrained::allow_any(WebSearchMode::Disabled),
         web_search_config: None,
+        web_search_model_provider: None,
         experimental_request_user_input_enabled: true,
         update_plan_enabled: true,
         tool_registry: Default::default(),

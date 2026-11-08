@@ -761,6 +761,8 @@ pub struct RealtimeAudioToml {
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ToolsToml {
+    /// Model provider used only for standalone web search; defaults to the inference provider.
+    pub standalone_web_search_provider: Option<String>,
     /// Client provider preference when the model does not select a provider.
     pub client_search_provider: Option<codex_protocol::openai_models::WebSearchProvider>,
     #[serde(

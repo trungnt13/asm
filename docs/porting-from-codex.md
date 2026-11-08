@@ -357,6 +357,16 @@ Show aliases in picker entries while retaining canonical selection identity. Nat
 do not add HTTP provider bindings or change native model/runtime selection.
 Default its context window to 300,000 tokens; retain the 1,000,000-token maximum for explicit overrides.
 Its catalog entry selects direct tools; live validation could not execute Code Mode's custom tool through Fireworks.
+
+Standalone `web.run` may explicitly select `tools.standalone_web_search_provider = "openai"`
+with `features.standalone_web_search = true`. Reuse the upstream search extension and
+existing OpenAI login independently of inference credentials. Keep the inference provider,
+native search defaults, and existing tool-output/history path unchanged; do not silently
+fall back between search services. Separate search sends its usual recent context to the
+selected OpenAI backend even when inference uses Fireworks. Fireworks exposes the same
+executor as the ordinary `web_run` function because namespaced calls did not produce
+dispatchable function calls in the live check; native OpenAI retains `web.run`.
+
 For Fireworks, defer MCP/app and desktop dynamic tools in the harness, discover them
 through an ordinary function call, and expose only selected tools on subsequent requests.
 Preserve explicitly direct-only namespaces. Keep discovery in the harness: do not send native

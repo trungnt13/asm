@@ -1202,6 +1202,9 @@ pub struct Config {
     /// Additional parameters for the web search tool when it is enabled.
     pub web_search_config: Option<WebSearchConfig>,
 
+    /// Explicit standalone search provider, authenticated independently of inference.
+    pub web_search_model_provider: Option<ModelProviderInfo>,
+
     /// Whether to register the experimental request_user_input tool.
     pub experimental_request_user_input_enabled: bool,
 
@@ -4223,6 +4226,27 @@ impl Config {
             })?
             .clone();
 
+        let web_search_model_provider = cfg
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.standalone_web_search_provider.as_ref())
+            .map(|id| {
+                let provider = model_providers.get(id).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Standalone web search provider `{id}` not found"),
+                    )
+                })?;
+                if !provider.is_openai() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Separate standalone web search requires an OpenAI provider",
+                    ));
+                }
+                Ok(provider.clone())
+            })
+            .transpose()?;
+
         let shell_environment_policy = ShellEnvironmentPolicy::from(cfg.shell_environment_policy);
         let allow_login_shell = cfg.allow_login_shell.unwrap_or(true);
 
@@ -4957,6 +4981,7 @@ impl Config {
             forced_login_method,
             web_search_mode: constrained_web_search_mode.value,
             web_search_config,
+            web_search_model_provider,
             experimental_request_user_input_enabled,
             update_plan_enabled,
             tool_registry,

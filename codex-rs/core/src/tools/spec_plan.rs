@@ -196,6 +196,7 @@ pub(crate) fn build_tool_router(
     }
     if native_mode.is_none() {
         registry.remove(&ToolName::namespaced("web", "run"));
+        registry.remove(&ToolName::plain("web_run"));
     }
     append_dynamic_tool_runtimes(turn_context, model_info, dynamic_tools, &mut registry);
     let hosted_specs = if let Some(mode) = native_mode {
@@ -738,7 +739,8 @@ fn hosted_model_tool_specs(
 
     let mut specs = Vec::new();
     let standalone_web_search_available = standalone_web_search_enabled(turn_context, model_info)
-        && registered_extension_tool_names.contains(&ToolName::namespaced("web", "run"));
+        && (registered_extension_tool_names.contains(&ToolName::namespaced("web", "run"))
+            || registered_extension_tool_names.contains(&ToolName::plain("web_run")));
     // `Some(Cached/Live/Disabled)` are the options for mode when standalone search is unavailable
     // and the provider supports hosted search. `None` prevents emitting a hosted search tool.
     let web_search_mode = (!standalone_web_search_available
@@ -1846,7 +1848,8 @@ fn append_extension_tool_executors(
 
     for executor in executors {
         let tool_name = executor.tool_name();
-        let is_standalone_web_search = tool_name == ToolName::namespaced("web", "run");
+        let is_standalone_web_search = tool_name == ToolName::namespaced("web", "run")
+            || tool_name == ToolName::plain("web_run");
         if is_standalone_web_search && (!standalone_web_search_enabled || !web_search_mode_on) {
             continue;
         }

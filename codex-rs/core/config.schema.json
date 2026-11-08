@@ -5440,6 +5440,10 @@
         "experimental_request_user_input": {
           "$ref": "#/definitions/ExperimentalRequestUserInput"
         },
+        "standalone_web_search_provider": {
+          "description": "Model provider used only for standalone web search; defaults to the inference provider.",
+          "type": "string"
+        },
         "update_plan": {
           "$ref": "#/definitions/UpdatePlanToolConfig"
         },

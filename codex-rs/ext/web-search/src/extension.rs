@@ -36,6 +36,8 @@ struct WebSearchExtension {
 #[derive(Clone)]
 struct WebSearchExtensionConfig {
     provider_supports_search: bool,
+    separate_search_auth: bool,
+    flat_tool: bool,
     include_copyright_compliance: bool,
     http_client_factory: HttpClientFactory,
     provider: ModelProviderInfo,
@@ -44,13 +46,19 @@ struct WebSearchExtensionConfig {
 
 impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
+        let provider = config
+            .web_search_model_provider
+            .as_ref()
+            .unwrap_or(&config.model_provider);
         Self {
-            provider_supports_search: config.model_provider.is_openai()
-                || config.model_provider.uses_openai_actor_authorization()
-                || config.model_provider.supports_standalone_web_search,
+            provider_supports_search: provider.is_openai()
+                || provider.uses_openai_actor_authorization()
+                || provider.supports_standalone_web_search,
+            separate_search_auth: config.web_search_model_provider.is_some(),
+            flat_tool: config.model_provider_id == "fireworks",
             include_copyright_compliance: config.include_web_search_copyright_compliance,
             http_client_factory: config.http_client_factory(),
-            provider: config.model_provider.clone(),
+            provider: provider.clone(),
             settings: search_settings(config),
         }
     }
@@ -146,9 +154,18 @@ impl ToolContributor for WebSearchExtension {
                     runtime_auth: None,
                 })
             });
+        let auth = if config.separate_search_auth {
+            Arc::new(codex_model_provider::ProviderAuthContext {
+                credentials: Arc::clone(&auth.credentials),
+                runtime_auth: None,
+            })
+        } else {
+            auth
+        };
 
         vec![Arc::new(WebSearchTool {
             session_id: session_store.level_id().to_string(),
+            flat_tool: config.flat_tool,
             include_copyright_compliance: config.include_copyright_compliance,
             http_client_factory: config.http_client_factory.clone(),
             provider: auth.model_provider(config.provider.clone()),
@@ -252,6 +269,8 @@ mod tests {
             for include_copyright_compliance in [true, false] {
                 thread_store.insert(WebSearchExtensionConfig {
                     provider_supports_search: true,
+                    separate_search_auth: false,
+                    flat_tool: false,
                     include_copyright_compliance,
                     http_client_factory: HttpClientFactory::new(
                         OutboundProxyPolicy::ReqwestDefault,
