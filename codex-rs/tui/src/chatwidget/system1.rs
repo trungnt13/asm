@@ -184,7 +184,7 @@ impl ChatWidget {
         } else {
             format!("System 1 error {code}, fallback and cooldown unavailable")
         };
-        self.add_to_history(history_cell::new_usage_warning_event(message));
+        self.add_to_history(history_cell::new_visible_warning_event(message));
         self.request_redraw();
     }
 
