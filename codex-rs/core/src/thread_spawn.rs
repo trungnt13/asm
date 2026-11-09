@@ -30,7 +30,7 @@ use codex_protocol::protocol::SubAgentSource;
 /// Child creation options; omitted overrides retain native MAv2 inheritance and role rules.
 pub struct ThreadCreateRequest {
     pub task_name: String,
-    /// `None` starts fresh; other modes copy parent history.
+    /// `None` starts fresh; `FullHistory` uses native fork preparation.
     pub fork_mode: Option<SpawnAgentForkMode>,
     pub agent_type: Option<String>,
     pub model: Option<String>,
@@ -42,7 +42,7 @@ pub(crate) struct ThreadSpawnRequest {
     pub spawn_arguments: String,
     /// Explicit encoding: hosts normally provide plaintext; native tools can forward ciphertext.
     pub message: AgentMessage,
-    /// `None` starts fresh; other modes copy parent history.
+    /// `None` starts fresh; `FullHistory` uses native fork preparation.
     pub fork_mode: Option<SpawnAgentForkMode>,
     pub agent_type: Option<String>,
     pub model: Option<String>,
@@ -169,7 +169,7 @@ pub(crate) async fn prepare(
         step_context,
         SpawnConfigOptions {
             version: SpawnConfigVersion::V2,
-            inherits_history: fork_mode.is_some(),
+            full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
             role_name,
             model: model.as_deref(),
             reasoning_effort,
@@ -178,6 +178,23 @@ pub(crate) async fn prepare(
     .await
     .map_err(ThreadSpawnError::Preparation)?;
     let config = prepared.config;
+    if matches!(fork_mode, Some(SpawnAgentForkMode::LastCompletedTurns(_)))
+        && config.model_provider_id != turn.config.model_provider_id
+    {
+        return Err(ThreadSpawnError::Preparation(
+            "Cross-provider subagents require fork_turns=none".to_string(),
+        ));
+    }
+    if fork_mode.is_some()
+        && config
+            .model
+            .as_deref()
+            .is_some_and(crate::external_runtime::is_native_model)
+    {
+        return Err(ThreadSpawnError::Preparation(
+            "Native runtime subagents require fork_turns=none".to_string(),
+        ));
+    }
     let task_name = turn
         .session_source
         .get_agent_path()
