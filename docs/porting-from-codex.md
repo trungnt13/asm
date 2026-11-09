@@ -117,9 +117,9 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
-Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonical rollouts but no derived history database. Resume builds the projection and exposes messages. This missing catch-up persists through `4e4767ffa7`. Independent stock `rust-v0.169.0-alpha.2` also returned an empty first cold timeline for valid real history; resume restored its projection and saved permissions. ASM already rebuilds before querying; this sync did not introduce the difference. Isolated checks found no history loss.
+Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonical rollouts but no derived history database. Resume builds the projection and exposes messages. This missing catch-up persists through `05cf8eeb14`. Independent stock `rust-v0.169.0-alpha.6` also returned an empty first cold timeline for valid real history; resume restored its projection and saved permissions. ASM already rebuilds before querying; this sync did not introduce the difference. Isolated checks found no history loss.
 
-The owner accepts this limitation for the sync through `4e4767ffa7`. Acceptance alone does not authorize a release. The owner separately authorized a new release from current main on 2026-11-09; do not resume the preserved cancelled candidate. Keep cold-stock reading unresolved, not passed. Report resume-assisted handoff separately. This acceptance waives no other checks and permits no personal history/cache changes.
+The owner accepts this limitation only for the sync through `05cf8eeb14`. This acceptance does not authorize a release. Keep cold-stock reading unresolved, not passed. Report resume-assisted handoff separately. This acceptance waives no other checks and permits no personal history/cache changes.
 
 ### Live backend model catalog
 
