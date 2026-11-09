@@ -130,6 +130,7 @@ impl ChatWidget {
                 }
             }
             ServerNotification::TurnStarted(notification) => {
+                self.turn_lifecycle.has_turn_history = true;
                 self.status_state.captured_step_reasoning = None;
                 self.status_state.suppressed_system1_turn_id = None;
                 if self
@@ -178,7 +179,10 @@ impl ChatWidget {
             }
             ServerNotification::AgentMessageDelta(notification) => {
                 self.restore_realtime_transcripts_before_turn(&notification.turn_id);
-                if !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
+                if !self
+                    .transcript
+                    .has_replayed_cloud_text(&notification.turn_id, &notification.item_id)
+                    && !self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
                     && (from_replay
                         || !self.is_realtime_delegated_agent_item(
                             &notification.turn_id,
@@ -651,6 +655,9 @@ impl ChatWidget {
                 // render with their choices on completion.
                 if delegated
                     || self.is_realtime_delegated_reasoning_turn(&notification.turn_id)
+                    || self
+                        .transcript
+                        .has_replayed_cloud_text(&notification.turn_id, &id)
                     || questions.is_some()
                     || text.is_empty()
                 {

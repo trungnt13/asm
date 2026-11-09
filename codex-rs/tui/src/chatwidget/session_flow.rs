@@ -132,7 +132,10 @@ impl ChatWidget {
             self.clear_thread_usage_state();
         }
         self.agent_wait_history.clear();
+        let has_turn_history =
+            previous_thread_id == self.thread_id && self.turn_lifecycle.has_turn_history;
         self.turn_lifecycle.reset_thread();
+        self.turn_lifecycle.has_turn_history = has_turn_history;
         self.status_state.captured_step_reasoning = None;
         self.status_state.suppressed_system1_turn_id = None;
         self.safety_recourse = None;
