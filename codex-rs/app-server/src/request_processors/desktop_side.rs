@@ -68,7 +68,7 @@ pub(super) fn apply_defaults(
         normalize_effort: config.side_reasoning_effort.is_some(),
         normalize_tier: config.side_service_tier.is_some(),
         pending_sync: configured,
-        pending_first_turn: matches!(origin, SideOrigin::Start),
+        pending_first_turn: Some(origin),
         pending_prompt,
     };
     if let Some(model) = &config.side_model {
@@ -109,7 +109,7 @@ pub(crate) struct SideSettingsInitialization {
     pub(super) normalize_effort: bool,
     pub(super) normalize_tier: bool,
     pub(super) pending_sync: bool,
-    pub(super) pending_first_turn: bool,
+    pub(super) pending_first_turn: Option<SideOrigin>,
 }
 
 impl SideSettingsInitialization {
@@ -118,7 +118,7 @@ impl SideSettingsInitialization {
         params: &mut codex_app_server_protocol::TurnStartParams,
         snapshot: &codex_core::ThreadConfigSnapshot,
     ) {
-        if !self.pending_first_turn {
+        if self.pending_first_turn.is_none() {
             return;
         }
         if let Some(mode) = params.collaboration_mode.as_mut() {

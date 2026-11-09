@@ -632,7 +632,7 @@ impl TurnRequestProcessor {
             .await
             .side_settings_initialization
             .as_ref()
-            .is_some_and(|initialization| initialization.pending_first_turn);
+            .is_some_and(|initialization| initialization.pending_first_turn.is_some());
         if pending_first_turn {
             let (mut snapshot, selected_service_tier) = thread.resume_config_snapshot().await;
             snapshot.service_tier = selected_service_tier;
@@ -773,7 +773,7 @@ impl TurnRequestProcessor {
                 .side_settings_initialization
                 .as_mut()
         {
-            initialization.pending_first_turn = false;
+            initialization.pending_first_turn = None;
         }
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
@@ -1067,7 +1067,7 @@ impl TurnRequestProcessor {
             .await
             .side_settings_initialization
             .as_ref()
-            .is_some_and(|initialization| initialization.pending_first_turn);
+            .is_some_and(|initialization| initialization.pending_first_turn.is_some());
         if params.system1_enabled.is_some() || pending_side_initialization {
             thread
                 .update_thread_settings(thread_settings)
@@ -1177,7 +1177,11 @@ impl TurnRequestProcessor {
                     .side_settings_initialization
                     .as_mut()
                     .is_some_and(|initialization| {
-                        (side_boundary || initialization.pending_first_turn)
+                        (side_boundary
+                            || matches!(
+                                initialization.pending_first_turn,
+                                Some(super::desktop_side::SideOrigin::Start)
+                            ))
                             && std::mem::take(&mut initialization.pending_sync)
                     })
             };
