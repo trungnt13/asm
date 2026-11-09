@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 #[test]
-fn spawn_agent_tool_v2_requires_task_name() {
+fn spawn_agent_tool_v2_requires_task_name_message_and_fork_turns() {
     let tool = create_spawn_agent_tool_v2(
         SpawnAgentToolOptions {
             agent_type_description: "role help".to_string(),
@@ -65,7 +65,11 @@ fn spawn_agent_tool_v2_requires_task_name() {
     assert!(!properties.contains_key("service_tier"));
     assert_eq!(
         parameters.required.as_deref(),
-        Some(["task_name".to_string(), "message".to_string()].as_slice())
+        Some(
+            ["task_name", "message", "fork_turns"]
+                .map(str::to_string)
+                .as_slice()
+        )
     );
     assert_eq!(
         output_schema.expect("spawn_agent output schema").to_value()["required"],

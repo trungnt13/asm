@@ -106,6 +106,7 @@ async fn api_key_subagent_inherits_prompt_cache_key_policy(policy: PromptCacheKe
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_TASK,
         "task_name": "worker",
+        "fork_turns": "all",
     }))?;
     let root_request = mount_sse_once_match(
         &server,

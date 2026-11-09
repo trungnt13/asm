@@ -156,6 +156,13 @@ pub fn create_spawn_agent_tool_v2(
         )),
     );
 
+    let mut parameters = JsonSchema::object(
+        properties,
+        Some(vec!["task_name".to_string(), "message".to_string()]),
+        Some(false.into()),
+    );
+    require_spawn_agent_fork_turns(&mut parameters);
+
     ToolSpec::Function(ResponsesApiTool {
         name: "spawn_agent".to_string(),
         description: append_external_model_aliases(
@@ -175,11 +182,7 @@ pub fn create_spawn_agent_tool_v2(
         ),
         strict: false,
         defer_loading: None,
-        parameters: JsonSchema::object(
-            properties,
-            Some(vec!["task_name".to_string(), "message".to_string()]),
-            Some(false.into()),
-        ),
+        parameters,
         output_schema: Some(
             spawn_agent_output_schema_v2(options.hide_agent_type_model_reasoning).into(),
         ),
@@ -682,16 +685,8 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
             ))),
         ),
         (
-            "fork_turns".to_string(),
-            JsonSchema::string(Some(
-                "Parent history to inherit. Defaults to `all`; use `none` to start without parent history. Only `all` and `none` are supported.".to_string(),
-            )),
-        ),
-        (
             "model".to_string(),
-            JsonSchema::string(Some(
-                SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string(),
-            )),
+            JsonSchema::string(Some(SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION.to_string())),
         ),
         (
             "reasoning_effort".to_string(),
@@ -701,6 +696,21 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
             )),
         ),
     ])
+}
+
+pub(crate) fn require_spawn_agent_fork_turns(parameters: &mut JsonSchema) {
+    parameters.properties.get_or_insert_default().insert(
+        "fork_turns".to_string(),
+        JsonSchema::string(Some(
+            "Parent history to inherit. Use `none` for no history or `all` for full history."
+                .to_string(),
+        )),
+    );
+    let mut required = parameters.required.take().unwrap_or_default().into_vec();
+    if !required.iter().any(|name| name == "fork_turns") {
+        required.push("fork_turns".to_string());
+    }
+    parameters.required = Some(required.into_boxed_slice());
 }
 
 fn hide_spawn_agent_metadata_options(properties: &mut BTreeMap<String, JsonSchema>) {
@@ -843,7 +853,7 @@ Note that passing `fork_turns="none"` will not pass any surrounding context to t
     };
 
     let tool_description = format!(
-        "{tool_description}\nNative runtime models (`claude-code/*`, `cursor-agent/*`) require `fork_turns=\"none\"`; `all` and its default are rejected before launch. Include all needed context in `message`. They use their native instructions, tools and permissions, not the parent's. Cursor agents cannot call agent messaging tools; their final answer is still returned."
+        "{tool_description}\nNative runtime models (`claude-code/*`, `cursor-agent/*`) require `fork_turns=\"none\"`. Include all needed context in `message`. They use their native instructions, tools and permissions, not the parent's. Cursor agents cannot call agent messaging tools; their final answer is still returned."
     );
 
     if let Some(usage_hint_text) = usage_hint_text {

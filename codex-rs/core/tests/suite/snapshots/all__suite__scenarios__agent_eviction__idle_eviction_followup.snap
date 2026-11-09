@@ -39,7 +39,7 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
     There are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 04:message/developer:
     <MULTI_AGENT_MODE>
 05:message/user:
@@ -98,7 +98,7 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
     There are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 04:message/developer:
     <MULTI_AGENT_MODE>
 05:message/user:

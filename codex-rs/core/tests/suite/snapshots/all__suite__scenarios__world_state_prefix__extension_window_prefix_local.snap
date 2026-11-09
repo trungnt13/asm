@@ -89,7 +89,7 @@ Settings:
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=949a0a6b83387d51]
 05:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
 06:message/user:
@@ -209,7 +209,7 @@ Settings: unavailable (items only)
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=949a0a6b83387d51]
 07:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
 08:message/user:
@@ -306,7 +306,7 @@ Settings: same as window 1
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=949a0a6b83387d51]
 07:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
 08:message/user:

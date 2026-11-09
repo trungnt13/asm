@@ -32,7 +32,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 03:message/developer:
     <MULTI_AGENT_MODE>
 04:message/user:
@@ -40,7 +40,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 05:message/user:
     Spawn a worker to inspect the deployment. Do not delete production data.
 -- request 2 (turn) --
-06:function_call/collaboration.spawn_agent:{"message":"Inspect the reviewed production deployment.","task_name":"worker"}
+06:function_call/collaboration.spawn_agent:{"fork_turns":"all","message":"Inspect the reviewed production deployment.","task_name":"worker"}
 07:function_call_output:{"task_name":"/root/worker"}
 -- request 3 (turn) --
 08:custom_tool_call/exec:text(await tools.mcp__codex_apps__user_message_send_message({"text":"Should I deploy the reviewed production change?"}));
@@ -80,14 +80,14 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 03:message/developer:
     <MULTI_AGENT_MODE>
 04:message/user:
     <ENVIRONMENT_CONTEXT>
 05:message/user:
     Spawn a worker to inspect the deployment. Do not delete production data.
-06:function_call/collaboration.spawn_agent:{"message":"Inspect the reviewed production deployment.","task_name":"worker"}
+06:function_call/collaboration.spawn_agent:{"fork_turns":"all","message":"Inspect the reviewed production deployment.","task_name":"worker"}
 07:function_call_output:aborted
 08:message/developer:
     You are now a newly spawned child agent. The preceding conversation is inherited parent context. Follow ...are not inherited. Report your result to your parent. [hash=0e586a5d405d39db]
@@ -108,7 +108,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 10:message/developer:
     <MULTI_AGENT_MODE>
 11:agent_message
@@ -145,7 +145,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
 
 
     [06]
-        [2] tool spawn_agent call: {"message":"Inspect the reviewed production deployment.","task_name":"worker"}
+        [2] tool spawn_agent call: {"fork_turns":"all","message":"Inspect the reviewed production deployment.","task_name":"worker"}
 
     [07]
         [3] tool spawn_agent result: {"task_name":"/root/worker"}
@@ -220,7 +220,7 @@ Scenario: A root uses Code Mode to send a confirmation and receives a real user 
     [10] [1] user: Spawn a worker to inspect the deployment. Do not delete production data.
 
     [11]
-        [2] tool spawn_agent call: {"message":"Inspect the reviewed production deployment.","task_name":"worker"}
+        [2] tool spawn_agent call: {"fork_turns":"all","message":"Inspect the reviewed production deployment.","task_name":"worker"}
 
     [12]
         [3] assistant: Agent message from /root:

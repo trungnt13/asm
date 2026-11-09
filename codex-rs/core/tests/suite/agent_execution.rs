@@ -126,6 +126,7 @@ async fn v2_nested_spawn_checks_shared_active_execution_capacity() -> Result<()>
     let first_args = serde_json::to_string(&json!({
         "message": FIRST_TASK,
         "task_name": "first",
+        "fork_turns": "all",
     }))?;
     mount_sse_once_match(
         &server,
@@ -145,6 +146,7 @@ async fn v2_nested_spawn_checks_shared_active_execution_capacity() -> Result<()>
     let second_args = serde_json::to_string(&json!({
         "message": SECOND_TASK,
         "task_name": "second",
+        "fork_turns": "all",
     }))?;
     mount_sse_once_match(
         &server,

@@ -493,7 +493,7 @@ async fn parent_response(
                     (
                         "guardian-spawn-worker",
                         "spawn_agent",
-                        json!({ "message": "Call the configured MCP tool.", "task_name": "worker" }),
+                        json!({ "message": "Call the configured MCP tool.", "task_name": "worker", "fork_turns": "all" }),
                     )
                 } else {
                     (
