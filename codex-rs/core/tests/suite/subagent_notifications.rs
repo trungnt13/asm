@@ -1494,7 +1494,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
 #[derive(Clone, Copy)]
 enum FullHistoryV2ModelSelection {
     ConfiguredDefault,
-    ExplicitOverride(&'static str),
+    ExplicitOverride,
     WorldStateIdentity,
     CurrentTimeReminders,
     MultiAgentModeInstructions,
@@ -1502,10 +1502,8 @@ enum FullHistoryV2ModelSelection {
     ReasoningEffortUpdates,
 }
 
-#[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with omitted fork_turns")]
-#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("all"); "explicit override with fork_turns all")]
-#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("1"); "legacy one turn forks full history with explicit override")]
-#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("3"); "legacy three turns forks full history with explicit override")]
+#[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with explicit full history")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride; "explicit override with fork_turns all")]
 #[test_case(FullHistoryV2ModelSelection::WorldStateIdentity; "world state appends context window when agent identity changes")]
 #[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork appends current-time reminders after inherited notices")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork appends child multi-agent mode instructions")]
@@ -1542,15 +1540,16 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             json!({
                 "message": CHILD_PROMPT,
                 "task_name": "worker",
+                "fork_turns": "all",
             }),
             V2_DEFAULT_MODEL,
             V2_DEFAULT_REASONING_EFFORT,
         ),
-        FullHistoryV2ModelSelection::ExplicitOverride(fork_turns) => (
+        FullHistoryV2ModelSelection::ExplicitOverride => (
             json!({
                 "message": CHILD_PROMPT,
                 "task_name": "worker",
-                "fork_turns": fork_turns,
+                "fork_turns": "all",
                 "model": V2_REQUESTED_MODEL,
                 "reasoning_effort": V2_REQUESTED_REASONING_EFFORT,
             }),
@@ -2339,7 +2338,7 @@ async fn spawn_v2_child_and_capture_requests(
         SPAWN_CALL_ID,
         MULTI_AGENT_V2_NAMESPACE,
         "spawn_agent",
-        &json!({ "message": CHILD_PROMPT, "task_name": "worker" }).to_string(),
+        &json!({ "message": CHILD_PROMPT, "task_name": "worker", "fork_turns": "all" }).to_string(),
     );
     spawn["item"]["encrypted_function_args"] = json!([]);
     // The parent and child may request their final answers in either order.
@@ -2449,12 +2448,10 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
     let mut spawn_args = json!({
         "message": message,
         "task_name": "worker",
+        "fork_turns": if model == Some("gpt-5.5") { "none" } else { "all" },
     });
     if let Some(model) = model {
         spawn_args["model"] = json!(model);
-        if model == "gpt-5.5" {
-            spawn_args["fork_turns"] = json!("none");
-        }
     }
     if let Some(reasoning_effort) = reasoning_effort {
         spawn_args["reasoning_effort"] = json!(reasoning_effort);
@@ -2741,6 +2738,7 @@ async fn plaintext_multi_agent_v2_completion_sends_agent_message(
     let spawn_args = serde_json::to_string(&json!({
         "message": "opaque-encrypted-message",
         "task_name": "worker",
+        "fork_turns": "all",
     }))?;
     mount_sse_once_match(
         &server,

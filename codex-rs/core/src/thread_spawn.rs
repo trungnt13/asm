@@ -30,7 +30,7 @@ use codex_protocol::protocol::SubAgentSource;
 /// Child creation options; omitted overrides retain native MAv2 inheritance and role rules.
 pub struct ThreadCreateRequest {
     pub task_name: String,
-    /// `None` starts fresh; `FullHistory` uses native fork preparation.
+    /// `None` starts fresh; other modes copy parent history.
     pub fork_mode: Option<SpawnAgentForkMode>,
     pub agent_type: Option<String>,
     pub model: Option<String>,
@@ -42,7 +42,7 @@ pub(crate) struct ThreadSpawnRequest {
     pub spawn_arguments: String,
     /// Explicit encoding: hosts normally provide plaintext; native tools can forward ciphertext.
     pub message: AgentMessage,
-    /// `None` starts fresh; `FullHistory` uses native fork preparation.
+    /// `None` starts fresh; other modes copy parent history.
     pub fork_mode: Option<SpawnAgentForkMode>,
     pub agent_type: Option<String>,
     pub model: Option<String>,
@@ -169,7 +169,7 @@ pub(crate) async fn prepare(
         step_context,
         SpawnConfigOptions {
             version: SpawnConfigVersion::V2,
-            full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
+            inherits_history: fork_mode.is_some(),
             role_name,
             model: model.as_deref(),
             reasoning_effort,

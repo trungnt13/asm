@@ -52,7 +52,8 @@ async fn confirmed_root_delivery_refreshes_pending_worker_allow(
                 SPAWN_CALL_ID,
                 "collaboration",
                 "spawn_agent",
-                &json!({"message": INITIAL_TASK, "task_name": "worker"}).to_string(),
+                &json!({"message": INITIAL_TASK, "task_name": "worker", "fork_turns": "all"})
+                    .to_string(),
             ),
             ev_completed("root-spawn"),
         ]),

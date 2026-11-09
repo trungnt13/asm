@@ -4642,6 +4642,7 @@ async fn direct_input_to_multi_agent_v2_subagent_is_rejected(
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
         "task_name": "worker",
+        "fork_turns": "all",
     }))?;
     let failed_spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,

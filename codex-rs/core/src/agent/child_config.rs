@@ -41,7 +41,7 @@ pub(crate) enum SpawnConfigVersion {
 
 pub(crate) struct SpawnConfigOptions<'a> {
     pub(crate) version: SpawnConfigVersion,
-    pub(crate) full_history_fork: bool,
+    pub(crate) inherits_history: bool,
     pub(crate) role_name: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
@@ -61,7 +61,7 @@ pub(crate) async fn prepare_agent_spawn_config(
     let turn = step_context.turn.as_ref();
     let mut config =
         build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
-    if options.version == SpawnConfigVersion::V1 && options.full_history_fork {
+    if options.version == SpawnConfigVersion::V1 && options.inherits_history {
         reject_full_fork_agent_type_override(options.role_name)?;
         config.role_model_context_window = turn.config.role_model_context_window;
         config.role_developer_instructions = turn.config.role_developer_instructions.clone();
@@ -94,12 +94,12 @@ pub(crate) async fn prepare_agent_spawn_config(
         // Inherit the parent's thread preference before applying child role overrides.
         config.service_tier = session.thread_settings_snapshot().await.service_tier;
     }
-    if !options.full_history_fork
+    if !options.inherits_history
         || (options.version == SpawnConfigVersion::V2 && options.role_name.is_some())
     {
         role_reasoning_effort = apply_role_to_config(&mut config, options.role_name).await?;
         if options.version == SpawnConfigVersion::V2
-            && options.full_history_fork
+            && options.inherits_history
             && config.developer_instructions.is_none()
         {
             config
@@ -145,8 +145,17 @@ pub(crate) async fn prepare_agent_spawn_config(
     config
         .validate_external_subagent_model()
         .map_err(|err| err.to_string())?;
-    if options.full_history_fork && config.model_provider_id != turn.config.model_provider_id {
+    if options.inherits_history && config.model_provider_id != turn.config.model_provider_id {
         return Err("Cross-provider subagents require fork_turns=none".to_string());
+    }
+    if options.version == SpawnConfigVersion::V2
+        && options.inherits_history
+        && config
+            .model
+            .as_deref()
+            .is_some_and(crate::external_runtime::is_native_model)
+    {
+        return Err("Native runtime subagents require fork_turns=none".to_string());
     }
     apply_spawn_agent_service_tier(session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
@@ -156,7 +165,7 @@ pub(crate) async fn prepare_agent_spawn_config(
         .role_name
         .or_else(|| {
             (options.version == SpawnConfigVersion::V2
-                && !options.full_history_fork
+                && !options.inherits_history
                 && config
                     .agent_roles
                     .get(DEFAULT_ROLE_NAME)

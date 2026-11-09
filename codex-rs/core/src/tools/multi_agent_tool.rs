@@ -3,6 +3,7 @@
 
 use crate::session::session::Session;
 use crate::tools::context::ToolInvocation;
+use crate::tools::handlers::multi_agents_spec::require_spawn_agent_fork_turns;
 use crate::tools::registry::CoreToolRuntime;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiNamespace;
@@ -77,8 +78,10 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
             }
             if let Some(parameters) = &self.parameters_override {
                 tool.parameters.clone_from(parameters);
-                if tool.name == "wait_agent" {
-                    codex_tools::require_wait_reason(&mut tool.parameters);
+                match tool.name.as_str() {
+                    "spawn_agent" => require_spawn_agent_fork_turns(&mut tool.parameters),
+                    "wait_agent" => codex_tools::require_wait_reason(&mut tool.parameters),
+                    _ => {}
                 }
             }
         }

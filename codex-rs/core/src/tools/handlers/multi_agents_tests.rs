@@ -1011,7 +1011,8 @@ async fn multi_agent_v2_full_history_fork_inherits_root_service_tier() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "fork_with_tier"
+                "task_name": "fork_with_tier",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -1250,7 +1251,8 @@ async fn multi_agent_v2_spawn_returns_path_and_send_message_accepts_relative_pat
             "spawn_agent",
             function_payload(json!({
                 "message": "plaintext-spawn-message",
-                "task_name": "test_process"
+                "task_name": "test_process",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -1410,7 +1412,10 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string(fork_turns: &str
 
     assert_eq!(
         err,
-        FunctionCallError::RespondToModel("fork_turns must be `none` or `all`".to_string())
+        FunctionCallError::RespondToModel(
+            "fork_turns is required and must be `none`, `all`, or a positive integer (for example, 3, not \"3\")"
+                .to_string()
+        )
     );
 }
 
@@ -1597,7 +1602,8 @@ async fn multi_agent_v2_list_agents_returns_completed_status() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -1769,7 +1775,8 @@ async fn multi_agent_v2_list_agents_omits_closed_agents() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -1830,7 +1837,8 @@ async fn multi_agent_v2_list_agents_keeps_interrupted_resident_agents() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -1902,7 +1910,8 @@ async fn multi_agent_v2_send_message_rejects_legacy_items_field() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -1958,7 +1967,8 @@ async fn multi_agent_v2_send_message_rejects_interrupt_parameter() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -2035,7 +2045,8 @@ async fn multi_agent_v2_followup_task_completion_notifies_parent_on_every_turn()
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -2191,7 +2202,8 @@ async fn multi_agent_v2_followup_task_rejects_legacy_items_field() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -2244,7 +2256,8 @@ async fn multi_agent_v2_interrupted_turn_does_not_notify_parent() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -2324,7 +2337,8 @@ async fn multi_agent_v2_spawn_omits_agent_id_when_named() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "test_process"
+                "task_name": "test_process",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -2362,7 +2376,8 @@ async fn multi_agent_v2_spawn_surfaces_task_name_validation_errors() {
         "spawn_agent",
         function_payload(json!({
             "message": "inspect this repo",
-            "task_name": "BadName"
+            "task_name": "BadName",
+            "fork_turns": "all"
         })),
     );
     let Err(err) = SpawnAgentHandlerV2::default().handle(invocation).await else {
@@ -3108,7 +3123,8 @@ async fn multi_agent_v2_wait_agent_accepts_timeout_only_argument() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -3608,7 +3624,8 @@ async fn multi_agent_v2_wait_agent_returns_summary_for_mailbox_activity() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "test_process"
+                "task_name": "test_process",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -3702,7 +3719,8 @@ async fn multi_agent_v2_wait_agent_returns_for_already_queued_mail() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -3788,7 +3806,8 @@ async fn multi_agent_v2_wait_agent_wakes_on_any_mailbox_notification() {
                 "spawn_agent",
                 function_payload(json!({
                     "message": format!("boot {task_name}"),
-                    "task_name": task_name
+                    "task_name": task_name,
+                    "fork_turns": "all"
                 })),
             ))
             .await
@@ -3882,7 +3901,8 @@ async fn multi_agent_v2_wait_agent_does_not_return_completed_content() {
             "spawn_agent",
             function_payload(json!({
                 "message": "boot worker",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -3975,7 +3995,8 @@ async fn multi_agent_v2_interrupt_agent_accepts_task_name_target() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -3999,7 +4020,8 @@ async fn multi_agent_v2_interrupt_agent_accepts_task_name_target() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect a child task",
-                "task_name": "child"
+                "task_name": "child",
+                "fork_turns": "all"
             })),
         ))
         .await
@@ -4105,7 +4127,8 @@ async fn multi_agent_v2_interrupt_agent_accepts_unloaded_task_name_target() {
             "spawn_agent",
             function_payload(json!({
                 "message": "inspect this repo",
-                "task_name": "worker"
+                "task_name": "worker",
+                "fork_turns": "all"
             })),
         ))
         .await
