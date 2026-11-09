@@ -76,7 +76,15 @@ impl ToolExecutor<ToolInvocation> for MultiAgentV2ToolOverrides {
             if let Some(description) = &self.description_override {
                 tool.description.clone_from(description);
             }
-            if let Some(parameters) = &self.parameters_override {
+            if let Some(parameters) = &self.parameters_override
+                && (tool.name != "spawn_agent"
+                    || (parameters.schema_ref.is_none()
+                        && parameters.any_of.is_none()
+                        && parameters.one_of.is_none()
+                        && parameters.all_of.is_none()))
+            {
+                // A composed spawn schema could still impose conflicting requirements
+                // after patching its root. Use the bundled schema for those overrides.
                 tool.parameters.clone_from(parameters);
                 match tool.name.as_str() {
                     "spawn_agent" => require_spawn_agent_fork_turns(&mut tool.parameters),
