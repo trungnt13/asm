@@ -500,28 +500,46 @@ fn last_completed_turns(
     parent_thread_id: ThreadId,
     limit: usize,
 ) -> Vec<RolloutItem> {
-    let mut completions = HashMap::new();
-    let mut turns = Vec::new();
-    let mut end = items.len();
+    // A compaction may summarize older turns. A rollback may remove part of a
+    // turn (for example a steer). Neither boundary proves intact dialogue.
+    let suffix_start = items
+        .iter()
+        .rposition(|item| {
+            matches!(
+                item,
+                RolloutItem::Compacted(_) | RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_))
+            )
+        })
+        .map_or(0, |boundary| boundary + 1);
+    let suffix = &items[suffix_start..];
 
-    for (index, item) in items.iter().enumerate().rev() {
+    // Recovery emits another start for the same ID without repeating the input.
+    let mut first_starts = HashMap::new();
+    for (index, item) in suffix.iter().enumerate() {
+        if let RolloutItem::EventMsg(EventMsg::TurnStarted(event)) = item {
+            first_starts.entry(event.turn_id.as_str()).or_insert(index);
+        }
+    }
+
+    let mut terminals = HashMap::new();
+    let mut turns = Vec::new();
+    for (index, item) in suffix.iter().enumerate().rev() {
         match item {
-            // A compaction may summarize older turns. A rollback may remove part of
-            // a turn (for example a steer). Neither boundary proves intact dialogue.
-            RolloutItem::Compacted(_) | RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_)) => {
-                break;
-            }
-            RolloutItem::EventMsg(EventMsg::TurnComplete(event)) if event.error.is_none() => {
-                completions.insert(event.turn_id.as_str(), index);
+            RolloutItem::EventMsg(EventMsg::TurnComplete(event)) => {
+                terminals
+                    .entry(event.turn_id.as_str())
+                    .or_insert_with(|| event.error.is_none().then_some(index));
             }
             RolloutItem::EventMsg(EventMsg::TurnAborted(event)) => {
                 if let Some(turn_id) = event.turn_id.as_deref() {
-                    completions.remove(turn_id);
+                    terminals.entry(turn_id).or_insert(None);
                 }
             }
             RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => {
-                if let Some(completion) = completions.remove(event.turn_id.as_str()) {
-                    let dialogue: Vec<_> = items[index + 1..end.min(completion)]
+                if let Some(start) = first_starts.remove(event.turn_id.as_str())
+                    && let Some(Some(completion)) = terminals.remove(event.turn_id.as_str())
+                {
+                    let dialogue: Vec<_> = suffix[start + 1..completion]
                         .iter()
                         .filter_map(|item| {
                             let RolloutItem::ResponseItem(envelope) = item else {
@@ -539,12 +557,10 @@ fn last_completed_turns(
                                 message @ ResponseItem::Message { role, phase, .. }
                                     if (role == "user" && is_user_turn_boundary(message))
                                         || (role == "assistant"
-                                            && matches!(
+                                            && !is_user_turn_boundary(message)
+                                            && !matches!(
                                                 phase,
-                                                Some(
-                                                    MessagePhase::PartialAnswer
-                                                        | MessagePhase::FinalAnswer
-                                                )
+                                                Some(MessagePhase::Commentary)
                                             )) =>
                                 {
                                     let mut dialogue = ResponseItemEnvelope::new(message.clone());
@@ -559,13 +575,12 @@ fn last_completed_turns(
                         })
                         .collect();
                     if !dialogue.is_empty() {
-                        turns.push((index, dialogue, completion));
+                        turns.push((start, dialogue, completion));
                         if turns.len() == limit {
                             break;
                         }
                     }
                 }
-                end = index;
             }
             _ => {}
         }
@@ -581,13 +596,14 @@ fn last_completed_turns(
         history.push(RolloutItem::SessionMeta(meta));
     }
     for (start, dialogue, completion) in turns.into_iter().rev() {
-        let RolloutItem::EventMsg(EventMsg::TurnStarted(mut started)) = items[start].clone() else {
+        let RolloutItem::EventMsg(EventMsg::TurnStarted(mut started)) = suffix[start].clone()
+        else {
             unreachable!("selected dialogue starts at a turn boundary");
         };
         started.turn_attribution = None;
         history.push(RolloutItem::EventMsg(EventMsg::TurnStarted(started)));
         history.extend(dialogue);
-        history.push(items[completion].clone());
+        history.push(suffix[completion].clone());
     }
     history
 }
