@@ -230,12 +230,23 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                         !actual_description
                             .contains("Spawns an agent to work on the specified task.")
                     );
-                    assert!(
-                        actual_description
-                            .strip_suffix(declaration)
-                            .expect("unchanged declaration")
-                            .ends_with("Local delegation hint.")
-                    );
+                    let actual_prose = actual_description
+                        .strip_suffix(declaration)
+                        .expect("unchanged declaration");
+                    let bundled_prose = bundled
+                        .strip_suffix(declaration)
+                        .expect("bundled declaration");
+                    let external_models = "\nExternal models (";
+                    let (actual_hint, actual_aliases) = actual_prose
+                        .split_once(external_models)
+                        .map_or((actual_prose, None), |(prose, aliases)| {
+                            (prose, Some(aliases))
+                        });
+                    let bundled_aliases = bundled_prose
+                        .split_once(external_models)
+                        .map(|(_, aliases)| aliases);
+                    assert_eq!(actual_aliases, bundled_aliases);
+                    assert!(actual_hint.ends_with("Local delegation hint."));
                     actual_description.to_string()
                 } else {
                     format!("{description}{declaration}")
