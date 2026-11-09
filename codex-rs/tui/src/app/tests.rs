@@ -3384,38 +3384,35 @@ async fn sidebar_reopens_saved_side_chat_after_restart() -> Result<()> {
     let parent = server.start_thread(&config).await?.session.thread_id;
     side_chat_policy_tests::ask(&mut server, &model, parent, "Parent-only prompt").await?;
     server.thread_set_name(parent, "New name".into()).await?;
-    let incomplete = server
-        .fork_side_thread(
-            &app.local_settings,
-            config.clone(),
-            parent,
-            /*selected_profile*/ None,
-            SideChatStorage::Attached,
-        )
-        .await?
-        .session
-        .thread_id;
-    let fork = server
-        .sidebar_fork(
-            app.local_settings.clone(),
-            config.clone(),
-            parent,
-            /*profile*/ None,
-            SideChatStorage::Attached,
-        )
-        .await?;
+    let incomplete = boxed_future!(server.fork_side_thread(
+        &app.local_settings,
+        config.clone(),
+        parent,
+        /*selected_profile*/ None,
+        SideChatStorage::Attached,
+    ))
+    .await?
+    .session
+    .thread_id;
+    let fork = boxed_future!(server.sidebar_fork(
+        app.local_settings.clone(),
+        config.clone(),
+        parent,
+        /*profile*/ None,
+        SideChatStorage::Attached,
+    ))
+    .await?;
     assert_eq!(fork.boundary, Ok(()));
-    let child = server
-        .fork_side_thread(
-            &app.local_settings,
-            config.clone(),
-            parent,
-            /*selected_profile*/ None,
-            SideChatStorage::Attached,
-        )
-        .await?
-        .session
-        .thread_id;
+    let child = boxed_future!(server.fork_side_thread(
+        &app.local_settings,
+        config.clone(),
+        parent,
+        /*selected_profile*/ None,
+        SideChatStorage::Attached,
+    ))
+    .await?
+    .session
+    .thread_id;
     // Older daemons copy the parent's name before the client can write the side-chat boundary.
     server.thread_set_name(child, "New name".into()).await?;
     server
