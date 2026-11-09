@@ -701,16 +701,10 @@ fn spawn_agent_common_properties_v2(agent_type_description: &str) -> BTreeMap<St
 pub(crate) fn require_spawn_agent_fork_turns(parameters: &mut JsonSchema) {
     parameters.properties.get_or_insert_default().insert(
         "fork_turns".to_string(),
-        JsonSchema::any_of(
-            vec![
-                JsonSchema::string_enum(vec![json!("none"), json!("all")], /*description*/ None),
-                JsonSchema::integer(/*description*/ None),
-            ],
-            Some(
-                "Parent history to inherit. Use `none` for no history, `all` for full history, or a positive integer for up to that many recent completed turns after the last compaction or rollback (user and assistant dialogue only)."
-                    .to_string(),
-            ),
-        ),
+        JsonSchema::string(Some(
+            "Parent history to inherit. Use `none` for no history or `all` for full history."
+                .to_string(),
+        )),
     );
     let mut required = parameters.required.take().unwrap_or_default().into_vec();
     if !required.iter().any(|name| name == "fork_turns") {

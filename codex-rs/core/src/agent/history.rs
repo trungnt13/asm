@@ -1,6 +1,5 @@
 //! Loads stored agent context and prepares the history a child inherits when it forks.
 
-use crate::agent::types::SpawnAgentForkMode;
 use crate::agent::types::SpawnAgentOptions;
 use crate::config::Config;
 use crate::context::BaseInstructionsFragment;
@@ -16,7 +15,6 @@ use crate::context::MultiAgentRoleInstructions;
 use crate::context::MultiAgentUsageHint;
 use crate::context::world_state::IncrementalToolsUpdate;
 use crate::context::world_state::PersistentModeState;
-use crate::context_manager::is_user_turn_boundary;
 use crate::session::multi_agents::resolve_usage_hints;
 use crate::tasks::InterruptedTurnHistoryMarker;
 use crate::thread_manager::ForkSnapshot;
@@ -41,7 +39,6 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::ReadThreadParams;
-use std::collections::HashMap;
 
 fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool) -> bool {
     match item {
@@ -174,10 +171,11 @@ pub(super) async fn prepare_forked_history(
             "spawn_agent fork requires a parent spawn call id".to_string(),
         ));
     }
-    let fork_mode = options
-        .fork_mode
-        .as_ref()
-        .ok_or_else(|| CodexErr::Fatal("spawn_agent fork requires a fork mode".to_string()))?;
+    if options.fork_mode.is_none() {
+        return Err(CodexErr::Fatal(
+            "spawn_agent fork requires a fork mode".to_string(),
+        ));
+    }
     let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id, ..
     }) = session_source
@@ -235,17 +233,6 @@ pub(super) async fn prepare_forked_history(
                 ))
             })?
             .items;
-
-    if let SpawnAgentForkMode::LastCompletedTurns(limit) = fork_mode {
-        return Ok((
-            InitialHistory::Forked(last_completed_turns(
-                &forked_rollout_items,
-                parent_thread_id,
-                limit.get(),
-            )),
-            destination_history_mode,
-        ));
-    }
 
     let multi_agent_v2_usage_hint_texts_to_filter: Vec<String> =
         if multi_agent_version == MultiAgentVersion::V2 {
@@ -493,117 +480,4 @@ pub(super) async fn prepare_forked_history(
         InitialHistory::Forked(forked_rollout_items),
         destination_history_mode,
     ))
-}
-
-fn last_completed_turns(
-    items: &[RolloutItem],
-    parent_thread_id: ThreadId,
-    limit: usize,
-) -> Vec<RolloutItem> {
-    // A compaction may summarize older turns. A rollback may remove part of a
-    // turn (for example a steer). Neither boundary proves intact dialogue.
-    let suffix_start = items
-        .iter()
-        .rposition(|item| {
-            matches!(
-                item,
-                RolloutItem::Compacted(_) | RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_))
-            )
-        })
-        .map_or(0, |boundary| boundary + 1);
-    let suffix = &items[suffix_start..];
-
-    // Recovery emits another start for the same ID without repeating the input.
-    let mut first_starts = HashMap::new();
-    for (index, item) in suffix.iter().enumerate() {
-        if let RolloutItem::EventMsg(EventMsg::TurnStarted(event)) = item {
-            first_starts.entry(event.turn_id.as_str()).or_insert(index);
-        }
-    }
-
-    let mut terminals = HashMap::new();
-    let mut turns = Vec::new();
-    for (index, item) in suffix.iter().enumerate().rev() {
-        match item {
-            RolloutItem::EventMsg(EventMsg::TurnComplete(event)) => {
-                terminals
-                    .entry(event.turn_id.as_str())
-                    .or_insert_with(|| event.error.is_none().then_some(index));
-            }
-            RolloutItem::EventMsg(EventMsg::TurnAborted(event)) => {
-                if let Some(turn_id) = event.turn_id.as_deref() {
-                    terminals.entry(turn_id).or_insert(None);
-                }
-            }
-            RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => {
-                if let Some(start) = first_starts.remove(event.turn_id.as_str())
-                    && let Some(Some(completion)) = terminals.remove(event.turn_id.as_str())
-                {
-                    let dialogue: Vec<_> = suffix[start + 1..completion]
-                        .iter()
-                        .filter_map(|item| {
-                            let RolloutItem::ResponseItem(envelope) = item else {
-                                return None;
-                            };
-                            if envelope.item.turn_id() != Some(event.turn_id.as_str())
-                                || envelope
-                                    .metadata
-                                    .as_ref()
-                                    .is_some_and(|metadata| metadata.compaction_output)
-                            {
-                                return None;
-                            }
-                            match &envelope.item {
-                                message @ ResponseItem::Message { role, phase, .. }
-                                    if (role == "user" && is_user_turn_boundary(message))
-                                        || (role == "assistant"
-                                            && !is_user_turn_boundary(message)
-                                            && !matches!(
-                                                phase,
-                                                Some(MessagePhase::Commentary)
-                                            )) =>
-                                {
-                                    let mut dialogue = ResponseItemEnvelope::new(message.clone());
-                                    dialogue
-                                        .metadata
-                                        .get_or_insert_default()
-                                        .inherited_user_message = true;
-                                    Some(RolloutItem::ResponseItem(dialogue))
-                                }
-                                _ => None,
-                            }
-                        })
-                        .collect();
-                    if !dialogue.is_empty() {
-                        turns.push((start, dialogue, completion));
-                        if turns.len() == limit {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut history = Vec::new();
-    if let Some(RolloutItem::SessionMeta(meta)) = items.iter().find(
-        |item| matches!(item, RolloutItem::SessionMeta(meta) if meta.meta.id == parent_thread_id),
-    ) {
-        let mut meta = meta.clone();
-        meta.meta.context_window = None;
-        meta.meta.dynamic_tools = codex_history::latest_dynamic_tools(items).map(<[_]>::to_vec);
-        history.push(RolloutItem::SessionMeta(meta));
-    }
-    for (start, dialogue, completion) in turns.into_iter().rev() {
-        let RolloutItem::EventMsg(EventMsg::TurnStarted(mut started)) = suffix[start].clone()
-        else {
-            unreachable!("selected dialogue starts at a turn boundary");
-        };
-        started.turn_attribution = None;
-        history.push(RolloutItem::EventMsg(EventMsg::TurnStarted(started)));
-        history.extend(dialogue);
-        history.push(suffix[completion].clone());
-    }
-    history
 }

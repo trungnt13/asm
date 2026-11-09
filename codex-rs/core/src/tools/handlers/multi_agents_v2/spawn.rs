@@ -12,7 +12,6 @@ use crate::turn_timing::now_unix_timestamp_ms;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ToolSpec;
-use serde_json::Value;
 use std::num::NonZeroUsize;
 
 #[derive(Default)]
@@ -213,7 +212,7 @@ struct SpawnAgentArgs {
     agent_type: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
-    fork_turns: Option<Value>,
+    fork_turns: Option<String>,
     fork_context: Option<bool>,
 }
 
@@ -225,26 +224,25 @@ impl SpawnAgentArgs {
             ));
         }
 
-        match self.fork_turns.as_ref() {
-            Some(Value::String(mode)) if mode == "none" => return Ok(None),
-            Some(Value::String(mode)) if mode == "all" => {
-                return Ok(Some(SpawnAgentForkMode::FullHistory));
-            }
-            Some(Value::Number(count)) => {
-                if let Some(count) = count
-                    .as_u64()
-                    .and_then(|count| usize::try_from(count).ok())
-                    .and_then(NonZeroUsize::new)
-                {
-                    return Ok(Some(SpawnAgentForkMode::LastCompletedTurns(count)));
-                }
-            }
-            Some(_) | None => {}
+        let fork_turns = self
+            .fork_turns
+            .as_deref()
+            .ok_or_else(|| FunctionCallError::RespondToModel("fork_turns is required".to_string()))
+            .map(str::trim)?;
+
+        if fork_turns.eq_ignore_ascii_case("none") {
+            return Ok(None);
+        }
+        // Accept legacy turn counts without limiting the inherited history.
+        if fork_turns.is_empty()
+            || fork_turns.eq_ignore_ascii_case("all")
+            || fork_turns.parse::<NonZeroUsize>().is_ok()
+        {
+            return Ok(Some(SpawnAgentForkMode::FullHistory));
         }
 
         Err(FunctionCallError::RespondToModel(
-            "fork_turns is required and must be `none`, `all`, or a positive integer (for example, 3, not \"3\")"
-                .to_string(),
+            "fork_turns must be `none` or `all`".to_string(),
         ))
     }
 }

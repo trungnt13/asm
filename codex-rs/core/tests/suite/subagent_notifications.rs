@@ -1494,7 +1494,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
 #[derive(Clone, Copy)]
 enum FullHistoryV2ModelSelection {
     ConfiguredDefault,
-    ExplicitOverride,
+    ExplicitOverride(&'static str),
     WorldStateIdentity,
     CurrentTimeReminders,
     MultiAgentModeInstructions,
@@ -1503,7 +1503,9 @@ enum FullHistoryV2ModelSelection {
 }
 
 #[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with explicit full history")]
-#[test_case(FullHistoryV2ModelSelection::ExplicitOverride; "explicit override with fork_turns all")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("all"); "explicit override with fork_turns all")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("1"); "legacy one turn forks full history with explicit override")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("3"); "legacy three turns forks full history with explicit override")]
 #[test_case(FullHistoryV2ModelSelection::WorldStateIdentity; "world state appends context window when agent identity changes")]
 #[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork appends current-time reminders after inherited notices")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork appends child multi-agent mode instructions")]
@@ -1545,11 +1547,11 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             V2_DEFAULT_MODEL,
             V2_DEFAULT_REASONING_EFFORT,
         ),
-        FullHistoryV2ModelSelection::ExplicitOverride => (
+        FullHistoryV2ModelSelection::ExplicitOverride(fork_turns) => (
             json!({
                 "message": CHILD_PROMPT,
                 "task_name": "worker",
-                "fork_turns": "all",
+                "fork_turns": fork_turns,
                 "model": V2_REQUESTED_MODEL,
                 "reasoning_effort": V2_REQUESTED_REASONING_EFFORT,
             }),

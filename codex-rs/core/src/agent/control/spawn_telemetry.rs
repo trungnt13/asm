@@ -28,7 +28,6 @@ pub(super) fn record_spawn_success(
     let fork_mode = match fork_mode {
         None => "none",
         Some(SpawnAgentForkMode::FullHistory) => "all",
-        Some(SpawnAgentForkMode::LastCompletedTurns(_)) => "last_completed_turns",
     };
     let history_mode = match measurements.history_mode {
         ThreadHistoryMode::Legacy => "legacy",

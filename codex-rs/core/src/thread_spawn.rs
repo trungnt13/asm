@@ -178,23 +178,6 @@ pub(crate) async fn prepare(
     .await
     .map_err(ThreadSpawnError::Preparation)?;
     let config = prepared.config;
-    if matches!(fork_mode, Some(SpawnAgentForkMode::LastCompletedTurns(_)))
-        && config.model_provider_id != turn.config.model_provider_id
-    {
-        return Err(ThreadSpawnError::Preparation(
-            "Cross-provider subagents require fork_turns=none".to_string(),
-        ));
-    }
-    if fork_mode.is_some()
-        && config
-            .model
-            .as_deref()
-            .is_some_and(crate::external_runtime::is_native_model)
-    {
-        return Err(ThreadSpawnError::Preparation(
-            "Native runtime subagents require fork_turns=none".to_string(),
-        ));
-    }
     let task_name = turn
         .session_source
         .get_agent_path()

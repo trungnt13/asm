@@ -7,7 +7,6 @@ use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::turn_input::CyberAccessProgram;
-use std::num::NonZeroUsize;
 
 /// Registry identity shared by loaded and unloaded agents.
 /// Registered agents have an `agent_id`; a reserved spawn can still be awaiting its ID.
@@ -22,7 +21,6 @@ pub struct AgentMetadata {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SpawnAgentForkMode {
     FullHistory,
-    LastCompletedTurns(NonZeroUsize),
 }
 
 #[derive(Clone, Debug, Default)]

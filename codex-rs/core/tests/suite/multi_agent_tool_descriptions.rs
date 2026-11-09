@@ -49,7 +49,8 @@ const EXPECTED_CATALOG_PARAMETERS: &str = r#"{
     "$defs": {"unused": {"type": "string"}}
 }"#;
 
-const EXPECTED_FORK_TURNS_DESCRIPTION: &str = "Parent history to inherit. Use `none` for no history, `all` for full history, or a positive integer for up to that many recent completed turns after the last compaction or rollback (user and assistant dialogue only).";
+const EXPECTED_FORK_TURNS_DESCRIPTION: &str =
+    "Parent history to inherit. Use `none` for no history or `all` for full history.";
 
 #[derive(Clone, Copy)]
 enum Exposure {
@@ -259,11 +260,8 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                 expected_tool["parameters"] = serde_json::from_str(parameters)?;
                 if name == "spawn_agent" {
                     expected_tool["parameters"]["properties"]["fork_turns"] = json!({
+                        "type": "string",
                         "description": EXPECTED_FORK_TURNS_DESCRIPTION,
-                        "anyOf": [
-                            {"type": "string", "enum": ["none", "all"]},
-                            {"type": "integer"},
-                        ],
                     });
                     expected_tool["parameters"]["required"] =
                         json!(["catalog_limit", "fork_turns"]);
@@ -278,9 +276,7 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
                         description.rsplit_once("(args: ").expect("arguments");
                     let (_, result) = signature.split_once("): Promise").expect("result type");
                     let fork_turns = if name == "spawn_agent" {
-                        format!(
-                            "  // {EXPECTED_FORK_TURNS_DESCRIPTION}\n  fork_turns: \"none\" | \"all\" | number;\n"
-                        )
+                        format!("  // {EXPECTED_FORK_TURNS_DESCRIPTION}\n  fork_turns: string;\n")
                     } else {
                         String::new()
                     };

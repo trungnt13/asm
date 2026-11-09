@@ -1412,10 +1412,7 @@ async fn multi_agent_v2_spawn_rejects_invalid_fork_turns_string(fork_turns: &str
 
     assert_eq!(
         err,
-        FunctionCallError::RespondToModel(
-            "fork_turns is required and must be `none`, `all`, or a positive integer (for example, 3, not \"3\")"
-                .to_string()
-        )
+        FunctionCallError::RespondToModel("fork_turns must be `none` or `all`".to_string())
     );
 }
 
