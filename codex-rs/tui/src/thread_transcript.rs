@@ -311,6 +311,7 @@ fn item_to_cells(
                     },
                 ));
             }
+            let legacy_answer = phase.is_none();
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
                 cells.push(Arc::new(
@@ -323,7 +324,7 @@ fn item_to_cells(
                     .with_questions(questions.as_deref().unwrap_or_default()),
                 ));
             }
-            if phase.is_none() {
+            if legacy_answer {
                 cells.push(Arc::new(
                     crate::history_cell::TurnActivityBoundary::LegacyAnswer { turn_id: None },
                 ));

@@ -84,7 +84,7 @@ impl Drop for AgentWaitHistory {
 
 #[derive(Debug)]
 pub(crate) struct AgentWaitHistoryCell {
-    preview: PlainHistoryCell,
+    preview: LabeledToolCell,
     // One namespaced identity retains group disclosure and deduplicates paired preview counts.
     count_key: String,
     state: Arc<RwLock<WaitGroupState>>,
