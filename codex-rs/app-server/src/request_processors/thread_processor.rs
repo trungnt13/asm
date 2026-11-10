@@ -5524,6 +5524,7 @@ impl ThreadRequestProcessor {
                 rollout_path: None,
                 forked_from_id: snapshot.forked_from_thread_id,
                 parent_thread_id: None,
+                attached_to_thread_id: None,
                 preview: preview_from_rollout_items(&items),
                 name: None,
                 model_provider: snapshot.model_provider_id,
