@@ -111,7 +111,7 @@ async fn interrupted_snapshot_closes_only_child_pending_calls(kind: &str) {
     // Reconstruct from persisted data, including the unchanged referenced ancestor prefix.
     let resumed: InitialHistory =
         serde_json::from_value(serde_json::to_value(&fork).unwrap()).unwrap();
-    let mut envelopes: Vec<_> = resumed
+    let envelopes: Vec<_> = resumed
         .get_rollout_items()
         .iter()
         .filter_map(|item| match item {
@@ -121,12 +121,6 @@ async fn interrupted_snapshot_closes_only_child_pending_calls(kind: &str) {
         .collect();
     let mut history = ContextManager::default();
     history.replace_annotated(envelopes.clone());
-    // Restore assigns delivery metadata to legacy items with no saved sequence.
-    for (sequence, envelope) in (1..).zip(&mut envelopes) {
-        let metadata = envelope.metadata.get_or_insert_default();
-        metadata.history_sequence = Some(sequence);
-        metadata.sampled_through_sequence = Some(0);
-    }
     assert_eq!(
         history
             .for_prompt_annotated(&[InputModality::Text], &InlineAttachmentStore)
