@@ -119,7 +119,9 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonical rollouts but no derived history database. Resume builds the projection and exposes messages. This missing catch-up persists through `05cf8eeb14`. Independent stock `rust-v0.169.0-alpha.6` also returned an empty first cold timeline for valid real history; resume restored its projection and saved permissions. ASM already rebuilds before querying; this sync did not introduce the difference. Isolated checks found no history loss.
 
-The owner accepts this limitation only for the sync through `05cf8eeb14`. This acceptance does not authorize a release. Keep cold-stock reading unresolved, not passed. Report resume-assisted handoff separately. This acceptance waives no other checks and permits no personal history/cache changes.
+Independent stock Linux `rust-v0.169.0-alpha.7` also reproduces the limitation: cold search finds the thread, but cold timeline, turn, and item reads are empty. Resume restores the saved projection and permissions without changing the canonical rollout. The stock tag is a release commit off `6bd17ba6ae`, not a build of `e1cc96712f`. The history and wire code in thread-store, rollout, state, app-server, and app-server-protocol matches the sync target.
+
+The owner accepted this limitation for the sync through `05cf8eeb14` and separately for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
 
 ### Live backend model catalog
 
@@ -127,7 +129,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `05cf8eeb14597044164d81b5ad12bd81d5f003b5`, 2026-11-09. Subject: Dismiss the model switch prompt when account usage recovers (#60435).
+Last incorporated commit: `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, 2026-11-09. Subject: Route TUI question answers through Cloud message admission (#60462).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

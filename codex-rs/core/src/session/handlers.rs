@@ -617,7 +617,11 @@ pub(super) async fn submission_loop(
                     }
                     false
                 }
-                Op::RealtimeConversationAttach { params, reply } => {
+                Op::RealtimeConversationAttach {
+                    params,
+                    options,
+                    reply,
+                } => {
                     if crate::external_runtime::is_native_model(&sess.thread_settings_snapshot().await.model) {
                         let _ = reply.send(Err(CodexErr::InvalidRequest(
                             "Native runtimes do not support realtime conversations".to_string(),
@@ -625,7 +629,8 @@ pub(super) async fn submission_loop(
                         return false;
                     }
                     let result =
-                        crate::realtime_conversation::handle_attach(&sess, sub.id, params).await;
+                        crate::realtime_conversation::handle_attach(&sess, sub.id, params, options)
+                            .await;
                     let _ = reply.send(result);
                     false
                 }
