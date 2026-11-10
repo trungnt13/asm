@@ -2,10 +2,10 @@
 source: tui/src/chatwidget/tests/popups_and_settings.rs
 expression: popup
 ---
-      Include logs and session history?
+      Include logs and session history?                                     ain
 › As
       Saving a ZIP does not submit feedback to OpenAI.
-  GP  Files may contain prompts, commands, and tool output:
+  so  Files may contain prompts, commands, and tool output:
         • codex-logs.log
         • client-logs.txt (if available)
         • codex-doctor-report.json
