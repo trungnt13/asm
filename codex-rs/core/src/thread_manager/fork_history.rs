@@ -24,7 +24,7 @@ pub(super) fn append_interrupted_call_outputs(
     // Keep referenced ancestor records unchanged; persist completion in the child's suffix
     // so cold resume also sees a closed call without inheriting the parent's live execution.
     items.extend(
-        missing_call_outputs(&inherited_items)
+        missing_call_outputs(&inherited_items, /*restored_through_sequence*/ 0)
             .into_iter()
             .map(|(_, output)| RolloutItem::ResponseItem(output)),
     );

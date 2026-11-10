@@ -11,11 +11,7 @@ impl StateRuntime {
             return Ok(());
         }
 
-        let logs_pool = self
-            .logs_pool
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("diagnostic log capture is disabled"))?;
-        let mut tx = logs_pool.begin().await?;
+        let mut tx = self.diagnostic_logs_pool()?.begin().await?;
         let mut builder = QueryBuilder::<Sqlite>::new(
             "INSERT INTO logs (ts, ts_nanos, level, target, feedback_log_body, thread_id, process_uuid, module_path, file, line, estimated_bytes) ",
         );
@@ -290,12 +286,12 @@ WHERE id IN (
     /// Read diagnostics without enabling capture or changing historical files.
     #[tracing::instrument(skip_all)]
     async fn log_reader(&self) -> anyhow::Result<Option<LogReader>> {
-        match &self.logs_pool {
-            Some(pool) => Ok(Some(LogReader {
-                pool: pool.as_ref().clone(),
-            })),
-            None => LogReader::open(&self.sqlite).await,
+        if self.sqlite.diagnostic_log_capture() == DiagnosticLogCapture::Enabled {
+            return Ok(Some(LogReader {
+                pool: self.diagnostic_logs_pool()?.clone(),
+            }));
         }
+        LogReader::open(&self.sqlite).await
     }
 
     #[tracing::instrument(skip_all)]
