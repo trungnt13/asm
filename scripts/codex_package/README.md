@@ -31,6 +31,9 @@ The builder creates a canonical Codex package directory:
 
 The package directory is the primary artifact. Archive formats such as
 `.tar.gz`, `.tar.zst`, and `.zip` are serializations of that directory.
+Fork releases pass `--no-exec-server` with the `codex` entrypoint. They omit
+the standalone executor and its manifest field; use `codex exec-server`.
+
 The `execServer` field in `codex-package.json` advertises the packaged executor.
 Installers use its presence to repair a missing executor while accepting older
 packages that predate the standalone binary.

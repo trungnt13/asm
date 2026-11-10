@@ -55,11 +55,12 @@ def build_package_dir(
         bin_dir / f"codex-code-mode-host{spec.exe_suffix}",
         is_windows=spec.is_windows,
     )
-    copy_executable(
-        inputs.exec_server_bin,
-        bin_dir / f"codex-exec-server{spec.exe_suffix}",
-        is_windows=spec.is_windows,
-    )
+    if inputs.exec_server_bin is not None:
+        copy_executable(
+            inputs.exec_server_bin,
+            bin_dir / f"codex-exec-server{spec.exe_suffix}",
+            is_windows=spec.is_windows,
+        )
     copy_executable(inputs.rg_bin, path_dir / spec.rg_name, is_windows=spec.is_windows)
 
     if inputs.bwrap_bin is not None:
@@ -85,10 +86,11 @@ def build_package_dir(
         "target": spec.target,
         "variant": variant.name,
         "entrypoint": f"bin/{entrypoint_name}",
-        "execServer": f"bin/codex-exec-server{spec.exe_suffix}",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
     }
+    if inputs.exec_server_bin is not None:
+        metadata["execServer"] = f"bin/codex-exec-server{spec.exe_suffix}"
     write_json(package_dir / "codex-package.json", metadata)
 
 
@@ -96,6 +98,8 @@ def validate_package_dir(
     package_dir: Path,
     variant: PackageVariant,
     spec: TargetSpec,
+    *,
+    include_exec_server: bool = True,
 ) -> None:
     required_dirs = [
         Path("bin"),
@@ -119,10 +123,18 @@ def validate_package_dir(
         "target": spec.target,
         "variant": variant.name,
         "entrypoint": f"bin/{variant.entrypoint_name(spec)}",
-        "execServer": f"bin/codex-exec-server{spec.exe_suffix}",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
     }
+    exec_server = Path("bin") / f"codex-exec-server{spec.exe_suffix}"
+    if include_exec_server:
+        expected_metadata["execServer"] = exec_server.as_posix()
+    elif (
+        "execServer" in metadata
+        or (package_dir / exec_server).exists()
+        or (package_dir / exec_server).is_symlink()
+    ):
+        raise RuntimeError("Package unexpectedly includes the standalone executor.")
     for key, expected in expected_metadata.items():
         actual = metadata.get(key)
         if actual != expected:
@@ -133,9 +145,10 @@ def validate_package_dir(
     required_files = [
         Path("bin") / variant.entrypoint_name(spec),
         Path("bin") / f"codex-code-mode-host{spec.exe_suffix}",
-        Path("bin") / f"codex-exec-server{spec.exe_suffix}",
         Path("codex-path") / spec.rg_name,
     ]
+    if include_exec_server:
+        required_files.append(exec_server)
     executable_files = list(required_files)
 
     if spec.is_linux:

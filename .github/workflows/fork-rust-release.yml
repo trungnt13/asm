@@ -199,7 +199,8 @@ jobs:
             export CODEX_BWRAP_SHA256
           fi
           build_args=(--locked --release --target "$TARGET" --bin codex --bin codex-code-mode-host --timings)
-          if grep -q -- '"--exec-server-bin"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+          if ! grep -q -- '"--no-exec-server"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py" &&
+            grep -q -- '"--exec-server-bin"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
             build_args+=(--bin codex-exec-server)
           fi
           if [[ "$BUILD_JOBS" != 0 ]]; then build_args+=(--jobs "$BUILD_JOBS"); fi
@@ -220,7 +221,9 @@ jobs:
             if grep -q -- '"--no-zsh"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
               resource_args+=(--no-zsh)
             fi
-            if grep -q -- '"--exec-server-bin"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+            if grep -q -- '"--no-exec-server"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
+              resource_args+=(--no-exec-server)
+            elif grep -q -- '"--exec-server-bin"' "${GITHUB_WORKSPACE}/scripts/codex_package/cli.py"; then
               resource_args+=(--exec-server-bin "${release_dir}/codex-exec-server")
             fi
             if [[ "$TARGET" == *-linux-gnu ]]; then

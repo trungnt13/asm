@@ -140,7 +140,13 @@ def create_parser() -> argparse.ArgumentParser:
             "the host is built with Cargo."
         ),
     )
-    parser.add_argument(
+    executor = parser.add_mutually_exclusive_group()
+    executor.add_argument(
+        "--no-exec-server",
+        action="store_true",
+        help="Omit the standalone executor; use the codex exec-server subcommand.",
+    )
+    executor.add_argument(
         "--exec-server-bin",
         type=Path,
         help="Optional prebuilt codex-exec-server executable. If omitted, build it with Cargo.",
@@ -200,10 +206,14 @@ def assemble_package(args: argparse.Namespace) -> Path:
         else Path(tempfile.mkdtemp(prefix="codex-package-")).resolve()
     )
 
+    if args.no_exec_server and variant.name != "codex":
+        raise RuntimeError("--no-exec-server requires the codex entrypoint.")
+
     source_outputs = build_source_binaries(
         spec,
         variant,
         cargo=args.cargo,
+        include_exec_server=not args.no_exec_server,
         profile=args.cargo_profile,
         entrypoint_bin=resolve_optional_input_path(
             args.entrypoint_bin,
@@ -247,18 +257,24 @@ def assemble_package(args: argparse.Namespace) -> Path:
     )
     prepare_package_dir(package_dir, force=args.force)
     build_package_dir(package_dir, args.package_version, variant, spec, inputs)
-    for filename, prebuilt in (
+    executables = [
         (variant.entrypoint_name(spec), args.entrypoint_bin),
         (f"codex-code-mode-host{spec.exe_suffix}", args.code_mode_host_bin),
-        (f"codex-exec-server{spec.exe_suffix}", args.exec_server_bin),
-    ):
+    ]
+    if source_outputs.exec_server_bin is not None:
+        executables.append(
+            (f"codex-exec-server{spec.exe_suffix}", args.exec_server_bin)
+        )
+    for filename, prebuilt in executables:
         if args.strip == "all" or (
             args.strip == "auto"
             and args.cargo_profile == "release"
             and prebuilt is None
         ):
             strip_binary(package_dir / "bin" / filename, spec, tool=args.strip_tool)
-    validate_package_dir(package_dir, variant, spec)
+    validate_package_dir(
+        package_dir, variant, spec, include_exec_server=not args.no_exec_server
+    )
     return package_dir
 
 

@@ -31,7 +31,6 @@ required_dirs = {"bin", "codex-resources", "codex-path"}
 executables = {
     "bin/codex",
     "bin/codex-code-mode-host",
-    "bin/codex-exec-server",
     "codex-path/rg",
 }
 if spec.is_linux:
@@ -70,7 +69,9 @@ with tarfile.open(archive_path, "r:gz") as archive:
                 with archive.extractfile(member) as source, path.open("wb") as output:
                     shutil.copyfileobj(source, output)
                 os.chmod(path, member.mode & 0o777)
-        validate_package_dir(package, PACKAGE_VARIANTS["codex"], spec)
+        validate_package_dir(
+            package, PACKAGE_VARIANTS["codex"], spec, include_exec_server=False
+        )
         metadata_fields = json.loads(
             (package / "codex-package.json").read_text(), object_pairs_hook=list
         )
@@ -80,7 +81,6 @@ with tarfile.open(archive_path, "r:gz") as archive:
             "target": target,
             "variant": "codex",
             "entrypoint": "bin/codex",
-            "execServer": "bin/codex-exec-server",
             "resourcesDir": "codex-resources",
             "pathDir": "codex-path",
         }
@@ -152,18 +152,12 @@ with tarfile.open(archive_path, "r:gz") as archive:
             raise SystemExit(
                 f"Wrong binary version: {reported_version}; expected codex-cli {version}"
             )
-        exec_server_path = package / "bin/codex-exec-server"
-        exec_server_version = subprocess.check_output(
-            [exec_server_path, "--version"], text=True, timeout=30
-        ).strip()
-        if exec_server_version != f"codex-exec-server {version}":
-            raise SystemExit(f"Wrong exec-server version: {exec_server_version}")
-        for executable in (binary_path, helper_path, exec_server_path):
+        for command in ([binary_path], [helper_path], [binary_path, "exec-server"]):
             output = subprocess.check_output(
-                [executable, "--help"], text=True, timeout=30
+                [*command, "--help"], text=True, timeout=30
             )
             if not any(line.startswith("Usage:") for line in output.splitlines()):
-                raise SystemExit(f"{executable.name} help lacks Usage")
+                raise SystemExit(f"{command} help lacks Usage")
         subprocess.run([package / "codex-path/rg", "--version"], check=True, timeout=30)
         if spec.is_linux:
             output = subprocess.check_output(
@@ -175,9 +169,8 @@ with tarfile.open(archive_path, "r:gz") as archive:
                 raise SystemExit("Bundled Bubblewrap lacks required sandbox options")
         print(
             f"archive={archive_path} bytes={archive_path.stat().st_size} "
-            f"version={reported_version} package=complete help=ok helper_help=ok exec_server_version=ok exec_server_help=ok resources=ok"
+            f"version={reported_version} package=complete help=ok helper_help=ok exec_server_help=ok resources=ok"
         )
         print(
-            f"binary_bytes={binary_path.stat().st_size} helper_bytes={helper_path.stat().st_size} "
-            f"exec_server_bytes={exec_server_path.stat().st_size}"
+            f"binary_bytes={binary_path.stat().st_size} helper_bytes={helper_path.stat().st_size}"
         )

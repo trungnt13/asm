@@ -22,6 +22,7 @@ def write_release(
     version,
     *,
     platform_manifest=True,
+    standalone_executor=False,
     missing_helper=False,
     bad_checksum=False,
     wrong_version=False,
@@ -30,15 +31,15 @@ def write_release(
     source = root / f"source-{version}"
     if source.exists():
         shutil.rmtree(source)
-    for name in (
+    executables = (
         "bin/codex",
         "bin/codex-code-mode-host",
-        "bin/codex-exec-server",
         "codex-path/rg",
         "codex-resources/bwrap",
-    ):
-        if not platform_manifest and name == "bin/codex-exec-server":
-            continue
+    )
+    if standalone_executor:
+        executables += ("bin/codex-exec-server",)
+    for name in executables:
         if missing_helper and name == "bin/codex-code-mode-host":
             continue
         path = source / name
@@ -54,7 +55,7 @@ def write_release(
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
     }
-    if platform_manifest:
+    if standalone_executor:
         package_metadata["execServer"] = "bin/codex-exec-server"
     (source / "codex-package.json").write_text(json.dumps(package_metadata))
     asset = f"codex-{TARGET}.tar.gz"
@@ -147,7 +148,10 @@ class InstallShTest(unittest.TestCase):
             ):
                 root = Path(directory)
                 files = write_release(
-                    root, VERSION, platform_manifest=platform_manifest
+                    root,
+                    VERSION,
+                    platform_manifest=platform_manifest,
+                    standalone_executor=platform_manifest,
                 )
                 marker = root / "codex-home/packages/standalone/auto-update-version"
                 marker.parent.mkdir(parents=True)

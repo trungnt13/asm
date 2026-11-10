@@ -18,7 +18,7 @@ CODEX_RS_ROOT = REPO_ROOT / "codex-rs"
 class SourceBuildOutputs:
     entrypoint_bin: Path
     code_mode_host_bin: Path
-    exec_server_bin: Path
+    exec_server_bin: Path | None
     bwrap_bin: Path | None
     codex_command_runner_bin: Path | None
     codex_windows_sandbox_setup_bin: Path | None
@@ -36,6 +36,7 @@ def build_source_binaries(
     bwrap_bin: Path | None,
     codex_command_runner_bin: Path | None,
     codex_windows_sandbox_setup_bin: Path | None,
+    include_exec_server: bool = True,
 ) -> SourceBuildOutputs:
     validate_prebuilt_resource_inputs(
         spec,
@@ -48,7 +49,7 @@ def build_source_binaries(
         variant,
         build_entrypoint=entrypoint_bin is None,
         build_code_mode_host=code_mode_host_bin is None,
-        build_exec_server=exec_server_bin is None,
+        build_exec_server=include_exec_server and exec_server_bin is None,
         build_bwrap=spec.is_linux and bwrap_bin is None,
         build_codex_command_runner=spec.is_windows and codex_command_runner_bin is None,
         build_codex_windows_sandbox_setup=spec.is_windows
@@ -70,7 +71,7 @@ def build_source_binaries(
         if (
             entrypoint_bin is None
             or code_mode_host_bin is None
-            or exec_server_bin is None
+            or (include_exec_server and exec_server_bin is None)
         ):
             codex_v8_env = resolve_codex_v8_cargo_env(spec)
             if codex_v8_env:
@@ -96,9 +97,11 @@ def build_source_binaries(
             else output_dir / f"codex-code-mode-host{spec.exe_suffix}"
         ),
         exec_server_bin=(
-            exec_server_bin.resolve()
-            if exec_server_bin is not None
-            else output_dir / f"codex-exec-server{spec.exe_suffix}"
+            resolve_output_path(
+                exec_server_bin, output_dir / f"codex-exec-server{spec.exe_suffix}"
+            )
+            if include_exec_server
+            else None
         ),
         bwrap_bin=resolve_output_path(
             bwrap_bin,
