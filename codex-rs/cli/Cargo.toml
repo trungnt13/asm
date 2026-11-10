@@ -41,7 +41,6 @@ codex-build-info = { workspace = true }
 codex-api = { workspace = true }
 codex-chatgpt = { workspace = true }
 codex-cloud-config = { workspace = true }
-codex-cloud-tasks = { path = "../cloud-tasks" }
 codex-utils-cli = { workspace = true }
 codex-config = { workspace = true }
 codex-core = { workspace = true }
