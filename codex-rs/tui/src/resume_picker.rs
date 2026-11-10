@@ -1605,6 +1605,16 @@ impl PickerState {
         }
     }
 
+    fn cancel_selection(&self) -> SessionSelection {
+        match (self.launch_context, self.action) {
+            (SessionPickerLaunchContext::Startup, SessionPickerAction::Fork) => {
+                SessionSelection::StartFresh
+            }
+            (SessionPickerLaunchContext::Startup, SessionPickerAction::Resume)
+            | (SessionPickerLaunchContext::ExistingSession { .. }, _) => SessionSelection::Exit,
+        }
+    }
+
     async fn handle_key(&mut self, key: KeyEvent) -> Result<Option<SessionSelection>> {
         self.inline_error = None;
         if self.is_transcript_loading() {
@@ -1627,7 +1637,7 @@ impl PickerState {
             }
             _ if self.keymap.list.cancel.is_pressed(key) => {
                 if self.query.is_empty() {
-                    return Ok(Some(SessionSelection::StartFresh));
+                    return Ok(Some(self.cancel_selection()));
                 }
                 self.clear_query_preserving_selection();
             }
@@ -2946,9 +2956,10 @@ fn footer_hint_lines(state: &PickerState, width: u16) -> Vec<Line<'static>> {
         state.action.action_label()
     };
     let (esc_label, esc_compact_label) = if state.query.is_empty() {
-        match state.launch_context {
-            SessionPickerLaunchContext::Startup => ("start new", "new"),
-            SessionPickerLaunchContext::ExistingSession { .. } => ("exit", "exit"),
+        if matches!(state.cancel_selection(), SessionSelection::StartFresh) {
+            ("start new", "new")
+        } else {
+            ("exit", "exit")
         }
     } else {
         ("clear search", "clear")
@@ -5172,7 +5183,7 @@ mod tests {
             SessionPickerAction::Resume,
         );
 
-        assert!(footer_lines_text(&state, /*width*/ 220).contains("esc start new"));
+        assert!(footer_lines_text(&state, /*width*/ 220).contains("esc exit"));
 
         state.query = String::from("picker");
 
@@ -5255,7 +5266,7 @@ mod tests {
 
         let rendered = footer_lines_text(&state, /*width*/ 119);
 
-        assert!(rendered.contains("esc new"));
+        assert!(rendered.contains("esc exit"));
         assert!(rendered.contains("tab focus"));
         assert!(rendered.contains("←/→ option"));
         assert!(rendered.contains("⌃o dense"));
@@ -5329,7 +5340,7 @@ mod tests {
         assert!(lines.iter().all(|line| line.width() <= width as usize));
         assert_eq!(
             rendered,
-            " enter resume   esc new   ⌃c quit\n ⌃o comfy   ⌃t preview   ↑/↓ browse"
+            " enter resume   esc exit   ⌃c quit\n ⌃o comfy   ⌃t preview   ↑/↓ browse"
         );
     }
 
@@ -8177,7 +8188,7 @@ session_picker_view = "dense"
     }
 
     #[tokio::test]
-    async fn esc_with_empty_query_starts_fresh() {
+    async fn esc_with_empty_query_exits_resume_picker() {
         let loader = page_only_loader(|_| {});
         let mut state = PickerState::new(
             crate::backend_id::BackendId::new(),
@@ -8194,7 +8205,7 @@ session_picker_view = "dense"
             .await
             .expect("handle key");
 
-        assert!(matches!(selection, Some(SessionSelection::StartFresh)));
+        assert!(matches!(selection, Some(SessionSelection::Exit)));
     }
 
     #[tokio::test]

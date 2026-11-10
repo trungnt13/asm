@@ -224,10 +224,9 @@ fn compact_picker_keeps_metadata_and_labeled_primary_actions() {
                     "{action:?} {width}x{height}: {text}"
                 );
                 assert!(
-                    text.contains(if width >= FOOTER_COMPACT_BREAKPOINT {
-                        "esc start new"
-                    } else {
-                        "esc new"
+                    text.contains(match action {
+                        SessionPickerAction::Resume => "esc exit",
+                        SessionPickerAction::Fork => "esc new",
                     }),
                     "{width}x{height}: {text}"
                 );

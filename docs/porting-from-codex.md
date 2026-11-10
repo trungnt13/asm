@@ -682,6 +682,7 @@ Optional `[memories] extract_reasoning_effort`/`consolidation_reasoning_effort` 
 - Show unsupported/unresolved destinations and retain destinations in text-only output. Reuse hyperlink layout/output transport. Keep trusted artifact capabilities separate.
 
 ### Conversation switching
+In `asm resume`, Esc clears a nonempty search or exits the picker when the search is empty, without starting a new session. Keep the startup `asm fork` fallback unchanged.
 
 During owned fullscreen switches, retain the displayed frame/terminal diff buffer until destination replay completes. Draw the destination once. Continue background collection and ordered current-history replay. A parked screen is not authoritative state. Preserve native-scrollback clearing. No experimental workspace feature is required.
 
