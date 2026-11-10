@@ -1654,7 +1654,11 @@ async fn find_refreshes_live_details_before_searching_the_first_query() -> Resul
         &mut app.chat_widget,
         Box::new(crate::exec_cell::new_active_exec_command(
             "live".into(),
-            vec!["printf visible\nprintf needle".into()],
+            vec![
+                "bash".into(),
+                "-lc".into(),
+                "printf visible\nprintf needle".into(),
+            ],
             Vec::new(),
             codex_app_server_protocol::CommandExecutionSource::Agent,
             /*interaction_input*/ None,
@@ -1670,6 +1674,18 @@ async fn find_refreshes_live_details_before_searching_the_first_query() -> Resul
             &tui.terminal
         ))
         .contains("needle")
+    );
+    app.local_settings.tui.collapse_tool_calls = true;
+    app.chat_widget.local_settings.tui.collapse_tool_calls = true;
+    app.render_owned_transcript(&mut tui, Size::new(80, 24))?;
+    let summary = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+        &tui.terminal,
+    ));
+    assert!(
+        summary.contains("Running 1 tool call")
+            && summary.contains("printf")
+            && !summary.contains("needle"),
+        "{summary}"
     );
     crate::app::test_support::enable_side_retention(&mut app)?;
     app.handle_tui_event(

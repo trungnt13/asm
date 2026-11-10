@@ -50,6 +50,7 @@ impl TranscriptView {
         if range.is_empty() {
             return;
         }
+        self.invalidate_turn_details_from(range.start);
         self.retain_search_origin(cells, range.clone());
         if range.end == cells.len() && self.last_tail == cells.last().map(EntryKey::cell) {
             self.last_tail = Some(EntryKey::cell(replacement));
@@ -98,6 +99,7 @@ impl TranscriptView {
         if range.is_empty() {
             return;
         }
+        self.invalidate_turn_details_from(range.start);
         self.retain_search_origin(cells, range.clone());
         // Older history may extend the final group without introducing new activity.
         if range.end == cells.len() && self.last_tail == cells.last().map(EntryKey::cell) {

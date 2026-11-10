@@ -319,6 +319,7 @@ fn item_to_cells(
                         cwd.as_path(),
                         inline_visualization_context,
                     )
+                    .with_phase(phase)
                     .with_questions(questions.as_deref().unwrap_or_default()),
                 ));
             }

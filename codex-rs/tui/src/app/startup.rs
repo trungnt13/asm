@@ -1078,6 +1078,7 @@ See the Codex keymap documentation for supported actions and examples."
             turn_agent_counts: Default::default(),
             agents_overview,
             side_threads: HashMap::new(),
+            saved_openings: Default::default(),
             sidebars: HashMap::new(),
             side_companions: HashMap::new(),
             zoomed_thread: None,
@@ -1521,7 +1522,7 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                         AppRunControl::Continue
                     }
-                    Some(event) = app_event_rx.recv() => {
+                    Some(event) = app.saved_openings.next_event(&mut app_event_rx) => {
                         let switch_backend = match &event {
                             AppEvent::ChooseNewSessionCheckout { name } | AppEvent::NewSession { name }
                                 if multi_backend => app.other_new_session_backend(&backends).await

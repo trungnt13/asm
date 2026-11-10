@@ -464,6 +464,7 @@ impl SidePaneLayout {
             &companion.cells,
             companion.display.active.as_deref(),
             &companion.display.auxiliary,
+            /*collapse_turn_details*/ false,
         );
         frame
             .image_placements

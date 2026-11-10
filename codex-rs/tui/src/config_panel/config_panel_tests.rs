@@ -375,6 +375,12 @@ fn unavailable_right_click_paste_remains_editable() {
             ..STATUS
         },
     );
+    assert!(
+        !panel
+            .settings
+            .iter()
+            .any(|row| row.label == "Collapse turn details")
+    );
     for _ in 0..4 {
         panel.handle_key_event(KeyCode::Right.into());
     }

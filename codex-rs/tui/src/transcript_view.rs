@@ -22,6 +22,7 @@ mod selection;
 mod snapshot;
 mod text;
 mod tool_groups;
+mod turn_details;
 mod turn_groups;
 mod turn_tip;
 
@@ -131,6 +132,7 @@ pub(crate) struct TranscriptView {
     disclosure: disclosure::Disclosure,
     collapsed_tools: tool_groups::CollapsedToolGroups,
     turn_groups: std::cell::RefCell<turn_groups::TurnGroups>,
+    turn_details: Option<turn_details::TurnDetails>,
 }
 
 impl Default for TranscriptView {
@@ -175,6 +177,7 @@ impl Default for TranscriptView {
             disclosure: disclosure::Disclosure::default(),
             collapsed_tools: tool_groups::CollapsedToolGroups::default(),
             turn_groups: std::cell::RefCell::default(),
+            turn_details: None,
         }
     }
 }
@@ -215,6 +218,16 @@ impl TranscriptView {
         if area.is_empty() {
             self.tail_visible = false;
             return;
+        }
+        if let Some(key) = self.disclosure.anchor_control.take()
+            && let Position::Reading(mut anchor) = self.position
+            && anchor.key == key
+            && let Some(layout) = self.layout(cells, anchor.index)
+            && let Some(row) = layout.disclosure_row()
+        {
+            anchor.offset = layout.position_at(row, /*column*/ 0);
+            anchor.row_bias = layout.row_for_offset(anchor.offset) as isize - row as isize;
+            self.position = Position::Reading(anchor);
         }
         let initial_start = self.start(cells);
         let initial_position = self.position;
@@ -361,12 +374,12 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         active: Option<&dyn HistoryCell>,
         auxiliary: &[HyperlinkLine],
+        collapse_turn_details: bool,
     ) {
         let width = area.width;
         let unseen_activity = self.unseen_activity;
-        let ids = active.map_or_else(Vec::new, HistoryCell::activity_ids);
-        let disclose = !ids.is_empty() && self.mode == HistoryRenderMode::Rich;
-        let expanded = self.sync_live_activity(cells, ids);
+        let (summary, expanded) = self.sync_live_tool_summary(cells, collapse_turn_details, active);
+        let disclose = !self.disclosure.live_ids.is_empty() && self.mode == HistoryRenderMode::Rich;
         let mode = self.mode;
         let lines = |width| {
             let mut lines = active.map_or_else(Vec::new, |c| c.transcript_hyperlink_lines(width));
@@ -379,6 +392,10 @@ impl TranscriptView {
         self.sync_search_live_tail(width, /*key*/ None, lines);
         if self.detailed {
             self.sync_live_tail(width, /*key*/ None, lines);
+        } else if let Some(row) = summary {
+            self.sync_live_layout(width, /*key*/ None, |width| {
+                Some(row.layout(width, expanded, auxiliary.to_vec()))
+            });
         } else {
             self.sync_live_activity_tail(width, /*key*/ None, expanded && disclose, |width| {
                 let activity = active.map_or_else(Vec::new, |cell| {
@@ -453,8 +470,8 @@ impl TranscriptView {
         self.live_separated = None;
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
         let live = layout(width).map(Arc::new);
-        if self.live.as_ref().map(|layout| layout.text())
-            != live.as_ref().map(|layout| layout.text())
+        if self.live.as_ref().map(|layout| layout.activity_content())
+            != live.as_ref().map(|layout| layout.activity_content())
         {
             if !self.is_following() && revision_changed && live.is_some() {
                 self.unseen_activity = true;

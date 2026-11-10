@@ -1346,6 +1346,7 @@ async fn discovery_without_database_skips_attached_threads_before_pagination() -
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(page1.items.len(), 1);
@@ -1364,6 +1365,7 @@ async fn discovery_without_database_skips_attached_threads_before_pagination() -
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(page2.items.len(), 1);
@@ -1402,6 +1404,7 @@ async fn list_archived_threads_without_db_keeps_threads_without_previews() -> st
             /*cwd_filters*/ None,
             config.model_provider_id.as_str(),
             /*search_term*/ None,
+            /*include_attached_threads*/ false,
         )
         .await?;
         assert_eq!(page.items.len(), 1);
@@ -1497,6 +1500,7 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(page.items.len(), 1);
@@ -1526,6 +1530,7 @@ async fn list_threads_db_enabled_preserves_metadata_for_missing_rollout_paths()
         /*cwd_filters*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(fallback.items.len(), 1);
@@ -1610,6 +1615,7 @@ async fn list_threads_state_db_only_skips_jsonl_repair_scan() -> std::io::Result
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
         config.model_provider_id.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(repaired_page.items.len(), 1);
@@ -1718,6 +1724,7 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
         config.model_provider_id.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(scanned_page.items.len(), 0);
@@ -1796,6 +1803,7 @@ async fn list_threads_metadata_filter_overlays_state_db_list_metadata() -> std::
         /*cwd_filters*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
+        /*include_attached_threads*/ false,
     )
     .await?;
 
@@ -1833,6 +1841,7 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
         ),
         source: None,
         history_mode: Default::default(),
+        attached_to_thread_id: None,
         parent_thread_id: None,
         agent_nickname: None,
         agent_role: None,
@@ -1866,6 +1875,7 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
         ),
         source: Some(SessionSource::Exec),
         history_mode: Default::default(),
+        attached_to_thread_id: None,
         parent_thread_id: None,
         agent_nickname: Some("state-agent".to_string()),
         agent_role: Some("state-role".to_string()),
@@ -1981,6 +1991,7 @@ async fn list_threads_search_repairs_stale_state_db_hits_before_returning() -> s
         /*cwd_filters*/ None,
         config.model_provider_id.as_str(),
         Some("needle"),
+        /*include_attached_threads*/ false,
     )
     .await?;
     assert_eq!(scanned_page.items.len(), 0);

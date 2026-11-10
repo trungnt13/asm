@@ -159,7 +159,7 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Vec<String>> {
-        if self.detailed || self.mode != HistoryRenderMode::Rich {
+        if self.turn_details.is_some() || self.detailed || self.mode != HistoryRenderMode::Rich {
             return None;
         }
         let mut turns = self.turn_groups.borrow_mut();
@@ -179,7 +179,7 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Arc<TextLayout>> {
-        if self.detailed || self.mode != HistoryRenderMode::Rich {
+        if self.turn_details.is_some() || self.detailed || self.mode != HistoryRenderMode::Rich {
             return None;
         }
         let mut turns = self.turn_groups.borrow_mut();
