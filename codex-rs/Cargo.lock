@@ -2563,7 +2563,6 @@ dependencies = [
  "codex-build-info",
  "codex-chatgpt",
  "codex-cloud-config",
- "codex-cloud-tasks",
  "codex-config",
  "codex-core",
  "codex-core-plugins",
@@ -2713,72 +2712,6 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
-]
-
-[[package]]
-name = "codex-cloud-tasks"
-version = "0.169.1-alpha.9"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "clap",
- "codex-agent-identity",
- "codex-backend-client",
- "codex-cloud-tasks-client",
- "codex-cloud-tasks-mock-client",
- "codex-core",
- "codex-features",
- "codex-git-utils",
- "codex-http-client",
- "codex-login",
- "codex-model-provider",
- "codex-runtime-agent-instance",
- "codex-tui",
- "codex-utils-cli",
- "core_test_support",
- "crossterm",
- "http 1.4.0",
- "insta",
- "owo-colors",
- "pretty_assertions",
- "ratatui",
- "serde",
- "serde_json",
- "supports-color 3.0.2",
- "tempfile",
- "tokio",
- "tokio-stream",
- "tracing",
- "tracing-subscriber",
- "unicode-segmentation",
- "unicode-width 0.2.1",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "codex-cloud-tasks-client"
-version = "0.169.1-alpha.9"
-dependencies = [
- "anyhow",
- "chrono",
- "codex-api",
- "codex-backend-client",
- "codex-git-utils",
- "codex-http-client",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "codex-cloud-tasks-mock-client"
-version = "0.169.1-alpha.9"
-dependencies = [
- "chrono",
- "codex-cloud-tasks-client",
- "diffy",
 ]
 
 [[package]]
