@@ -272,7 +272,10 @@ impl App {
     }
 }
 
-fn apply_thread_settings_to_session(session: &mut ThreadSessionState, settings: &ThreadSettings) {
+pub(super) fn apply_thread_settings_to_session(
+    session: &mut ThreadSessionState,
+    settings: &ThreadSettings,
+) {
     if settings.system1_revision >= session.system1_revision {
         session.system1_enabled = settings.system1_enabled;
         session.system1_revision = settings.system1_revision;

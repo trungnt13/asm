@@ -2032,6 +2032,7 @@ async fn resolve_resume_thread_id(
                 ClientRequest::ThreadList {
                     request_id: RequestId::Integer(0),
                     params: ThreadListParams {
+                        include_attached_threads: false,
                         current_account_only: true,
                         excluded_thread_ids: None,
                         attached_to_thread_id: None,
@@ -2121,6 +2122,7 @@ async fn resolve_resume_thread_id(
             ClientRequest::ThreadList {
                 request_id: RequestId::Integer(0),
                 params: ThreadListParams {
+                    include_attached_threads: false,
                     current_account_only: false,
                     excluded_thread_ids: None,
                     attached_to_thread_id: None,

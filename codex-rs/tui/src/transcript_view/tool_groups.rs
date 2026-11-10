@@ -59,6 +59,10 @@ impl TranscriptView {
         }
     }
 
+    pub(super) fn collapse_tool_calls_enabled(&self) -> bool {
+        self.collapsed_tools.enabled
+    }
+
     pub(super) fn groups_tools(&self) -> bool {
         self.collapsed_tools.enabled && !self.detailed && self.mode == HistoryRenderMode::Rich
     }
