@@ -310,7 +310,6 @@ async fn resumed_subagent_mcp_startup_settles_while_cached_servers_remain_deferr
     app.primary_thread_id = Some(subagent_thread_id);
     app.active_thread_id = Some(subagent_thread_id);
     app.agent_navigation.mark_parent_owned(subagent_thread_id);
-    app.refresh_mcp_startup_expected_servers_from_config();
 
     for status in [
         McpServerStartupState::Starting,
@@ -332,7 +331,7 @@ async fn resumed_subagent_mcp_startup_settles_while_cached_servers_remain_deferr
 }
 
 #[tokio::test]
-async fn side_conversations_wait_for_every_configured_mcp_server() {
+async fn side_conversations_settle_despite_unreported_locally_configured_servers() {
     let mut app = make_test_app().await;
     configure_mcp_servers(&mut app);
     let root_thread_id = ThreadId::new();
@@ -341,7 +340,6 @@ async fn side_conversations_wait_for_every_configured_mcp_server() {
     app.side_threads
         .insert(side_thread_id, SideThreadState::new(root_thread_id));
     app.active_thread_id = Some(side_thread_id);
-    app.refresh_mcp_startup_expected_servers_from_config();
 
     for status in [
         McpServerStartupState::Starting,
@@ -359,5 +357,5 @@ async fn side_conversations_wait_for_every_configured_mcp_server() {
         );
     }
 
-    assert!(app.chat_widget.is_task_running_for_test());
+    assert!(!app.chat_widget.is_task_running_for_test());
 }

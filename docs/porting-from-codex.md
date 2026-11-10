@@ -121,9 +121,9 @@ Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonica
 
 Independent stock Linux `rust-v0.169.0-alpha.7` also reproduces the limitation: cold search finds the thread, but cold timeline, turn, and item reads are empty. Resume restores the saved projection and permissions without changing the canonical rollout. The stock tag is a release commit off `6bd17ba6ae`, not a build of `e1cc96712f`. The history and wire code in thread-store, rollout, state, app-server, and app-server-protocol matches the sync target.
 
-Through `b6d93b4cba`, the stock cold read paths still query the saved projection without catch-up. The independently tested alpha.7 reader has the same core cold-query path. This is source evidence for the newer target, not a runtime result for alpha.8. The stock cold timeline, turn and item implementations remain unchanged through `37103d7f01`; attached-thread search and fork previews do not add cold catch-up for those reads.
+Through `b6d93b4cba`, the stock cold read paths still query the saved projection without catch-up. The independently tested alpha.7 reader has the same core cold-query path. This is source evidence for the newer target, not a runtime result for alpha.8. The stock cold timeline, turn and item implementations remain unchanged through `37103d7f01`; attached-thread search and fork previews do not add cold catch-up for those reads. Through `627b579219`, experimental `thread/sample` uses a separate path and the ordinary cold readers remain unchanged.
 
-The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, for PR #180 through `b6d93b4cbadd6f449395d326f72465a5823f1492`, and for PR #181 through `37103d7f01e82162472c6fba7b4088d5a1303321`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
+The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, for PR #180 through `b6d93b4cbadd6f449395d326f72465a5823f1492`, for PR #181 through `37103d7f01e82162472c6fba7b4088d5a1303321`, and for PR #182 through `627b579219d492b5445d6d433d3110eb53e507dc`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
 
 ### Live backend model catalog
 
@@ -131,7 +131,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `37103d7f01e82162472c6fba7b4088d5a1303321`, 2026-11-10. Subject: Keep the TUI responsive while opening saved side chats (#60599).
+Last incorporated commit: `627b579219d492b5445d6d433d3110eb53e507dc`, 2026-11-10. Subject: Preserve script quotes in Windows sandbox cmd invocations (#60624).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
