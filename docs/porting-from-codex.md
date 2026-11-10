@@ -123,7 +123,7 @@ Independent stock Linux `rust-v0.169.0-alpha.7` also reproduces the limitation: 
 
 Through `b6d93b4cba`, the stock cold read paths still query the saved projection without catch-up. The independently tested alpha.7 reader has the same core cold-query path. This is source evidence for the newer target, not a runtime result for alpha.8. The stock cold timeline, turn and item implementations remain unchanged through `37103d7f01`; attached-thread search and fork previews do not add cold catch-up for those reads.
 
-The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, and for PR #180 through `b6d93b4cbadd6f449395d326f72465a5823f1492`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
+The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, for PR #180 through `b6d93b4cbadd6f449395d326f72465a5823f1492`, and for PR #181 through `37103d7f01e82162472c6fba7b4088d5a1303321`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
 
 ### Live backend model catalog
 
