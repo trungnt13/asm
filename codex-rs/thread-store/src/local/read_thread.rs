@@ -758,19 +758,19 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             active_path.clone(),
             Utc::now(),
             SessionSource::Cli,
-        );
-        builder.model_provider = Some(config.default_model_provider_id.clone());
-        builder.git_branch = Some("sqlite-branch".to_string());
+        )
+        .with_model_provider(Some(config.default_model_provider_id.clone()))
+        .with_git_branch(Some("sqlite-branch".to_string()));
         let recency_at = chrono::DateTime::parse_from_rfc3339("2026-01-03T12:00:00Z")
             .expect("timestamp should parse")
             .with_timezone(&Utc);
-        builder.recency_at = Some(recency_at);
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
+        metadata.recency_at = recency_at;
         metadata.title = "Stale SQLite name".to_string();
         metadata.section = Some(codex_state::ThreadSection {
             id: codex_state::PINNED_THREAD_SECTION_ID.to_string(),
@@ -930,11 +930,11 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder =
-            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli);
-        builder.model_provider = Some(config.default_model_provider_id.clone());
-        builder.cwd = home.path().to_path_buf();
-        builder.cli_version = Some("test_version".to_string());
+        let builder =
+            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli)
+                .with_model_provider(Some(config.default_model_provider_id.clone()))
+                .with_cwd(home.path().to_path_buf())
+                .with_cli_version("test_version".to_string());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.title = "Saved title".to_string();
         metadata.first_user_message = Some("Hello from user".to_string());
@@ -991,15 +991,15 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             rollout_path.clone(),
             Utc::now(),
             SessionSource::Cli,
-        );
-        builder.history_mode = ThreadHistoryMode::Paginated;
-        builder.model_provider = Some("Canonical SQLite provider".to_string());
-        builder.cwd = home.path().to_path_buf();
+        )
+        .with_history_mode(ThreadHistoryMode::Paginated)
+        .with_model_provider(Some("Canonical SQLite provider".to_string()))
+        .with_cwd(home.path().to_path_buf());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.name = Some("Canonical SQLite name".to_string());
         metadata.preview = Some("Canonical SQLite preview".to_string());
@@ -1068,30 +1068,39 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder =
-            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli);
-        builder.model_provider = Some(config.default_model_provider_id.clone());
-        builder.cwd = home.path().to_path_buf();
+        let builder =
+            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli)
+                .with_model_provider(Some(config.default_model_provider_id.clone()))
+                .with_cwd(home.path().to_path_buf());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
-        let permission_profile: PermissionProfile = PermissionProfile::Disabled;
-        metadata.sandbox_policy =
-            serde_json::to_string(&permission_profile).expect("serialize profile");
-        runtime
-            .upsert_thread(&metadata)
-            .await
-            .expect("state db upsert should succeed");
+        for (value, expected) in [
+            (
+                metadata.sandbox_policy.clone(),
+                PermissionProfile::read_only(),
+            ),
+            (
+                serde_json::to_string(&PermissionProfile::Disabled).expect("serialize profile"),
+                PermissionProfile::Disabled,
+            ),
+        ] {
+            metadata.sandbox_policy = value;
+            runtime
+                .upsert_thread(&metadata)
+                .await
+                .expect("state db upsert should succeed");
 
-        let thread = store
-            .read_thread(ReadThreadParams {
-                thread_id,
-                include_archived: false,
-                include_history: false,
-            })
-            .await
-            .expect("read thread");
+            let thread = store
+                .read_thread(ReadThreadParams {
+                    thread_id,
+                    include_archived: false,
+                    include_history: false,
+                })
+                .await
+                .expect("read thread");
 
-        assert_eq!(thread.preview, "Hello from user");
-        assert_eq!(thread.permission_profile, PermissionProfile::Disabled);
+            assert_eq!(thread.preview, "Hello from user");
+            assert_eq!(thread.permission_profile, expected);
+        }
     }
 
     #[tokio::test]
@@ -1109,27 +1118,33 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder =
-            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli);
-        builder.model_provider = Some(config.default_model_provider_id.clone());
-        builder.cwd = home.path().to_path_buf();
+        let builder =
+            ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli)
+                .with_model_provider(Some(config.default_model_provider_id.clone()))
+                .with_cwd(home.path().to_path_buf());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
-        metadata.sandbox_policy = "danger-full-access".to_string();
-        runtime
-            .upsert_thread(&metadata)
-            .await
-            .expect("state db upsert should succeed");
+        for value in [
+            "danger-full-access".to_string(),
+            serde_json::to_string(&SandboxPolicy::DangerFullAccess)
+                .expect("serialize legacy policy"),
+        ] {
+            metadata.sandbox_policy = value;
+            runtime
+                .upsert_thread(&metadata)
+                .await
+                .expect("state db upsert should succeed");
 
-        let thread = store
-            .read_thread(ReadThreadParams {
-                thread_id,
-                include_archived: false,
-                include_history: true,
-            })
-            .await
-            .expect("read thread");
+            let thread = store
+                .read_thread(ReadThreadParams {
+                    thread_id,
+                    include_archived: false,
+                    include_history: true,
+                })
+                .await
+                .expect("read thread");
 
-        assert_eq!(thread.permission_profile, PermissionProfile::Disabled);
+            assert_eq!(thread.permission_profile, PermissionProfile::Disabled);
+        }
     }
 
     #[tokio::test]
@@ -1176,15 +1191,15 @@ mod tests {
         });
         writeln!(file, "{user_event}").expect("write user event");
 
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             rollout_path.clone(),
             Utc::now(),
             SessionSource::Cli,
-        );
-        builder.model_provider = Some(config.default_model_provider_id.clone());
+        )
+        .with_model_provider(Some(config.default_model_provider_id.clone()));
         let sqlite_cwd = home.path().join("sqlite-workspace");
-        builder.cwd = sqlite_cwd.clone();
+        let builder = builder.with_cwd(sqlite_cwd.clone());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.title = "Saved title".to_string();
         metadata.first_user_message = Some("Hello from sqlite".to_string());
@@ -1341,15 +1356,15 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             rollout_path.clone(),
             Utc::now(),
             SessionSource::Cli,
-        );
-        builder.model_provider = Some("sqlite-provider".to_string());
-        builder.cwd = home.path().join("workspace");
-        builder.cli_version = Some("sqlite-cli".to_string());
+        )
+        .with_model_provider(Some("sqlite-provider".to_string()))
+        .with_cwd(home.path().join("workspace"))
+        .with_cli_version("sqlite-cli".to_string());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.title = "Command-only thread".to_string();
         runtime
@@ -1414,13 +1429,13 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             stale_path.clone(),
             Utc::now(),
             SessionSource::Cli,
-        );
-        builder.model_provider = Some("stale-sqlite-provider".to_string());
+        )
+        .with_model_provider(Some("stale-sqlite-provider".to_string()));
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.first_user_message = Some("stale sqlite preview".to_string());
         metadata.model = Some("persisted-model".to_string());
@@ -1471,9 +1486,9 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder =
-            ThreadMetadataBuilder::new(thread_id, stale_path, Utc::now(), SessionSource::Cli);
-        builder.model_provider = Some("wrong-sqlite-provider".to_string());
+        let builder =
+            ThreadMetadataBuilder::new(thread_id, stale_path, Utc::now(), SessionSource::Cli)
+                .with_model_provider(Some("wrong-sqlite-provider".to_string()));
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.first_user_message = Some("wrong sqlite preview".to_string());
         runtime
@@ -1570,15 +1585,15 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             rollout_path.clone(),
             Utc::now(),
             SessionSource::Exec,
-        );
-        builder.model_provider = Some("sqlite-provider".to_string());
-        builder.cwd = external.path().join("workspace");
-        builder.cli_version = Some("sqlite-cli".to_string());
+        )
+        .with_model_provider(Some("sqlite-provider".to_string()))
+        .with_cwd(external.path().join("workspace"))
+        .with_cli_version("sqlite-cli".to_string());
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.preview = Some("optimize the benchmark".to_string());
         metadata.first_user_message = Some("next normal prompt".to_string());
@@ -1631,10 +1646,10 @@ mod tests {
         )
         .await
         .expect("state db should initialize");
-        let mut builder =
+        let builder =
             ThreadMetadataBuilder::new(thread_id, rollout_path, Utc::now(), SessionSource::Cli);
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        builder.archived_at = Some(Utc::now());
+        let builder = builder.with_archived_at(Some(Utc::now()));
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.first_user_message = Some("Archived SQLite preview".to_string());
         runtime
@@ -1687,13 +1702,13 @@ mod tests {
         .await
         .expect("state db should initialize");
         let store = LocalThreadStore::new(config.clone(), Some(runtime.clone()));
-        let mut builder = ThreadMetadataBuilder::new(
+        let builder = ThreadMetadataBuilder::new(
             thread_id,
             archived_path.clone(),
             Utc::now(),
             SessionSource::Cli,
-        );
-        builder.archived_at = Some(Utc::now());
+        )
+        .with_archived_at(Some(Utc::now()));
         let mut metadata = builder.build(config.default_model_provider_id.as_str());
         metadata.first_user_message = Some("Archived SQLite preview".to_string());
         runtime

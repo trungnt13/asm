@@ -1,5 +1,6 @@
 pub(crate) mod startup;
 
+use crate::McpRefreshReason;
 use crate::PromptCacheKey;
 use crate::WithTurnExtensionData;
 use crate::runtime_auth::RuntimeAuthSlot;
@@ -988,12 +989,9 @@ impl Session {
             let permission_profile = config.permissions.effective_permission_profile();
             if permission_profile.enforcement() != SandboxEnforcement::External
                 && permission_profile.network_sandbox_policy().is_enabled()
-                && {
-                    let file_system = permission_profile.file_system_sandbox_policy();
-                    file_system.has_full_disk_write_access()
-                        // Preserve the legacy fallback for writable URIs that cannot be projected locally.
-                        && file_system.entries.iter().all(|entry| entry.legacy_writable_path().is_ok())
-                }
+                && permission_profile
+                    .file_system_sandbox_policy()
+                    .has_legacy_full_disk_write_access()
             {
                 let config = Arc::make_mut(&mut config);
                 let permission_profile = PermissionProfile::workspace_write();
@@ -2226,6 +2224,7 @@ impl Session {
                 reference_context_item,
                 HistoryReplacement::Reset,
             );
+            state.history.restored_through_sequence = state.history.input_sequence();
             state
                 .history
                 .restore_rejected_audio_file_ids(rejected_audio_file_ids);
@@ -2397,7 +2396,7 @@ impl Session {
                     != updated.step_settings.service_tier;
             let mcp_inputs_changed = self.mcp_inputs_differ(&state.session_configuration, &updated);
             if mcp_inputs_changed {
-                self.mark_mcp_runtime_dirty();
+                self.mark_mcp_runtime_dirty(McpRefreshReason::SessionMcpInputsChanged);
             }
             // Save new environment defaults for future turns. The running turn keeps its own.
             windows_sandbox_changed =
@@ -2574,7 +2573,6 @@ impl Session {
         &self,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
-        mcp_elicitations_auto_deny: bool,
     ) -> ConstraintResult<()> {
         self.update_settings(SessionSettingsUpdate {
             app_server_client_name,
@@ -2582,9 +2580,6 @@ impl Session {
             ..Default::default()
         })
         .await?;
-        self.services
-            .mcp_runtime
-            .set_elicitations_auto_deny(mcp_elicitations_auto_deny);
         Ok(())
     }
 
@@ -4016,7 +4011,7 @@ impl Session {
                     environment_id,
                     response.permissions.clone().into(),
                 );
-                self.mark_mcp_runtime_dirty();
+                self.mark_mcp_runtime_dirty(McpRefreshReason::SessionPermissionsGranted);
             }
         }
     }
@@ -4628,8 +4623,11 @@ impl Session {
                 )
                 .await
             };
-            if inventory_changed || discovery_recovered {
-                self.mark_mcp_runtime_dirty();
+            if inventory_changed {
+                self.mark_mcp_runtime_dirty(McpRefreshReason::ExecutorCapabilityInventoryChanged);
+            }
+            if discovery_recovered {
+                self.mark_mcp_runtime_dirty(McpRefreshReason::ExecutorCapabilityDiscoveryRecovered);
             }
             let extension_data =
                 codex_extension_api::ExtensionData::new(turn_context.sub_id.clone());

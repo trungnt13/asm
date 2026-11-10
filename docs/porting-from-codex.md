@@ -121,7 +121,9 @@ Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonica
 
 Independent stock Linux `rust-v0.169.0-alpha.7` also reproduces the limitation: cold search finds the thread, but cold timeline, turn, and item reads are empty. Resume restores the saved projection and permissions without changing the canonical rollout. The stock tag is a release commit off `6bd17ba6ae`, not a build of `e1cc96712f`. The history and wire code in thread-store, rollout, state, app-server, and app-server-protocol matches the sync target.
 
-The owner accepted this limitation for the sync through `05cf8eeb14` and separately for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
+Through `b6d93b4cba`, the stock cold read paths still query the saved projection without catch-up. The independently tested alpha.7 reader has the same core cold-query path. This is source evidence for the newer target, not a runtime result for alpha.8.
+
+The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, and for PR #180 through `b6d93b4cbadd6f449395d326f72465a5823f1492`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
 
 ### Live backend model catalog
 
@@ -129,7 +131,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, 2026-11-09. Subject: Route TUI question answers through Cloud message admission (#60462).
+Last incorporated commit: `b6d93b4cbadd6f449395d326f72465a5823f1492`, 2026-11-10. Subject: Disable Daybreak when the selected model lacks access (#60526).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

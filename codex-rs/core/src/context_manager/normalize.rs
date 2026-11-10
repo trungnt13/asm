@@ -18,16 +18,32 @@ use tracing::info;
 // Changing this value would change model-visible IDs and invalidate prompt caches.
 const SYNTHETIC_OUTPUT_ID_NAMESPACE: Uuid = Uuid::from_u128(0x90d38d3e_6a5b_4d52_bfe2_2f1e634bfac4);
 
-pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItemEnvelope>) {
+pub(crate) fn ensure_call_outputs_present(
+    items: &mut Vec<ResponseItemEnvelope>,
+    restored_through_sequence: u64,
+) {
     // Insert synthetic outputs in reverse index order to avoid re-indexing.
-    for (idx, output_item) in missing_call_outputs(items).into_iter().rev() {
+    for (idx, output_item) in missing_call_outputs(items, restored_through_sequence)
+        .into_iter()
+        .rev()
+    {
         items.insert(idx + 1, output_item);
     }
 }
 
 pub(crate) fn missing_call_outputs(
     items: &[ResponseItemEnvelope],
+    restored_through_sequence: u64,
 ) -> Vec<(usize, ResponseItemEnvelope)> {
+    // Forks and recovered sessions can inherit a call before its output was written.
+    let may_be_unfinished = |envelope: &ResponseItemEnvelope| {
+        envelope.metadata.as_ref().is_some_and(|metadata| {
+            metadata.inherited_user_message
+                || metadata
+                    .history_sequence
+                    .is_some_and(|sequence| sequence <= restored_through_sequence)
+        })
+    };
     let mut function_output_ids = HashSet::new();
     let mut tool_search_output_ids = HashSet::new();
     let mut custom_tool_output_ids = HashSet::new();
@@ -96,13 +112,7 @@ pub(crate) fn missing_call_outputs(
             ResponseItem::CustomToolCall { id, call_id, .. }
                 if !custom_tool_output_ids.contains(call_id.as_str()) =>
             {
-                // Preserved-prefix forks mark copied calls as inherited. A call still
-                // running in the parent has no output in the child's snapshot.
-                if !envelope
-                    .metadata
-                    .as_ref()
-                    .is_some_and(|metadata| metadata.inherited_user_message)
-                {
+                if !may_be_unfinished(envelope) {
                     error_or_panic(format!(
                         "Custom tool call output is missing for call id: {call_id}"
                     ));
@@ -124,13 +134,7 @@ pub(crate) fn missing_call_outputs(
                 call_id: Some(call_id),
                 ..
             } if !function_output_ids.contains(call_id.as_str()) => {
-                // Preserved-prefix forks mark copied calls as inherited. A call still
-                // running in the parent has no output in the child's snapshot.
-                if !envelope
-                    .metadata
-                    .as_ref()
-                    .is_some_and(|metadata| metadata.inherited_user_message)
-                {
+                if !may_be_unfinished(envelope) {
                     error_or_panic(format!(
                         "Local shell call output is missing for call id: {call_id}"
                     ));
