@@ -46,7 +46,6 @@ members = [
     "shell-command",
     "skills",
     "core",
-    "core-api",
     "core-plugin-common",
     "core-plugins",
     "diagnostics",
@@ -63,7 +62,6 @@ members = [
     "exec-server-cli",
     "exec-server/tests/support",
     "execpolicy",
-    "ext/agent",
     "ext/agent-message-board",
     "ext/external-runtime",
     "ext/connectors",
@@ -141,14 +139,12 @@ members = [
     "utils/home-dir",
     "utils/process",
     "utils/pty",
-    "utils/readiness",
     "utils/redacted-string",
     "utils/rustls-provider",
     "utils/string",
     "utils/cli",
     "utils/elapsed",
     "utils/sandbox-summary",
-    "utils/model-facing-id",
     "utils/sleep-inhibitor",
     "utils/approval-presets",
     "utils/oss",
@@ -163,7 +159,6 @@ members = [
     "state",
     "terminal-detection",
     "test-binary-support",
-    "thread-manager-sample",
     "thread-store",
     "uds",
     "codex-experimental-api-macros",
@@ -229,7 +224,6 @@ codex-message-board-mcp = { path = "message-board-mcp" }
 codex-connectors-extension = { path = "ext/connectors" }
 codex-context-fragments = { path = "context-fragments" }
 codex-core = { path = "core" }
-codex-core-api = { path = "core-api" }
 codex-core-plugin-common = { path = "core-plugin-common" }
 codex-core-plugins = { path = "core-plugins" }
 codex-diagnostics = { path = "diagnostics" }
