@@ -95,7 +95,6 @@ members = [
     "network-proxy",
     "process-hardening",
     "realtime-webrtc",
-    "voice-host",
     "protocol",
     "protocol/tests/support",
     "prompts",

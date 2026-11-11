@@ -295,10 +295,7 @@ impl ChatWidget {
         }
 
         if !RealtimeWebrtcSession::is_supported() {
-            self.add_error_message(
-                "Voice requires macOS, an MSVC-based Windows build, or a glibc-based Linux build."
-                    .to_string(),
-            );
+            self.add_error_message("Terminal voice is not included in this ASM build.".to_string());
             return;
         }
 
