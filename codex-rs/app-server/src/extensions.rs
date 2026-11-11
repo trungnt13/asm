@@ -31,26 +31,6 @@ use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadStateManager;
 
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "Guardian V2 is not supported by this ASM build; disable `guardianv2` and `guardianv2_decisions_comparison`"
-)]
-pub(crate) struct UnavailableGuardianV2;
-
-pub(crate) fn validate_available_features(config: &Config) -> std::io::Result<()> {
-    if config.features.enabled(codex_features::Feature::GuardianV2)
-        || config
-            .features
-            .enabled(codex_features::Feature::GuardianV2DecisionsComparison)
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            UnavailableGuardianV2,
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) struct ThreadExtensionDependencies {
     pub(crate) sample_responses: Arc<crate::thread_sample::SampleResponseRegistry>,
     pub(crate) event_sink: Arc<dyn ExtensionEventSink>,
@@ -124,6 +104,7 @@ pub(crate) fn thread_extensions(
         git_attribution_base_url,
         http_client_factory,
     );
+    codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);
     codex_memories_extension::install(&mut builder, codex_otel::global());
     codex_mcp_extension::install(&mut builder);
     codex_mcp_extension::install_plugins(&mut builder, environment_manager);

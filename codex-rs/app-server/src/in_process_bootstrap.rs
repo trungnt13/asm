@@ -103,7 +103,6 @@ pub(super) async fn configure(
     config: &mut Arc<Config>,
     enable_codex_api_key_env: bool,
 ) -> IoResult<Arc<AuthManager>> {
-    crate::extensions::validate_available_features(config)?;
     let bootstrap_config = config_manager
         .load_startup_config(Some(config.cwd.to_path_buf()))
         .await?

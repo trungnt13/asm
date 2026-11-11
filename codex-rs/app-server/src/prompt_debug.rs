@@ -35,7 +35,6 @@ pub async fn build_prompt_request(
     input: Vec<UserInput>,
     output_schema: Option<Value>,
 ) -> Result<PromptRequestAudit> {
-    crate::extensions::validate_available_features(&config)?;
     let auth_manager =
         AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false).await?;
     codex_login::GatewayLoginControl::for_runtime(&auth_manager.runtime_config())

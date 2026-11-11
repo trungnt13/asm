@@ -291,7 +291,6 @@ impl ConfigManager {
         config.config_layer_stack = config
             .config_layer_stack
             .with_mcp_ema_cancellation(mcp_ema_cancellation);
-        crate::extensions::validate_available_features(&config)?;
         Ok(config)
     }
 
@@ -318,7 +317,6 @@ impl ConfigManager {
         config.config_layer_stack = config
             .config_layer_stack
             .with_mcp_ema_cancellation(mcp_ema_cancellation);
-        crate::extensions::validate_available_features(&config)?;
         Ok(config)
     }
 
@@ -348,7 +346,6 @@ impl ConfigManager {
         config.config_layer_stack = config
             .config_layer_stack
             .with_mcp_ema_cancellation(mcp_ema_cancellation);
-        crate::extensions::validate_available_features(&config)?;
         Ok(config)
     }
 
@@ -480,9 +477,6 @@ impl ConfigManager {
             }),
             Err(error)
                 if self.strict_config
-                    || error.get_ref().is_some_and(|source| {
-                        source.is::<crate::extensions::UnavailableGuardianV2>()
-                    })
                     || crate::is_unsupported_untrusted_approval_policy_error(&error) =>
             {
                 Err(error)
@@ -518,7 +512,6 @@ impl ConfigManager {
         config.config_layer_stack = config
             .config_layer_stack
             .with_mcp_ema_cancellation(mcp_ema_cancellation);
-        crate::extensions::validate_available_features(&config)?;
         Ok(config)
     }
 
@@ -752,7 +745,6 @@ impl ConfigManager {
         config.config_layer_stack = config
             .config_layer_stack
             .with_mcp_ema_cancellation(mcp_ema_cancellation);
-        crate::extensions::validate_available_features(&config)?;
         Ok(config)
     }
 
