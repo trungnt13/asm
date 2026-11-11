@@ -1201,7 +1201,7 @@ mod tests {
     fn direct_serialization_preserves_websocket_request_payload() {
         let api_request = ResponsesApiRequest {
             model: "gpt-test".to_string(),
-            input: vec![ResponseItem::Message {
+            input: vec![Arc::new(ResponseItem::Message {
                 status: None,
                 encrypted_content: None,
                 id: Some(ResponseItemId::with_suffix("msg", "1")),
@@ -1211,7 +1211,7 @@ mod tests {
                 }],
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
-            }],
+            })],
             tools: Some(
                 Arc::<RawValue>::from(
                     to_raw_value(&vec![json!({

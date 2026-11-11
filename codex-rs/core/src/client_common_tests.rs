@@ -68,7 +68,10 @@ fn prompt_with_image_outputs(detail: Option<ImageDetail>) -> Prompt {
                 ]),
                 internal_chat_message_metadata_passthrough: None,
             },
-        ],
+        ]
+        .into_iter()
+        .map(Arc::new)
+        .collect(),
         ..Default::default()
     }
 }
@@ -114,7 +117,7 @@ fn serializes_text_verbosity_when_set() {
     let input: Vec<ResponseItem> = vec![];
     let req = ResponsesApiRequest {
         model: "gpt-5.4".to_string(),
-        input,
+        input: input.into_iter().map(Arc::new).collect(),
         tools: Some(empty_tools().into()),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: true,
@@ -162,7 +165,7 @@ fn serializes_text_schema_with_strict_format() {
 
     let req = ResponsesApiRequest {
         model: "gpt-5.4".to_string(),
-        input,
+        input: input.into_iter().map(Arc::new).collect(),
         tools: Some(empty_tools().into()),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: true,
@@ -224,7 +227,7 @@ fn omits_text_when_not_set() {
     let input: Vec<ResponseItem> = vec![];
     let req = ResponsesApiRequest {
         model: "gpt-5.4".to_string(),
-        input,
+        input: input.into_iter().map(Arc::new).collect(),
         tools: Some(empty_tools().into()),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: true,
@@ -249,7 +252,7 @@ fn omits_text_when_not_set() {
 fn serializes_flex_service_tier_when_set() {
     let req = ResponsesApiRequest {
         model: "gpt-5.4".to_string(),
-        input: vec![],
+        input: vec![].into_iter().map(Arc::new).collect(),
         tools: Some(empty_tools().into()),
         tool_choice: "auto".to_string(),
         parallel_tool_calls: true,

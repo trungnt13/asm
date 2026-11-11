@@ -1906,7 +1906,7 @@ pub(crate) fn build_prompt(
         step_context.tool_router.model_visible_specs()
     };
     Prompt {
-        input,
+        input: input.into_iter().map(Arc::new).collect(),
         tools,
         parallel_tool_calls: true,
         base_instructions: if incremental_tools {
@@ -2021,7 +2021,7 @@ async fn run_sampling_request(
             .await?;
         }
         if first_attempt && turn_context.config.notify.is_some() {
-            notify_messages = legacy_notify_input_messages(&prompt.input);
+            notify_messages = legacy_notify_input_messages(prompt.input.iter().map(Arc::as_ref));
         }
         let _native_search = crate::model_search::SearchOwner::reserve_server_fallback(
             &step_context.extension_data,
@@ -2040,13 +2040,13 @@ async fn run_sampling_request(
                 &turn_context.sub_id,
                 model,
                 provider,
-                &prompt.input,
+                prompt.input.iter().map(Arc::as_ref),
             );
             let clear_checkpoints = history.annotated_items().iter().filter_map(|envelope| {
                 rejected_audio::clear_checkpoint(&envelope.item, envelope.metadata.as_ref())
             });
             let submitted = rejected_audio::SubmittedFileAudio::from_request(
-                &prompt.input,
+                prompt.input.iter().map(Arc::as_ref),
                 accepted,
                 clear_checkpoints,
             );

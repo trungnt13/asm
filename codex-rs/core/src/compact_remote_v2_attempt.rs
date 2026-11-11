@@ -178,7 +178,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
             .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
     let mut prompt = Prompt {
-        input,
+        input: input.into_iter().map(Arc::new).collect(),
         tools: if tools_in_history {
             tool_router
                 .model_visible_specs()
@@ -210,7 +210,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     // The file may disappear after the availability check, or the store may
     // defer validation to Responses. Retry only an unambiguously rejected ID.
     let mut submitted_audio = rejected_audio::SubmittedFileAudio::from_request(
-        &prompt.input,
+        prompt.input.iter().map(Arc::as_ref),
         /*accepted*/ None,
         prompt
             .input
@@ -225,7 +225,9 @@ pub(super) async fn run_remote_compact_v2_attempt(
         response_id,
         token_usage,
     } = loop {
-        prompt.input.push(ResponseItem::CompactionTrigger {});
+        prompt
+            .input
+            .push(Arc::new(ResponseItem::CompactionTrigger {}));
         let trace_attempt = compaction_trace.start_attempt(&serde_json::json!({
             "model": model_info.slug.as_str(),
             "instructions": prompt.base_instructions.text.as_str(),
@@ -257,11 +259,16 @@ pub(super) async fn run_remote_compact_v2_attempt(
                     return Err(error);
                 };
                 unavailable.insert(id);
+                let mut input = std::mem::take(&mut prompt.input)
+                    .into_iter()
+                    .map(Arc::unwrap_or_clone)
+                    .collect();
                 rejected_audio::project_compaction_audio(
-                    &mut prompt.input,
+                    &mut input,
                     &mut prompt_input_metadata,
                     &unavailable,
                 );
+                prompt.input = input.into_iter().map(Arc::new).collect();
             }
         }
     };
@@ -269,7 +276,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         rejected_audio_file_ids: unavailable,
         input_goal_ids,
         trace_input_history,
-        prompt_input: prompt.input,
+        prompt_input: prompt.input.into_iter().map(Arc::unwrap_or_clone).collect(),
         prompt_input_metadata,
         compaction_output,
         compaction_response_id: response_id,

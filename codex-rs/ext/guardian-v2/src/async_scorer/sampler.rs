@@ -229,7 +229,7 @@ impl LunaSampler {
     ) -> execution::SamplingExecution {
         let api_request = ResponsesApiRequest {
             model: MODEL.to_owned(),
-            input,
+            input: input.into_iter().map(Arc::new).collect(),
             tools: None,
             tool_choice: "none".to_owned(),
             parallel_tool_calls: false,
@@ -305,17 +305,22 @@ impl LunaSampler {
             sampling.pending_score.clone(),
         );
         let result = execution.run(&mut completion, &mut telemetry).await;
-        execution
-            .request
-            .input
-            .extend(completion.finish(result, &mut telemetry)?);
+        execution.request.input.extend(
+            completion
+                .finish(result, &mut telemetry)?
+                .into_iter()
+                .map(Arc::new),
+        );
         Some(
             execution
                 .request
                 .input
                 .into_iter()
                 .zip(metadata.into_iter().chain(std::iter::repeat(None)))
-                .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
+                .map(|(item, metadata)| ResponseItemEnvelope {
+                    item: Arc::unwrap_or_clone(item),
+                    metadata,
+                })
                 .collect(),
         )
     }

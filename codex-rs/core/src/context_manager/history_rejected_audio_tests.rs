@@ -41,7 +41,7 @@ fn audio_error() -> CodexErrorDetails {
 }
 
 fn rejected_file_audio_id(error: &CodexErrorDetails, items: &[ResponseItem]) -> Option<String> {
-    SubmittedFileAudio::from_request(items, /*accepted*/ None, std::iter::empty())?
+    SubmittedFileAudio::from_request(items.iter(), /*accepted*/ None, std::iter::empty())?
         .rejected_file_id(error)
 }
 
@@ -54,7 +54,7 @@ fn previously_accepted_file_only_disambiguates_clip_specific_errors() {
         "turn",
         "model",
         "provider",
-        std::slice::from_ref(&good),
+        std::slice::from_ref(&good).iter(),
     )
     .expect("new audio");
     context.record(
@@ -75,7 +75,7 @@ fn previously_accepted_file_only_disambiguates_clip_specific_errors() {
     );
     let accepted = context.accepted_file_audio("model", "provider");
     let items = [good, message(vec![file_audio("file_b")])];
-    let candidate = SubmittedFileAudio::from_request(&items, accepted, std::iter::empty())
+    let candidate = SubmittedFileAudio::from_request(items.iter(), accepted, std::iter::empty())
         .expect("one new recording");
     assert!(candidate.matches_rejection(&audio_error()));
     assert!(

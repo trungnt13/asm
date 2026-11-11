@@ -44,7 +44,7 @@ pub(super) fn estimate_request_tokens(request: &ResponsesApiRequest) -> usize {
     let input = request
         .input
         .iter()
-        .map(estimate_item_token_count)
+        .map(|item| estimate_item_token_count(item))
         .fold(0i64, i64::saturating_add);
     let metadata = serde_json::to_vec(&(&request.tools, &request.text))
         .map(|bytes| TruncationPolicy::Bytes(bytes.len()).token_budget())
@@ -151,9 +151,11 @@ pub(crate) async fn prepare_prompt(
             .prepare_annotated_conversation_items_for_history(step.turn.as_ref(), model, messages)
             .await
             .0;
-        prompt
-            .input
-            .extend(restored.iter().map(|envelope| envelope.item.clone()));
+        prompt.input.extend(
+            restored
+                .iter()
+                .map(|envelope| std::sync::Arc::new(envelope.item.clone())),
+        );
     }
     let request = session.services.model_client.build_responses_request(
         prompt,
