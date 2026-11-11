@@ -11,10 +11,6 @@ on:
         description: 'Resume the immutable candidate from an earlier release run'
         type: string
         default: ''
-      linux_cgu_experiment:
-        description: 'Compare clean Linux release CGU 4 and 16 builds; never publish'
-        type: boolean
-        default: false
       macos_concurrency_experiment:
         description: 'Build macOS with 2 and 3 Cargo jobs; never publish'
         type: boolean
@@ -30,32 +26,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  validate_linux_experiment:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.linux_cgu_experiment == true }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Reject release and other experiment inputs
-        env:
-          PUBLISH_RELEASE: ${{ inputs.publish_release }}
-          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
-          MACOS_EXPERIMENT: ${{ inputs.macos_concurrency_experiment }}
-        run: |
-          if [[ "$PUBLISH_RELEASE" == true || -n "$RESUME_RUN_ID" || "$MACOS_EXPERIMENT" == true ]]; then
-            echo 'Linux CGU experiments cannot publish, resume, or run macOS experiments' >&2
-            exit 1
-          fi
-
-  linux_cgu_experiment:
-    needs: validate_linux_experiment
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.linux_cgu_experiment == true }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/linux-release-cgu-experiment.yml
-    with:
-      source_sha: ${{ github.sha }}
-
   prepare:
-    if: ${{ inputs.linux_cgu_experiment != true }}
     name: Resolve immutable release candidate
     runs-on: ubuntu-24.04
     permissions:
