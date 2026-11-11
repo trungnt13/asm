@@ -1,5 +1,6 @@
 use crate::AgentPath;
 use crate::ItemIdGenerator;
+use crate::TS;
 use crate::ThreadId;
 use crate::dynamic_tools::DynamicToolCallOutputContentItem;
 use crate::mcp::CallToolResult;
@@ -41,7 +42,6 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
-use ts_rs::TS;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
