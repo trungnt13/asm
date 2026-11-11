@@ -324,6 +324,13 @@ impl ThreadHistoryBuilder {
         *self = Self::new();
     }
 
+    /// Releases snapshots that a live tracker can no longer expose.
+    /// Generated item numbers continue without changes.
+    pub fn discard_turn_snapshots(&mut self) {
+        self.turns.clear();
+        self.current_turn = None;
+    }
+
     pub fn finish(mut self) -> Vec<Turn> {
         self.finish_current_turn();
         self.turns.into_iter().map(Turn::from).collect()
