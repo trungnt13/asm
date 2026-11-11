@@ -10,7 +10,7 @@
 ### Unused-component pruning
 
 - Removing unused or nonfunctional components is approved even when it increases upstream conflicts. Prefer whole components over scattered edits. Preserve personally used features, Desktop/Remote Control contracts, existing configuration/history, and security enforcement. Compatibility scaffolding must report unsupported behavior truthfully, never pretend success.
-- Omit CLI Cloud Tasks, the app-server test client, the responses API proxy, and OSS bootstrap/model-picker shortcuts. Preserve explicit provider configuration. Remove the unavailable terminal voice client and helper; retain a truthful unsupported TUI facade and preserve Desktop voice. Shared reviewer installation is not exclusive to Guardian V2 and must remain available when V2 flags are off.
+- Omit CLI Cloud Tasks, the app-server test client, the responses API proxy, and OSS bootstrap/model-picker shortcuts. Preserve explicit provider configuration. Remove unused external-agent detection/import engines with explicit unsupported RPC errors; retain history recording/reading, connector attribution, protocol types, and imported rollouts. Remove the unavailable terminal voice client and helper; retain a truthful unsupported TUI facade and preserve Desktop voice. Shared reviewer installation is not exclusive to Guardian V2 and must remain available when V2 flags are off.
 
 This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.md). Its validation and platform limits replace upstream defaults. Other coding, formatting, test-authoring, and generator rules still apply. Recorded intent does not prove implementation, integration, or publication.
 
