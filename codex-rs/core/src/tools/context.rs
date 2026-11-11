@@ -544,6 +544,7 @@ impl ExecCommandToolOutput {
     fn truncated_output_with_policy(&self, policy: TruncationPolicy) -> String {
         self.raw_output
             .render(Some(policy), self.original_token_count)
+            .into_owned()
     }
 
     fn response_header(&self) -> String {
