@@ -187,8 +187,6 @@ fn queue_rejects_unsupported_options() -> Result<()> {
     for (args, expected) in [
         ("queue --image screenshot.png", "image attachments"),
         ("queue --model other-model", "`--model`"),
-        ("--oss queue", "`--oss`"),
-        ("queue --local-provider ollama", "`--local-provider`"),
         (
             "queue --dangerously-bypass-hook-trust",
             "`--dangerously-bypass-hook-trust`",

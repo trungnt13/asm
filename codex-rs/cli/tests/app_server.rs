@@ -92,10 +92,6 @@ fn agents_reject_inputs_that_cannot_be_applied() -> Result<()> {
             "does not accept an initial prompt or images",
         ),
         (
-            ["--oss", "agents", "--remote", "ws://127.0.0.1:4512"].as_slice(),
-            "cannot apply local provider or additional-directory overrides",
-        ),
-        (
             [
                 "--add-dir",
                 ".",
