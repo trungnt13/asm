@@ -190,7 +190,7 @@ pub(crate) use guardian_policy::resolve_guardian_policy_text;
 pub(crate) use guardian_policy::resolve_guardian_reviewer;
 mod runtime_refresh;
 pub(crate) use runtime_refresh::RuntimeConfigRefresh;
-#[cfg(test)]
+#[cfg(any(test, feature = "config-schema"))]
 mod schema;
 mod token_budget_startup;
 mod windows_sandbox_config;

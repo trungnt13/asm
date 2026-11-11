@@ -2795,6 +2795,7 @@ version = "0.169.1-alpha.9"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "codex-app-server-protocol-noop-macros",
  "codex-execpolicy",
  "codex-features",
  "codex-file-system",

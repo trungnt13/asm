@@ -11,6 +11,9 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+config-schema = ["codex-config/config-schema"]
+
 [dependencies]
 axum = { workspace = true, features = ["http1", "json", "tokio"] }
 codex-utils-process = { workspace = true }
@@ -144,6 +147,7 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 openssl-sys = { workspace = true, features = ["vendored"] }
 
 [dev-dependencies]
+codex-config = { workspace = true, features = ["config-schema"] }
 codex-app-server = { workspace = true }
 codex-backend-client = { workspace = true }
 codex-message-board = { workspace = true }
