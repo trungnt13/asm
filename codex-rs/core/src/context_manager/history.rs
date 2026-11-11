@@ -621,7 +621,14 @@ impl ContextManager {
         I::Item: Deref<Target = ResponseItem>,
     {
         for item in items {
-            self.record_item_with_metadata(&item, /*metadata*/ None, policy);
+            if is_api_message(&item, /*metadata*/ None) {
+                self.record_item_with_metadata(
+                    &item,
+                    Arc::new((*item).clone()),
+                    /*metadata*/ None,
+                    policy,
+                );
+            }
         }
     }
 
@@ -635,7 +642,8 @@ impl ContextManager {
         for envelope in items {
             self.sampling.record(envelope);
             if let Some(source) = self.record_item_with_metadata(
-                envelope.item.as_ref(),
+                &envelope.item,
+                Arc::clone(&envelope.item),
                 envelope.metadata.as_ref(),
                 policy,
             ) {
@@ -651,7 +659,8 @@ impl ContextManager {
         policy: TruncationPolicy,
     ) {
         let captured = self.record_item_with_metadata(
-            envelope.item.as_ref(),
+            &envelope.item,
+            Arc::clone(&envelope.item),
             envelope.metadata.as_ref(),
             policy,
         );
@@ -672,6 +681,7 @@ impl ContextManager {
     fn record_item_with_metadata(
         &mut self,
         item: &ResponseItem,
+        shared_item: Arc<ResponseItem>,
         metadata: Option<&CodexHarnessMetadata>,
         policy: TruncationPolicy,
     ) -> Option<codex_history::RetainedSource> {
@@ -679,13 +689,20 @@ impl ContextManager {
             return None;
         }
         let mut processed = ResponseItemEnvelope {
-            item: Arc::new(item.clone()),
+            item: shared_item,
             metadata: metadata.cloned(),
         };
         self.sampling.record(&mut processed);
-        if let ResponseItem::FunctionCallOutput { output, .. }
-        | ResponseItem::CustomToolCallOutput { output, .. } = Arc::make_mut(&mut processed.item)
-        {
+        if matches!(
+            processed.item.as_ref(),
+            ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. }
+        ) {
+            let (ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. }) =
+                Arc::make_mut(&mut processed.item)
+            else {
+                unreachable!("tool output checked before copy-on-write");
+            };
             // The override already includes the tool's serialization allowance.
             let policy = metadata
                 .and_then(|metadata| metadata.history_truncation_token_limit)
