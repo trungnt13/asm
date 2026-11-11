@@ -74,6 +74,7 @@ impl App {
             AutoRenameRequest {
                 expected_name: thread.name,
             },
+            /*fallback_title*/ None,
         );
     }
 
@@ -132,7 +133,7 @@ impl App {
             return;
         }
         self.chat_widget
-            .expect_manual_thread_name(thread_id, title.clone());
+            .display_thread_name(thread_id, title.clone());
         self.cancel_thread_title_generation(thread_id);
         self.persist_automatic_thread_title(thread_id, &title).await;
     }

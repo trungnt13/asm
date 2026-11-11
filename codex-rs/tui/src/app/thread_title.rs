@@ -1,6 +1,6 @@
 //! Structured-output schema and normalization for generated TUI thread titles.
 //!
-//! Automatic titles are persisted only after generation, including for inactive threads;
+//! Automatic titles use the first message until generation completes and as a fallback;
 //! the originating thread's saved name takes precedence over an automatic result. Manual
 //! renames cancel pending requests; canceled events cannot affect newer requests.
 
@@ -12,18 +12,21 @@ use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
 use crate::app_server_session::ThreadSettingsOwner;
 use crate::temporary_structured_request::TemporaryStructuredThreadOptions;
+use crate::temporary_structured_request::TemporaryThreadKind;
 use crate::temporary_structured_request::run_temporary_structured_turn;
 use crate::temporary_structured_request::start_temporary_thread;
 use crate::temporary_structured_request::unsubscribe_temporary_thread;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItemPayload;
-use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::UserInput;
 use codex_config::AutoRenameConfig;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::openai_models::ReasoningEffort;
+use pulldown_cmark::Event;
+use pulldown_cmark::Parser;
+use pulldown_cmark::TagEnd;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
@@ -73,6 +76,7 @@ impl App {
         destination: ThreadTitleDestination,
         prompt: String,
         auto_rename: AutoRenameRequest,
+        fallback_title: Option<String>,
     ) {
         if app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server {
             if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
@@ -126,6 +130,16 @@ impl App {
         let max_title_chars = automatic_settings
             .and_then(|settings| settings.max_title_chars)
             .unwrap_or(THREAD_TITLE_MAX_CHARS);
+        let fallback_title = fallback_title
+            .filter(|_| {
+                destination == ThreadTitleDestination::Automatic
+                    && auto_rename.expected_name.is_none()
+            })
+            .map(|title| title.chars().take(max_title_chars).collect::<String>());
+        if let Some(title) = &fallback_title {
+            self.chat_widget
+                .display_thread_name(thread_id, title.clone());
+        }
         let model = automatic_settings
             .and_then(|settings| settings.model.clone())
             .unwrap_or(model);
@@ -139,7 +153,7 @@ impl App {
         let explicit_model = automatic_settings.and_then(|settings| settings.model.clone());
         let config = self.chat_widget.config_ref();
         let options = TemporaryStructuredThreadOptions {
-            thread_source: ThreadSource::Feature("thread_title".to_string()),
+            kind: TemporaryThreadKind::Title,
             model,
             model_provider: config.model_provider_id.clone(),
             cwd: config.cwd.display().to_string(),
@@ -171,6 +185,7 @@ impl App {
                 thread_id,
                 destination,
                 prompt,
+                fallback_title,
                 effort,
                 result,
             });
@@ -179,12 +194,14 @@ impl App {
 
     /// Register a started hidden thread and generate its structured title.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn on_thread_title_started(
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn on_thread_title_started(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
         prompt: String,
+        fallback_title: Option<String>,
         effort: Option<ReasoningEffort>,
         max_title_chars: usize,
         auto_rename: AutoRenameRequest,
@@ -206,8 +223,10 @@ impl App {
             }
             return;
         }
-        let temporary_thread_id_text = match result {
-            Ok(thread_id) => thread_id,
+        let temporary_thread_id = match result
+            .and_then(|id| ThreadId::from_string(&id).map_err(|error| error.to_string()))
+        {
+            Ok(id) => id,
             Err(error) => {
                 tracing::debug!(%error, "failed to start title-generation thread");
                 if destination == ThreadTitleDestination::ExplicitAutoRename {
@@ -215,6 +234,10 @@ impl App {
                         .add_error_message(format!("Could not generate a session name: {error}"));
                 }
                 self.finish_thread_title_generation(thread_id, destination);
+                if let Some(title) = fallback_title {
+                    self.save_automatic_thread_title(app_server, thread_id, title, auto_rename)
+                        .await;
+                }
                 if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
                     self.chat_widget.apply_thread_name_suggestion(
                         thread_id, request_id, /*suggestion*/ None,
@@ -224,39 +247,36 @@ impl App {
             }
         };
 
-        let Ok(temporary_thread_id) = ThreadId::from_string(&temporary_thread_id_text) else {
-            if destination == ThreadTitleDestination::ExplicitAutoRename {
-                self.chat_widget.add_error_message(
-                    "Could not generate a session name: invalid helper thread ID.".to_string(),
-                );
-            }
-            self.finish_thread_title_generation(thread_id, destination);
-            if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
-                self.chat_widget
-                    .apply_thread_name_suggestion(thread_id, request_id, /*suggestion*/ None);
-            }
-            return;
-        };
-
         let (sender, receiver) = mpsc::unbounded_channel();
         self.temporary_structured_requests
-            .insert(temporary_thread_id, sender);
+            .insert(temporary_thread_id, (TemporaryThreadKind::Title, sender));
 
         let request_handle = app_server.request_handle();
         let event_sender = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = run_temporary_structured_turn(
+            let mut result = run_temporary_structured_turn(
                 request_handle,
-                temporary_thread_id_text,
-                prompt,
-                thread_title_output_schema(max_title_chars),
-                effort,
+                TemporaryThreadKind::Title.turn_params(
+                    temporary_thread_id.to_string(),
+                    prompt,
+                    thread_title_output_schema(max_title_chars),
+                    effort,
+                ),
                 receiver,
                 cancellation.clone(),
             )
             .await
             .map_err(|error| error.to_string());
 
+            if let Some(title) = fallback_title
+                && result
+                    .as_deref()
+                    .ok()
+                    .and_then(|response| parse_thread_title(response, max_title_chars))
+                    .is_none()
+            {
+                result = Ok(json!({"title": title}).to_string());
+            }
             event_sender.send(AppEvent::GeneratedThreadTitle {
                 auto_rename,
                 max_title_chars,
@@ -325,6 +345,7 @@ impl App {
             ThreadTitleDestination::RenameSuggestion { request_id },
             recent_conversation_thread_title_prompt(&conversation),
             AutoRenameRequest::default(),
+            /*fallback_title*/ None,
         );
     }
 }
@@ -371,6 +392,35 @@ pub(super) fn thread_title_instructions(
   Do not use quotes, markdown, or trailing punctuation. \
   Do not answer the request."
     )
+}
+
+/// Desktop shows a single line from the first message until a generated title is available.
+pub(super) fn fallback_thread_title(message: &str) -> Option<String> {
+    const MAX_CHARS: usize = 60;
+    const INPUT_CHAR_LIMIT: usize = 2_000;
+    let excerpt: String = message.trim().chars().take(INPUT_CHAR_LIMIT).collect();
+    let mut text = String::new();
+    for event in Parser::new(&excerpt) {
+        match event {
+            Event::Text(value) | Event::Code(value) => text.push_str(&value),
+            Event::SoftBreak
+            | Event::HardBreak
+            | Event::Rule
+            | Event::End(
+                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item | TagEnd::CodeBlock,
+            ) => text.push(' '),
+            _ => {}
+        }
+    }
+    let mut title = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut chars = title.char_indices().skip(MAX_CHARS - 1);
+    if let Some((end, _)) = chars.next()
+        && chars.next().is_some()
+    {
+        title.truncate(title[..end].trim_end().len());
+        title.push('…');
+    }
+    (!title.is_empty()).then_some(title)
 }
 
 /// Build a bounded title request without truncating a Unicode character.

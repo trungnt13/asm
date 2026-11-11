@@ -9897,7 +9897,7 @@ async fn copy_picker_opening_preserves_terminal_scrollback_without_reflow() {
             !matches!(
                 event,
                 AppEvent::ClearUi { .. }
-                    | AppEvent::ClearUiAndSubmitUserMessage { .. }
+                    | AppEvent::ImplementPlanInFreshSession { .. }
                     | AppEvent::InsertHistoryCell(_)
                     | AppEvent::ConsolidateAgentMessage { .. }
             ),

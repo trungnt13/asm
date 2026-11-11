@@ -885,7 +885,7 @@ impl App {
                 self.cancel_thread_title_generation(thread_id);
                 self.forget_automatic_thread_title(thread_id)?;
                 app_server.thread_set_name(thread_id, name.clone()).await?;
-                self.chat_widget.expect_manual_thread_name(thread_id, name);
+                self.chat_widget.display_thread_name(thread_id, name);
                 Ok(true)
             }
             AppCommand::Review { target } => {

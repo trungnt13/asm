@@ -67,7 +67,7 @@ async fn captures_originals_without_generated_context_or_later_appends() -> anyh
             history_mode: ThreadHistoryMode::Paginated,
             history_base: None,
             subagent_history_start_ordinal: None,
-            initial_window_id: "window-1".into(),
+            initial_window_id: codex_protocol::ContextWindowId::new_uuid_v7(),
             runtime_workspace_roots: None,
             metadata: ThreadPersistenceMetadata {
                 cwd: Some(dir.path().to_path_buf()),
@@ -130,6 +130,7 @@ Approved action: {"action":{"command":"write /workspace/report.txt"},"outcome":"
         acceptance_order: Some(2),
     });
     let delivered = RolloutItem::RetainedContext(RetainedContextEvent::DeliveredAssistantMessage {
+        retained_source: None,
         message: RetainedUserMessage {
             turn_id: "turn-1".into(),
             message_id: Some("delivered-1".into()),
