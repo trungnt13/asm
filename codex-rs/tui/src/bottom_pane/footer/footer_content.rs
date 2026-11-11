@@ -29,14 +29,6 @@ impl From<UiTree> for FooterContent {
 }
 
 impl FooterContent {
-    pub(crate) fn native_parts(&self) -> Option<(&Line<'static>, &[TerminalHyperlink])> {
-        match self {
-            Self::Line(line) => Some((line, &[])),
-            Self::HyperlinkLine(line) => Some((&line.line, &line.hyperlinks)),
-            Self::Extension { .. } => None,
-        }
-    }
-
     /// Natural display width in terminal cells.
     pub(crate) fn width(&self) -> u16 {
         let width = match self {
