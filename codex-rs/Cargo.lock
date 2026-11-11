@@ -2562,7 +2562,6 @@ dependencies = [
  "codex-multi-env-copy-file",
  "codex-plugin",
  "codex-protocol",
- "codex-responses-api-proxy",
  "codex-rmcp-client",
  "codex-rollout",
  "codex-rollout-trace",
@@ -4634,30 +4633,6 @@ dependencies = [
  "http 1.4.0",
  "pretty_assertions",
  "serde_json",
-]
-
-[[package]]
-name = "codex-responses-api-proxy"
-version = "0.169.1-alpha.9"
-dependencies = [
- "anyhow",
- "bytes",
- "clap",
- "codex-http-client",
- "codex-process-hardening",
- "ctor 0.6.3",
- "http 1.4.0",
- "libc",
- "pretty_assertions",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tiny_http",
- "tokio",
- "tracing",
- "tracing-test",
- "url",
- "zeroize",
 ]
 
 [[package]]
@@ -18113,7 +18088,6 @@ version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 dependencies = [
- "serde",
  "zeroize_derive",
 ]
 

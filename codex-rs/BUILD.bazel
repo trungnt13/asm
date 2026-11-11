@@ -72,7 +72,6 @@ runtime_archive(
         "//codex-rs/cli:release_files",
         "//codex-rs/code-mode-host:release_files",
         "//codex-rs/exec-server-cli:release_files",
-        "//codex-rs/responses-api-proxy:release_files",
     ] + select({
         "@platforms//os:linux": ["//codex-rs/bwrap:release_files"],
         "//conditions:default": [],

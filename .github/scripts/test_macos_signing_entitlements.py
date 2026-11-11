@@ -26,12 +26,6 @@ class MacosSigningEntitlementsTest(unittest.TestCase):
             with self.subTest(binary=binary):
                 self.assertEqual(self.load(binary), expected)
 
-    def test_responses_proxy_keeps_existing_entitlements(self) -> None:
-        self.assertEqual(
-            self.load("codex-responses-api-proxy"),
-            {ALLOW_JIT: True},
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,13 +55,7 @@ class WorkflowArtifact:
     size_in_bytes: int
 
 
-BINARY_COMPONENTS = {
-    "codex-responses-api-proxy": BinaryComponent(
-        artifact_prefix="codex-responses-api-proxy",
-        dest_dir="codex-responses-api-proxy",
-        binary_basename="codex-responses-api-proxy",
-    ),
-}
+BINARY_COMPONENTS: dict[str, BinaryComponent] = {}
 
 
 def _gha_enabled() -> bool:

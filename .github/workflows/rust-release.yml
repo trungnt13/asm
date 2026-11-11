@@ -95,7 +95,7 @@ jobs:
             target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
             build_dmg: "true"
           - runner: macos-15-xlarge
             target: aarch64-apple-darwin
@@ -107,7 +107,7 @@ jobs:
             target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
             build_dmg: "true"
           - runner: macos-15-xlarge
             target: x86_64-apple-darwin
@@ -120,7 +120,7 @@ jobs:
             target: x86_64-unknown-linux-musl
             bundle: primary
             artifact_name: x86_64-unknown-linux-musl
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy bwrap"
+            binaries: "codex codex-code-mode-host codex-exec-server bwrap"
             build_dmg: "false"
           - runner: ${{ github.event.repository.name }}-linux-x64-xl
             target: x86_64-unknown-linux-musl
@@ -132,7 +132,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             bundle: primary
             artifact_name: aarch64-unknown-linux-musl
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy bwrap"
+            binaries: "codex codex-code-mode-host codex-exec-server bwrap"
             build_dmg: "false"
           - runner: ${{ github.event.repository.name }}-linux-arm64
             target: aarch64-unknown-linux-musl
@@ -660,7 +660,7 @@ jobs:
           - target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
           - target: aarch64-apple-darwin
             bundle: app-server
             artifact_name: aarch64-apple-darwin-app-server
@@ -668,7 +668,7 @@ jobs:
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
           - target: x86_64-apple-darwin
             bundle: app-server
             artifact_name: x86_64-apple-darwin-app-server
@@ -905,7 +905,7 @@ jobs:
           - target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
             build_dmg: "true"
           - target: aarch64-apple-darwin
             bundle: app-server
@@ -915,7 +915,7 @@ jobs:
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
             build_dmg: "true"
           - target: x86_64-apple-darwin
             bundle: app-server
@@ -1298,7 +1298,7 @@ jobs:
           - target: aarch64-apple-darwin
             bundle: primary
             artifact_name: aarch64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
             verify_dmg: "true"
           - target: aarch64-apple-darwin
             bundle: app-server
@@ -1308,7 +1308,7 @@ jobs:
           - target: x86_64-apple-darwin
             bundle: primary
             artifact_name: x86_64-apple-darwin
-            binaries: "codex codex-code-mode-host codex-exec-server codex-responses-api-proxy"
+            binaries: "codex codex-code-mode-host codex-exec-server"
             verify_dmg: "true"
           - target: x86_64-apple-darwin
             bundle: app-server
@@ -1599,7 +1599,6 @@ jobs:
             --release-version "$release_version" \
             --artifacts-dir "${GITHUB_WORKSPACE}/dist" \
             --package codex \
-            --package codex-responses-api-proxy \
             --package codex-sdk
 
       - name: Upload staged npm packages
@@ -1889,7 +1888,6 @@ jobs:
             "codex-npm-linux-*-${version}.tgz"
             "codex-npm-darwin-*-${version}.tgz"
             "codex-npm-win32-*-${version}.tgz"
-            "codex-responses-api-proxy-npm-${version}.tgz"
             "codex-sdk-npm-${version}.tgz"
           )
           for pattern in "${patterns[@]}"; do
@@ -1980,7 +1978,7 @@ jobs:
                 platform="${platform%-${VERSION}.tgz}"
                 tag="${prefix}${platform}"
                 ;;
-              codex-npm-"${VERSION}".tgz|codex-responses-api-proxy-npm-"${VERSION}".tgz|codex-sdk-npm-"${VERSION}".tgz)
+              codex-npm-"${VERSION}".tgz|codex-sdk-npm-"${VERSION}".tgz)
                 tag="${NPM_TAG}"
                 ;;
               *)
