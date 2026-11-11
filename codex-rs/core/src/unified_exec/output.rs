@@ -1,5 +1,7 @@
 //! Text retained for one unified exec output stream and the bytes omitted by its collection cap.
 
+use std::borrow::Cow;
+
 use codex_utils_head_tail_buffer::HeadTailBuffer;
 use codex_utils_head_tail_buffer::format_output_omission_marker;
 use codex_utils_output_truncation::TruncationPolicy;
@@ -36,13 +38,13 @@ impl CapturedStream {
         &self,
         policy: Option<TruncationPolicy>,
         original_tokens: Option<usize>,
-    ) -> String {
+    ) -> Cow<'_, str> {
         let truncated = match policy {
             Some(policy) if self.omitted_bytes == 0 => {
-                return formatted_truncate_text(&self.text, policy);
+                return formatted_truncate_text(&self.text, policy).into();
             }
             Some(policy) => truncate_text(&self.text, policy),
-            None if self.omitted_bytes == 0 => return self.text.clone(),
+            None if self.omitted_bytes == 0 => return Cow::Borrowed(&self.text),
             None => self.text.clone(),
         };
         let marker = format_output_omission_marker(self.omitted_bytes);
@@ -53,11 +55,12 @@ impl CapturedStream {
         };
         if policy.is_none_or(|policy| self.text.len() <= policy.byte_budget()) {
             if notice.is_empty() {
-                return truncated;
+                return truncated.into();
             }
-            return format!("{notice}{truncated}");
+            return format!("{notice}{truncated}").into();
         }
         let tokens = original_tokens.unwrap_or_else(|| approx_token_count(&self.text));
         format!("Warning: truncated output (original token count: {tokens})\n{notice}\n{truncated}")
+            .into()
     }
 }
