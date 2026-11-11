@@ -20,6 +20,7 @@ fn thread_settings_for_test(
             system1_error: None,
             system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
+            environments: None,
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::AutoReview,
