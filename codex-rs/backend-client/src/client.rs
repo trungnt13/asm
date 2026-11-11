@@ -1,13 +1,10 @@
 use crate::types::AccountsCheckResponse;
-use crate::types::CodeTaskDetailsResponse;
 use crate::types::CodexUserSettingsResponse;
 use crate::types::CodexWorkspaceMessagesResponse;
 use crate::types::ConfigBundleResponse;
-use crate::types::PaginatedListTaskListItem;
 use crate::types::RateLimitReachedKind as BackendRateLimitReachedKind;
 use crate::types::RateLimitStatusPayload;
 use crate::types::TokenUsageProfile;
-use crate::types::TurnAttemptsSiblingTurnsResponse;
 use anyhow::Result;
 use codex_api::AuthError;
 use codex_api::SharedAuthProvider;
@@ -564,98 +561,6 @@ impl Client {
         Ok(())
     }
 
-    pub async fn list_tasks(
-        &self,
-        limit: Option<i32>,
-        task_filter: Option<&str>,
-        environment_id: Option<&str>,
-        cursor: Option<&str>,
-    ) -> Result<PaginatedListTaskListItem> {
-        let url = self.list_tasks_url(limit, task_filter, environment_id, cursor)?;
-        let req = self
-            .request(Method::GET, &url)
-            .headers(self.headers().await?);
-        let (body, ct) = self.exec_request(req, "GET", &url).await?;
-        self.decode_json::<PaginatedListTaskListItem>(&url, &ct, &body)
-    }
-
-    fn list_tasks_url(
-        &self,
-        limit: Option<i32>,
-        task_filter: Option<&str>,
-        environment_id: Option<&str>,
-        cursor: Option<&str>,
-    ) -> Result<String> {
-        let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/tasks/list", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/tasks/list", self.base_url),
-        };
-        if limit.is_none() && task_filter.is_none() && environment_id.is_none() && cursor.is_none()
-        {
-            return Ok(url);
-        }
-        let mut url = url::Url::parse(&url)?;
-        {
-            let mut query = url.query_pairs_mut();
-            if let Some(limit) = limit {
-                query.append_pair("limit", &limit.to_string());
-            }
-            if let Some(task_filter) = task_filter {
-                query.append_pair("task_filter", task_filter);
-            }
-            if let Some(cursor) = cursor {
-                query.append_pair("cursor", cursor);
-            }
-            if let Some(environment_id) = environment_id {
-                query.append_pair("environment_id", environment_id);
-            }
-        }
-        Ok(url.to_string())
-    }
-
-    pub async fn get_task_details(&self, task_id: &str) -> Result<CodeTaskDetailsResponse> {
-        let (parsed, _body, _ct) = self.get_task_details_with_body(task_id).await?;
-        Ok(parsed)
-    }
-
-    pub async fn get_task_details_with_body(
-        &self,
-        task_id: &str,
-    ) -> Result<(CodeTaskDetailsResponse, String, String)> {
-        let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/tasks/{}", self.base_url, task_id),
-            PathStyle::ChatGptApi => format!("{}/wham/tasks/{}", self.base_url, task_id),
-        };
-        let req = self
-            .request(Method::GET, &url)
-            .headers(self.headers().await?);
-        let (body, ct) = self.exec_request(req, "GET", &url).await?;
-        let parsed: CodeTaskDetailsResponse = self.decode_json(&url, &ct, &body)?;
-        Ok((parsed, body, ct))
-    }
-
-    pub async fn list_sibling_turns(
-        &self,
-        task_id: &str,
-        turn_id: &str,
-    ) -> Result<TurnAttemptsSiblingTurnsResponse> {
-        let url = match self.path_style {
-            PathStyle::CodexApi => format!(
-                "{}/api/codex/tasks/{}/turns/{}/sibling_turns",
-                self.base_url, task_id, turn_id
-            ),
-            PathStyle::ChatGptApi => format!(
-                "{}/wham/tasks/{}/turns/{}/sibling_turns",
-                self.base_url, task_id, turn_id
-            ),
-        };
-        let req = self
-            .request(Method::GET, &url)
-            .headers(self.headers().await?);
-        let (body, ct) = self.exec_request(req, "GET", &url).await?;
-        self.decode_json::<TurnAttemptsSiblingTurnsResponse>(&url, &ct, &body)
-    }
-
     /// `GET /api/codex/config/bundle` (Codex API style) or
     /// `GET /wham/config/bundle` (ChatGPT backend-api style), or
     /// `GET /codex/config/bundle` beneath a custom config server's base URL.
@@ -711,40 +616,6 @@ impl Client {
         let (body, ct) = self.exec_request_detailed(req, "GET", &url).await?;
         self.decode_json::<CodexWorkspaceMessagesResponse>(&url, &ct, &body)
             .map_err(RequestError::from)
-    }
-
-    /// Create a new task (user turn) by POSTing to the appropriate backend path
-    /// based on `path_style`. Returns the created task id.
-    pub async fn create_task(&self, request_body: serde_json::Value) -> Result<String> {
-        let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/tasks", self.base_url),
-            PathStyle::ChatGptApi => format!("{}/wham/tasks", self.base_url),
-        };
-        let req = self
-            .request(Method::POST, &url)
-            .headers(self.headers().await?)
-            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .json(&request_body);
-        let (body, ct) = self.exec_request(req, "POST", &url).await?;
-        // Extract id from JSON: prefer `task.id`; fallback to top-level `id` when present.
-        match serde_json::from_str::<serde_json::Value>(&body) {
-            Ok(v) => {
-                if let Some(id) = v
-                    .get("task")
-                    .and_then(|t| t.get("id"))
-                    .and_then(|s| s.as_str())
-                {
-                    Ok(id.to_string())
-                } else if let Some(id) = v.get("id").and_then(|s| s.as_str()) {
-                    Ok(id.to_string())
-                } else {
-                    anyhow::bail!(
-                        "POST {url} succeeded but no task id found; content-type={ct}; body={body}"
-                    );
-                }
-            }
-            Err(e) => anyhow::bail!("Decode error for {url}: {e}; content-type={ct}; body={body}"),
-        }
     }
 
     // rate limit helpers
