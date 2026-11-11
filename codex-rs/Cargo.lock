@@ -3157,6 +3157,7 @@ dependencies = [
  "clap",
  "codex-app-server-client",
  "codex-app-server-protocol",
+ "codex-app-server-protocol-noop-macros",
  "codex-apply-patch",
  "codex-arg0",
  "codex-cloud-config",
@@ -3565,6 +3566,7 @@ version = "0.169.1-alpha.9"
 dependencies = [
  "anyhow",
  "chrono",
+ "codex-app-server-protocol-noop-macros",
  "codex-file-system",
  "codex-protocol",
  "codex-utils-absolute-path",
@@ -4533,6 +4535,7 @@ dependencies = [
  "anyhow",
  "chardetng",
  "chrono",
+ "codex-app-server-protocol-noop-macros",
  "codex-async-utils",
  "codex-execpolicy",
  "codex-extension-items",

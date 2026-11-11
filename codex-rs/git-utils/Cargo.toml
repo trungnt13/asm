@@ -8,7 +8,11 @@ readme = "README.md"
 [lints]
 workspace = true
 
+[features]
+ts = ["codex-protocol/ts"]
+
 [dependencies]
+codex-app-server-protocol-noop-macros = { workspace = true }
 codex-utils-process = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
@@ -35,6 +39,7 @@ ts-rs = { workspace = true, features = [
 walkdir = { workspace = true }
 
 [dev-dependencies]
+codex-protocol = { workspace = true, features = ["ts"] }
 codex-utils-cargo-bin = { workspace = true }
 pretty_assertions = { workspace = true }
 
