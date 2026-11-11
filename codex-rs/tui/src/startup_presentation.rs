@@ -23,7 +23,6 @@ use crate::startup_draft::StartupScreen;
 /// Screen policy and the already-loaded bootstrap configuration for this exact loading context.
 pub(super) struct StartupPresentation {
     pub(super) bootstrap_config: ConfigTomlLoadResult,
-    pub(super) config_cwd: Option<AbsolutePathBuf>,
     pub(super) screen: StartupScreen,
     pub(super) local_settings: crate::local_settings::LocalSettings,
 }
@@ -78,7 +77,6 @@ pub(super) async fn load(
     );
     Ok(StartupPresentation {
         bootstrap_config,
-        config_cwd,
         local_settings,
         screen: StartupScreen {
             use_alt_screen,

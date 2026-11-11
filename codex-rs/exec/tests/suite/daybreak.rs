@@ -93,7 +93,7 @@ async fn exec_rejects_daybreak_for_non_openai_provider() -> anyhow::Result<()> {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "Daybreak requires the OpenAI model provider",
+            "Daybreak requires a model provider with Cyber access program support",
         ));
     assert!(response.requests().is_empty());
     Ok(())
