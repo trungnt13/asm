@@ -4509,6 +4509,7 @@ impl Session {
                 cancellation_token,
                 required_servers,
                 required_plugins,
+                turn::StepToolRouting::ResponsesApi,
             )
             .await?;
         self.set_last_known_step_context(&step_context).await;
@@ -4527,6 +4528,24 @@ impl Session {
             cancellation_token,
             /*required_servers*/ &[],
             /*required_plugins*/ &HashSet::new(),
+            turn::StepToolRouting::ResponsesApi,
+        )
+        .await
+    }
+
+    /// Captures a private step whose router must be bound by a native messaging bridge.
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub(crate) async fn capture_native_messaging_step_context(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        cancellation_token: &CancellationToken,
+    ) -> CodexResult<Arc<StepContext>> {
+        self.capture_step_context_inner(
+            turn_context,
+            cancellation_token,
+            /*required_servers*/ &[],
+            /*required_plugins*/ &HashSet::new(),
+            turn::StepToolRouting::NativeMessaging,
         )
         .await
     }
@@ -4554,6 +4573,7 @@ impl Session {
         cancellation_token: &CancellationToken,
         required_servers: &[String],
         required_plugins: &HashSet<String>,
+        routing: turn::StepToolRouting,
     ) -> CodexResult<Arc<StepContext>> {
         // Read the step's model and record its environments together so an update cannot split them.
         // Match apply_turn_settings and activate_turn_environments: active_turn before state.
@@ -4863,6 +4883,7 @@ impl Session {
                 &mcp,
                 &extension_data,
                 prepared_recommendations,
+                routing,
                 &dynamic_tools,
             )
             .await?;

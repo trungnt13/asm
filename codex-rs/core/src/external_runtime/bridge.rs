@@ -529,3 +529,7 @@ fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
     };
     Ok(json!({"isError":output.success == Some(false), "content":content}))
 }
+
+#[cfg(test)]
+#[path = "bridge_tests.rs"]
+mod tests;
