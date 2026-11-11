@@ -8,9 +8,6 @@ pub mod analytics;
 pub(crate) mod config_bundle_response;
 pub use self::config_bundle_response::ConfigBundleResponse;
 
-pub(crate) mod config_file_response;
-pub use self::config_file_response::ConfigFileResponse;
-
 pub(crate) mod delivered_config_toml;
 pub use self::delivered_config_toml::DeliveredConfigToml;
 
@@ -24,11 +21,6 @@ pub(crate) mod delivered_toml_fragment;
 pub use self::delivered_toml_fragment::DeliveredTomlFragment;
 
 // Cloud Tasks
-pub(crate) mod code_task_details_response;
-pub use self::code_task_details_response::CodeTaskDetailsResponse;
-
-pub(crate) mod task_response;
-pub use self::task_response::TaskResponse;
 
 pub(crate) mod external_pull_request_response;
 pub use self::external_pull_request_response::ExternalPullRequestResponse;
