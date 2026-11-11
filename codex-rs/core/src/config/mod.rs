@@ -1,5 +1,3 @@
-use crate::config::edit::ConfigEdit;
-use crate::config::edit::ConfigEditsBuilder;
 use crate::context::world_state::validate_managed_developer_instructions;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::unified_exec::BackgroundTerminalTimeoutBounds;
@@ -2659,22 +2657,6 @@ pub fn set_project_trust_level(
         .apply_blocking()
 }
 
-/// Save the default OSS provider preference to config.toml
-pub fn set_default_oss_provider(codex_home: &Path, provider: &str) -> std::io::Result<()> {
-    codex_config::config_toml::validate_oss_provider(provider)?;
-    use toml_edit::value;
-
-    let edits = [ConfigEdit::SetPath {
-        segments: vec!["oss_provider".to_string()],
-        value: value(provider),
-    }];
-
-    ConfigEditsBuilder::new(codex_home)
-        .with_edits(edits)
-        .apply_blocking()
-        .map_err(|err| std::io::Error::other(format!("failed to persist config.toml: {err}")))
-}
-
 fn resolve_tool_suggest_config(
     config_toml: &ConfigToml,
     config_layer_stack: &ConfigLayerStack,
@@ -2902,20 +2884,6 @@ pub struct ConfigOverrides {
 fn dedupe_absolute_paths(paths: &mut Vec<AbsolutePathBuf>) {
     let mut seen = HashSet::new();
     paths.retain(|path| seen.insert(path.clone()));
-}
-
-/// Resolves the OSS provider from CLI override or global config.
-/// Returns `None` if no provider is configured at any level.
-pub fn resolve_oss_provider(
-    explicit_provider: Option<&str>,
-    config_toml: &ConfigToml,
-) -> Option<String> {
-    if let Some(provider) = explicit_provider {
-        // Explicit provider specified (e.g., via --local-provider)
-        Some(provider.to_string())
-    } else {
-        config_toml.oss_provider.clone()
-    }
 }
 
 /// Resolve the web search mode from explicit config and feature flags.
