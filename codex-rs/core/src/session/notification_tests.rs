@@ -26,7 +26,7 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
     };
     session
         .inject_if_running(vec![ResponseItemEnvelope {
-            item: notification(text.clone()),
+            item: notification(text.clone()).into(),
             metadata: Some(CodexHarnessMetadata {
                 history_truncation_token_limit: Some(120),
                 ..Default::default()

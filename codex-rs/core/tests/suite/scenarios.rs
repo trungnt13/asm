@@ -849,7 +849,7 @@ async fn unavailable_images_are_rechecked_without_rewriting_history() -> Result<
         .items
         .into_iter()
         .filter_map(|item| match item {
-            RolloutItem::ResponseItem(envelope) => match envelope.item {
+            RolloutItem::ResponseItem(envelope) => match envelope.into_item() {
                 ResponseItem::Message { content, .. } => Some(content),
                 _ => None,
             },

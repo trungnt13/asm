@@ -86,7 +86,7 @@ impl ContextManager {
                 .is_some_and(|metadata| metadata.delivered_assistant_message.is_some())
         }) {
             let _ = self.record_retained_message(
-                &envelope.item,
+                envelope.item.as_ref(),
                 envelope.metadata.as_ref(),
                 RetainedMessageSource::Checkpoint,
             );
@@ -104,7 +104,7 @@ impl ContextManager {
                     .is_some_and(|metadata| metadata.inherited_user_message)
             }) {
                 let _ = self.record_retained_message(
-                    &envelope.item,
+                    envelope.item.as_ref(),
                     envelope.metadata.as_ref(),
                     RetainedMessageSource::Checkpoint,
                 );
@@ -126,7 +126,7 @@ impl ContextManager {
             } = item
         {
             let call = self.items.iter().rev().find(|envelope| {
-                matches!(&envelope.item, ResponseItem::FunctionCall { call_id: id, .. } if id == call_id)
+                matches!(envelope.item.as_ref(), ResponseItem::FunctionCall { call_id: id, .. } if id == call_id)
             })?;
             let source = RetainedInputSource::from(call.metadata.as_ref());
             if source == RetainedInputSource::Inherited && !self.retain_inherited_user_messages {

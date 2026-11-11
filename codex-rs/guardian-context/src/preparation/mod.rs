@@ -401,7 +401,7 @@ pub async fn prepare_sync_context_with_facts(
             preparation
                 .reviewer_history
                 .iter()
-                .map(|envelope| &envelope.item),
+                .map(|envelope| envelope.item.as_ref()),
             preparation
                 .context_window
                 .filter(|_| preparation.supports_images),

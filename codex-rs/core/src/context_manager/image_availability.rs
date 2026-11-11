@@ -1,6 +1,7 @@
 //! Projects unavailable file images into placeholders without changing tool attribution.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use codex_attachment_store::AttachmentStore;
 use codex_context_fragments::AnnotatedContent;
@@ -19,13 +20,13 @@ const MAX_CONCURRENT_IMAGE_AVAILABILITY_CHECKS: usize = 8;
 
 /// Checks distinct file IDs concurrently and replaces only unavailable image content.
 pub(crate) async fn replace_unresolvable_image_files<'a>(
-    items: impl Iterator<Item = &'a mut ResponseItem>,
+    items: impl Iterator<Item = &'a mut Arc<ResponseItem>>,
     image_store: &dyn AttachmentStore,
 ) {
     let items: Vec<_> = items.collect();
     let mut file_ids = HashSet::new();
     for item in &items {
-        match item {
+        match item.as_ref() {
             ResponseItem::Message { content, .. } => {
                 for part in content {
                     if let ContentItem::InputImage {
@@ -71,6 +72,15 @@ pub(crate) async fn replace_unresolvable_image_files<'a>(
     }
 
     for item in items {
+        let changes = match item.as_ref() {
+            ResponseItem::Message { content, .. } => content.iter().any(|part| matches!(part, ContentItem::InputImage { image: ImageReference::File { file_id }, .. } if unavailable_file_ids.contains(file_id))),
+            ResponseItem::FunctionCallOutput { output, .. } | ResponseItem::CustomToolCallOutput { output, .. } => output.content_items().is_some_and(|content| content.iter().any(|part| matches!(part, FunctionCallOutputContentItem::InputImage { image: ImageReference::File { file_id }, .. } if unavailable_file_ids.contains(file_id)))),
+            _ => false,
+        };
+        if !changes {
+            continue;
+        }
+        let item = Arc::make_mut(item);
         match item {
             ResponseItem::Message { content, .. } => {
                 let mut unavailable = Vec::new();

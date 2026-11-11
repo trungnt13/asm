@@ -336,7 +336,7 @@ impl AnyToolResult {
         } = self;
         let history_truncation_token_limit = result.fallback_token_limit_override();
         ResponseItemEnvelope {
-            item: result.to_response_item(&call_id, &payload).into(),
+            item: std::sync::Arc::new(result.to_response_item(&call_id, &payload).into()),
             metadata: history_truncation_token_limit.map(|limit| CodexHarnessMetadata {
                 history_truncation_token_limit: Some(limit),
                 ..Default::default()

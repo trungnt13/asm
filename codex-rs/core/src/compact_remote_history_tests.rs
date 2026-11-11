@@ -14,7 +14,8 @@ fn rewritten_output_preserves_harness_metadata() {
                 success: Some(true),
             },
             internal_chat_message_metadata_passthrough: None,
-        },
+        }
+        .into(),
         metadata: Some(CodexHarnessMetadata::default()),
     };
 

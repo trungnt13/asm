@@ -37,7 +37,7 @@ pub(crate) async fn snapshot(session: &Session) -> Arc<FileAudioDurations> {
 pub(super) fn file_ids(items: &[ResponseItemEnvelope]) -> impl Iterator<Item = &String> {
     items
         .iter()
-        .filter_map(|envelope| match &envelope.item {
+        .filter_map(|envelope| match envelope.item.as_ref() {
             ResponseItem::Message { content, .. } => Some(content),
             _ => None,
         })

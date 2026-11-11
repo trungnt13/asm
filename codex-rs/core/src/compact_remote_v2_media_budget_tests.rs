@@ -270,14 +270,11 @@ fn older_media_keeps_both_labels_or_is_dropped_after_file_audio_fits() {
                     image_budget,
                     &FileAudioDurations::default(),
                 );
-                let [
-                    ResponseItemEnvelope {
-                        item: ResponseItem::Message { content, .. },
-                        ..
-                    },
-                ] = actual.as_slice()
-                else {
+                let [ResponseItemEnvelope { item, .. }] = actual.as_slice() else {
                     panic!("expected one retained user message");
+                };
+                let ResponseItem::Message { content, .. } = item.as_ref() else {
+                    panic!("expected message")
                 };
                 assert_eq!(content, &expected);
             }
@@ -384,7 +381,7 @@ fn image_treatment_preserves_client_developer_boundary_behavior() {
     };
     *role = "developer".to_string();
     let source = ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: Some(CodexHarnessMetadata {
             client_authored: true,
             ..Default::default()

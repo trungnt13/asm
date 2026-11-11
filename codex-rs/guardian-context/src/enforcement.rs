@@ -148,7 +148,7 @@ impl ComposedContext {
             matches!(
                 &section.delivery,
                 SectionDelivery::Message(message)
-                    if matches!(message.content.item,
+                    if matches!(message.content.item.as_ref(),
                         ResponseItem::AgentMessage { .. } | ResponseItem::FunctionCall { .. })
             )
         }) {
@@ -180,7 +180,7 @@ impl ComposedContext {
             .map(|item| (None, &item.item))
             .chain(pending)
         {
-            let duplicate = match item {
+            let duplicate = match item.as_ref() {
                 ResponseItem::AgentMessage {
                     id: Some(id),
                     author,

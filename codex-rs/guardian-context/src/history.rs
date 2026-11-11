@@ -66,7 +66,7 @@ impl TranscriptHistory {
     /// Elastic overflow evicts whole non-user entries toward half the byte allowance.
     /// Oversized user images fall back to bounded text; other oversized items are skipped.
     pub fn record(&mut self, envelope: &ResponseItemEnvelope) {
-        let item = &envelope.item;
+        let item = envelope.item.as_ref();
         if envelope
             .metadata
             .as_ref()
@@ -153,7 +153,8 @@ impl TranscriptHistory {
                             phase: phase.clone(),
                             internal_chat_message_metadata_passthrough:
                                 internal_chat_message_metadata_passthrough.clone(),
-                        },
+                        }
+                        .into(),
                         metadata: envelope.metadata.clone(),
                     });
                 }
@@ -228,8 +229,8 @@ impl TranscriptHistory {
                     // Old backups may lack delivery ordering. Do not keep ambiguous assistant
                     // sources ahead of a queued input; retained facts preserve earlier evidence.
                     RetainedInputSource::Local(None) => {
-                        !matches!(&entry.item, ResponseItem::Message { role, .. } if role == "assistant")
-                            && !matches!(&entry.item, ResponseItem::FunctionCall { .. })
+                        !matches!(entry.item.as_ref(), ResponseItem::Message { role, .. } if role == "assistant")
+                            && !matches!(entry.item.as_ref(), ResponseItem::FunctionCall { .. })
                     }
                     RetainedInputSource::Inherited => true,
                 }
@@ -264,7 +265,7 @@ impl TranscriptHistory {
 
 impl SectionHistory for TranscriptHistory {
     fn items(&self) -> Box<dyn Iterator<Item = &ResponseItem> + Send + '_> {
-        Box::new(self.reviewable_items().map(|item| &item.item))
+        Box::new(self.reviewable_items().map(|item| item.item.as_ref()))
     }
 }
 

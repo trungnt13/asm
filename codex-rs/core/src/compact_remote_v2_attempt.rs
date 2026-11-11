@@ -68,7 +68,7 @@ pub(crate) struct BackgroundCompactionInput {
     turn_state: Option<String>,
     window: (String, u64, codex_protocol::ContextWindowId),
     base_instructions: BaseInstructions,
-    input: Vec<ResponseItem>,
+    input: Vec<Arc<ResponseItem>>,
     metadata: Vec<Option<CodexHarnessMetadata>>,
 }
 
@@ -160,7 +160,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         }
         RemoteCompactV2AttemptInput::Background(input) => (
             &step_context.settings.model_info,
-            UserGoalUpdate::message_ids(input.input.iter()),
+            UserGoalUpdate::message_ids(input.input.iter().map(Arc::as_ref)),
             None,
             input.base_instructions,
             input.input,
@@ -175,10 +175,10 @@ pub(super) async fn run_remote_compact_v2_attempt(
     let tools_in_history = step_context.incremental_tools_feature().is_some()
         && input
             .iter()
-            .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
+            .any(|item| matches!(item.as_ref(), ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
     let mut prompt = Prompt {
-        input: input.into_iter().map(Arc::new).collect(),
+        input,
         tools: if tools_in_history {
             tool_router
                 .model_visible_specs()
@@ -259,16 +259,13 @@ pub(super) async fn run_remote_compact_v2_attempt(
                     return Err(error);
                 };
                 unavailable.insert(id);
-                let mut input = std::mem::take(&mut prompt.input)
-                    .into_iter()
-                    .map(Arc::unwrap_or_clone)
-                    .collect();
+                let mut input = std::mem::take(&mut prompt.input);
                 rejected_audio::project_compaction_audio(
                     &mut input,
                     &mut prompt_input_metadata,
                     &unavailable,
                 );
-                prompt.input = input.into_iter().map(Arc::new).collect();
+                prompt.input = input;
             }
         }
     };

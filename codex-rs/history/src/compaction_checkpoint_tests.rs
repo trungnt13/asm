@@ -12,7 +12,8 @@ fn latest_checkpoint_keeps_its_own_producer_even_when_unusable() {
             id: Some(uuid_v7_item_id_generator_for_test()("old")),
             encrypted_content: "older checkpoint".to_owned(),
             internal_chat_message_metadata_passthrough: None,
-        },
+        }
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             compaction_model_hash: Some("producer".to_owned()),
             ..Default::default()

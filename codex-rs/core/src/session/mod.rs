@@ -2045,7 +2045,7 @@ impl Session {
                 let turn_context = self.new_default_turn().await;
                 for record in &mut rollout_items {
                     if let RolloutItem::ResponseItem(envelope) = record {
-                        self.assign_missing_response_item_id(&mut envelope.item);
+                        self.assign_missing_response_item_id(Arc::make_mut(&mut envelope.item));
                     }
                 }
                 self.apply_rollout_reconstruction(&turn_context, &rollout_items)
@@ -2191,7 +2191,7 @@ impl Session {
         // the prior batch behavior and carry history-only metadata in a positional sidecar.
         let (mut prepared_history, metadata): (Vec<_>, Vec<_>) = history
             .into_iter()
-            .map(|envelope| (envelope.item, envelope.metadata))
+            .map(|envelope| (Arc::unwrap_or_clone(envelope.item), envelope.metadata))
             .unzip();
         // Replay must not upload or migrate recorded history. The inline store returns prepared
         // inline bytes, while existing file references bypass preparation and remain unchanged.
@@ -2216,7 +2216,10 @@ impl Session {
         history = prepared_history
             .into_iter()
             .zip(metadata)
-            .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
+            .map(|(item, metadata)| ResponseItemEnvelope {
+                item: item.into(),
+                metadata,
+            })
             .collect();
         file_audio::resolve(self, file_audio::file_ids(&history).cloned().collect()).await;
         // Ordinary replay needs no reviewer refresh. Only an opaque
@@ -4283,7 +4286,7 @@ impl Session {
         );
         for envelope in &mut items {
             if matches!(
-                envelope.item,
+                envelope.item.as_ref(),
                 ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. }
             ) {
                 envelope
@@ -4339,8 +4342,8 @@ impl Session {
                 {
                     continue;
                 }
-                if matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "assistant")
-                    || matches!(&envelope.item, ResponseItem::FunctionCall { .. })
+                if matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "assistant")
+                    || matches!(envelope.item.as_ref(), ResponseItem::FunctionCall { .. })
                     || crate::context::is_user_authorization_message(&envelope.item)
                 {
                     let message_order = pending_orders.as_ref().and_then(|orders| {
@@ -4362,10 +4365,10 @@ impl Session {
                 }
             }
             if items.iter().any(|envelope| {
-                matches!(&envelope.item,
+                matches!(envelope.item.as_ref(),
                 ResponseItem::Message { role, .. } if role == "assistant")
                     || matches!(
-                        &envelope.item,
+                        envelope.item.as_ref(),
                         ResponseItem::FunctionCallOutput { .. }
                             | ResponseItem::CustomToolCallOutput { .. }
                     )
@@ -4414,9 +4417,12 @@ impl Session {
                 .mark_mcp_attribution_persisted(revision);
         }
         if turn_context.config.memories.disable_on_external_context
-            && let Some(item) = response_items
-                .iter()
-                .find(|item| matches!(item, ResponseItem::FunctionCallOutput { call_id: None, .. }))
+            && let Some(item) = response_items.iter().find(|item| {
+                matches!(
+                    item.as_ref(),
+                    ResponseItem::FunctionCallOutput { call_id: None, .. }
+                )
+            })
         {
             mark_thread_memory_mode_polluted_if_external_context(self, turn_context, item).await;
         }
@@ -5114,7 +5120,7 @@ impl Session {
             });
         if let Some(checkpoint) = items.iter_mut().rev().find(|envelope| {
             matches!(
-                envelope.item,
+                envelope.item.as_ref(),
                 ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
             )
         }) {
@@ -5195,13 +5201,13 @@ impl Session {
                 }
             };
             for envelope in &mut items {
-                self.assign_missing_response_item_id(&mut envelope.item);
+                self.assign_missing_response_item_id(Arc::make_mut(&mut envelope.item));
             }
             // Goal edits are published outside the running task. Keep edits accepted after
             // the compaction input snapshot, in their original order, after its replacement.
             if complete_replacement {
                 let replacement_goal_ids = crate::context::UserGoalUpdate::message_ids(
-                    items.iter().map(|envelope| &envelope.item),
+                    items.iter().map(|envelope| envelope.item.as_ref()),
                 );
                 items.extend(
                     state
@@ -5330,12 +5336,16 @@ impl Session {
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(item_count = items.len()))]
-    async fn send_raw_response_items(&self, turn_context: &TurnContext, items: &[ResponseItem]) {
+    async fn send_raw_response_items(
+        &self,
+        turn_context: &TurnContext,
+        items: &[Arc<ResponseItem>],
+    ) {
         for item in items {
             self.send_event(
                 turn_context,
                 EventMsg::RawResponseItem(RawResponseItemEvent {
-                    item: item.clone(),
+                    item: item.as_ref().clone(),
                     spawn_arguments: None,
                 }),
             )
@@ -6245,7 +6255,7 @@ impl Session {
                 turn_context,
                 model_info,
                 vec![ResponseItemEnvelope {
-                    item: response_item,
+                    item: response_item.into(),
                     metadata: metadata.acceptance_order.map(|order| CodexHarnessMetadata {
                         user_input_order: Some(order),
                         ..Default::default()
@@ -6365,10 +6375,8 @@ fn apply_prepared_image_file_ids(
 ) {
     // Preparation replaces image slots in place; resize notices are separate messages.
     // Read the references from the original message while retaining UI-only input spans.
-    if let Some(ResponseItemEnvelope {
-        item: ResponseItem::Message { content, .. },
-        ..
-    }) = prepared_items.first()
+    if let Some(envelope) = prepared_items.first()
+        && let ResponseItem::Message { content, .. } = envelope.item.as_ref()
     {
         for (&input_index, &content_index) in user_image_content_indices {
             if let Some(ContentItem::InputImage {

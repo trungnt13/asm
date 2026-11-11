@@ -233,7 +233,7 @@ fn annotate_retained_user_in_rollout(path: &Path, retained_text: &str) -> Result
         .iter_mut()
         .find_map(|line| match &mut line.item {
             RolloutItem::ResponseItem(envelope)
-                if is_retained_user_message(&envelope.item, retained_text) =>
+                if is_retained_user_message(envelope.item.as_ref(), retained_text) =>
             {
                 Some(envelope)
             }
@@ -266,7 +266,8 @@ fn assert_compacted_user_metadata(path: &Path, retained_text: &str) -> Result<()
         .context("compacted replacement history missing")?;
     assert!(
         replacement_history.iter().any(|envelope| {
-            is_retained_user_message(&envelope.item, retained_text) && envelope.metadata.is_some()
+            is_retained_user_message(envelope.item.as_ref(), retained_text)
+                && envelope.metadata.is_some()
         }),
         "compacted user message should retain its aligned harness metadata"
     );
@@ -520,7 +521,7 @@ async fn remote_compact_v2_records_usage_before_output_validation() -> Result<()
                 item,
                 RolloutItem::ResponseItem(envelope)
                     if is_retained_user_message(
-                        &envelope.item,
+                        envelope.item.as_ref(),
                         "turn that triggers auto compact",
                     )
             ))

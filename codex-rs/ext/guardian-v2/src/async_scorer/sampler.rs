@@ -87,7 +87,7 @@ pub struct LunaSamplingRequest {
     pub instructions: RenderedFragment,
     /// Composed evidence messages, with roles, annotations and content order intact.
     #[cfg(test)]
-    pub input: Vec<ResponseItem>,
+    pub input: Vec<Arc<ResponseItem>>,
     /// Opaque parent compaction to reuse only for compatible model configurations.
     pub parent_compaction: Option<ResponseItem>,
     /// Reasoning budget explicitly selected for this request.
@@ -197,7 +197,9 @@ impl LunaSampler {
         });
         // Normalize only new evidence; never rewrite the committed prefix.
         for item in &mut evidence {
-            if let ResponseItem::Message { content, .. } = &mut item.item {
+            if matches!(item.item.as_ref(), ResponseItem::Message { content, .. } if content.iter().any(|part| matches!(part, ContentItem::InputImage { detail: Some(_), .. })))
+                && let ResponseItem::Message { content, .. } = Arc::make_mut(&mut item.item)
+            {
                 for content in content {
                     if let ContentItem::InputImage { detail, .. } = content {
                         *detail = None;
@@ -224,12 +226,12 @@ impl LunaSampler {
     fn execution(
         &self,
         request: &LunaSamplingRequest,
-        input: Vec<ResponseItem>,
+        input: Vec<Arc<ResponseItem>>,
         auth_owner: Option<AuthOwner>,
     ) -> execution::SamplingExecution {
         let api_request = ResponsesApiRequest {
             model: MODEL.to_owned(),
-            input: input.into_iter().map(Arc::new).collect(),
+            input,
             tools: None,
             tool_choice: "none".to_owned(),
             parallel_tool_calls: false,
@@ -317,10 +319,7 @@ impl LunaSampler {
                 .input
                 .into_iter()
                 .zip(metadata.into_iter().chain(std::iter::repeat(None)))
-                .map(|(item, metadata)| ResponseItemEnvelope {
-                    item: Arc::unwrap_or_clone(item),
-                    metadata,
-                })
+                .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
                 .collect(),
         )
     }

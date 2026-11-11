@@ -2,6 +2,7 @@
 //! Provider errors are attributed only against the immutable submitted request.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use codex_attachment_store::AttachmentStore;
@@ -106,9 +107,9 @@ fn visit_sources<'a>(item: &'a ResponseItem, mut visit: impl FnMut(FileErrorSour
 pub(crate) fn checkpoint_input_has_no_file_error_sources(items: &[ResponseItemEnvelope]) -> bool {
     items.iter().all(|envelope| {
         let mut clear = true;
-        visit_sources(&envelope.item, |source| {
+        visit_sources(envelope.item.as_ref(), |source| {
             clear &= matches!(source, FileErrorSource::Opaque)
-                && clear_checkpoint(&envelope.item, envelope.metadata.as_ref()).is_some();
+                && clear_checkpoint(envelope.item.as_ref(), envelope.metadata.as_ref()).is_some();
         });
         clear
     })
@@ -243,12 +244,12 @@ fn is_unknown_file_error(error: &CodexErrorDetails) -> bool {
 /// A long-lived thread can reach compaction after an earlier upload has expired.
 /// Only an authoritative negative availability check permits omitting the file.
 pub(crate) async fn unavailable_file_audio(
-    items: &[ResponseItem],
+    items: &[Arc<ResponseItem>],
     store: &dyn AttachmentStore,
 ) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for item in items {
-        if let ResponseItem::Message { content, .. } = item {
+        if let ResponseItem::Message { content, .. } = item.as_ref() {
             for part in content {
                 if let ContentItem::InputAudio {
                     audio: AudioReference::File { file_id },
@@ -283,7 +284,7 @@ async fn unavailable_file_audio_ids(
 /// Keep per-item metadata paired with the submitted input when an audio-only
 /// message disappears. The resulting projection also becomes the checkpoint.
 pub(crate) fn project_compaction_audio(
-    input: &mut Vec<ResponseItem>,
+    input: &mut Vec<Arc<ResponseItem>>,
     metadata: &mut Vec<Option<CodexHarnessMetadata>>,
     unavailable: &BTreeSet<String>,
 ) {
@@ -308,13 +309,7 @@ pub(super) fn project_file_audio(
     rejected_file_ids: &BTreeSet<String>,
 ) {
     items.retain_mut(|envelope| {
-        let ResponseItem::Message {
-            role,
-            content,
-            internal_chat_message_metadata_passthrough,
-            ..
-        } = &mut envelope.item
-        else {
+        let ResponseItem::Message { content, .. } = envelope.item.as_ref() else {
             return true;
         };
         let keep = content
@@ -328,6 +323,15 @@ pub(super) fn project_file_audio(
         if keep.iter().all(|keep| *keep) {
             return true;
         }
+        let ResponseItem::Message {
+            role,
+            content,
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = Arc::make_mut(&mut envelope.item)
+        else {
+            unreachable!()
+        };
         retain_aligned(content, &keep);
         if let Some(metadata) = internal_chat_message_metadata_passthrough {
             if let Some(kinds) = &mut metadata.content_item_kinds {

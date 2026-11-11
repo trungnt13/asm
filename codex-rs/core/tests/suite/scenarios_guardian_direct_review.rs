@@ -93,7 +93,7 @@ async fn direct_exec_review_matches_live_action_without_execution() -> Result<()
         .items
         .into_iter()
         .filter_map(|entry| match entry {
-            RolloutItem::ResponseItem(item) => match &item.item {
+            RolloutItem::ResponseItem(item) => match item.item.as_ref() {
                 ResponseItem::Message { role, content, .. }
                     if role == "user" && content == &[input_text(prompt)] =>
                 {
@@ -331,7 +331,7 @@ async fn direct_patch_review_matches_live_action_without_writes(
         .items
         .into_iter()
         .filter_map(|entry| match entry {
-            RolloutItem::ResponseItem(item) => match &item.item {
+            RolloutItem::ResponseItem(item) => match item.item.as_ref() {
                 ResponseItem::Message { role, content, .. }
                     if role == "user" && content == &[input_text(prompt)] =>
                 {
@@ -465,7 +465,7 @@ async fn direct_permissions_review_matches_live_action() -> Result<()> {
         .items
         .into_iter()
         .filter_map(|entry| match entry {
-            RolloutItem::ResponseItem(item) => match &item.item {
+            RolloutItem::ResponseItem(item) => match item.item.as_ref() {
                 ResponseItem::Message { role, content, .. }
                     if role == "user" && content == &[input_text(prompt)] =>
                 {
@@ -829,7 +829,7 @@ async fn direct_exec_review_honors_hook_denial_before_policy_skip() -> Result<()
     let history = test.codex.load_history(/*include_archived*/ false).await?;
     assert!(history.items.iter().any(|entry| {
         matches!(entry, RolloutItem::ResponseItem(item)
-            if matches!(&item.item, ResponseItem::Message { role, content, .. }
+            if matches!(item.item.as_ref(), ResponseItem::Message { role, content, .. }
                 if role == "developer" && content == &[input_text(reason)]))
     }));
 

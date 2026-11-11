@@ -135,13 +135,13 @@ fn find_user_message_with_image(text: &str) -> Option<ResponseItem> {
             Err(_) => continue,
         };
         if let RolloutItem::ResponseItem(envelope) = &rollout.item
-            && let ResponseItem::Message { role, content, .. } = &envelope.item
+            && let ResponseItem::Message { role, content, .. } = envelope.item.as_ref()
             && role == "user"
             && content
                 .iter()
                 .any(|span| matches!(span, ContentItem::InputImage { .. }))
         {
-            return Some(envelope.item.clone());
+            return Some(envelope.item.as_ref().clone());
         }
     }
     None
@@ -657,7 +657,9 @@ async fn resumed_history_only_emits_resize_notices_for_new_images() -> anyhow::R
             let RolloutItem::ResponseItem(envelope) = &mut line.item else {
                 return None;
             };
-            let ResponseItem::Message { role, content, .. } = &mut envelope.item else {
+            let ResponseItem::Message { role, content, .. } =
+                std::sync::Arc::make_mut(&mut envelope.item)
+            else {
                 return None;
             };
             (role == "user"
@@ -877,7 +879,7 @@ async fn resumed_history_only_emits_resize_notices_for_new_images() -> anyhow::R
             else {
                 return None;
             };
-            matches!(envelope.item, ResponseItem::Message { role, .. } if role == "developer")
+            matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "developer")
                 .then(|| envelope.metadata.map(|metadata| metadata.client_authored))
         })
         .collect::<Vec<_>>();

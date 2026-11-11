@@ -119,7 +119,7 @@ impl Session {
         mut envelope: ResponseItemEnvelope,
     ) -> ResponseItemEnvelope {
         if self.enabled(Feature::RetainClientDeveloperMessages)
-            && matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "developer")
+            && matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "developer")
         {
             envelope.metadata.get_or_insert_default().client_authored = true;
         }
@@ -174,7 +174,7 @@ impl Session {
 
             let mut metadata = envelope.metadata;
             annotated_items.extend(prepared_items.into_iter().map(|item| ResponseItemEnvelope {
-                item,
+                item: item.into(),
                 metadata: metadata.take(),
             }));
         }

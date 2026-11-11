@@ -1136,7 +1136,10 @@ async fn pending_turn_input(
             } else {
                 None
             };
-            TurnInput::FunctionCallOutput(ResponseItemEnvelope { item, metadata })
+            TurnInput::FunctionCallOutput(ResponseItemEnvelope {
+                item: item.into(),
+                metadata,
+            })
         }
         SubmittedTurnInput::ResponseItem(item)
         | SubmittedTurnInput::AnnotatedResponseItem(AnnotatedResponseItem { item, .. }) => {
@@ -1149,7 +1152,10 @@ async fn pending_turn_input(
     if retain
         && let TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) =
             &mut input
-        && matches!(envelope.item, ResponseItem::FunctionCallOutput { .. })
+        && matches!(
+            envelope.item.as_ref(),
+            ResponseItem::FunctionCallOutput { .. }
+        )
     {
         envelope.metadata.get_or_insert_default().client_authored = true;
     }

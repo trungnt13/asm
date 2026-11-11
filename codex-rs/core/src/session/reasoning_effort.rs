@@ -55,7 +55,7 @@ impl Session {
                     {
                         return None;
                     }
-                    match &envelope.item {
+                    match envelope.item.as_ref() {
                         ResponseItem::ConfigurationUpdate { reasoning } => {
                             Some((index, &reasoning.effort))
                         }
@@ -82,7 +82,8 @@ impl Session {
             vec![ResponseItemEnvelope {
                 item: ResponseItem::ConfigurationUpdate {
                     reasoning: ConfigurationReasoning { effort },
-                },
+                }
+                .into(),
                 metadata: Some(CodexHarnessMetadata {
                     harness_authored_configuration: true,
                     ..Default::default()

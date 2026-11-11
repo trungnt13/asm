@@ -62,7 +62,7 @@ impl RootConversationSource for CapturedRootConversation {
                 let ResponseItem::FunctionCallOutput {
                     call_id: Some(call_id),
                     ..
-                } = &envelope.item
+                } = envelope.item.as_ref()
                 else {
                     return None;
                 };
@@ -81,7 +81,7 @@ impl RootConversationSource for CapturedRootConversation {
                 .annotated_items()
                 .iter()
                 .filter_map(|envelope| {
-                    let item = &envelope.item;
+                    let item = envelope.item.as_ref();
                     let Some(TurnItem::UserMessage(message)) = parse_turn_item(item) else {
                         return None;
                     };
@@ -181,7 +181,7 @@ impl RootConversationSource for CapturedRootConversation {
                     .is_some_and(|metadata| metadata.compaction_output)
             })
             .filter_map(|envelope| {
-                let content = match &envelope.item {
+                let content = match envelope.item.as_ref() {
                     ResponseItem::FunctionCall { call_id, .. } => {
                         RootAssistantContent::DeliveredCall {
                             call_id: call_id.clone(),

@@ -28,7 +28,6 @@ use codex_protocol::models::ExecutedToolCallArguments;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::ToolResultMetadata;
 use codex_protocol::models::executed_tool_call_metadata_bytes;
-use codex_protocol::models::normalize_executed_tool_call_completeness;
 use codex_protocol::openai_models::ToolMode;
 use indexmap::IndexMap;
 use serde_json::Value as JsonValue;

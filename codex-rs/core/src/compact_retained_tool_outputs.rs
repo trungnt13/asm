@@ -10,7 +10,7 @@ pub(crate) fn is_retained_tool_output(envelope: &ResponseItemEnvelope) -> bool {
         .as_ref()
         .is_some_and(|metadata| metadata.client_authored)
         && matches!(
-            envelope.item,
+            envelope.item.as_ref(),
             ResponseItem::FunctionCallOutput {
                 call_id: None,
                 name: Some(_),

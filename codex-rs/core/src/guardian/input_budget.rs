@@ -204,10 +204,7 @@ pub(crate) async fn finalize(
     let context = PreparedReviewContext::prepare(context, pending.elastic.as_ref(), &history)
         .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?;
     let prompt = build_prompt(
-        history
-            .into_iter()
-            .map(codex_history::ResponseItemEnvelope::into_item)
-            .collect(),
+        history.into_iter().map(|envelope| envelope.item).collect(),
         step,
         session.get_prompt_base_instructions().await,
         session.current_window_uses_incremental_tools(step).await,
@@ -318,7 +315,7 @@ pub(crate) async fn finalize(
         Ok((user_input, metadata)) => {
             if metadata.is_some() {
                 input[0] = TurnInput::ResponseItem(codex_history::ResponseItemEnvelope {
-                    item: session.response_item_from_user_input(user_input),
+                    item: session.response_item_from_user_input(user_input).into(),
                     metadata,
                 });
             } else if let TurnInput::UserInput { content, .. } = &mut input[0] {
@@ -334,7 +331,7 @@ pub(crate) async fn finalize(
                 .map(|mut envelope| {
                     // Preserve the ordinary user-content annotations on each text segment;
                     // native evidence retains its original identity and ciphertext.
-                    if let ResponseItem::Message { role, content, .. } = &envelope.item
+                    if let ResponseItem::Message { role, content, .. } = envelope.item.as_ref()
                         && role == "user"
                     {
                         let user_input = content
@@ -355,7 +352,7 @@ pub(crate) async fn finalize(
                                 }
                             })
                             .collect::<CodexResult<Vec<_>>>()?;
-                        envelope.item = session.response_item_from_user_input(user_input);
+                        envelope.item = session.response_item_from_user_input(user_input).into();
                     }
                     Ok(TurnInput::ResponseItem(envelope))
                 })
