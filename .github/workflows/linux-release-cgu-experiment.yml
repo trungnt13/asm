@@ -1,0 +1,106 @@
+name: Linux release CGU experiment
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        description: 'Full immutable source commit SHA (same source for both clean builds)'
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Full immutable source commit SHA (same source for both clean builds)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Linux release CGU ${{ matrix.cgu }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        cgu: [4, 16]
+    defaults:
+      run:
+        working-directory: codex-rs
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_RELEASE_STRIP: 'debuginfo'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.cgu }}
+      TARGET: x86_64-unknown-linux-gnu
+      AWS_LC_SYS_NO_JITTER_ENTROPY: '1'
+      AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_gnu: '1'
+    steps:
+      - name: Validate immutable source input
+        working-directory: .
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: '[[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Install GNU build tools
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/install-gnu-build-tools.sh"
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: x86_64-unknown-linux-gnu
+          repository: trungnt13/asm
+      - name: Build unchanged release binary set and record evidence
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/diagnostics"
+          evidence="$GITHUB_WORKSPACE/diagnostics"
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          {
+            git rev-parse HEAD
+            rustc -Vv
+            cargo -V
+            nproc
+            free -h
+            env | sort | grep -E '^(CARGO_PROFILE_RELEASE_|AWS_LC_SYS_NO_JITTER_ENTROPY|TARGET=)'
+          } > "$evidence/inputs.log"
+          (while true; do
+            date -u
+            free -h
+            df -h .
+            ps -eo pid,comm,%cpu,%mem,rss --sort=-rss | head -12 || true
+            sleep 60
+          done) > "$evidence/resources.log" 2>&1 &
+          sampler=$!
+          trap 'kill "$sampler" 2>/dev/null || true' EXIT
+          start=$SECONDS
+          /usr/bin/time -v -o "$evidence/bwrap-time.log" \
+            cargo build --locked --release --target "$TARGET" --bin bwrap
+          CODEX_BWRAP_SHA256=$(sha256sum "target/$TARGET/release/bwrap" | cut -d' ' -f1)
+          export CODEX_BWRAP_SHA256
+          /usr/bin/time -v -o "$evidence/build-time.log" \
+            cargo build --locked --release --target "$TARGET" \
+              --bin codex --bin codex-code-mode-host --bin codex-exec-server --timings \
+              2>&1 | tee "$evidence/build.log"
+          echo "total_build_seconds=$((SECONDS - start))" >> "$evidence/inputs.log"
+          sha256sum "target/$TARGET/release/"{codex,codex-code-mode-host,codex-exec-server} > "$evidence/binaries.sha256"
+          du -b "target/$TARGET/release/"{codex,codex-code-mode-host,codex-exec-server} > "$evidence/binary-sizes.log"
+          cp -r target/cargo-timings "$evidence/"
+          cat "$evidence/inputs.log" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload experiment evidence only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-release-cgu-${{ matrix.cgu }}-${{ inputs.source_sha }}
+          path: diagnostics/
+          if-no-files-found: warn
+          retention-days: 14
