@@ -1145,7 +1145,7 @@ impl Session {
             && session_configuration.session_source.is_non_root_agent()
             && config.features.enabled(Feature::TokenBudget);
         if restore_child_window && let InitialHistory::Forked(items) = &mut initial_history {
-            let child_window_id = initial_auto_compact_window_ids.window_id.to_string();
+            let child_window_id = initial_auto_compact_window_ids.window_id.clone();
             for item in items {
                 if let RolloutItem::Compacted(checkpoint) = item {
                     checkpoint.window_number = Some(0);
@@ -1224,6 +1224,16 @@ impl Session {
                 )),
             );
         }
+        // Native children receive their enrollment at spawn. A cold resume or durable fork
+        // has no live attachment, even when the rollout is enabled at startup.
+        if matches!(
+            &initial_history,
+            InitialHistory::New | InitialHistory::Cleared
+        ) && !session_source.is_non_root_agent()
+            && config.features.enabled(Feature::DaybreakProgramPropagation)
+        {
+            thread_extension_data.insert(crate::agent::helper_daybreak::Enrollment::Root);
+        }
         thread_extension_data.insert(crate::context::GuardianReviewEvidence::default());
         crate::model_search::SearchOwner::restore(&thread_extension_data, &initial_history);
         // Kick off independent async setup tasks in parallel to reduce startup latency.
@@ -1273,9 +1283,7 @@ impl Session {
                                 ForkPersistence::Referenced { history_base, .. } => *history_base,
                             },
                             subagent_history_start_ordinal: None,
-                            initial_window_id: initial_auto_compact_window_ids
-                                .window_id
-                                .to_string(),
+                            initial_window_id: initial_auto_compact_window_ids.window_id.clone(),
                             runtime_workspace_roots: Some(config.workspace_roots.clone()),
                             metadata: ThreadPersistenceMetadata {
                                 cwd: Some(config.cwd.to_path_buf()),

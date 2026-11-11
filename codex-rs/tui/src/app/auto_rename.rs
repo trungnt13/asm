@@ -41,6 +41,7 @@ struct AutoRenameUserMessage {
 pub(super) struct AutomaticTitlePrompt {
     pub(super) prompt: String,
     pub(super) request: AutoRenameRequest,
+    pub(super) fallback_title: Option<String>,
 }
 
 impl App {
@@ -62,6 +63,7 @@ impl App {
                 ThreadTitleDestination::Automatic,
                 prompt.prompt,
                 prompt.request,
+                prompt.fallback_title,
             );
         }
     }
@@ -181,6 +183,7 @@ impl App {
             return (!source.trim().is_empty()).then(|| AutomaticTitlePrompt {
                 prompt: automatic_title_prompt(settings, &source, /*previous_title*/ None),
                 request,
+                fallback_title: super::thread_title::fallback_thread_title(&source),
             });
         }
         let channel = self.thread_event_channels.get(&thread_id)?;
@@ -309,7 +312,14 @@ impl App {
                 .get_mut(&thread_id)?
                 .turns_since_attempt = 0;
         }
-        Some(AutomaticTitlePrompt { prompt, request })
+        let fallback_title = (!recurring)
+            .then(|| super::thread_title::fallback_thread_title(&source))
+            .flatten();
+        Some(AutomaticTitlePrompt {
+            prompt,
+            request,
+            fallback_title,
+        })
     }
 
     pub(super) fn track_automatic_thread_title(&mut self, thread_id: ThreadId, title: String) {

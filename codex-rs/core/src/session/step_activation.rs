@@ -346,6 +346,20 @@ impl Session {
                 reason: "Native runtime environments cannot change during a turn".to_string(),
             };
         }
+        if update
+            .model
+            .as_ref()
+            .is_some_and(|model| *model != current.model_info.slug)
+            && turn_context
+                .extension_data
+                .get::<crate::agent::helper_daybreak::SavedIntent>()
+                .is_some()
+        {
+            return TurnSettingsUpdateOutcome::Rejected {
+                reason: "Change the model on the next turn when using a saved Daybreak choice"
+                    .to_string(),
+            };
+        }
         let TurnSettingsUpdate {
             approvals_reviewer,
             environments: environment_requests,

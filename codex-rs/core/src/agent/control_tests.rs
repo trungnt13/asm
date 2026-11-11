@@ -2861,6 +2861,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
 
     let (parent_thread_id, parent_thread) = harness.start_paginated_thread().await;
     let parent_resume_metadata = codex_history::CompactionResumeMetadata {
+        next_item_ordinal: None,
         rejected_audio_file_ids: Default::default(),
         dynamic_tools: None,
         multi_agent_version: Some(MultiAgentVersion::V2),
@@ -4026,6 +4027,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                 compaction_response_id: None,
                 latest_token_usage_record: None,
                 resume_metadata: Some(codex_history::CompactionResumeMetadata {
+                    next_item_ordinal: None,
                     rejected_audio_file_ids: Default::default(),
                     dynamic_tools: None,
                     multi_agent_version: Some(MultiAgentVersion::V2),
@@ -4162,6 +4164,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
         assert_eq!(
             inherited_state,
             Some(codex_history::CompactionResumeMetadata {
+                next_item_ordinal: None,
                 rejected_audio_file_ids: Default::default(),
                 dynamic_tools: None,
                 multi_agent_version: Some(MultiAgentVersion::V2),

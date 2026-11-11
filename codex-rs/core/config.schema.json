@@ -1101,6 +1101,9 @@
             "daemon_auto_start": {
               "type": "boolean"
             },
+            "daybreak_program_propagation": {
+              "type": "boolean"
+            },
             "default_mode_request_user_input": {
               "type": "boolean"
             },
@@ -1255,6 +1258,9 @@
               "type": "boolean"
             },
             "incremental_tools_legacy": {
+              "type": "boolean"
+            },
+            "incremental_tools_legacy_gcp": {
               "type": "boolean"
             },
             "instant_interrupt": {
@@ -8420,6 +8426,9 @@
         "daemon_auto_start": {
           "type": "boolean"
         },
+        "daybreak_program_propagation": {
+          "type": "boolean"
+        },
         "default_mode_request_user_input": {
           "type": "boolean"
         },
@@ -8574,6 +8583,9 @@
           "type": "boolean"
         },
         "incremental_tools_legacy": {
+          "type": "boolean"
+        },
+        "incremental_tools_legacy_gcp": {
           "type": "boolean"
         },
         "instant_interrupt": {

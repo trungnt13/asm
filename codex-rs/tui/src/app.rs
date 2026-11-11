@@ -662,7 +662,13 @@ pub(crate) struct App {
     realtime_replay_order: VecDeque<ThreadId>,
     background_voice: Option<Box<ChatWidget>>,
     background_voice_error: Option<(ThreadId, String)>,
-    temporary_structured_requests: HashMap<ThreadId, mpsc::UnboundedSender<ServerNotification>>,
+    temporary_structured_requests: HashMap<
+        ThreadId,
+        (
+            crate::temporary_structured_request::TemporaryThreadKind,
+            mpsc::UnboundedSender<ServerNotification>,
+        ),
+    >,
     /// Track title generation across thread switches and deduplicate automatic requests.
     pending_thread_titles: HashMap<(ThreadId, ThreadTitleDestination), CancellationToken>,
     automatic_thread_titles: HashMap<ThreadId, auto_rename::AutoRenameState>,
