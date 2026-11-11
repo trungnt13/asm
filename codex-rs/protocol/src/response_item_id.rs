@@ -1,10 +1,10 @@
 use std::fmt;
 use std::ops::Deref;
 
+use crate::TS;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 
 /// A Responses API item ID. New IDs require an explicit prefix; deserialization
 /// remains permissive so legacy rollouts can still be read.

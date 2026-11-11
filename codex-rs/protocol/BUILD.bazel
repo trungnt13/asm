@@ -4,4 +4,5 @@ codex_rust_crate(
     name = "protocol",
     compile_data = glob(["src/prompts/**/*.md"]),
     crate_name = "codex_protocol",
+    crate_features = ["ts"],
 )
