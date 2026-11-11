@@ -686,7 +686,7 @@ fn fullscreen_plan_indicator_keeps_the_cycle_hint_when_it_fits() {
     composer.set_active_agent_label(Some("reviewer".to_string()));
     let (narrow, _) = render(&composer, /*width*/ 37, /*footer*/ None);
     assert!(
-        strip_osc8(&narrow).contains("project · PR #42 · reviewer"),
+        strip_osc8(&narrow).contains("project · PR #42·reviewer"),
         "{narrow}"
     );
     assert!(

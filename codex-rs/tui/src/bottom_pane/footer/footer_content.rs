@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use crate::render::highlight::with_syntax_theme;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::TerminalHyperlink;
 use crate::ui_tree::PreparedUiTree;
 use crate::ui_tree::UiTree;
 

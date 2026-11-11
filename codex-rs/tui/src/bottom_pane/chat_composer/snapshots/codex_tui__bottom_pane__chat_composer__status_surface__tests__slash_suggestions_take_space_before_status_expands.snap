@@ -5,7 +5,7 @@ expression: frame(&buf)
 |› /model     choose what model and reasoning effort to use                      |
 |  /memories  configure memory use and generation                                |
 |  /mention   mention a file                                                     |
-|                                                                                |
+|                                                                           Main |
 |› /m                                                                            |
 |                                                                                |
 |  one…                                                                          |
