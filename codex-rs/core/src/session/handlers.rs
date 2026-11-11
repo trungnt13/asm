@@ -735,15 +735,15 @@ pub(super) async fn submission_loop(
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
                     };
+                    let _settings_guard = if system1_enabled.is_none() {
+                        Some(thread_settings::acquire_persistence_lock(&sess).await)
+                    } else {
+                        None
+                    };
                     let result = async {
                         if system1_enabled.is_some() && persistent {
                             return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
                         }
-                        let _settings_guard = if system1_enabled.is_none() {
-                            Some(thread_settings::acquire_persistence_lock(&sess).await)
-                        } else {
-                            None
-                        };
                         let commit = if system1_enabled.is_none() {
                             Some(thread_settings::update(&sess, thread_settings, reply.is_some()).await
                                 .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?)
