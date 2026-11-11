@@ -180,7 +180,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-const JSONRPC_INVALID_REQUEST: i64 = -32600;
+pub(crate) const JSONRPC_INVALID_REQUEST: i64 = -32600;
 const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
 pub(crate) const EXTERNAL_AGENT_CONFIG_IMPORT_IN_PROGRESS_MESSAGE: &str = "A previous external agent import is still running. Wait for it to finish before importing again.";
@@ -269,6 +269,18 @@ pub(crate) enum ThreadHistorySupport {
 fn bootstrap_request_error(context: &'static str, err: TypedRequestError) -> color_eyre::Report {
     let message = format!("{context}: {err}");
     color_eyre::Report::new(err).wrap_err(message)
+}
+
+pub(crate) fn is_method_not_found(error: &TypedRequestError) -> bool {
+    let TypedRequestError::Server { method, source } = error else {
+        return false;
+    };
+    // Older servers report an unknown method as an invalid request during deserialization.
+    source.code == JSONRPC_METHOD_NOT_FOUND
+        || (source.code == JSONRPC_INVALID_REQUEST
+            && source.message.contains(method.as_str())
+            && (source.message.contains("unknown variant")
+                || source.message.contains("unknown method")))
 }
 
 pub(crate) fn is_history_pagination_unsupported(source: &JSONRPCErrorError) -> bool {
@@ -418,6 +430,7 @@ pub(crate) struct AppServerSession {
     pub(crate) model_provider_override: Option<String>,
     history_support: ThreadHistorySupport,
     pub(crate) thread_settings_update_supported: bool,
+    cloud_model_selections: HashMap<ThreadId, user_message_submission::CloudModelSelection>,
     default_model: Option<String>,
     available_models: Vec<ModelPreset>,
     prefetched_model_list: Option<RemoteHandle<Result<Vec<ModelPreset>>>>,
@@ -607,6 +620,7 @@ impl AppServerSession {
             model_provider_override: None,
             history_support: ThreadHistorySupport::Paginated,
             thread_settings_update_supported: true,
+            cloud_model_selections: HashMap::new(),
             default_model: None,
             available_models: Vec::new(),
             prefetched_model_list: None,
@@ -872,6 +886,10 @@ impl AppServerSession {
         let handle = self.request_handle();
         let request_id = self.next_request_id();
         async move {
+            if mode == ThreadParamsMode::Cloud {
+                // Cloud activation supplies the model. Fetch the catalog on picker demand.
+                return Ok(Vec::new());
+            }
             models::list(mode, handle, request_id).await.map_err(|err| {
                 bootstrap_request_error("model/list failed during TUI bootstrap", err)
             })
@@ -1867,7 +1885,7 @@ impl AppServerSession {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn turn_start(
+    async fn turn_start(
         &mut self,
         thread_id: ThreadId,
         turn_trigger: &str,
@@ -1885,8 +1903,8 @@ impl AppServerSession {
         collaboration_mode: Option<codex_protocol::config_types::CollaborationMode>,
         output_schema: Option<serde_json::Value>,
         cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
+        cloud_selection: Option<&user_message_submission::CloudModelSelection>,
     ) -> Result<TurnStartResponse> {
-        let request_id = self.next_request_id();
         let mut params = TurnStartParams {
             thread_id: thread_id.to_string(),
             turn_trigger: Some(turn_trigger.to_string()),
@@ -1910,7 +1928,11 @@ impl AppServerSession {
             params.effort = effort;
             params.summary = summary;
             params.collaboration_mode = collaboration_mode;
+        } else if let Some(selection) = cloud_selection {
+            params.model = Some(selection.model.clone());
+            params.effort.clone_from(&selection.effort);
         }
+        let request_id = self.next_request_id();
         self.request_handle
             .request_typed(ClientRequest::TurnStart { request_id, params })
             .await
@@ -3784,6 +3806,7 @@ mod tests {
                 }),
                 Some(output_schema.clone()),
                 Some(CyberAccessProgram::DaybreakBlue.into()),
+                /*cloud_selection*/ None,
             ),
             async {
                 let command = commands.recv().await.expect("cloud turn start");

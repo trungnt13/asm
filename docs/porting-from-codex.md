@@ -123,6 +123,8 @@ Independent stock Linux `rust-v0.169.0-alpha.7` also reproduces the limitation: 
 
 Through `b6d93b4cba`, the stock cold read paths still query the saved projection without catch-up. The independently tested alpha.7 reader has the same core cold-query path. This is source evidence for the newer target, not a runtime result for alpha.8. The stock cold timeline, turn and item implementations remain unchanged through `37103d7f01`; attached-thread search and fork previews do not add cold catch-up for those reads. Through `627b579219`, experimental `thread/sample` uses a separate path and the ordinary cold readers remain unchanged.
 
+Independent stock Linux `rust-v0.169.0-alpha.9` also finds old real history through cold search but returns no cold timeline, turns, or items. Resume restores exact saved history and permissions without changing canonical bytes. Through `5228d94a27`, the ordinary stock cold-reader paths still lack catch-up. The owner accepted this limitation for this sync through `5228d94a27b7f84cae4854acbb5ea3b3e90dfeaf` only.
+
 The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #179 through `e1cc96712f9ad4f5404fe821b9eba7ff29598816`, for PR #180 through `b6d93b4cbadd6f449395d326f72465a5823f1492`, for PR #181 through `37103d7f01e82162472c6fba7b4088d5a1303321`, and for PR #182 through `627b579219d492b5445d6d433d3110eb53e507dc`. These decisions do not cover later upstream commits or waive any other checks. Keep cold-stock reading unresolved, not passed, and report resume-assisted handoff separately. Do not change personal history or caches.
 
 ### Live backend model catalog
@@ -131,7 +133,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `627b579219d492b5445d6d433d3110eb53e507dc`, 2026-11-10. Subject: Preserve script quotes in Windows sandbox cmd invocations (#60624).
+Last incorporated commit: `5228d94a27b7f84cae4854acbb5ea3b3e90dfeaf`, 2026-11-11. Subject: Canonicalize Windows sandbox homes and migrate saved junction paths (#60708).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

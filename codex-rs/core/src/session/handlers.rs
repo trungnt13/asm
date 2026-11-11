@@ -397,8 +397,9 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     {
         let _refresh = sess.mcp_refresh.acquire().await;
         sess.mcp_refresh.close();
-        sess.services.mcp_runtime.shutdown().await;
     }
+    sess.wait_for_apps_tool_refresh().await;
+    sess.services.mcp_runtime.shutdown().await;
 
     sess.drain_code_mode_messages().await;
 
@@ -734,17 +735,17 @@ pub(super) async fn submission_loop(
                         request: thread_settings,
                         turn_extension_init: sub.turn_extension_init,
                     };
+                    let _settings_guard = if system1_enabled.is_none() {
+                        Some(thread_settings::acquire_persistence_lock(&sess).await)
+                    } else {
+                        None
+                    };
                     let result = async {
                         if system1_enabled.is_some() && persistent {
                             return Err(CodexErr::InvalidRequest("System1 mode must be updated separately from persistent thread settings".to_string()));
                         }
-                        let _settings_guard = if system1_enabled.is_none() {
-                            Some(thread_settings::acquire_persistence_lock(&sess).await)
-                        } else {
-                            None
-                        };
-                        let snapshot = if system1_enabled.is_none() {
-                            Some(thread_settings::update(&sess, thread_settings).await
+                        let commit = if system1_enabled.is_none() {
+                            Some(thread_settings::update(&sess, thread_settings, reply.is_some()).await
                                 .map_err(|error| CodexErr::InvalidRequest(error.to_string()))?)
                         } else {
                             None
@@ -752,16 +753,36 @@ pub(super) async fn submission_loop(
                         if let Some(enabled) = system1_enabled {
                             sess.set_system1_enabled(enabled).await?;
                         }
-                        Ok::<_, CodexErr>(snapshot)
+                        Ok::<_, CodexErr>(commit)
                     }.await;
                     match result {
-                        Ok(snapshot) => {
-                            // Reply first: the caller may hold a lock its event consumer needs.
-                            if let Some(reply) = reply {
-                                let _ = reply.send(Ok(()));
+                        Ok(mut commit) => {
+                            let host_acceptance = commit.as_mut().and_then(|commit| commit.host_acceptance.take());
+                            match (reply, host_acceptance) {
+                                (Some(mut reply), Some(acceptance)) => {
+                                    // Leave the submission loop free to process interrupts.
+                                    tokio::spawn(async move {
+                                        tokio::select! {
+                                            _ = reply.closed() => {}
+                                            result = acceptance => {
+                                                let result = result.map_err(|error| {
+                                                    CodexErr::from(std::io::Error::other(format!(
+                                                        "service tier committed locally; host acceptance unconfirmed: {error}"
+                                                    )))
+                                                });
+                                                let _ = reply.send(result);
+                                            }
+                                        }
+                                    });
+                                }
+                                (Some(reply), None) => {
+                                    // The caller may hold a lock its event consumer needs.
+                                    let _ = reply.send(Ok(()));
+                                }
+                                (None, _) => {}
                             }
-                            if let Some(snapshot) = snapshot {
-                                thread_settings::emit_applied(&sess, sub.id.clone(), snapshot).await;
+                            if let Some(commit) = commit {
+                                thread_settings::emit_applied(&sess, sub.id.clone(), commit.snapshot).await;
                             }
                         }
                         Err(error) => {

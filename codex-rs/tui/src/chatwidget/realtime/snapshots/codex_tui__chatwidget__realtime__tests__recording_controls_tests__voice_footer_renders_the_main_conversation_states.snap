@@ -9,6 +9,7 @@ connecting:
 › Ask ASM to do anything
 
   status line stays visible
+  ? for shortcuts
 
 listening:
                                                                            Main
@@ -18,6 +19,7 @@ listening:
 › Ask ASM to do anything
 
   status line stays visible
+  ? for shortcuts
 
 speaking:
                                                                            Main
@@ -27,6 +29,7 @@ speaking:
 › Ask ASM to do anything
 
   status line stays visible
+  ? for shortcuts
 
 muted:
                                                                            Main
@@ -36,6 +39,7 @@ muted:
 › Ask ASM to do anything
 
   status line stays visible
+  ? for shortcuts
 
 transcript:
                                                                            Main
@@ -45,6 +49,7 @@ transcript:
 › Ask ASM to do anything
 
   status line stays visible
+  ? for shortcuts
 
 interrupted:
                                                                            Main
@@ -54,3 +59,4 @@ interrupted:
 › Ask ASM to do anything
 
   status line stays visible
+  ? for shortcuts

@@ -1124,6 +1124,7 @@ client_request_definitions! {
     #[experimental("turn/settings/update")]
     TurnSettingsUpdate => "turn/settings/update" {
         params: v2::TurnSettingsUpdateParams,
+        inspect_params: true,
         serialization: thread_id(params.thread_id),
         response: v2::TurnSettingsUpdateResponse,
     },
@@ -4650,6 +4651,7 @@ mod tests {
                     system1_error: None,
                     system1_failure_episode: 0,
                     disabled_plugin_ids: Vec::new(),
+                    environments: Some(Vec::new()),
                     cwd: absolute_path("/tmp/repo"),
                     approval_policy: v2::AskForApproval::Never,
                     approvals_reviewer: v2::ApprovalsReviewer::User,

@@ -1509,6 +1509,7 @@ impl ThreadHistoryBuilder {
             if let Some(turn) = self.current_turn.as_mut().filter(|turn| turn.id == turn_id) {
                 let changed_turn = apply_abort(turn);
                 self.record_changed_turn(changed_turn);
+                self.finish_current_turn();
                 return;
             }
 
@@ -1519,10 +1520,13 @@ impl ThreadHistoryBuilder {
             }
         }
 
-        // If the event has no ID (or refers to an unknown turn), fall back to the active turn.
-        if let Some(turn) = self.current_turn.as_mut() {
+        // Fall back only when the abort or the active turn lacks an explicit ID.
+        if let Some(turn) = self.current_turn.as_mut()
+            && (payload.turn_id.is_none() || turn.has_generated_id)
+        {
             let changed_turn = apply_abort(turn);
             self.record_changed_turn(changed_turn);
+            self.finish_current_turn();
         }
     }
 
@@ -1640,6 +1644,7 @@ impl ThreadHistoryBuilder {
     }
 
     fn new_turn(&mut self, id: Option<String>) -> PendingTurn {
+        let has_generated_id = id.is_none();
         let id = id.unwrap_or_else(|| {
             if self.next_rollout_index == 0 {
                 Uuid::now_v7().to_string()
@@ -1649,6 +1654,7 @@ impl ThreadHistoryBuilder {
         });
         PendingTurn {
             id,
+            has_generated_id,
             root_turn_id: None,
             items: Vec::new(),
             item_index: TurnItemIndex::default(),
@@ -1979,6 +1985,7 @@ impl TurnItemIndex {
 
 struct PendingTurn {
     id: String,
+    has_generated_id: bool,
     root_turn_id: Option<String>,
     items: Vec<ThreadItemPayload>,
     item_index: TurnItemIndex,
@@ -2412,6 +2419,16 @@ mod tests {
                 started_at_ms: Some(0),
                 completed_at_ms: 0,
             }),
+            // A late abort for a discarded turn must preserve the review turn's explicit ID.
+            EventMsg::TurnAborted(TurnAbortedEvent {
+                root_turn_id: None,
+                turn_id: Some("discarded-turn".into()),
+                started_at: None,
+                reason: TurnAbortReason::Replaced,
+                error: None,
+                completed_at: None,
+                duration_ms: None,
+            }),
             EventMsg::ItemCompleted(ItemCompletedEvent {
                 content_token_count: None,
                 thread_id,
@@ -2439,6 +2456,7 @@ mod tests {
         let turns = builder.finish();
 
         assert_eq!(turns[0].id, "turn-1");
+        assert_eq!(turns[0].status, TurnStatus::Completed);
         assert_eq!(
             turns[0].item_payloads().collect::<Vec<_>>(),
             [
