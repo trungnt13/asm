@@ -7,6 +7,11 @@
 - Assume upstream tested unchanged code. Check fork changes, conflicts, and packages narrowly; upstream tests do not prove them.
 - Record current fork purposes and constraints here, not task history. Ask before contradicting intent. After approval, replace the rule; resolve mechanical conflicts without further approval.
 
+### Unused-component pruning
+
+- Removing unused or nonfunctional components is approved even when it increases upstream conflicts. Prefer whole components over scattered edits. Preserve personally used features, Desktop/Remote Control contracts, existing configuration/history, and security enforcement. Compatibility scaffolding must report unsupported behavior truthfully, never pretend success.
+- Omit CLI Cloud Tasks, the app-server test client, the responses API proxy, and OSS bootstrap/model-picker shortcuts. Preserve explicit provider configuration. Default Cargo builds exclude terminal voice, whose helper is not packaged; retain its developer implementation behind `terminal-voice` and preserve Desktop voice. Shared reviewer installation is not exclusive to Guardian V2 and must remain available when V2 flags are off.
+
 This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.md). Its validation and platform limits replace upstream defaults. Other coding, formatting, test-authoring, and generator rules still apply. Recorded intent does not prove implementation, integration, or publication.
 
 The linked task skills and their procedures are required parts of this guide for applicable tasks. Read them before those tasks. This guide controls conflicts. Skill use grants no new authority.
