@@ -42,7 +42,6 @@ codex-protocol = { workspace = true }
 codex-rollout = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-cli = { workspace = true }
-codex-utils-oss = { workspace = true }
 codex-utils-path-uri = { workspace = true }
 codex-utils-sandbox-summary = { workspace = true }
 codex-worktree = { workspace = true }
