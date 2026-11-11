@@ -5762,6 +5762,7 @@ impl Session {
                 crate::compact_remote_v2::RETAINED_MESSAGE_TOKEN_BUDGET,
                 &history.file_audio_durations,
             );
+        drop(history);
         // Resolve the roster before allocating a new context window.
         let rendered = world_state.render_full_with_host_roster().await;
         let (window_number, window_ids) = self.state.lock().await.start_new_context_window();
