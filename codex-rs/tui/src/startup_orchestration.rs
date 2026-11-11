@@ -73,7 +73,7 @@ pub(super) async fn run_main_inner(
 
     let raw_overrides = cli.config_overrides.raw_overrides.clone();
     let overrides_cli = codex_utils_cli::CliConfigOverrides { raw_overrides };
-    let mut cli_kv_overrides = match overrides_cli.parse_overrides() {
+    let cli_kv_overrides = match overrides_cli.parse_overrides() {
         // Parse `-c` overrides from the CLI.
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
@@ -325,7 +325,6 @@ pub(super) async fn run_main_inner(
     let terminal_size_tags = crate::terminal_size_telemetry::tags(initial_terminal_size);
     let startup_presentation::StartupPresentation {
         bootstrap_config,
-        config_cwd,
         mut screen,
         local_settings,
     } = presentation;

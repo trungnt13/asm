@@ -165,7 +165,6 @@ use std::path::PathBuf;
 use supports_color::Stream;
 use tokio::sync::mpsc;
 use tracing::Instrument;
-use tracing::error;
 use tracing::field;
 use tracing::info;
 use tracing::info_span;
@@ -350,7 +349,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
 
     // Parse `-c` overrides from the CLI.
-    let mut cli_kv_overrides = match config_overrides.parse_overrides() {
+    let cli_kv_overrides = match config_overrides.parse_overrides() {
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
         Err(e) => {
@@ -1123,6 +1122,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             response.thread.name.clone(),
             response.thread.path.clone(),
             response.model,
+            response.model_provider,
             response.service_tier,
             response.approval_policy.to_core(),
             response.approvals_reviewer.to_core(),
