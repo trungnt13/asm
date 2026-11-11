@@ -2295,29 +2295,6 @@ name = "codex-app-server-protocol-noop-macros"
 version = "0.169.1-alpha.3.2"
 
 [[package]]
-name = "codex-app-server-test-client"
-version = "0.169.1-alpha.3.2"
-dependencies = [
- "anyhow",
- "clap",
- "codex-app-server-protocol",
- "codex-core",
- "codex-otel",
- "codex-protocol",
- "codex-utils-cargo-bin",
- "codex-utils-cli",
- "pretty_assertions",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "tungstenite",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "codex-app-server-transport"
 version = "0.169.1-alpha.3.2"
 dependencies = [
@@ -2556,7 +2533,6 @@ dependencies = [
  "codex-app-server-client",
  "codex-app-server-daemon",
  "codex-app-server-protocol",
- "codex-app-server-test-client",
  "codex-arg0",
  "codex-build-info",
  "codex-chatgpt",
