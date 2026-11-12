@@ -4460,43 +4460,48 @@ async fn spawn_agent_respects_legacy_max_threads_alias() {
 
 #[tokio::test]
 async fn spawn_agent_releases_slot_after_shutdown() {
-    let max_threads = 1usize;
-    let (_home, config) = test_config_with_cli_overrides(vec![(
-        "agents.max_concurrent_threads_per_session".to_string(),
-        TomlValue::Integer(max_threads as i64),
-    )])
-    .await;
-    let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
-        config.model_provider.clone(),
-        config.codex_home.to_path_buf(),
-        std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    let (home, mut config) = test_config().await;
+    config.features.enable(Feature::MultiAgentV2).unwrap();
+    // The root leaves exactly one resident child slot available.
+    config.multi_agent_v2.max_concurrent_threads_per_session = 2;
+    let harness = AgentControlHarness::new_with_config(home, config).await;
+    let (_, parent) = harness.start_thread().await;
+    let control = parent
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent.session.session_id());
+    let first =
+        spawn_v2_reload_test_child(&control, harness.config.clone(), &parent, "first").await;
+    let first_thread = harness
+        .manager
+        .get_thread(first.thread_id)
+        .await
+        .expect("first child should be registered");
+    // This fixture has no task runner to finish the initial turn; eviction owns shutdown and slot release.
+    first_thread.session.mark_interrupted();
+    *first_thread.session.active_turn.lock().await = None;
+    assert_eq!(
+        harness
+            .manager
+            .try_evict_v2_thread(Arc::clone(&first_thread))
+            .await
+            .expect("shutdown and evict first child"),
+        ThreadEvictionOutcome::Evicted,
     );
-    let control = manager.agent_control();
+    assert_eq!(first_thread.agent_status().await, AgentStatus::Shutdown);
 
-    let first_agent_id = control
-        .spawn_agent(
-            config.clone(),
-            text_input("hello"),
-            /*session_source*/ None,
-        )
+    let second =
+        spawn_v2_reload_test_child(&control, harness.config.clone(), &parent, "second").await;
+    harness
+        .manager
+        .get_thread(second.thread_id)
         .await
-        .expect("spawn_agent should succeed");
-    stop_fixture_thread(&control, first_agent_id)
+        .expect("second child should be registered after shutdown")
+        .shutdown_and_wait()
         .await
-        .expect("shutdown agent");
-
-    let second_agent_id = control
-        .spawn_agent(
-            config.clone(),
-            text_input("hello again"),
-            /*session_source*/ None,
-        )
-        .await
-        .expect("spawn_agent should succeed after shutdown");
-    stop_fixture_thread(&control, second_agent_id)
-        .await
-        .expect("shutdown agent");
+        .expect("shutdown second child");
+    parent.shutdown_and_wait().await.expect("shutdown root");
 }
 
 #[tokio::test]
