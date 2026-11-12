@@ -1,7 +1,4 @@
-use super::bedrock_auth::BedrockProviderConfig;
 use super::bedrock_auth::clear_user_model_provider_if_bedrock;
-use super::bedrock_auth::prepare_bedrock_provider;
-use super::config_processor::map_error as map_config_error;
 use super::*;
 use crate::auth_mode::auth_mode_to_api;
 use crate::external_auth::ExternalAuthBridge;
@@ -12,9 +9,7 @@ use codex_app_server_protocol::DesktopOnboardingEntrypoint;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
 use codex_core::McpRefreshReason;
 use codex_login::LoginOnboardingEntrypoint;
-use codex_login::login_with_bedrock_access_keys;
 use codex_mcp::ema_auth_scope;
-use codex_model_provider::is_supported_amazon_bedrock_region;
 use codex_otel::auth_storage::AuthStorageOriginator;
 use codex_rmcp_client::EnterpriseOAuthCredentialGuard;
 
@@ -89,15 +84,6 @@ enum RefreshTokenRequestOutcome {
 enum CloudLoginProvider {
     AmazonBedrock,
     Gcp,
-}
-
-enum BedrockLoginCredentials {
-    ApiKey(String),
-    AccessKeys {
-        access_key_id: String,
-        secret_access_key: String,
-        session_token: Option<String>,
-    },
 }
 
 impl Drop for ActiveLogin {
@@ -407,30 +393,9 @@ impl AccountRequestProcessor {
                 )
                 .await;
             }
-            LoginAccountParams::AmazonBedrock { api_key, region } => {
-                self.login_amazon_bedrock_v2(
-                    request_id,
-                    BedrockLoginCredentials::ApiKey(api_key),
-                    region,
-                )
-                .await;
-            }
-            LoginAccountParams::AmazonBedrockAccessKeys {
-                access_key_id,
-                secret_access_key,
-                session_token,
-                region,
-            } => {
-                self.login_amazon_bedrock_v2(
-                    request_id,
-                    BedrockLoginCredentials::AccessKeys {
-                        access_key_id,
-                        secret_access_key,
-                        session_token,
-                    },
-                    region,
-                )
-                .await;
+            LoginAccountParams::AmazonBedrock { .. }
+            | LoginAccountParams::AmazonBedrockAccessKeys { .. } => {
+                self.login_amazon_bedrock_v2(request_id).await;
             }
         }
         Ok(())
@@ -530,98 +495,12 @@ impl AccountRequestProcessor {
         }
     }
 
-    async fn login_amazon_bedrock_v2(
-        &self,
-        request_id: ConnectionRequestId,
-        credentials: BedrockLoginCredentials,
-        region: String,
-    ) {
-        let result = async {
-            self.ensure_provider_login_allowed(CloudLoginProvider::AmazonBedrock)?;
-
-            match &credentials {
-                BedrockLoginCredentials::ApiKey(api_key) => {
-                    if api_key.trim().is_empty() {
-                        return Err(invalid_request("Amazon Bedrock API key must not be empty."));
-                    }
-                }
-                BedrockLoginCredentials::AccessKeys {
-                    access_key_id,
-                    secret_access_key,
-                    ..
-                } => {
-                    if access_key_id.trim().is_empty() || secret_access_key.trim().is_empty() {
-                        return Err(invalid_request(
-                            "AWS access key ID and secret access key must not be empty.",
-                        ));
-                    }
-                }
-            }
-            let region = region.trim();
-            if !is_supported_amazon_bedrock_region(region) {
-                return Err(invalid_request(format!(
-                    "Amazon Bedrock does not support region `{region}`"
-                )));
-            }
-
-            self.cancel_active_login().await;
-            let write = prepare_bedrock_provider(
-                &self.config_manager,
-                BedrockProviderConfig {
-                    region: matches!(&credentials, BedrockLoginCredentials::AccessKeys { .. })
-                        .then_some(region),
-                    profile: None,
-                },
-            )
-            .await?;
-            self.config_manager
-                .commit_provider_config(write)
-                .await
-                .map_err(map_config_error)?;
-
-            match credentials {
-                BedrockLoginCredentials::ApiKey(api_key) => login_with_bedrock_api_key(
-                    &self.config.codex_home,
-                    api_key.trim(),
-                    region,
-                    self.config.cli_auth_credentials_store_mode,
-                    self.config.auth_keyring_backend_kind(),
-                ),
-                BedrockLoginCredentials::AccessKeys {
-                    access_key_id,
-                    secret_access_key,
-                    session_token,
-                } => {
-                    let session_token = session_token
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|token| !token.is_empty());
-                    login_with_bedrock_access_keys(
-                        &self.config.codex_home,
-                        access_key_id.trim(),
-                        secret_access_key.trim(),
-                        session_token,
-                        self.config.cli_auth_credentials_store_mode,
-                        self.config.auth_keyring_backend_kind(),
-                    )
-                }
-            }
-            .map_err(|err| internal_error(format!("failed to save Amazon Bedrock auth: {err}")))?;
-            self.auth_manager.reload().await;
-            self.config_manager.clear_chatgpt_config_loader();
-            Ok(LoginAccountResponse::AmazonBedrock {})
-        }
-        .await;
-        let logged_in = result.is_ok();
-        if logged_in {
-            self.model_catalog.invalidate().await;
-        }
-        self.outgoing.send_result(request_id, result).await;
-
-        if logged_in {
-            self.send_login_success_notifications(/*login_id*/ None)
-                .await;
-        }
+    async fn login_amazon_bedrock_v2(&self, request_id: ConnectionRequestId) {
+        let error = self
+            .ensure_provider_login_allowed(CloudLoginProvider::AmazonBedrock)
+            .err()
+            .unwrap_or_else(|| invalid_request("Amazon Bedrock is unsupported in this build."));
+        self.outgoing.send_error(request_id, error).await;
     }
 
     // Build options for a ChatGPT login attempt; performs validation.

@@ -1,9 +1,8 @@
-//! Exercises streamed remote compaction, including the retained checkpoint and continuing history.
+use anyhow::Context;
+use base64::Engine;
 
 use super::audio_duration_store::TestAudioDurationStore;
-use anyhow::Context;
 use anyhow::Result;
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
@@ -13,9 +12,6 @@ use codex_history::CodexHarnessMetadata;
 use codex_history::InitialHistory;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
-use codex_login::auth::BedrockApiKeyAuth;
-use codex_model_provider_info::AMAZON_BEDROCK_GPT_5_5_MODEL_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::AgentPath;
@@ -193,23 +189,6 @@ async fn wait_for_turn_complete(codex: &codex_core::CodexThread) {
         REMOTE_COMPACT_TURN_COMPLETE_TIMEOUT,
     )
     .await;
-}
-
-fn amazon_bedrock_test_codex() -> TestCodexBuilder {
-    let auth = CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-        api_key: "bedrock-test-api-key".to_string(),
-        region: "us-east-1".to_string(),
-    });
-    test_codex()
-        .with_auth(auth)
-        .with_model(AMAZON_BEDROCK_GPT_5_5_MODEL_ID)
-        .with_config(|config| {
-            config.model_provider = ModelProviderInfo {
-                base_url: config.model_provider.base_url.clone(),
-                ..ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None)
-            };
-            config.model_provider_id = AMAZON_BEDROCK_PROVIDER_ID.to_string();
-        })
 }
 
 fn is_retained_user_message(item: &ResponseItem, retained_text: &str) -> bool {
@@ -546,11 +525,9 @@ async fn remote_compact_v2_records_usage_before_output_validation() -> Result<()
 }
 
 enum CompactionProvider {
-    AmazonBedrock,
     Gcp,
 }
 
-#[test_case(CompactionProvider::AmazonBedrock; "bedrock")]
 #[test_case(CompactionProvider::Gcp; "gcp")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provider_automatic_compaction_uses_v2_responses_endpoint(
@@ -561,12 +538,6 @@ async fn provider_automatic_compaction_uses_v2_responses_endpoint(
     let server = responses::start_mock_server().await;
     let auth_fixture;
     let (builder, expected_model, expected_path, expected_auth) = match provider {
-        CompactionProvider::AmazonBedrock => (
-            amazon_bedrock_test_codex(),
-            AMAZON_BEDROCK_GPT_5_5_MODEL_ID,
-            "/v1/responses",
-            "Bearer bedrock-test-api-key",
-        ),
         CompactionProvider::Gcp => {
             auth_fixture = ProviderAuthCommandFixture::new(&["vertex-access-token"])?;
             let mut provider = ModelProviderInfo::create_gcp_provider();
@@ -644,12 +615,6 @@ async fn provider_automatic_compaction_uses_v2_responses_endpoint(
         Some(expected_auth)
     );
     match provider {
-        CompactionProvider::AmazonBedrock => assert_eq!(
-            compact_request
-                .header("x-amzn-mantle-client-agent")
-                .as_deref(),
-            Some("codex")
-        ),
         CompactionProvider::Gcp => {
             for request in &response_requests {
                 assert_eq!(request.body_json()["reasoning"].get("summary"), None);

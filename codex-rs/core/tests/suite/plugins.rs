@@ -1717,12 +1717,11 @@ enabled = true
                 Some(AuthMode::ApiKey)
             }
             TargetAuth::BedrockApiKey => {
-                codex_login::login_with_bedrock_api_key(
-                    codex_home.path(),
-                    "test-bedrock-api-key",
-                    "us-east-1",
-                    codex_login::AuthCredentialsStoreMode::File,
-                    codex_login::AuthKeyringBackendKind::default(),
+                std::fs::write(
+                    codex_home.path().join("auth.json"),
+                    serde_json::to_vec(
+                        &serde_json::json!({"auth_mode": "bedrockApiKey", "bedrock_api_key": {"api_key": "test-bedrock-api-key", "region": "us-east-1"}}),
+                    )?,
                 )?;
                 test_codex.thread_manager.auth_manager().reload().await;
                 Some(AuthMode::BedrockApiKey)

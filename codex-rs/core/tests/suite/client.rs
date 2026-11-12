@@ -18,10 +18,7 @@ use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::auth::AgentIdentityAuthPolicy;
-use codex_login::auth::BedrockApiKeyAuth;
 use codex_login::default_client::originator;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::built_in_model_providers;
@@ -211,47 +208,6 @@ async fn responses_request_preserves_flex_without_catalog_support_or_fast_mode()
             response_mock.single_request().body_json()["service_tier"],
             json!("flex"),
             "configure_at_start={configure_at_start}",
-        );
-    }
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_request_uses_implicit_default_tier_for_bedrock() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-    for provider_id in [
-        AMAZON_BEDROCK_PROVIDER_ID,
-        AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
-    ] {
-        let server = start_mock_server().await;
-        let response_mock = mount_sse_once(&server, sse(vec![ev_completed("done")])).await;
-        let test = test_codex()
-            .with_auth(CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-                api_key: "dummy".to_string(),
-                region: "us-east-1".to_string(),
-            }))
-            .with_model("gpt-5.4")
-            .with_model_info_override("gpt-5.4", |model| model.service_tiers.clear())
-            .with_config(move |config| {
-                let base_url = config.model_provider.base_url.clone();
-                config.model_provider_id = provider_id.to_string();
-                config.model_provider = built_in_model_providers(/*openai_base_url*/ None)
-                    .remove(provider_id)
-                    .expect("built-in Bedrock provider");
-                config.model_provider.base_url = base_url;
-                config.service_tier = Some("flex".to_string());
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        test.submit_turn("hello").await?;
-
-        assert_eq!(
-            response_mock
-                .single_request()
-                .body_json()
-                .get("service_tier"),
-            None,
-            "provider={provider_id}",
         );
     }
     Ok(())
@@ -1720,45 +1676,6 @@ async fn provider_auth_command_recovers_after_initial_resolution_failure() {
         .await;
 
     send_provider_auth_request(&server, auth_fixture.auth()).await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn amazon_bedrock_proxy_uses_command_auth_and_custom_headers() {
-    skip_if_no_network!();
-
-    let server = MockServer::start().await;
-    let response = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-    )
-    .await;
-    let auth_fixture = ProviderAuthCommandFixture::new(&["command-token"]).unwrap();
-    let mut provider = built_in_model_providers(/*openai_base_url*/ None)
-        .remove(AMAZON_BEDROCK_PROVIDER_ID)
-        .expect("Amazon Bedrock provider should be built in");
-    provider.base_url = Some(format!("{}/v1", server.uri()));
-    provider.auth = Some(auth_fixture.auth());
-    provider.aws = None;
-    provider
-        .http_headers
-        .get_or_insert_default()
-        .insert("x-some-header".to_string(), "foo".into());
-
-    send_request_with_provider(provider).await;
-
-    let request = response.single_request();
-    assert_eq!(request.path(), "/v1/responses");
-    assert_eq!(
-        request.header("authorization"),
-        Some("Bearer command-token".to_string())
-    );
-    assert_eq!(request.header("x-amz-date"), None);
-    assert_eq!(request.header("x-some-header"), Some("foo".to_string()));
-    assert_eq!(
-        request.header("x-amzn-mantle-client-agent"),
-        Some("codex".to_string())
-    );
-    assert_eq!(request.body_json()["store"], false);
 }
 
 /// Issues one streamed Responses request through a provider configured with command-backed auth.

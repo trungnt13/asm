@@ -95,31 +95,6 @@ async fn start_thread_with_model(
 }
 
 #[tokio::test]
-async fn thread_start_provider_model_fallback_applies_to_configured_model() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    std::fs::write(
-        codex_home.path().join("config.toml"),
-        r#"model_provider = "amazon-bedrock"
-model = "gpt-5.4-mini"
-"#,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-
-    let response = mcp
-        .start_thread(ThreadStartParams {
-            allow_provider_model_fallback: true,
-            ..Default::default()
-        })
-        .await?;
-
-    assert_eq!(response.model, "openai.gpt-6.1-sol");
-    Ok(())
-}
-
-#[tokio::test]
 async fn thread_start_warns_for_exec_policy_parse_failure_after_initialize() -> Result<()> {
     let codex_home = TempDir::new()?;
     let mut mcp = TestAppServer::builder()
@@ -226,11 +201,70 @@ async fn thread_start_does_not_repeat_initialize_exec_policy_warning() -> Result
 }
 
 #[tokio::test]
-async fn thread_start_provider_model_fallback_uses_bedrock_static_catalog() -> Result<()> {
+async fn thread_start_provider_model_fallback_applies_to_configured_model() -> Result<()> {
     let codex_home = TempDir::new()?;
+    let mut catalog = codex_models_manager::bundled_models_response()?;
+    catalog.models.retain(|model| {
+        [
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.5",
+        ]
+        .contains(&model.slug.as_str())
+    });
+    std::fs::write(
+        codex_home.path().join("catalog.json"),
+        serde_json::to_vec(&catalog)?,
+    )?;
     std::fs::write(
         codex_home.path().join("config.toml"),
-        r#"model_provider = "amazon-bedrock"
+        r#"model_provider = "openai"
+model_catalog_json = "catalog.json"
+model = "gpt-5.4-mini"
+"#,
+    )?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+
+    let response = mcp
+        .start_thread(ThreadStartParams {
+            allow_provider_model_fallback: true,
+            ..Default::default()
+        })
+        .await?;
+
+    assert_eq!(response.model, "gpt-6.1-sol");
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_start_provider_model_fallback_uses_configured_static_catalog() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let mut catalog = codex_models_manager::bundled_models_response()?;
+    catalog.models.retain(|model| {
+        [
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.5",
+        ]
+        .contains(&model.slug.as_str())
+    });
+    std::fs::write(
+        codex_home.path().join("catalog.json"),
+        serde_json::to_vec(&catalog)?,
+    )?;
+    std::fs::write(
+        codex_home.path().join("config.toml"),
+        r#"model_provider = "openai"
+model_catalog_json = "catalog.json"
 "#,
     )?;
     let mut mcp = TestAppServer::builder()
@@ -245,11 +279,11 @@ async fn thread_start_provider_model_fallback_uses_bedrock_static_catalog() -> R
     )
     .await?;
     for model in [
-        "openai.gpt-6.1-sol",
-        "openai.gpt-6.1-terra",
-        "openai.gpt-6-sol",
-        "openai.gpt-6-luna",
-        "openai.gpt-5.6-sol",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "gpt-6-sol",
+        "gpt-6-luna",
+        "gpt-5.6-sol",
     ] {
         let response =
             start_thread_with_model(&mut mcp, model, /*allow_provider_model_fallback*/ true)
@@ -257,9 +291,7 @@ async fn thread_start_provider_model_fallback_uses_bedrock_static_catalog() -> R
         assert_eq!(response.model, model);
     }
     let supported_with_fallback = start_thread_with_model(
-        &mut mcp,
-        "openai.gpt-5.5",
-        /*allow_provider_model_fallback*/ true,
+        &mut mcp, "gpt-5.5", /*allow_provider_model_fallback*/ true,
     )
     .await?;
     let unsupported_without_fallback = start_thread_with_model(
@@ -275,50 +307,8 @@ async fn thread_start_provider_model_fallback_uses_bedrock_static_catalog() -> R
             supported_with_fallback.model,
             unsupported_without_fallback.model,
         ],
-        vec!["openai.gpt-6.1-sol", "openai.gpt-5.5", "gpt-5.4-mini"]
+        vec!["gpt-6.1-sol", "gpt-5.5", "gpt-5.4-mini"]
     );
-    Ok(())
-}
-
-#[tokio::test]
-async fn thread_start_bedrock_runtime_prefers_global_cross_region_models() -> Result<()> {
-    let codex_home = TempDir::new()?;
-    std::fs::write(
-        codex_home.path().join("config.toml"),
-        r#"model_provider = "amazon-bedrock-runtime"
-"#,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-
-    for model in [
-        "global.openai.gpt-6.1-sol",
-        "us.openai.gpt-6.1-sol",
-        "global.openai.gpt-6.1-terra",
-        "us.openai.gpt-6.1-terra",
-        "global.openai.gpt-6-sol",
-        "us.openai.gpt-6-sol",
-        "global.openai.gpt-6-luna",
-        "us.openai.gpt-6-luna",
-        "global.openai.gpt-5.6-sol",
-        "us.openai.gpt-5.6-sol",
-    ] {
-        let response =
-            start_thread_with_model(&mut mcp, model, /*allow_provider_model_fallback*/ true)
-                .await?;
-        assert_eq!(response.model, model);
-    }
-
-    let response = start_thread_with_model(
-        &mut mcp,
-        "openai.gpt-5.6-sol",
-        /*allow_provider_model_fallback*/ true,
-    )
-    .await?;
-    assert_eq!(response.model, "global.openai.gpt-6.1-sol");
-
     Ok(())
 }
 
