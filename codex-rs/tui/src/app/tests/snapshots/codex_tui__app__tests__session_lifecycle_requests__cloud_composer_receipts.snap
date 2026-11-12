@@ -7,20 +7,23 @@ expression: "rendered_receipts.join(\"\\n\\n\")"
 › follow up
 
 ■ Conversation interrupted - use /feedback if something went wrong
+
 • Working (0s • esc to interrupt)
 
+                                                                           Main
+› Ask ASM to do anything
 
-› Ask Codex to do anything
-
-  gpt-test default · /tmp/project
+  tes def·/tmp/project
   ? for shortcuts
 
 ── Steered ──
 ■ Conversation interrupted - use /feedback if something went wrong
+
 ■ Conversation interrupted - use /feedback if something went wrong
+                                                                           Main
 › follow up
 
-  gpt-test default · /tmp/project
+  tes def·/tmp/project
 
 ── Unconfirmed ──
 ■ Cloud submission could not be confirmed: cloud/submitUserMessage transport error: cloud backend dropped its response
@@ -28,20 +31,20 @@ expression: "rendered_receipts.join(\"\\n\\n\")"
 • Queued follow-up inputs
   ↳ follow up
     ⇧← edit last queued message
+                                                                           Main
+› Ask ASM to do anything
 
-› Ask Codex to do anything
-
-  gpt-test default · /tmp/project
+  tes def·/tmp/project
   ? for shortcuts
 
 ── Rejected ──
 ■ reply stream closed before submission
 • Working (0s • esc to interrupt)
 
-
+                                                                           Main
 › follow up
 
-  gpt-test default · /tmp/project
+  tes def·/tmp/project
   tab to queue message
 
 ── Duplicate ──
@@ -49,8 +52,8 @@ expression: "rendered_receipts.join(\"\\n\\n\")"
 • Queued follow-up inputs
   ↳ follow up
     ⇧← edit last queued message
+                                                                           Main
+› Ask ASM to do anything
 
-› Ask Codex to do anything
-
-  gpt-test default · /tmp/project
+  tes def·/tmp/project
   ? for shortcuts

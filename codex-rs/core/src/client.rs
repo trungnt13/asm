@@ -1402,7 +1402,11 @@ impl ModelClient {
 
     fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
         for item in input {
-            if item.id().is_some_and(|id| !id.is_prefixed()) {
+            // A provider can echo a bare reserved prefix or return an opaque ID.
+            if item
+                .id()
+                .is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())
+            {
                 item.set_id(/*new_id*/ None);
             }
             if !self.state.content_item_kinds_enabled {
@@ -2831,9 +2835,10 @@ fn map_response_stream(
     let routing_affinity = api_stream.routing_affinity.take();
     let upstream_request_id = api_stream.upstream_request_id.take();
     let interrupt = api_stream.interrupt.take();
+    let events = crate::model_request::intercept_stream(Box::pin(api_stream), interceptors);
     let mut stream = map_response_events(
         upstream_request_id,
-        crate::model_request::intercept_stream(Box::pin(api_stream), interceptors),
+        events,
         session_telemetry,
         inference_trace_attempt,
         client,
@@ -2926,6 +2931,7 @@ where
                     usage_metadata,
                     request_duration_ms,
                     generation_duration_ms,
+                    reasoning_removals,
                     end_turn,
                 }) => {
                     feedback_tags!(last_model_response_id = &response_id);
@@ -2952,6 +2958,7 @@ where
                             usage_metadata,
                             request_duration_ms,
                             generation_duration_ms,
+                            reasoning_removals,
                             end_turn,
                         }))
                         .await

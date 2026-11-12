@@ -730,9 +730,11 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
             let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80)
                 .replace(&destination.path().display().to_string(), "<PROJECT>");
             insta::assert_snapshot!(rendered, @r"
+                                                                                       Main
             › Ask ASM to do anything
 
-              GPT-6.1-Sol high·<PROJECT>
+              sol61 hig·<PROJECT>
+              ? for shortcuts
             ");
         }
         let expected_cwd = if override_cwd {

@@ -1836,6 +1836,7 @@ async fn response_stream_records_last_model_feedback_ids() {
             usage_metadata: None,
             request_duration_ms: Some(2_000),
             generation_duration_ms: Some(2_000),
+            reasoning_removals: None,
             end_turn: Some(true),
         }),
     ]);
@@ -2898,6 +2899,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
             usage_metadata: None,
             request_duration_ms: None,
             generation_duration_ms: None,
+            reasoning_removals: None,
             end_turn: None,
         }))
         .await?;
