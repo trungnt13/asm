@@ -58,7 +58,6 @@ use super::trusted_tools::trusted_tool_context;
 pub(super) struct Classification {
     pub(super) reservation: Reservation,
     pub(super) classification_started_at: Instant,
-    pub(super) decisions_sampler: Option<Arc<super::decisions::DecisionsSampler>>,
     pub(super) guardian_config: GuardianV2Config,
     pub(super) score_progress: Arc<GuardianV2ScoreProgress>,
     pub(super) parent_model: Option<Arc<ModelInfo>>,
@@ -113,7 +112,6 @@ impl Classification {
         let Self {
             reservation,
             classification_started_at,
-            decisions_sampler,
             guardian_config,
             score_progress,
             parent_model,
@@ -278,11 +276,6 @@ impl Classification {
         };
         drop(history);
         drop(node_repl_images);
-        let decisions_comparison_enabled = config
-            .features
-            .enabled(codex_features::Feature::GuardianV2DecisionsComparison);
-        let mut decisions_task = None;
-        let mut responses_duration = None;
         let mut failure_reason = "invalid_output";
         let mut classification_risk = None;
         let mut classification_finished_at = None;
@@ -326,20 +319,7 @@ impl Classification {
                 pending_score: pending_score.clone(),
                 sampled_at,
             };
-            let mut sampling_started = None;
             if let Some(prepared) = reservation.prepare(request).await {
-                if let Some(decisions_sampler) = decisions_sampler.as_ref() {
-                    decisions_task = Some(
-                        decisions_sampler.start_conversation_comparison(&prepared.request.input),
-                    );
-                } else if decisions_comparison_enabled {
-                    super::metrics::record_decisions_comparison_outcome(
-                        metrics.as_deref(),
-                        "skipped",
-                        "not_initialized",
-                    );
-                }
-                sampling_started = Some(Instant::now());
                 tokio::spawn(prepared.run());
             }
             let result = tokio::select! {
@@ -347,20 +327,6 @@ impl Classification {
                 () = pending_score.expired() => Err(LunaSamplerError::Superseded),
                 result = score => result.unwrap_or(Err(LunaSamplerError::Superseded)).map(super::sampler::SampledScore::accept),
             };
-            // Stop at the usable score, before draining and committing history.
-            responses_duration = sampling_started.map(|started| started.elapsed());
-            if sampling_started.is_none() && decisions_comparison_enabled {
-                super::metrics::record_decisions_comparison_outcome(
-                    metrics.as_deref(),
-                    "skipped",
-                    if matches!(result, Err(LunaSamplerError::Superseded)) {
-                        "superseded"
-                    } else {
-                        "preparation_failed"
-                    },
-                );
-            }
-
             let output = match result {
                 Ok(output) => output,
                 Err(LunaSamplerError::Superseded) => {
@@ -462,48 +428,12 @@ impl Classification {
         if matches!(result, Ok(ClassificationOutcome::Scored)) {
             truncations.emit(metrics.as_deref());
         }
-        if matches!(result, Ok(ClassificationOutcome::Superseded))
-            && let Some(task) = decisions_task.take()
-        {
-            drop(task);
-            super::metrics::record_decisions_comparison_outcome(
-                metrics.as_deref(),
-                "skipped",
-                "superseded",
-            );
-        }
-        // Only compare against a score accepted by the authoritative publication path.
-        let baseline_risk = if matches!(result, Ok(ClassificationOutcome::Scored)) {
-            classification_risk
-        } else {
-            None
-        };
         if let Err(error) = result {
             event_sink.emit_warning(ExtensionWarning {
                 thread_id,
                 turn_id: Some(turn_id),
                 message: format!("Guardian V2 risk scoring failed: {error}"),
             });
-        }
-        if let Some(decisions_task) = decisions_task {
-            super::metrics::record_decisions_comparison(
-                decisions_task.finish().await,
-                baseline_risk.zip(responses_duration),
-                metrics.as_deref(),
-            );
-        } else if decisions_comparison_enabled
-            && let Some(risk) = baseline_risk
-            && let Some(metrics) = metrics.as_deref()
-        {
-            metrics.counter(
-                "codex.guardian_v2.decisions_comparison.comparison",
-                /*inc*/ 1,
-                &[
-                    ("comparison", "unavailable"),
-                    ("responses", risk),
-                    ("decisions", "unavailable"),
-                ],
-            );
         }
     }
 }

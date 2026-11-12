@@ -457,7 +457,7 @@ pub enum Feature {
     GuardianDenialReconsideration,
     /// Enable Guardian V2 automatic approval reviews.
     GuardianV2,
-    /// Run Decisions alongside Guardian V2 for measurement without changing approvals.
+    /// Removed compatibility flag for Guardian V2 Decisions comparison.
     GuardianV2DecisionsComparison,
     /// Enable Guardian V3 integrations.
     GuardianV3,
@@ -784,7 +784,9 @@ impl Features {
                 "personality" | "plugin_discovery_prefetch" | "plugin_hooks" => {
                     continue;
                 }
-                "skill_search" | "skill_env_var_dependency_prompt" => {
+                "skill_search"
+                | "skill_env_var_dependency_prompt"
+                | "guardianv2_decisions_comparison" => {
                     continue;
                 }
                 "terminal_resize_reflow" => {
@@ -2209,7 +2211,7 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::GuardianV2DecisionsComparison,
         key: "guardianv2_decisions_comparison",
-        stage: Stage::UnderDevelopment,
+        stage: Stage::Removed,
         default_enabled: false,
     },
     FeatureSpec {

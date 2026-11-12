@@ -35,7 +35,6 @@ use super::trusted_skills::TrustedSkillRoots;
 
 #[derive(Clone)]
 pub(super) struct GuardianV2Extension {
-    auth_manager: Arc<AuthManager>,
     pub(super) event_sink: Arc<dyn ExtensionEventSink>,
     pub(super) thread_manager: Weak<ThreadManager>,
 }
@@ -85,18 +84,6 @@ impl ThreadLifecycleContributor<Config> for GuardianV2Extension {
             input
                 .thread_store
                 .insert(ConversationBackend::new(Arc::clone(&sampler)));
-            input
-                .thread_store
-                .remove::<super::decisions::DecisionsSampler>();
-            if input
-                .config
-                .features
-                .enabled(Feature::GuardianV2DecisionsComparison)
-                && let Some(decisions_sampler) =
-                    super::startup::decisions_sampler(&input, &self.auth_manager)
-            {
-                input.thread_store.insert(decisions_sampler);
-            }
             input.thread_store.insert(guardian_config);
             input.thread_store.insert(GuardianV2ScoreProgress::new(
                 input.extension_metrics.clone(),
@@ -179,11 +166,10 @@ impl ToolLifecycleContributor for GuardianV2Extension {
 /// Installs feature-gated Guardian V2 tool classification for each thread.
 pub fn install(
     registry: &mut ExtensionRegistryBuilder<Config>,
-    auth_manager: Arc<AuthManager>,
+    _auth_manager: Arc<AuthManager>,
     thread_manager: Weak<ThreadManager>,
 ) {
     let extension = Arc::new(GuardianV2Extension {
-        auth_manager,
         event_sink: registry.event_sink(),
         thread_manager,
     });
