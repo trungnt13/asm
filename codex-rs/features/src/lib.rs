@@ -416,7 +416,7 @@ pub enum Feature {
     SkillMcpDependencyInstall,
     /// Omit descriptions from the model-visible available-skills catalog.
     OmitSkillDescriptions,
-    /// Run cheap skill-search methods in shadow mode and emit experiment metrics.
+    /// Removed compatibility flag for the shadow skill-search experiment.
     SkillSearch,
     /// Append skill additions and edits within a cumulative context budget.
     SkillCatalogDeltas,
@@ -784,7 +784,7 @@ impl Features {
                 "personality" | "plugin_discovery_prefetch" | "plugin_hooks" => {
                     continue;
                 }
-                "skill_env_var_dependency_prompt" => {
+                "skill_search" | "skill_env_var_dependency_prompt" => {
                     continue;
                 }
                 "terminal_resize_reflow" => {
@@ -2077,8 +2077,8 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::SkillSearch,
         key: "skill_search",
-        stage: Stage::Stable,
-        default_enabled: true,
+        stage: Stage::Removed,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::SkillCatalogDeltas,

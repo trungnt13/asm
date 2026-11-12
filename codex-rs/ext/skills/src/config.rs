@@ -15,6 +15,6 @@ pub struct SkillsExtensionConfig {
     pub bundled_skills_enabled: bool,
     /// Whether cloud skills are discovered and exposed to the model.
     pub cloud_skill_enabled: bool,
-    /// Whether cheap skill selectors run in shadow mode without changing prompt contents.
+    /// Ignored compatibility input for the removed shadow skill-search experiment.
     pub shadow_selection_enabled: bool,
 }
