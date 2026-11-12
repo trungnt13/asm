@@ -147,7 +147,7 @@ fn selected_exec_result_uses_only_the_retained_wrapper_inventory() {
     let tools = ["normalized_alias__lookup".to_owned()];
     assert!(!recorder.exec_output_matches(&exec, &tools));
     let mut prompt = vec![exec_input("exec"), exec.clone()];
-    recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
 
     assert!(recorder.exec_output_matches(&exec, &tools));
     assert!(recorder.exec_output_matches(&exec, &["normalized-alias__lookup".to_owned()]));
