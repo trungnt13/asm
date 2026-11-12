@@ -1459,7 +1459,19 @@ async fn logout_managed_bedrock_restores_default_account(
     model: &str,
 ) -> Result<()> {
     let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), CreateConfigTomlParams::default())?;
+    create_config_toml(
+        codex_home.path(),
+        CreateConfigTomlParams {
+            model_provider_id: Some("amazon-bedrock".to_string()),
+            ..Default::default()
+        },
+    )?;
+    std::fs::write(
+        codex_home.path().join("auth.json"),
+        serde_json::to_vec(
+            &serde_json::json!({"auth_mode": "bedrockApiKey", "bedrock_api_key": {"api_key": "managed-bedrock-api-key", "region": "us-west-2"}}),
+        )?,
+    )?;
 
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
@@ -1467,24 +1479,6 @@ async fn logout_managed_bedrock_restores_default_account(
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
-    let request_id = mcp
-        .send_login_account_amazon_bedrock_request("managed-bedrock-api-key", "us-west-2")
-        .await?;
-    let response = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    assert_eq!(
-        to_response::<LoginAccountResponse>(response)?,
-        LoginAccountResponse::AmazonBedrock {}
-    );
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("account/login/completed"),
-    )
-    .await??;
-    assert_account_updated(&mut mcp, Some(AuthMode::BedrockApiKey)).await?;
     assert_eq!(
         read_account(&mut mcp).await?,
         GetAccountResponse {
