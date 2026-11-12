@@ -3240,7 +3240,7 @@ async fn try_run_sampling_request(
         let Some(event) = resampling.filter(event, &step_context.tool_router) else {
             continue;
         };
-        sess.services
+        step_context
             .session_telemetry
             .record_responses(&handle_responses, &event);
 

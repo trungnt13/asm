@@ -733,10 +733,15 @@ impl ChatWidget {
     pub(super) fn status_line_value_for_item(&mut self, item: StatusLineItem) -> Option<String> {
         match item {
             StatusLineItem::ModelName => Some(compact_model_name(self.model_display_name())),
-            StatusLineItem::ModelWithReasoning => Some(self.model_with_reasoning_display_name(
-                &compact_model_name(self.model_display_name()),
-                &compact_reasoning_label(&self.reasoning_display_name()),
-            )),
+            StatusLineItem::ModelWithReasoning => Some(
+                self.model_with_reasoning_display_name(
+                    &compact_model_name(self.model_display_name()),
+                    &compact_reasoning_label(&self.reasoning_display_name()),
+                    self.processing_tier_display_name()
+                        .map(str::to_lowercase)
+                        .as_deref(),
+                ),
+            ),
             StatusLineItem::Reasoning => {
                 Some(compact_reasoning_label(&self.reasoning_display_name()))
             }
@@ -1013,6 +1018,7 @@ impl ChatWidget {
                 self.model_with_reasoning_display_name(
                     self.model_display_name(),
                     &self.reasoning_display_name(),
+                    self.processing_tier_display_name(),
                 ),
                 /*max_chars*/ 32,
             )),
@@ -1046,9 +1052,13 @@ impl ChatWidget {
         }
     }
 
-    fn model_with_reasoning_display_name(&self, model_name: &str, label: &str) -> String {
-        let service_tier_label = self
-            .processing_tier_display_name()
+    fn model_with_reasoning_display_name(
+        &self,
+        model_name: &str,
+        label: &str,
+        service_tier: Option<&str>,
+    ) -> String {
+        let service_tier_label = service_tier
             .map(|tier| format!(" {tier}"))
             .unwrap_or_default();
         format!("{model_name} {label}{service_tier_label}")

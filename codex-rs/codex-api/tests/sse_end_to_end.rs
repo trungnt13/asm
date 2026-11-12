@@ -177,6 +177,7 @@ async fn responses_stream_parses_items_and_completed_end_to_end() -> Result<()> 
             usage_metadata,
             request_duration_ms,
             generation_duration_ms: _,
+            reasoning_removals: _,
             end_turn,
         } => {
             assert_eq!(response_id, "resp1");

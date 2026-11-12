@@ -1439,6 +1439,7 @@ mod tests {
             generation_duration_ms: None,
             token_usage: Some(usage.clone()),
             usage_metadata: None,
+            reasoning_removals: None,
             end_turn: Some(true),
         })]);
         let result = collect_compaction_output(
@@ -1493,6 +1494,7 @@ mod tests {
                 }),
                 request_duration_ms: None,
                 generation_duration_ms: None,
+                reasoning_removals: None,
                 end_turn: Some(true),
             }),
         ]);
