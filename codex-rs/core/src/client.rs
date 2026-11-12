@@ -2545,14 +2545,14 @@ impl ModelClientSession {
                     .prepare_response_items_for_request(incremental_items);
                 Vec::new()
             } else {
-                // Request preparation clears only unprefixed IDs; restore exactly those afterward.
+                // Request preparation preserves allocated IDs; restore only those it strips.
                 let cleared_item_ids = request
                     .input
                     .iter()
                     .enumerate()
                     .filter_map(|(index, item)| {
                         item.id()
-                            .filter(|id| !id.is_prefixed())
+                            .filter(|id| id.allocation().is_none() && !id.is_prefixed())
                             .map(|id| (index, id.clone()))
                     })
                     .collect::<Vec<_>>();
