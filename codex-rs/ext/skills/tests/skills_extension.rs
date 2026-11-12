@@ -454,7 +454,10 @@ allowed_agent_roles = ["reviewer"]
     for role in [None, Some("reviewer"), Some("other")] {
         let input = base_input.clone().with_agent_role(role.map(str::to_string));
         let snapshot = service
-            .snapshot_for_config(&input, Some(Arc::clone(&LOCAL_FS)))
+            .snapshot_for_config(
+                &input,
+                Some(&FileSystemEnvironmentAccessor::unrestricted(&LOCAL_FS)),
+            )
             .await;
         let turn_store = ExtensionData::new("scoped-turn");
         turn_store.insert(snapshot);
