@@ -1002,12 +1002,10 @@ impl Session {
         {
             for record in records {
                 match record {
-                    RolloutItem::ResponseItem(item) => {
-                        assign_missing_item_id(
-                            Arc::make_mut(&mut item.item),
-                            &ids.item_id_generator,
-                        )
-                    }
+                    RolloutItem::ResponseItem(item) => assign_missing_item_id(
+                        Arc::make_mut(&mut item.item),
+                        &ids.item_id_generator,
+                    ),
                     RolloutItem::Compacted(checkpoint) if restore_child_window => {
                         checkpoint.window_number = Some(0);
                         checkpoint.first_window_id =
