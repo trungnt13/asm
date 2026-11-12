@@ -188,8 +188,8 @@ struct LiveWriterLocks {
 
 #[derive(Default)]
 struct ThreadCoordination {
-    // Serialize writes and capture consistent fork snapshots.
-    writer: Arc<Mutex<()>>,
+    // Serializes writes and holds the next item ordinal observed in this writer’s rollout.
+    writer: Arc<Mutex<u64>>,
     // Successful catch-up for an unchanged source and checkpoint; never seed from partial batches.
     history_projection: Mutex<Option<(String, u64, u64)>>,
     // Forks hold a shared lease until their child reference is durable; deletion, archive, and
@@ -209,7 +209,7 @@ impl LiveWriterLocks {
             .clone()
     }
 
-    async fn lock(&self, thread_id: ThreadId) -> OwnedMutexGuard<()> {
+    async fn lock(&self, thread_id: ThreadId) -> OwnedMutexGuard<u64> {
         self.coordination(thread_id)
             .await
             .writer

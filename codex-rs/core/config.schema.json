@@ -1329,6 +1329,9 @@
             "multi_env_copy_file": {
               "type": "boolean"
             },
+            "multi_environment_mcp": {
+              "type": "boolean"
+            },
             "network_proxy": {
               "$ref": "#/definitions/FeatureToml_for_NetworkProxyConfigToml"
             },
@@ -2376,6 +2379,13 @@
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "nested_tool_names": {
+          "description": "Exact Code Mode tool names for the transcript_selected_exec_results section.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -8652,6 +8662,9 @@
           "type": "boolean"
         },
         "multi_env_copy_file": {
+          "type": "boolean"
+        },
+        "multi_environment_mcp": {
           "type": "boolean"
         },
         "network_proxy": {

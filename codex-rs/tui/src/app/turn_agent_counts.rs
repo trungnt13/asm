@@ -137,7 +137,10 @@ impl App {
         else {
             return;
         };
-        let refresh_id = self.agents_overview.request_id;
+        let refresh_id = self
+            .agents_overview
+            .active_refresh
+            .map(|(request_id, _)| request_id);
         let state = &mut self.turn_agent_counts;
         if let ServerNotification::ItemStarted(item) = notification {
             state.record_native_item(thread_id, &item.turn_id, &item.item, /*live*/ true);
