@@ -3102,6 +3102,17 @@ async fn check_dynamic_tool_requests(
         )),
     )
     .await;
+    let event = tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), events.recv())
+        .await?
+        .expect("manual title intent event");
+    let AppEvent::StopAutomaticThreadTitles {
+        thread_id: target, ..
+    } = &event
+    else {
+        panic!("expected a manual title intent event")
+    };
+    assert_eq!(target.to_string(), thread_id);
+    Box::pin(app.handle_event(&mut tui, &mut app_server, event)).await?;
     let AppEvent::DynamicToolCallCompleted { response, .. } =
         tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), events.recv())
             .await?

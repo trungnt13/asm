@@ -260,7 +260,7 @@ async fn new_session_preserves_vim_line_yank() -> Result<()> {
     );
     let composer_lines = render_bottom_popup(&app.chat_widget, /*width*/ 80)
         .lines()
-        .take(2)
+        .take(3)
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(composer_lines);
@@ -319,10 +319,10 @@ async fn widget_replacement_preserves_mention_usage_with_history_disabled() -> R
     app.replace_chat_widget(ChatWidget::new_with_app_event(init));
     app.chat_widget.set_skills_from_response(&skills);
     app.chat_widget.insert_str("$stat");
-    insta::assert_snapshot!(normalize_snapshot_paths(render_bottom_popup(
-        &app.chat_widget,
-        /*width*/ 80
-    )));
+    insta::assert_snapshot!(
+        normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, /*width*/ 80))
+            .replace(env!("CARGO_PKG_VERSION"), "0.0.0")
+    );
     assert!(
         !app.local_settings
             .codex_home
@@ -505,9 +505,11 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
             let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 140)
                 .replace(&server_config.cwd.display().to_string(), "<PROJECT>");
             insta::assert_snapshot!(rendered, @r"
+                                                                                                                                                   Main
             › Ask ASM to do anything
 
-              server-model high·<PROJECT>·← for agents
+              ser hig·<PROJECT>
+              ← for agents · ? for shortcuts
             ");
         }
         if explicit.starts_with("profile_summary") {
