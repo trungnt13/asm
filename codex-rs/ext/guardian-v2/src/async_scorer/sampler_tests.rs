@@ -69,6 +69,7 @@ impl LunaSampler {
     ) -> Result<String, LunaSamplerError> {
         let evidence = std::mem::take(&mut request.input)
             .into_iter()
+            .map(Arc::unwrap_or_clone)
             .map(codex_history::ResponseItemEnvelope::new)
             .collect();
         let (input, input_tokens) = Self::prepare_input(&request, /*history*/ None, evidence);
@@ -311,9 +312,7 @@ pub(in crate::async_scorer) fn sample_request(parent_turn_id: &str) -> LunaSampl
         cyber_access_program: None,
         parent_response_id: None,
         instructions: classifier_instructions(),
-        input: vec![responses::user_message_item(
-            "The user requested a README summary.",
-        )],
+        input: vec![responses::user_message_item("The user requested a README summary.").into()],
         parent_compaction: None,
         reasoning_effort: ReasoningEffort::None,
         parent_turn_id: parent_turn_id.to_owned(),
@@ -710,22 +709,25 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
             cyber_access_program: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
-            input: vec![ResponseItem::Message {
-                status: None,
-                encrypted_content: None,
-                id: None,
-                role: "user".to_owned(),
-                content: vec![
-                    ContentItem::InputText {
-                        text: "The user requested a README summary.".to_owned(),
-                    },
-                    ContentItem::InputText {
-                        text: "The assistant inspected README.md.".to_owned(),
-                    },
-                ],
-                phase: None,
-                internal_chat_message_metadata_passthrough: None,
-            }],
+            input: vec![
+                ResponseItem::Message {
+                    status: None,
+                    encrypted_content: None,
+                    id: None,
+                    role: "user".to_owned(),
+                    content: vec![
+                        ContentItem::InputText {
+                            text: "The user requested a README summary.".to_owned(),
+                        },
+                        ContentItem::InputText {
+                            text: "The assistant inspected README.md.".to_owned(),
+                        },
+                    ],
+                    phase: None,
+                    internal_chat_message_metadata_passthrough: None,
+                }
+                .into(),
+            ],
             parent_compaction: None,
             reasoning_effort: ReasoningEffort::None,
             parent_turn_id: "turn-1".to_owned(),
@@ -757,9 +759,7 @@ async fn preconnected_sampler_reuses_authenticated_websocket_for_classifications
             cyber_access_program: None,
             parent_response_id: None,
             instructions: classifier_instructions(),
-            input: vec![responses::user_message_item(
-                "The user requested a source review.",
-            )],
+            input: vec![responses::user_message_item("The user requested a source review.").into()],
             parent_compaction: None,
             reasoning_effort: ReasoningEffort::Medium,
             parent_turn_id: "turn-2".to_owned(),
@@ -868,6 +868,7 @@ async fn sampler_returns_classification_token_before_terminal_response_events() 
         request
             .input
             .iter()
+            .map(AsRef::as_ref)
             .cloned()
             .map(codex_history::ResponseItemEnvelope::new)
             .collect(),
@@ -981,13 +982,15 @@ async fn sampler_retries_expired_websockets_on_another_warm_connection() -> Resu
             fragment: "trusted review".to_owned(),
         }])?
         .into_annotated_message()
-        .into_item(),
+        .into_item()
+        .into(),
     );
     request.input.insert(
         /*index*/ 1,
         ContextualUserFragment::into(codex_guardian_context::TrustedSkills {
             paths: vec!["/skills/review/SKILL.md".to_owned()],
-        }),
+        })
+        .into(),
     );
     request.root_turn_id = Some("root-turn".to_owned());
     let output = sampler.sample(request).await?;

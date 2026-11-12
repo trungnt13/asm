@@ -31,12 +31,14 @@ async fn retained_websocket_requests_preserve_model_output_and_ids() -> Result<(
         let input_tokens = request
             .input
             .iter()
+            .map(AsRef::as_ref)
             .map(codex_guardian_context::estimate_input_tokens)
             .fold(0usize, usize::saturating_add);
         let prepared = PreparedRequest {
             input: request
                 .input
                 .iter()
+                .map(AsRef::as_ref)
                 .cloned()
                 .map(ResponseItemEnvelope::new)
                 .collect(),
@@ -60,10 +62,13 @@ async fn retained_websocket_requests_preserve_model_output_and_ids() -> Result<(
             .into_iter()
             .map(ResponseItemEnvelope::into_item)
             .collect::<Vec<_>>();
-        assert_eq!(&completed[..committed.len()], committed);
+        assert_eq!(
+            completed[..committed.len()].iter().collect::<Vec<_>>(),
+            committed.iter().map(AsRef::as_ref).collect::<Vec<_>>()
+        );
         output = completed[committed.len()..].to_vec();
-        committed = completed;
-        committed.push(responses::user_message_item("Next action."));
+        committed = completed.into_iter().map(Arc::new).collect();
+        committed.push(responses::user_message_item("Next action.").into());
     }
     assert!(
         matches!(&output[..], [ResponseItem::Reasoning { encrypted_content: Some(_), .. }, ResponseItem::Message { id: Some(id), role, .. }] if id.as_str() == "msg_score" && role == "assistant")
@@ -140,12 +145,14 @@ async fn retention_overflow_or_incomplete_stream_keeps_early_score() -> Result<(
         let input_tokens = request
             .input
             .iter()
+            .map(AsRef::as_ref)
             .map(codex_guardian_context::estimate_input_tokens)
             .fold(0usize, usize::saturating_add);
         let prepared = PreparedRequest {
             input: request
                 .input
                 .iter()
+                .map(AsRef::as_ref)
                 .cloned()
                 .map(ResponseItemEnvelope::new)
                 .collect(),
