@@ -58,7 +58,6 @@ pub(crate) use self::runtime::AgentTreeMembership;
 pub(crate) use self::runtime::AgentTreeShutdownState;
 pub(crate) use self::runtime::AgentTreeTeardownGuard;
 pub(crate) use self::runtime::LocalAgentRuntime;
-pub(crate) use self::watch::StatusSubscription;
 pub(in crate::agent) use spawn::effective_spawn_config;
 pub(in crate::agent) use spawn::fresh_child_history_and_tools;
 pub(in crate::agent) use spawn::inherited_dynamic_tools;
@@ -695,29 +694,6 @@ fn agent_matches_prefix(agent_path: Option<&AgentPath>, prefix: &AgentPath) -> b
                 .strip_prefix(prefix.as_str())
                 .is_some_and(|suffix| suffix.starts_with('/'))
     })
-}
-
-pub(crate) fn render_input_preview(input: &[UserInput]) -> String {
-    input
-        .iter()
-        .map(|item| match item {
-            UserInput::Text { text, .. } => text.clone(),
-            UserInput::Image { .. } => "[image]".to_string(),
-            UserInput::LocalImage { path, .. } => {
-                format!("[local_image:{}]", path.display())
-            }
-            UserInput::Audio { .. } => "[audio]".to_string(),
-            UserInput::LocalAudio { path } => {
-                format!("[local_audio:{}]", path.display())
-            }
-            UserInput::Skill { name, path, .. } => {
-                format!("[skill:${name}]({})", path.display())
-            }
-            UserInput::Mention { name, path, .. } => format!("[mention:${name}]({path})"),
-            _ => "[input]".to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Share loaded-recipient submission while callers retain residency and failure handling.
