@@ -6,15 +6,17 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use codex_otel::SessionTelemetry;
+#[cfg(test)]
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::MultiAgentVersion;
+#[cfg(test)]
 use codex_protocol::protocol::SessionSource;
+#[cfg(test)]
 use codex_protocol::protocol::SubAgentSource;
-use codex_protocol::user_input::UserInput;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
@@ -138,6 +140,7 @@ pub(crate) fn collab_v2_agent_error(agent_id: ThreadId, err: CodexErr) -> Functi
     }
 }
 
+#[cfg(test)]
 pub(crate) fn thread_spawn_source(
     parent_thread_id: ThreadId,
     parent_session_source: &SessionSource,
@@ -162,37 +165,4 @@ pub(crate) fn thread_spawn_source(
         agent_nickname: None,
         agent_role: agent_role.map(str::to_string),
     }))
-}
-
-pub(crate) fn parse_collab_input(
-    message: Option<String>,
-    items: Option<Vec<UserInput>>,
-) -> Result<Vec<UserInput>, FunctionCallError> {
-    match (message, items) {
-        (Some(_), Some(_)) => Err(FunctionCallError::RespondToModel(
-            "Provide either message or items, but not both".to_string(),
-        )),
-        (None, None) => Err(FunctionCallError::RespondToModel(
-            "Provide one of: message or items".to_string(),
-        )),
-        (Some(message), None) => {
-            if message.trim().is_empty() {
-                return Err(FunctionCallError::RespondToModel(
-                    "Empty message can't be sent to an agent".to_string(),
-                ));
-            }
-            Ok(vec![UserInput::Text {
-                text: message,
-                text_elements: Vec::new(),
-            }])
-        }
-        (None, Some(items)) => {
-            if items.is_empty() {
-                return Err(FunctionCallError::RespondToModel(
-                    "Items can't be empty".to_string(),
-                ));
-            }
-            Ok(items)
-        }
-    }
 }
