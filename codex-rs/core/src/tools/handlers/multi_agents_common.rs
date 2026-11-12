@@ -6,17 +6,11 @@ use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use codex_otel::SessionTelemetry;
-#[cfg(test)]
-use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::MultiAgentVersion;
-#[cfg(test)]
-use codex_protocol::protocol::SessionSource;
-#[cfg(test)]
-use codex_protocol::protocol::SubAgentSource;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
@@ -138,31 +132,4 @@ pub(crate) fn collab_v2_agent_error(agent_id: ThreadId, err: CodexErr) -> Functi
         }
         _ => collab_agent_error(agent_id, err),
     }
-}
-
-#[cfg(test)]
-pub(crate) fn thread_spawn_source(
-    parent_thread_id: ThreadId,
-    parent_session_source: &SessionSource,
-    depth: i32,
-    agent_role: Option<&str>,
-    task_name: Option<String>,
-) -> Result<SessionSource, FunctionCallError> {
-    let agent_path = task_name
-        .as_deref()
-        .map(|task_name| {
-            parent_session_source
-                .get_agent_path()
-                .unwrap_or_else(AgentPath::root)
-                .join(task_name)
-                .map_err(FunctionCallError::RespondToModel)
-        })
-        .transpose()?;
-    Ok(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-        parent_thread_id,
-        depth,
-        agent_path,
-        agent_nickname: None,
-        agent_role: agent_role.map(str::to_string),
-    }))
 }

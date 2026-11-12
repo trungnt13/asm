@@ -48,7 +48,6 @@ use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::ReadThreadParams;
 use futures::StreamExt;
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Weak;
 use tracing::warn;
@@ -73,11 +72,9 @@ mod delivery;
 mod execution;
 mod inspection;
 mod interrupt;
-mod legacy;
 mod mailbox;
 mod residency;
 pub use residency::ThreadEvictionOutcome;
-mod resume;
 mod root_handoff;
 mod runtime;
 mod runtime_context;
@@ -721,13 +718,6 @@ pub(crate) fn render_input_preview(input: &[UserInput]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
-    match session_source {
-        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { depth, .. }) => Some(*depth),
-        _ => None,
-    }
 }
 
 /// Share loaded-recipient submission while callers retain residency and failure handling.

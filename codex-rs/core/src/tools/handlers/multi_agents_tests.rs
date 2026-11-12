@@ -1,7 +1,6 @@
 use super::*;
 use crate::StartThreadOptions;
 use crate::ThreadManager;
-use crate::ThreadStoreBuilder;
 use crate::agent::api::AgentControl;
 use crate::agent::child_config::apply_spawn_agent_service_tier;
 use crate::agent::child_config::build_agent_resume_config;
@@ -14,7 +13,6 @@ use crate::environment_selection::EnvironmentConfigOrigin;
 use crate::environment_selection::TurnEnvironmentState;
 use crate::function_tool::FunctionCallError;
 use crate::init_state_db;
-use crate::local_agent_graph_store_from_state_db;
 use crate::session::step_context::StepContext;
 use crate::session::tests::install_reviewer_scoped_skills;
 use crate::session::tests::make_session_and_context;
@@ -25,7 +23,6 @@ use crate::session::tests::update_turn_settings_for_test;
 use crate::session::turn_context::TurnContext;
 use crate::session_prefix::format_inter_agent_completion_message;
 use crate::tools::context::ToolOutput;
-use crate::tools::handlers::multi_agents_common::thread_spawn_source;
 use crate::tools::handlers::multi_agents_v2::FollowupTaskHandler as FollowupTaskHandlerV2;
 use crate::tools::handlers::multi_agents_v2::InterruptAgentHandler;
 use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
@@ -33,13 +30,10 @@ use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHa
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
 use crate::turn_diff_tracker::TurnDiffTracker;
-use codex_extension_api::empty_extension_registry;
 use codex_features::Feature;
-use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider::create_model_provider;
 use codex_model_provider_info::built_in_model_providers;
-use codex_models_manager::manager::ModelCatalogSettings;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_otel::MULTI_AGENT_SPAWN_FAILURE_METRIC;
 use codex_otel::MetricsClient;
@@ -1684,7 +1678,7 @@ async fn multi_agent_v2_list_agents_filters_by_relative_path_prefix() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_list_agents_omits_closed_agents() {
+async fn multi_agent_v2_list_agents_omits_removed_agents() {
     let (mut session, mut turn) = make_session_and_context().await;
     let manager = thread_manager();
     let root = manager
@@ -1720,13 +1714,11 @@ async fn multi_agent_v2_list_agents_omits_closed_agents() {
         .resolve_agent_reference(session.thread_id, &turn.session_source, "worker")
         .await
         .expect("worker path should resolve");
-    session
-        .services
-        .local_agent_runtime
-        .control(session.session_id())
-        .close_agent(agent_id)
+    let removed = manager
+        .remove_thread(&agent_id)
         .await
-        .expect("close_agent should succeed");
+        .expect("remove worker");
+    removed.shutdown_and_wait().await.expect("stop worker");
 
     let output = ListAgentsHandlerV2
         .handle(invocation(
@@ -3744,268 +3736,6 @@ async fn multi_agent_v2_interrupt_agent_rejects_self_target_by_task_name() {
                 .to_string()
         )
     );
-}
-
-#[tokio::test]
-async fn agent_control_cascades_close_and_resume_and_keeps_explicitly_closed_subtrees_closed() {
-    let codex_home = tempfile::tempdir().expect("create codex home");
-    let (_session, turn, _) = make_session_and_context_with_auth_config_home_and_rx(
-        CodexAuth::from_api_key("Test API Key"),
-        Vec::new(),
-        codex_home.path(),
-        |_config| {},
-    )
-    .await;
-    let mut config = turn.config.as_ref().clone();
-    config.agent_max_depth = 3;
-    config
-        .permissions
-        .set_permission_profile(PermissionProfile::workspace_write())
-        .expect("test config should allow workspace writes");
-    config
-        .features
-        .enable(Feature::Sqlite)
-        .expect("test config should allow sqlite");
-    let state_db = init_state_db(&config).await;
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
-    let manager = ThreadManager::new(
-        &config,
-        crate::build_startup_models(
-            &config,
-            auth_manager.clone(),
-            "11111111-1111-4111-8111-111111111111".to_string(),
-            Arc::new(ModelCatalogSettings::disk(config.codex_home.to_path_buf())),
-        ),
-        crate::CodexAppsToolsCache::default(),
-        SessionSource::Exec,
-        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
-        empty_extension_registry(),
-        Arc::new(crate::test_support::EmptyUserInstructionsProvider),
-        /*analytics_events_client*/ None,
-        crate::thread_manager::passthrough_image_store(),
-        ThreadStoreBuilder::from_config(&config, state_db.clone()).build(),
-        local_agent_graph_store_from_state_db(state_db.as_ref()),
-        /*attestation_provider*/ None,
-        /*external_time_provider*/ None,
-    );
-
-    let parent = manager
-        .start_thread(StartThreadOptions::new(config.clone()))
-        .await
-        .expect("parent thread should start");
-    let parent_thread_id = parent.thread_id;
-    let parent_session = parent.thread.session.clone();
-    let parent_turn = parent_session.new_default_turn().await;
-    let mut owner_config = parent_turn
-        .initial_environments
-        .primary()
-        .expect("parent should have an environment")
-        .config()
-        .clone();
-    let owner_permission_profile = PermissionProfile::read_only();
-    owner_config.permission_profile =
-        PermissionProfileSnapshot::legacy(owner_permission_profile.clone());
-    let parent_environment = parent.thread.environment_selections().await.remove(0);
-    parent
-        .thread
-        .environment_ready(&parent_environment, owner_config)
-        .await
-        .expect("owner environment should be installed");
-
-    let child_turn = parent_session.new_default_turn().await;
-    let child_thread_id = manager
-        .agent_control()
-        .spawn_agent(
-            build_agent_spawn_config(
-                &BaseInstructions::default(),
-                &StepContext::for_test(child_turn),
-            )
-            .expect("spawn config"),
-            vec![UserInput::Text {
-                text: "hello child".to_string(),
-                text_elements: Vec::new(),
-            }],
-            Some(
-                thread_spawn_source(
-                    parent_thread_id,
-                    &SessionSource::Exec,
-                    /*depth*/ 1,
-                    /*agent_role*/ None,
-                    /*task_name*/ None,
-                )
-                .expect("spawn source"),
-            ),
-        )
-        .await
-        .expect("child spawn should succeed");
-
-    let child_thread = manager
-        .get_thread(child_thread_id)
-        .await
-        .expect("child thread should exist");
-    let child_session = child_thread.session.clone();
-    let grandchild_thread_id = manager
-        .agent_control()
-        .spawn_agent(
-            build_agent_spawn_config(
-                &BaseInstructions::default(),
-                &StepContext::for_test(child_session.new_default_turn().await),
-            )
-            .expect("spawn config"),
-            vec![UserInput::Text {
-                text: "hello grandchild".to_string(),
-                text_elements: Vec::new(),
-            }],
-            Some(
-                thread_spawn_source(
-                    child_thread_id,
-                    &SessionSource::Exec,
-                    /*depth*/ 2,
-                    /*agent_role*/ None,
-                    /*task_name*/ None,
-                )
-                .expect("spawn source"),
-            ),
-        )
-        .await
-        .expect("grandchild spawn should succeed");
-
-    let close_result = manager
-        .agent_control()
-        .close_agent(child_thread_id)
-        .await
-        .expect("close_agent should close the child subtree");
-    assert_ne!(
-        close_result.status().expect("loaded child status"),
-        &AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager.agent_control().get_status(child_thread_id).await,
-        AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager
-            .agent_control()
-            .get_status(grandchild_thread_id)
-            .await,
-        AgentStatus::NotFound
-    );
-
-    let (child_resume_result, _) = manager
-        .agent_control()
-        .resume_agent(
-            build_agent_resume_config(&parent_session.new_default_turn().await)
-                .expect("resume config"),
-            child_thread_id,
-            thread_spawn_source(
-                parent_session.thread_id,
-                &SessionSource::Exec,
-                /*depth*/ 1,
-                /*agent_role*/ None,
-                /*task_name*/ None,
-            )
-            .expect("resume source"),
-        )
-        .await
-        .expect("resume_agent should reopen the child subtree");
-    assert_ne!(child_resume_result.status, AgentStatus::NotFound);
-    assert_ne!(
-        manager.agent_control().get_status(child_thread_id).await,
-        AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager
-            .get_thread(child_thread_id)
-            .await
-            .expect("resumed child thread should exist")
-            .config_snapshot()
-            .await
-            .permission_profile,
-        owner_permission_profile
-    );
-    assert_ne!(
-        manager
-            .agent_control()
-            .get_status(grandchild_thread_id)
-            .await,
-        AgentStatus::NotFound
-    );
-
-    let close_again_result = manager
-        .agent_control()
-        .close_agent(child_thread_id)
-        .await
-        .expect("close_agent should be repeatable for the child subtree");
-    assert_ne!(
-        close_again_result.status().expect("loaded child status"),
-        &AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager.agent_control().get_status(child_thread_id).await,
-        AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager
-            .agent_control()
-            .get_status(grandchild_thread_id)
-            .await,
-        AgentStatus::NotFound
-    );
-
-    let operator = manager
-        .start_thread(StartThreadOptions::new(config.clone()))
-        .await
-        .expect("operator thread should start");
-    let operator_session = operator.thread.session.clone();
-    let _ = manager
-        .agent_control()
-        .shutdown_live_agent(parent_thread_id)
-        .await
-        .expect("parent shutdown should succeed");
-    assert_eq!(
-        manager.agent_control().get_status(parent_thread_id).await,
-        AgentStatus::NotFound
-    );
-
-    let (parent_resume_result, _) = manager
-        .agent_control()
-        .resume_agent(
-            build_agent_resume_config(&operator_session.new_default_turn().await)
-                .expect("resume config"),
-            parent_thread_id,
-            thread_spawn_source(
-                operator_session.thread_id,
-                &SessionSource::Exec,
-                /*depth*/ 1,
-                /*agent_role*/ None,
-                /*task_name*/ None,
-            )
-            .expect("resume source"),
-        )
-        .await
-        .expect("resume_agent should reopen the parent thread");
-    assert_ne!(parent_resume_result.status, AgentStatus::NotFound);
-    assert_ne!(
-        manager.agent_control().get_status(parent_thread_id).await,
-        AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager.agent_control().get_status(child_thread_id).await,
-        AgentStatus::NotFound
-    );
-    assert_eq!(
-        manager
-            .agent_control()
-            .get_status(grandchild_thread_id)
-            .await,
-        AgentStatus::NotFound
-    );
-
-    let shutdown_report = manager
-        .shutdown_all_threads_bounded(Duration::from_secs(5))
-        .await;
-    assert_eq!(shutdown_report.submit_failed, Vec::<ThreadId>::new());
-    assert_eq!(shutdown_report.timed_out, Vec::<ThreadId>::new());
 }
 
 #[test_case::test_case(false; "inactive_parent")]
