@@ -28,6 +28,7 @@ async fn resumed_initial_messages_render_history() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: true,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -196,6 +197,7 @@ async fn restored_conversation_ultra_remains_selected_after_switching_to_plan() 
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -527,6 +529,7 @@ async fn replayed_user_message_preserves_text_elements_and_local_images() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -606,6 +609,7 @@ async fn replayed_user_message_preserves_remote_image_urls() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -719,6 +723,7 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -806,6 +811,7 @@ async fn session_configured_preserves_profile_workspace_roots() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -860,6 +866,7 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -908,6 +915,7 @@ async fn replayed_user_message_with_only_remote_images_renders_history_cell() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -975,6 +983,7 @@ async fn replayed_user_message_with_only_local_images_renders_history_cell() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1340,6 +1349,7 @@ async fn replayed_reasoning_item_preserves_summary_parts_and_hides_raw_reasoning
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -1398,6 +1408,7 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -1447,6 +1458,7 @@ async fn replayed_mcp_tool_call_stays_active_until_completion() {
     let _ = drain_insert_history(&mut rx);
 
     let mut item = AppServerThreadItemPayload::McpToolCall {
+        environment_id: None,
         id: "mcp-1".to_string(),
         server: "copilot-bridge".to_string(),
         tool: "copilot".to_string(),
@@ -1492,6 +1504,7 @@ async fn failed_repl_mcp_tool_call_preserves_status_and_result() {
 
         chat.handle_server_notification(
             ServerNotification::ItemCompleted(ItemCompletedNotification::new("thread-1".to_string(), "turn-1".to_string(), AppServerThreadItemPayload::McpToolCall {
+                    environment_id: None,
                     id: "mcp-failed".to_string(),
                     server: server.to_string(),
                     tool: "js".to_string(),
@@ -1558,6 +1571,7 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
     ));
 
     chat.on_mcp_tool_call_started(AppServerThreadItemPayload::McpToolCall {
+        environment_id: None,
         id: "mcp-deferred".to_string(),
         server: "copilot-bridge".to_string(),
         tool: "copilot".to_string(),
@@ -1576,6 +1590,7 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
 
     chat.stream_controller = None;
     chat.on_mcp_tool_call_completed(AppServerThreadItemPayload::McpToolCall {
+        environment_id: None,
         id: "mcp-deferred".to_string(),
         server: "copilot-bridge".to_string(),
         tool: "copilot".to_string(),

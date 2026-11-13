@@ -475,6 +475,9 @@ impl ChatWidget {
     ///
     /// Unknown ids are deduplicated in insertion order for warning messages.
     fn status_line_items_with_invalids(&self) -> (Vec<StatusLineItem>, Vec<String>) {
+        if self.read_only_history {
+            return Default::default();
+        }
         parse_items_with_invalids(self.configured_status_line_items())
     }
 
@@ -732,10 +735,10 @@ impl ChatWidget {
     /// git metadata.
     pub(super) fn status_line_value_for_item(&mut self, item: StatusLineItem) -> Option<String> {
         match item {
-            StatusLineItem::ModelName => Some(compact_model_name(self.model_display_name())),
+            StatusLineItem::ModelName => Some(compact_model_name(self.status_model_display_name())),
             StatusLineItem::ModelWithReasoning => Some(
                 self.model_with_reasoning_display_name(
-                    &compact_model_name(self.model_display_name()),
+                    &compact_model_name(self.status_model_display_name()),
                     &compact_reasoning_label(&self.reasoning_display_name()),
                     self.processing_tier_display_name()
                         .map(str::to_lowercase)
@@ -1011,12 +1014,12 @@ impl ChatWidget {
                 self.status_line_value_for_item(StatusLineItem::Daybreak)
             }
             TerminalTitleItem::Model => Some(Self::truncate_terminal_title_part(
-                self.model_display_name().to_string(),
+                self.status_model_display_name().to_string(),
                 /*max_chars*/ 32,
             )),
             TerminalTitleItem::ModelWithReasoning => Some(Self::truncate_terminal_title_part(
                 self.model_with_reasoning_display_name(
-                    self.model_display_name(),
+                    self.status_model_display_name(),
                     &self.reasoning_display_name(),
                     self.processing_tier_display_name(),
                 ),
@@ -1030,13 +1033,27 @@ impl ChatWidget {
         }
     }
 
+    pub(super) fn status_model_display_name(&self) -> &str {
+        self.cloud_picker_selection.as_ref().map_or_else(
+            || self.model_display_name(),
+            |selection| self.model_catalog.display_name(&selection.model),
+        )
+    }
+
+    pub(super) fn status_reasoning_effort(&self) -> Option<ReasoningEffortConfig> {
+        self.cloud_picker_selection.as_ref().map_or_else(
+            || self.effective_reasoning_effort(),
+            |selection| selection.effort.clone(),
+        )
+    }
+
     fn reasoning_display_name(&self) -> String {
         let effort = self
             .status_state
             .captured_step_reasoning
             .as_ref()
             .map(|step| step.reasoning_effort.clone())
-            .unwrap_or_else(|| self.effective_reasoning_effort());
+            .unwrap_or_else(|| self.status_reasoning_effort());
         let label = Self::status_line_reasoning_effort_label(effort.as_ref());
         if self.system1_enabled() {
             format!(
@@ -1069,7 +1086,7 @@ impl ChatWidget {
         self.model_catalog
             .models
             .iter()
-            .find(|preset| preset.model == self.current_model())
+            .find(|preset| preset.model == self.selected_model())
             .and_then(|preset| preset.service_tiers.iter().find(|tier| tier.id == id))
             .map(|tier| tier.name.as_str())
             .or_else(|| {

@@ -51,6 +51,8 @@ pub(super) struct InputQueueState {
     pub(super) submit_pending_steers_after_interrupt: bool,
     pub(super) suppress_queue_autosend: bool,
     pub(super) thread_switch_pending: bool,
+    /// Independent of settings suppression, which a drained event can set.
+    pub(super) resume_handoff: std::sync::Weak<()>,
     pub(super) transcript_copy: std::sync::Weak<crate::copy_input_guard::CopyInputGuard>,
     /// Hold submissions while a usage failure or backend-directed model fallback is resolved.
     pub(super) rate_limit_recovery_pending: bool,
@@ -71,6 +73,7 @@ impl InputQueueState {
         self.suppress_queue_autosend
             || self.thread_switch_pending
             || self.transcript_copy.strong_count() > 0
+            || self.resume_handoff.strong_count() > 0
     }
 
     pub(super) fn has_unconfirmed_messages(&self) -> bool {

@@ -15,16 +15,12 @@ use super::TextWeight;
 use super::UiNode;
 use super::UiTree;
 use super::theme::RenderTheme;
-use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::TerminalHyperlink;
 use crate::terminal_hyperlinks::mark_hyperlink_cells;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::layout::Size;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
-use ratatui::text::Span;
-use std::ops::Range;
 use syntect::highlighting::Theme;
 use vtparse::CollectingVTActor;
 use vtparse::VTAction;
@@ -101,29 +97,6 @@ impl PreparedUiTree {
                 }
             }),
         );
-    }
-
-    pub(crate) fn render_line(&self, width: u16, theme: &Theme) -> HyperlinkLine {
-        let natural = self.measure_natural();
-        if width == 1 && (natural.width > 1 || natural.height > 1) {
-            return ratatui::text::Line::from("…").into();
-        }
-        let mut line = HyperlinkLine::default();
-        let mut theme = RenderTheme::new(theme);
-        layout(
-            self.0.as_ref(),
-            Size::new(width, /*height*/ 1),
-            Some(&mut |_, col, text, cells, paint| {
-                line.line
-                    .push_span(Span::styled(text.to_owned(), paint.style(&mut theme)));
-                if cells > 0
-                    && let Some(href) = &paint.href
-                {
-                    push_link(&mut line, col..col + cells, href);
-                }
-            }),
-        );
-        line
     }
 }
 
@@ -349,18 +322,6 @@ fn sanitize_leaf(mut raw: String) -> String {
             _ => None,
         })
         .collect()
-}
-
-fn push_link(line: &mut HyperlinkLine, columns: Range<usize>, href: &str) {
-    if let Some(last) = line.hyperlinks.last_mut()
-        && last.columns.end == columns.start
-        && last.destination == href
-    {
-        last.columns.end = columns.end;
-    } else {
-        line.hyperlinks
-            .push(TerminalHyperlink::web(columns, href.to_owned()));
-    }
 }
 
 impl TextProps {

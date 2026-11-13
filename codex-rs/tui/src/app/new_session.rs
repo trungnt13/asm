@@ -97,8 +97,13 @@ impl App {
         if let Some(model) = selected_model {
             overrides.model = Some(model.to_owned());
         }
-        let refresh =
-            self.rebuild_config_for_cwd_with_overrides(&settings.config, cwd.clone(), overrides);
+        let refresh = self.rebuild_config_for_cwd_with_overrides(
+            &settings.config,
+            &settings.local_settings,
+            &settings.target,
+            cwd.clone(),
+            overrides,
+        );
         let load = async {
             let defaults = crate::config_update::read_effective_config_if_supported(
                 app_server.request_handle(),

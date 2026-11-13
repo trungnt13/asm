@@ -256,6 +256,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let notification = McpServerStatusUpdatedNotification {
                 thread_id: Some(conversation_id.to_string()),
                 name: update.server,
+                environment_id: update.environment_id,
                 status,
                 error,
                 failure_reason,
@@ -971,6 +972,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 thread_id: conversation_id.to_string(),
                 turn_id,
                 server_name: request.server_name.clone(),
+                environment_id: request.environment_id.clone(),
                 request: request_body,
             };
             let (pending_request_id, rx) = outgoing

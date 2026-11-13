@@ -635,6 +635,7 @@ async fn submission_preserves_text_elements_and_local_images() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -751,6 +752,7 @@ async fn submission_includes_configured_active_permission_profile() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -813,6 +815,7 @@ async fn submission_omits_active_permission_profile_for_legacy_snapshot() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -865,6 +868,7 @@ async fn submission_with_remote_and_local_images_keeps_local_placeholder_numberi
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -972,6 +976,7 @@ async fn enter_with_only_remote_images_submits_user_turn() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1048,6 +1053,7 @@ async fn shift_enter_with_only_remote_images_does_not_submit_user_turn() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1096,6 +1102,7 @@ async fn enter_with_only_remote_images_does_not_submit_when_modal_is_active() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1144,6 +1151,7 @@ async fn enter_with_only_remote_images_does_not_submit_when_input_disabled() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1195,6 +1203,7 @@ async fn submission_prefers_selected_duplicate_skill_path() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1436,7 +1445,7 @@ async fn blocked_image_restore_with_remote_images_keeps_local_placeholder_mappin
 }
 
 #[tokio::test]
-async fn startup_draft_handoff_preserves_literal_and_shell_bang() {
+async fn draft_handoffs_preserve_literal_and_shell_bang() {
     for text in [
         "!echo literal",
         "!echo literal\nsecond line",
@@ -1454,6 +1463,13 @@ async fn startup_draft_handoff_preserves_literal_and_shell_bang() {
         chat.thread_id = Some(ThreadId::new());
         chat.restore_startup_draft(draft.clone());
         assert_eq!(chat.bottom_pane.composer_draft_snapshot(), draft);
+        let input = chat.capture_thread_input_state();
+        chat.restore_thread_input_state(
+            input,
+            ThreadInputStateRestoreMode {
+                preserve_in_flight_turn: false,
+            },
+        );
         chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
         assert_hidden_shell_payload_is_literal(ops.try_recv(), text.trim().to_string());
     }
@@ -1467,6 +1483,13 @@ async fn startup_draft_handoff_preserves_literal_and_shell_bang() {
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.restore_startup_draft(draft);
+    let input = chat.capture_thread_input_state();
+    chat.restore_thread_input_state(
+        input,
+        ThreadInputStateRestoreMode {
+            preserve_in_flight_turn: false,
+        },
+    );
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_matches!(ops.try_recv(), Ok(Op::RunUserShellCommand { command }) if command == "pwd");
 }
@@ -2798,7 +2821,26 @@ async fn reconnect_resumes_unsent_input_and_reconciles_confirmed_submissions() {
         let mut input = chat.capture_thread_input_state();
         let saved_source = input.as_ref().unwrap().safety_buffering_source;
         assert_eq!(saved_source, UserMessageSource::Prompt);
+        if !pending_start {
+            let mut running_input = input.clone().unwrap();
+            running_input.reconcile_confirmed_messages(std::slice::from_ref(&client_id));
+            let (mut restored, _rx, mut ops) =
+                make_chatwidget_manual(/*model_override*/ None).await;
+            restored.restore_thread_input_state(
+                Some(running_input),
+                ThreadInputStateRestoreMode {
+                    preserve_in_flight_turn: true,
+                },
+            );
+            assert!(restored.turn_lifecycle.agent_turn_running);
+            assert!(restored.input_queue.pending_steers.is_empty());
+            assert!(!restored.input_queue.submit_pending_steers_after_interrupt);
+            restored.on_interrupted_turn(TurnAbortReason::Interrupted);
+            assert_no_submit_op(&mut ops);
+        }
         // Missing history and unrelated receipts never authorize resubmitting uncertain input.
+        // Each pass restores state captured from the prior pass, so an exact receipt discovered
+        // on a later resume still releases the ordinary follow-up exactly once.
         for ids in [
             vec![],
             vec!["different-submission".into()],

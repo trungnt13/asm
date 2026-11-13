@@ -98,6 +98,7 @@ impl AppServerSession {
         .await
         .map_err(color_eyre::eyre::Report::msg)?;
         session.thread_source = thread.thread_source.clone().map(Into::into);
+        session.read_only_history = true;
         self.freeze_viewed_receipt(thread_id);
         Ok((
             AppServerStartedThread {

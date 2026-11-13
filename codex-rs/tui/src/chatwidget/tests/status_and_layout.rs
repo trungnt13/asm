@@ -4919,6 +4919,7 @@ async fn session_configured_clears_goal_status_footer() {
         system1_failure_episode: 0,
         agent_role: None,
         thread_source: None,
+        read_only_history: false,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),

@@ -339,7 +339,7 @@ pub(crate) struct CapturedSideDisplay {
     pub(crate) active: Option<Box<dyn HistoryCell>>,
     pub(crate) auxiliary: Vec<crate::terminal_hyperlinks::HyperlinkLine>,
     pub(crate) draft: Box<crate::bottom_pane::TextArea>,
-    pub(crate) status_line: Option<crate::bottom_pane::footer_content::FooterContent>,
+    pub(crate) status_line: Option<crate::bottom_pane::StatusLine>,
     pub(crate) work: Option<CapturedSideWork>,
     pub(crate) last_completed_agent_message: Option<(String, String)>,
     pub(crate) cwd: AbsolutePathBuf,
@@ -1330,6 +1330,7 @@ pub(crate) enum AppEvent {
 
     StartMcpLogin {
         name: String,
+        environment_id: Option<String>,
         thread_id: ThreadId,
     },
 
@@ -1572,6 +1573,12 @@ pub(crate) enum AppEvent {
     /// Save the voice for subsequent conversations through the app server.
     PersistRealtimeVoiceSelection {
         voice: codex_protocol::protocol::RealtimeVoice,
+    },
+
+    /// Toggle the service tier staged for the next Cloud submission.
+    ToggleCloudServiceTier {
+        thread_id: ThreadId,
+        tier: String,
     },
 
     /// Persist the selected service tier to the appropriate config.

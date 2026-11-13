@@ -230,6 +230,7 @@ mod startup_recovery;
 mod status;
 mod status_indicator_widget;
 mod status_line_labels;
+mod statusline_provider;
 mod streaming;
 mod style;
 mod subscription;

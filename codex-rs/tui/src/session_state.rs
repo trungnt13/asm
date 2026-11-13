@@ -39,6 +39,8 @@ pub(crate) struct ThreadSessionState {
     pub(crate) system1_failure_episode: u64,
     pub(crate) agent_role: Option<String>,
     pub(crate) thread_source: Option<codex_protocol::protocol::ThreadSource>,
+    /// This TUI opened saved history without a live attachment.
+    pub(crate) read_only_history: bool,
     pub(crate) daybreak_enabled: bool,
     pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,
     pub(crate) thread_id: ThreadId,
@@ -73,6 +75,15 @@ impl ThreadSessionState {
     pub(crate) fn is_user_fork(&self) -> bool {
         self.forked_from_id.is_some()
             && self.thread_source == Some(codex_protocol::protocol::ThreadSource::User)
+    }
+
+    pub(crate) fn set_fork_parent(&mut self, parent: Option<&str>) {
+        let parent = parent.and_then(|id| ThreadId::from_string(id).ok());
+        // The cached title belongs to the old parent. Drop it if the parent changes or is absent.
+        if self.forked_from_id != parent {
+            self.fork_parent_title = None;
+        }
+        self.forked_from_id = parent;
     }
 
     pub(crate) fn set_cwd_retargeting_implicit_runtime_workspace_root(
