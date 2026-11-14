@@ -81,7 +81,6 @@ members = [
     "ext/queue",
     "ext/skills",
     "ext/web-search",
-    "external-agent-migration",
     "keyring-store",
     "file-search",
     "file-watcher",
@@ -249,7 +248,6 @@ codex-guardian-v2 = { path = "ext/guardian-v2" }
 codex-guardian-v3 = { path = "ext/guardian-v3" }
 codex-history-notes-extension = { path = "ext/history-notes" }
 codex-image-generation-extension = { path = "ext/image-generation" }
-codex-external-agent-migration = { path = "external-agent-migration" }
 codex-experimental-api-macros = { path = "codex-experimental-api-macros" }
 codex-features = { path = "features" }
 codex-feedback = { path = "feedback" }
@@ -430,7 +428,6 @@ libc = "0.2.182"
 # https://www.sqlite.org/wal.html#the_wal_reset_bug
 # SQLite 3.54 also fixes RUSTSEC-2026-0459 when opening a database with a WAL.
 libsqlite3-sys = { version = "0.39.1", default-features = false }
-linkify = "0.11"
 log = "0.4"
 lru = "0.18.2"
 maplit = "1.0.2"

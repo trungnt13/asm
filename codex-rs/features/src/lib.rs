@@ -224,8 +224,6 @@ pub enum Feature {
     CriticalPathTiming,
     /// Enable startup memory extraction and file-backed memory consolidation.
     MemoryTool,
-    /// Enable importing project-scoped memory from external agents.
-    ExternalAgentMemoryImport,
     /// Compress cold local thread-store rollout files, including shared histories.
     /// Requires every reader of the Codex home to support compressed shared histories.
     LocalThreadStoreCompression,
@@ -398,8 +396,6 @@ pub enum Feature {
     PluginDiscoveryPrefetch,
     /// Enable remote plugin sharing flows.
     PluginSharing,
-    /// Removed compatibility flag retained as a no-op.
-    ExternalMigration,
     /// Enable extension-backed image generation.
     ImageGeneration,
     /// Allow the image-generation tool to request a backend-assembled GIF.
@@ -1471,12 +1467,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::ExternalAgentMemoryImport,
-        key: "external_agent_memory_import",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
         id: Feature::LocalThreadStoreCompression,
         key: "local_thread_store_compression",
         stage: Stage::UnderDevelopment,
@@ -2029,12 +2019,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "plugin_sharing",
         stage: Stage::Stable,
         default_enabled: true,
-    },
-    FeatureSpec {
-        id: Feature::ExternalMigration,
-        key: "external_migration",
-        stage: Stage::Removed,
-        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::ImageGeneration,

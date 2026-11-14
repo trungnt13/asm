@@ -11,8 +11,6 @@ mod approvals;
 mod apps;
 #[path = "hooks_tests.rs"]
 mod hooks;
-#[path = "onboarding_tests.rs"]
-mod onboarding;
 #[path = "plugins_tests.rs"]
 mod plugins;
 #[path = "reducer_ordering_tests.rs"]

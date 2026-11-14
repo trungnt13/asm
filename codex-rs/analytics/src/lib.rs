@@ -46,8 +46,6 @@ pub use facts::CompactionTrigger;
 pub use facts::ControlToolCallFact;
 pub use facts::ControlToolCallStatus;
 pub use facts::ElicitationType;
-pub use facts::ExternalAgentConfigImportCompletedInput;
-pub use facts::ExternalAgentConfigImportFailureInput;
 pub use facts::GoalEventKind;
 pub use facts::HookRunFact;
 pub use facts::ImageDetailSetting;
