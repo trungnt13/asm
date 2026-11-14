@@ -194,9 +194,12 @@ async fn run_turn_start(
             .authentication_required
             .store(/*val*/ true, std::sync::atomic::Ordering::Release);
     }
-    if result
-        .as_ref()
-        .is_err_and(|error| !error.is::<ConfirmedInterrupt>())
+    // A confirmed interrupt or usage limit leaves a clean idle process. Keep it: a temporary side
+    // fork is unsaved natively and cannot be started again.
+    if failure != Some(ExternalTurnFailure::UsageLimit)
+        && result
+            .as_ref()
+            .is_err_and(|error| !error.is::<ConfirmedInterrupt>())
     {
         shutdown(&session).await;
     }
