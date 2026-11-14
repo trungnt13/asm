@@ -7,7 +7,6 @@ use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::app_server_event_targets::server_request_thread_id;
 use super::app_server_requests::BufferedServerRequest;
-use crate::app_command::AppCommand;
 use crate::app_event::AppEvent;
 use crate::app_event::RateLimitRefreshOrigin;
 #[cfg(any(target_os = "windows", test))]
@@ -469,28 +468,6 @@ impl App {
                         app_server_client,
                         self.app_event_tx.clone(),
                         self.chat_widget.security_setup_request_id,
-                    );
-                }
-                return;
-            }
-            ServerNotification::ExternalAgentConfigImportCompleted(notification) => {
-                let should_report_completion = app_server_client
-                    .consume_external_agent_config_import_completion(&notification.import_id);
-                if !app_server_client.uses_remote_workspace()
-                    && let Err(err) = self.refresh_in_memory_config_from_disk().await
-                {
-                    tracing::warn!(
-                        error = %err,
-                        "failed to refresh config after external agent config import"
-                    );
-                }
-                let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
-                self.chat_widget.refresh_plugin_mentions();
-                self.chat_widget.submit_op(AppCommand::reload_user_config());
-                self.fetch_plugins_list(app_server_client, cwd);
-                if should_report_completion {
-                    self.chat_widget.add_plain_history_lines(
-                        crate::external_agent_config_migration::flow::external_agent_config_migration_finished_lines(notification),
                     );
                 }
                 return;

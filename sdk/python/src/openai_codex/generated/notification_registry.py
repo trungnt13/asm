@@ -20,8 +20,6 @@ from .v2_all import ContextCompactedNotification
 from .v2_all import DeprecationNoticeNotification
 from .v2_all import EnvironmentConnectionNotification
 from .v2_all import ErrorNotification
-from .v2_all import ExternalAgentConfigImportCompletedNotification
-from .v2_all import ExternalAgentConfigImportProgressNotification
 from .v2_all import FileChangeOutputDeltaNotification
 from .v2_all import FileChangePatchUpdatedNotification
 from .v2_all import FsChangedNotification
@@ -108,8 +106,6 @@ KnownNotificationPayload: TypeAlias = (
     | DeprecationNoticeNotification
     | EnvironmentConnectionNotification
     | ErrorNotification
-    | ExternalAgentConfigImportCompletedNotification
-    | ExternalAgentConfigImportProgressNotification
     | FileChangeOutputDeltaNotification
     | FileChangePatchUpdatedNotification
     | FsChangedNotification
@@ -194,8 +190,6 @@ NOTIFICATION_MODELS: dict[str, type[KnownNotificationPayload]] = {
     "configWarning": ConfigWarningNotification,
     "deprecationNotice": DeprecationNoticeNotification,
     "error": ErrorNotification,
-    "externalAgentConfig/import/completed": ExternalAgentConfigImportCompletedNotification,
-    "externalAgentConfig/import/progress": ExternalAgentConfigImportProgressNotification,
     "fs/changed": FsChangedNotification,
     "fuzzyFileSearch/sessionCompleted": FuzzyFileSearchSessionCompletedNotification,
     "fuzzyFileSearch/sessionUpdated": FuzzyFileSearchSessionUpdatedNotification,

@@ -8,7 +8,6 @@ pub(crate) use account::SessionAccount;
 mod cloud_project;
 mod daybreak_api_key_compat;
 mod events;
-mod external_agent_config;
 pub(crate) mod fs;
 mod history;
 mod models;
@@ -178,7 +177,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
@@ -189,7 +187,6 @@ use uuid::Uuid;
 pub(crate) const JSONRPC_INVALID_REQUEST: i64 = -32600;
 const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
-pub(crate) const EXTERNAL_AGENT_CONFIG_IMPORT_IN_PROGRESS_MESSAGE: &str = "A previous external agent import is still running. Wait for it to finish before importing again.";
 const THREAD_SETTINGS_UPDATE_METHOD: &str = "thread/settings/update";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -443,7 +440,6 @@ pub(crate) struct AppServerSession {
     prefetched_model_list: Option<RemoteHandle<Result<Vec<ModelPreset>>>>,
     daybreak_api_key_compat: Arc<tokio::sync::Semaphore>,
     managed_new_thread_defaults: Option<NewThreadModelDefaults>,
-    external_agent_config_import_id: Mutex<Option<String>>,
     dynamic_tool_mcp: Option<Arc<DynamicToolMcpServer>>,
     pub(crate) worktree_source_config_builder:
         Option<Box<crate::legacy_core::config::ConfigBuilder>>,
@@ -668,7 +664,6 @@ impl AppServerSession {
             prefetched_model_list: None,
             daybreak_api_key_compat: Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
             managed_new_thread_defaults: None,
-            external_agent_config_import_id: Mutex::default(),
             dynamic_tool_mcp: None,
             worktree_source_config_builder: None,
         }
