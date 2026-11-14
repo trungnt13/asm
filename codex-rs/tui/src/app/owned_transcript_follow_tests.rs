@@ -193,6 +193,56 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                     super::tests::buffer_text(buffer)
                 ));
             }
+
+            app.local_settings.tui.collapse_tool_calls = true;
+            for id in 1..=6 {
+                let call_id = format!("lookup-{id}");
+                let command = vec!["echo".to_string(), format!("field note {id}")];
+                let parsed = codex_shell_command::parse_command::parse_command(&command);
+                let mut call = crate::exec_cell::new_active_exec_command(
+                    call_id.clone(),
+                    command,
+                    parsed,
+                    codex_app_server_protocol::CommandExecutionSource::Agent,
+                    /*interaction_input*/ None,
+                    /*animations_enabled*/ false,
+                );
+                assert!(call.complete_call(
+                    &call_id,
+                    crate::exec_cell::CommandOutput::new(
+                        /*exit_code*/ 0,
+                        format!("field note {id}")
+                    ),
+                    std::time::Duration::ZERO,
+                ));
+                app.transcript_cells.push(Arc::new(call));
+            }
+            let size = Size::new(/*width*/ 80, /*height*/ 16);
+            tui.screen_size_for_event(&TuiEvent::Resize(size))?;
+            app.render_owned_transcript(&mut tui, size)?;
+            for key in [KeyCode::F(4), KeyCode::Enter] {
+                app.transcript_view
+                    .handle_key(key.into(), &app.transcript_cells);
+            }
+            app.render_owned_transcript(&mut tui, size)?;
+            app.transcript_view
+                .scroll(&app.transcript_cells, /*rows*/ 2);
+            app.render_owned_transcript(&mut tui, size)?;
+            app.transcript_view
+                .handle_key(KeyCode::Enter.into(), &app.transcript_cells);
+            app.transcript_view.show_copy_feedback(
+                &Ok(crate::clipboard_copy::CopyStatus::Confirmed),
+                /*characters*/ 24,
+            );
+            app.render_owned_transcript(&mut tui, size)?;
+            let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
+            let collapsed = super::tests::buffer_text(buffer);
+            assert!(collapsed.contains("6 tool calls"), "{collapsed}");
+            assert!(app.transcript_view.is_activity_focused());
+            snapshots.push(format!(
+                "Collapsed tool group with copy feedback\n{collapsed}"
+            ));
+
             insta::assert_snapshot!(
                 "running_copy_feedback_spacing",
                 crate::chatwidget::tests::helpers::normalize_working_snapshot(

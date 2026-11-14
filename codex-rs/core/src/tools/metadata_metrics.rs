@@ -11,8 +11,8 @@ const BYTE_BUCKETS: &[f64] = &[
     4194304.0, 8388608.0, 16777216.0,
 ];
 
-pub(crate) fn metadata_bytes(items: &[ResponseItem]) -> usize {
-    items.iter().fold(0_usize, |bytes, item| {
+pub(crate) fn metadata_bytes<'a>(items: impl IntoIterator<Item = &'a ResponseItem>) -> usize {
+    items.into_iter().fold(0_usize, |bytes, item| {
         bytes.saturating_add(executed_tool_call_metadata_bytes(item))
     })
 }

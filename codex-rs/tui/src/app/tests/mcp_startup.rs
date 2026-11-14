@@ -41,6 +41,7 @@ async fn remote_mcp_startup_settles_when_attaching_mid_round() -> Result<()> {
 
         let update = |name: &str, status| {
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(id.to_string()),
                 name: name.to_string(),
                 status,
@@ -159,6 +160,7 @@ async fn remote_mcp_startup_reports_terminal_only_failures_and_cancellations() -
     ] {
         let notification =
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(id.to_string()),
                 name: name.to_string(),
                 error: (status == Failed).then(|| error.to_string()),
@@ -267,6 +269,7 @@ async fn subagent_mcp_startup_settles_while_cached_servers_remain_deferred() {
             &app_server,
             codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
                 ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                    environment_id: None,
                     thread_id: Some(subagent_thread_id.to_string()),
                     name: name.to_string(),
                     status,
@@ -317,6 +320,7 @@ async fn resumed_subagent_mcp_startup_settles_while_cached_servers_remain_deferr
     ] {
         app.chat_widget.handle_server_notification(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(subagent_thread_id.to_string()),
                 name: "eager".to_string(),
                 status,
@@ -347,6 +351,7 @@ async fn side_conversations_settle_despite_unreported_locally_configured_servers
     ] {
         app.chat_widget.handle_server_notification(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(side_thread_id.to_string()),
                 name: "eager".to_string(),
                 status,

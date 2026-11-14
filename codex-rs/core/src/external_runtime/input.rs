@@ -10,6 +10,7 @@ use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::user_input::UserInput;
+use codex_utils_image::PromptImageDecoder;
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::load_data_url_for_prompt;
 use codex_utils_image::load_for_prompt_bytes;
@@ -131,7 +132,11 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                                 bail!("Native images require a base64 data URL, not a file ID");
                             };
                             (
-                                load_data_url_for_prompt(image_url, image_mode(*detail))?,
+                                load_data_url_for_prompt(
+                                    image_url,
+                                    image_mode(*detail),
+                                    PromptImageDecoder::Legacy,
+                                )?,
                                 *detail,
                             )
                         }

@@ -2,17 +2,18 @@
 //! Only the wire copy changes; model-visible input and WebSocket continuation history stay intact.
 
 use crate::tools::metadata_metrics;
-use crate::utils::json::serialized_json_bytes;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::bound_executed_tool_calls_for_message;
+use codex_utils_string::serialized_json_bytes;
 use serde::Serialize;
+use std::sync::Arc;
 
 const MAX_RESPONSE_MESSAGE_BYTES: usize = 15 * 1024 * 1024;
 
 pub(super) fn bounded_input<T: Serialize>(
     message: &T,
-    input: &[ResponseItem],
-) -> Option<Vec<ResponseItem>> {
+    input: &[Arc<ResponseItem>],
+) -> Option<Vec<Arc<ResponseItem>>> {
     if !input.iter().any(|item| {
         item.executed_tool_call_metadata().is_some_and(|metadata| {
             metadata.executed_tool_calls.is_some()
@@ -27,8 +28,11 @@ pub(super) fn bounded_input<T: Serialize>(
     if message_bytes <= MAX_RESPONSE_MESSAGE_BYTES {
         return None;
     }
-    let before = metadata_metrics::metadata_bytes(input);
-    let mut bounded = input.to_vec();
+    let before = metadata_metrics::metadata_bytes(input.iter().map(Arc::as_ref));
+    let mut bounded = input
+        .iter()
+        .map(|item| (**item).clone())
+        .collect::<Vec<_>>();
     let overage = message_bytes - MAX_RESPONSE_MESSAGE_BYTES;
     bound_executed_tool_calls_for_message(&mut bounded, before.saturating_sub(overage));
     let after = metadata_metrics::metadata_bytes(&bounded);
@@ -37,7 +41,19 @@ pub(super) fn bounded_input<T: Serialize>(
     }
     metadata_metrics::record_shedding("message", before, after, codex_otel::global().as_ref());
     // Ordinary content alone can exceed the soft limit. Preserve it and existing error handling.
-    Some(bounded)
+    Some(
+        bounded
+            .into_iter()
+            .zip(input)
+            .map(|(bounded, original)| {
+                if bounded == **original {
+                    Arc::clone(original)
+                } else {
+                    Arc::new(bounded)
+                }
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::metadata_metrics;
 use crate::tools::router::ToolCall;
-use crate::utils::json::serialized_json_bytes;
+use codex_utils_string::serialized_json_bytes;
 
 mod seen_ids;
 
@@ -321,17 +321,17 @@ impl ExecutedToolCalls {
 
     /// A later wait cannot claim a complete inventory if an earlier wire copy
     /// lost recorded calls or tool names from the same Code Mode cell.
-    pub(crate) fn invalidate_wire_inventory_loss(
+    pub(crate) fn invalidate_wire_inventory_loss<'a>(
         &self,
-        original: &[ResponseItem],
-        bounded: &[ResponseItem],
+        original: impl IntoIterator<Item = &'a ResponseItem>,
+        bounded: impl IntoIterator<Item = &'a ResponseItem>,
     ) {
         let mut state = self.lock_state();
         let Some(state) = state.as_mut() else {
             return;
         };
         // Request bounding clones the same items in the same order; it only edits metadata.
-        for (original, bounded) in original.iter().zip(bounded) {
+        for (original, bounded) in original.into_iter().zip(bounded) {
             let Some(metadata) = original.executed_tool_call_metadata() else {
                 continue;
             };
@@ -398,7 +398,7 @@ impl ExecutedToolCalls {
     fn reserve_direct_call(&self) -> Option<DirectCallPermit> {
         let recording = Arc::downgrade(&self.lock_state().as_ref()?.recording);
         self.pending_direct_calls
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |pending| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |pending| {
                 (pending < MAX_PENDING_EXECUTED_TOOL_CALLS).then_some(pending + 1)
             })
             .ok()?;
@@ -766,7 +766,7 @@ fn recorded_call(call: &ToolCall) -> (ExecutedToolCall, usize) {
     (ExecutedToolCall::new(name, arguments), original_bytes)
 }
 
-fn input_call_id(item: &ResponseItem) -> Option<&str> {
+pub(crate) fn input_call_id(item: &ResponseItem) -> Option<&str> {
     match item {
         ResponseItem::FunctionCall { call_id, .. }
         | ResponseItem::CustomToolCall { call_id, .. } => Some(call_id),
@@ -776,11 +776,31 @@ fn input_call_id(item: &ResponseItem) -> Option<&str> {
     }
 }
 
-fn output_call_id(item: &ResponseItem) -> Option<&str> {
+pub(crate) fn output_call_id(item: &ResponseItem) -> Option<&str> {
     match item {
         ResponseItem::FunctionCallOutput { call_id, .. }
         | ResponseItem::ToolSearchOutput { call_id, .. } => call_id.as_deref(),
         ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id),
         _ => None,
     }
+}
+
+pub(crate) fn is_matching_tool_output(call: &ResponseItem, output: &ResponseItem) -> bool {
+    let Some(call_id) = input_call_id(call) else {
+        return false;
+    };
+    output_call_id(output) == Some(call_id)
+        && matches!(
+            (call, output),
+            (
+                ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. },
+                ResponseItem::FunctionCallOutput { .. }
+            ) | (
+                ResponseItem::CustomToolCall { .. },
+                ResponseItem::CustomToolCallOutput { .. }
+            ) | (
+                ResponseItem::ToolSearchCall { .. },
+                ResponseItem::ToolSearchOutput { .. }
+            )
+        )
 }

@@ -92,7 +92,7 @@ impl Steering {
 
     pub(crate) fn close_at_idle(&mut self) -> bool {
         match self {
-            Self::Foreground(_) => true,
+            Self::Foreground(receiver) => receiver.is_empty(),
             Self::Continuation {
                 receiver,
                 closed,

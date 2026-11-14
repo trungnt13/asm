@@ -363,28 +363,8 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
         &[],
     )
     .unwrap();
-    let elastic = (budgeting == ContextBudgeting::Elastic).then(|| {
-        let section = codex_guardian_context::ElasticSection::TrustedSkills;
-        let mut policy = codex_guardian_context::ElasticBudgetConfig::default();
-        policy.sections.insert(
-            section,
-            codex_guardian_context::ElasticSectionLimits::new(
-                /*min_total_section_tokens*/ 1, /*max_section_entry_tokens*/ 1,
-            )
-            .unwrap(),
-        );
-        let minimum = codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS
-            - usize::try_from(policy.total_minimum_tokens()).unwrap()
-            + 1;
-        policy.sections.insert(
-            section,
-            codex_guardian_context::ElasticSectionLimits::new(
-                minimum, /*max_section_entry_tokens*/ 1,
-            )
-            .unwrap(),
-        );
-        policy
-    });
+    let elastic = (budgeting == ContextBudgeting::Elastic)
+        .then(core_test_support::guardian::elastic_budget_config);
     step.turn.extension_data.insert(RetainedReviewContext {
         context: context.retained_instructions(),
         elastic,
@@ -420,7 +400,14 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
             session.services.image_store.as_ref(),
         )
         .await;
-    assert_eq!(prompt.input, persisted);
+    assert_eq!(
+        prompt
+            .input
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>(),
+        persisted.iter().collect::<Vec<_>>()
+    );
     assert!(
         persisted
             .iter()
@@ -434,5 +421,12 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
     super::super::request_budget::prepare_prompt(&session, &mut prompt, &step, &metadata)
         .await
         .unwrap();
-    assert_eq!(prompt.input, persisted);
+    assert_eq!(
+        prompt
+            .input
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>(),
+        persisted.iter().collect::<Vec<_>>()
+    );
 }

@@ -402,6 +402,7 @@ use self::status_state::TerminalTitleStatusKind;
 mod status_controls;
 mod status_surface_commands;
 mod status_surfaces;
+pub(crate) mod statusline_state;
 use self::status_surface_commands::StatusSurfaceOverrides;
 mod streaming;
 use self::status_surfaces::CachedProjectRootName;
@@ -553,8 +554,11 @@ pub(crate) struct ChatWidget {
     has_codex_backend_auth: bool,
     model_catalog: Arc<ModelCatalog>,
     model_popup_request_id: Option<uuid::Uuid>,
+    /// Cloud settings accepted for future turns. Serving model metadata comes from the session.
     pub(crate) cloud_picker_selection:
         Option<crate::app_server_session::user_message_submission::CloudModelSelection>,
+    pub(crate) pending_cloud_turn_settings:
+        Option<crate::app_server_session::user_message_submission::PendingCloudTurnSettings>,
     /// An app event has been queued to open the permissions picker, but no view exists yet.
     pub(crate) permission_popup_pending: bool,
     permission_popup_request_id: Option<uuid::Uuid>,
@@ -571,6 +575,7 @@ pub(crate) struct ChatWidget {
     pub(crate) remote_connection: Option<RemoteConnectionStatus>,
     /// Remote app servers cannot read image paths on the TUI host.
     pub(crate) snapshot_local_images: bool,
+    pub(crate) thread_settings_owner: crate::app_server_session::ThreadSettingsOwner,
     pending_image_submission: Option<image_submission::PendingImageSubmission>,
     pub(crate) local_worktree_operations: bool,
     pub(crate) windows_sandbox_local_server: bool,
@@ -643,11 +648,11 @@ pub(crate) struct ChatWidget {
     unified_exec_processes: Vec<UnifiedExecProcessSummary>,
     /// Exits observed during the pending list request take precedence over its response.
     pending_terminal_restore: Option<(uuid::Uuid, HashSet<String>)>,
-    /// Latest status per server in the active startup round. Its presence keeps
+    /// Latest status per (server name, environment ID) in the active startup round. Its presence keeps
     /// the composer busy, and its terminal outcomes determine the round's summary.
-    mcp_startup_status: Option<HashMap<String, McpStartupStatus>>,
+    mcp_startup_status: Option<HashMap<(String, Option<String>), McpStartupStatus>>,
     /// Last diagnostic per server, so replayed terminal updates are only reported once.
-    mcp_startup_last_diagnostics: HashMap<String, McpStartupStatus>,
+    mcp_startup_last_diagnostics: HashMap<(String, Option<String>), McpStartupStatus>,
     connectors: ConnectorsState,
     ide_context: IdeContextState,
     plugins_cache: PluginsCacheState,
@@ -690,6 +695,8 @@ pub(crate) struct ChatWidget {
     blocks_direct_input: bool,
     show_interagent_communication: bool,
     external_writer_view: bool,
+    read_only_history: bool,
+    thread_settings_confirmed: bool,
     provider_error: Option<codex_app_server_protocol::ModelProviderError>,
     /// Covers both queued and executing forks so repeated shortcuts cannot queue another one.
     pub(crate) fork_in_progress: bool,
@@ -742,6 +749,7 @@ pub(crate) struct ChatWidget {
     current_rollout_path: Option<PathBuf>,
     // Current working directory (if known)
     current_cwd: Option<PathBuf>,
+    primary_environment_cwd: Option<crate::session_state::EnvironmentCwd>,
     // App-server-backed command runner for status-line workspace metadata lookups.
     workspace_command_runner: Option<WorkspaceCommandRunner>,
     // Instruction source files loaded for the current session, supplied by app-server.
@@ -791,9 +799,7 @@ pub(crate) struct ChatWidget {
     // Cached workspace notification headline for the status line.
     status_line_workspace_headline: Option<String>,
     // Request ID for the async workspace headline fetch currently in flight.
-    status_line_workspace_headline_pending_request_id: Option<u64>,
-    // Request ID to assign to the next workspace headline fetch.
-    next_status_line_workspace_headline_request_id: u64,
+    status_line_workspace_headline_pending_request_id: Option<uuid::Uuid>,
     // Last time a workspace headline fetch was requested.
     status_line_workspace_headline_last_requested_at: Option<Instant>,
     // Set after the backend reports the workspace-message feature gate is disabled.
@@ -950,20 +956,8 @@ fn request_permissions_from_params(
 
 fn token_usage_info_from_app_server(token_usage: ThreadTokenUsage) -> TokenUsageInfo {
     TokenUsageInfo {
-        total_token_usage: TokenUsage {
-            total_tokens: token_usage.total.total_tokens,
-            input_tokens: token_usage.total.input_tokens,
-            cached_input_tokens: token_usage.total.cached_input_tokens,
-            output_tokens: token_usage.total.output_tokens,
-            reasoning_output_tokens: token_usage.total.reasoning_output_tokens,
-        },
-        last_token_usage: TokenUsage {
-            total_tokens: token_usage.last.total_tokens,
-            input_tokens: token_usage.last.input_tokens,
-            cached_input_tokens: token_usage.last.cached_input_tokens,
-            output_tokens: token_usage.last.output_tokens,
-            reasoning_output_tokens: token_usage.last.reasoning_output_tokens,
-        },
+        total_token_usage: token_usage.total.into(),
+        last_token_usage: token_usage.last.into(),
         model_context_window: token_usage.model_context_window,
     }
 }
@@ -1163,13 +1157,17 @@ impl ChatWidget {
         self.config.memories.generate_memories = generate_memories;
     }
 
+    fn sync_context_window_visibility(&mut self) {
+        self.bottom_pane
+            .set_context_window_hidden(self.read_only_history || self.token_usage_pending);
+    }
+
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
         match info {
             Some(info) => self.apply_token_info(info),
             None => {
                 self.token_usage_pending = true;
-                self.bottom_pane
-                    .set_context_window_pending(/*pending*/ true);
+                self.sync_context_window_visibility();
                 self.bottom_pane
                     .set_context_window(/*percent*/ None, /*used_tokens*/ None);
                 self.token_info = None;
@@ -1179,8 +1177,7 @@ impl ChatWidget {
 
     fn apply_token_info(&mut self, info: TokenUsageInfo) {
         self.token_usage_pending = false;
-        self.bottom_pane
-            .set_context_window_pending(/*pending*/ false);
+        self.sync_context_window_visibility();
         let percent = self.context_remaining_percent(&info);
         let used_tokens = self.context_used_tokens(&info, percent.is_some());
         self.bottom_pane.set_context_window(percent, used_tokens);
@@ -1901,6 +1898,10 @@ impl ChatWidget {
         self.external_writer_view
     }
 
+    pub(crate) fn is_read_only_view(&self) -> bool {
+        self.is_external_writer_view()
+    }
+
     fn refresh_skills_for_current_cwd(&mut self, force_reload: bool) {
         self.submit_op(AppCommand::list_skills(
             vec![self.config.cwd.to_path_buf()],
@@ -2129,14 +2130,16 @@ impl ChatWidget {
 
     #[cfg(test)]
     pub(crate) fn status_line_text(&self) -> Option<String> {
-        self.status_line_content()
-            .cloned()
-            .map(|content| content.into_hyperlink_line().line.to_string())
+        self.status_line_content().map(|status| {
+            status
+                .as_native()
+                .expect("native status line")
+                .line
+                .to_string()
+        })
     }
 
-    pub(crate) fn status_line_content(
-        &self,
-    ) -> Option<&crate::bottom_pane::footer_content::FooterContent> {
+    pub(crate) fn status_line_content(&self) -> Option<&crate::bottom_pane::StatusLine> {
         self.bottom_pane.status_line_content()
     }
 

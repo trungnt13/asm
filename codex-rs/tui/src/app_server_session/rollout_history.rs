@@ -78,7 +78,7 @@ impl AppServerSession {
         }
         let mut session = thread_session_state_from_thread_response(
             &thread.id,
-            crate::windows_sandbox::host_from_environments(thread.environments.as_deref()),
+            thread.environments.as_deref(),
             thread.forked_from_id.clone(),
             thread.name.clone(),
             thread.path.clone(),
@@ -98,6 +98,7 @@ impl AppServerSession {
         .await
         .map_err(color_eyre::eyre::Report::msg)?;
         session.thread_source = thread.thread_source.clone().map(Into::into);
+        session.read_only_history = true;
         self.freeze_viewed_receipt(thread_id);
         Ok((
             AppServerStartedThread {

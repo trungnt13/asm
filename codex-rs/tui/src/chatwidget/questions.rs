@@ -180,6 +180,7 @@ impl ChatWidget {
                         quotes: main.quotes,
                         quote_comments: main.quote_comments,
                         text: main.text,
+                        shell_mode: None,
                         text_elements: main.text_elements,
                         local_images: main.local_images,
                         remote_image_urls: main.remote_image_urls,

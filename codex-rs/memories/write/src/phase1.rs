@@ -306,7 +306,10 @@ mod job {
                 internal_chat_message_metadata_passthrough: None,
             }],
             MemoryVersion::V2 => crate::rollout_input::extraction_messages(&input_text),
-        };
+        }
+        .into_iter()
+        .map(std::sync::Arc::new)
+        .collect();
         prompt.base_instructions = BaseInstructions {
             text: match config.memories.version {
                 MemoryVersion::V1 => crate::stage_one::PROMPT,
@@ -319,7 +322,7 @@ mod job {
         prompt.output_schema_strict = true;
 
         let (result, token_usage) = context
-            .stream_stage_one_prompt(config, &prompt, stage_one_context)
+            .stream_stage_one_prompt(config, prompt, stage_one_context)
             .await?;
 
         let output = StageOneOutput::parse(&result, config.memories.version)?;

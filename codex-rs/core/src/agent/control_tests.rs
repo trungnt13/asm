@@ -2845,6 +2845,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
         next_item_ordinal: None,
         rejected_audio_file_ids: Default::default(),
         dynamic_tools: None,
+        observation_clock_floor_ms: None,
         multi_agent_version: Some(MultiAgentVersion::V2),
         last_started_turn_id: Some("parent-turn".to_string()),
         turn_attribution: Some(codex_history::TurnAttribution {
@@ -4003,6 +4004,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                     next_item_ordinal: None,
                     rejected_audio_file_ids: Default::default(),
                     dynamic_tools: None,
+                    observation_clock_floor_ms: None,
                     multi_agent_version: Some(MultiAgentVersion::V2),
                     last_started_turn_id: None,
                     turn_attribution: None,
@@ -4140,6 +4142,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                 next_item_ordinal: None,
                 rejected_audio_file_ids: Default::default(),
                 dynamic_tools: None,
+                observation_clock_floor_ms: None,
                 multi_agent_version: Some(MultiAgentVersion::V2),
                 last_started_turn_id: None,
                 turn_attribution: None,
@@ -4610,6 +4613,8 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
         .await
         .expect("tester thread should exist");
     let tester_turn = tester_thread.session.new_default_turn().await;
+    let writes = &harness.control.runtime.unconfirmed_results;
+    let before = writes.load(std::sync::atomic::Ordering::Acquire);
     tester_thread
         .session
         .send_event(
@@ -4627,6 +4632,7 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
         )
         .await;
 
+    assert_eq!(writes.load(std::sync::atomic::Ordering::Acquire), before);
     sleep(Duration::from_millis(100)).await;
 
     assert!(
@@ -4658,6 +4664,18 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
         )
     ));
     assert!(!has_subagent_notification(root_history.raw_items()));
+}
+
+#[test]
+fn terminal_result_writes_require_confirmation_after_the_parent_claims_mail() {
+    let count = Arc::new(std::sync::atomic::AtomicUsize::default());
+    let publish = || MessageDelivery::publish(ThreadId::new(), &[], Some(&count)).unwrap();
+    let parent = ThreadId::new();
+    drop(publish().consumed(parent));
+    let saved = publish();
+    saved.consumed(parent).unwrap().confirm();
+    assert!(saved.consumed(parent).is_none());
+    assert_eq!(count.load(std::sync::atomic::Ordering::Acquire), 1);
 }
 
 #[tokio::test]
@@ -5171,11 +5189,23 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         Vec::new()
     );
 
+    assert_eq!(
+        original_snapshot.history_mode,
+        codex_protocol::protocol::ThreadHistoryMode::Legacy
+    );
+    let before_resume = thread_store.calls().await;
     control
         .ensure_child_loaded(parent_thread_id, child_thread_id)
         .await
         .expect("owner reload");
     let resumed_thread_id = child_thread_id;
+    let after_resume = thread_store.calls().await;
+    assert_eq!(
+        after_resume.read_thread_with_history,
+        before_resume.read_thread_with_history
+    );
+    assert!(after_resume.load_history > before_resume.load_history);
+
     let resumed_thread = harness
         .manager
         .get_thread(resumed_thread_id)

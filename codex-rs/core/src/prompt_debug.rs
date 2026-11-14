@@ -88,7 +88,7 @@ pub async fn build_prompt_input(
 
     let output = prepare_debug_prompt(&thread.thread.session, input)
         .await
-        .map(|(prompt, _)| prompt.input);
+        .map(|(prompt, _)| prompt.input.into_iter().map(Arc::unwrap_or_clone).collect());
     let shutdown = thread.thread.shutdown_and_wait().await;
     let _removed = thread_manager.remove_thread(&thread.thread_id).await;
 

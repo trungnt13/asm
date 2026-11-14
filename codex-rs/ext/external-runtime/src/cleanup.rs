@@ -214,7 +214,14 @@ mod supported {
             Ok(()) => Ok(bytes
                 .split(|byte| *byte == 0)
                 .any(|value| value == expected.as_bytes())),
-            Err(error) if matches!(error.raw_os_error(), Some(libc::ESRCH | libc::ENOENT)) => {
+            // Unrelated same-user processes such as `sshd: user@notty` hide their environment.
+            // Owned descendants that do so are still reached through their ancestry.
+            Err(error)
+                if matches!(
+                    error.raw_os_error(),
+                    Some(libc::ESRCH | libc::ENOENT | libc::EACCES | libc::EPERM)
+                ) =>
+            {
                 Ok(false)
             }
             Err(error) => Err(error).context("checking native process ownership"),

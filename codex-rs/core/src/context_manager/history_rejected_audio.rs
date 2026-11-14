@@ -21,15 +21,14 @@ use futures::stream;
 #[derive(Clone)]
 pub(crate) struct RejectedAudioFileIds(pub(crate) Vec<String>);
 
-pub(crate) fn pending_audio_confirmation(
+pub(crate) fn pending_audio_confirmation<'a>(
     previous: Option<&AcceptedFileAudio>,
     turn_id: &str,
     model: &str,
     provider: &str,
-    items: &[ResponseItem],
+    items: impl Iterator<Item = &'a ResponseItem> + Clone,
 ) -> Option<AcceptedFileAudio> {
     let ids = items
-        .iter()
         .filter_map(|item| match item {
             ResponseItem::Message { content, .. } => Some(content.iter()),
             _ => None,
@@ -58,6 +57,7 @@ pub(crate) fn pending_audio_confirmation(
 enum FileErrorSource<'a> {
     Audio(&'a str),
     InlineAudio,
+    ToolFileAudio,
     FileImage,
     Opaque,
 }
@@ -85,9 +85,12 @@ fn visit_sources<'a>(item: &'a ResponseItem, mut visit: impl FnMut(FileErrorSour
         | ResponseItem::CustomToolCallOutput { output, .. } => {
             for part in output.content_items().unwrap_or_default() {
                 match part {
-                    FunctionCallOutputContentItem::InputAudio { .. } => {
-                        visit(FileErrorSource::InlineAudio)
-                    }
+                    FunctionCallOutputContentItem::InputAudio {
+                        audio: AudioReference::File { .. },
+                    } => visit(FileErrorSource::ToolFileAudio),
+                    FunctionCallOutputContentItem::InputAudio {
+                        audio: AudioReference::Inline { .. },
+                    } => visit(FileErrorSource::InlineAudio),
                     FunctionCallOutputContentItem::InputImage {
                         image: ImageReference::File { .. },
                         ..
@@ -141,25 +144,29 @@ fn opaque_content(item: &ResponseItem) -> Option<&str> {
 pub(crate) struct SubmittedFileAudio {
     file_ids: Vec<String>,
     candidate: Option<usize>,
-    has_inline_audio: bool,
-    has_file_image: bool,
+    has_competing_audio: bool,
+    has_competing_file: bool,
 }
 
 impl SubmittedFileAudio {
     pub(crate) fn from_request<'a>(
-        items: &[ResponseItem],
+        items: impl Iterator<Item = &'a ResponseItem> + Clone,
         accepted: Option<&AcceptedFileAudio>,
         clear_checkpoints: impl Iterator<Item = &'a str> + Clone,
     ) -> Option<Self> {
         let mut file_ids = Vec::new();
-        let mut has_inline_audio = false;
-        let mut has_file_image = false;
+        let mut has_competing_audio = false;
+        let mut has_competing_file = false;
         let mut unknown_checkpoint = false;
         for item in items {
             visit_sources(item, |source| match source {
                 FileErrorSource::Audio(id) => file_ids.push(id),
-                FileErrorSource::InlineAudio => has_inline_audio = true,
-                FileErrorSource::FileImage => has_file_image = true,
+                FileErrorSource::InlineAudio => has_competing_audio = true,
+                FileErrorSource::ToolFileAudio => {
+                    has_competing_audio = true;
+                    has_competing_file = true;
+                }
+                FileErrorSource::FileImage => has_competing_file = true,
                 FileErrorSource::Opaque => {
                     unknown_checkpoint |= !opaque_content(item).is_some_and(|ciphertext| {
                         clear_checkpoints.clone().any(|known| known == ciphertext)
@@ -185,8 +192,8 @@ impl SubmittedFileAudio {
         Some(Self {
             file_ids: file_ids.into_iter().map(str::to_owned).collect(),
             candidate,
-            has_inline_audio,
-            has_file_image,
+            has_competing_audio,
+            has_competing_file,
         })
     }
 
@@ -195,9 +202,9 @@ impl SubmittedFileAudio {
         let unique_file = self.file_ids.len() == 1;
         let attributable = match error {
             CodexErrorDetails::InvalidAudioInput { per_recording, .. } => {
-                !self.has_inline_audio && (unique_file || *per_recording)
+                !self.has_competing_audio && (unique_file || *per_recording)
             }
-            _ => unique_file && !self.has_file_image && is_unknown_file_error(error),
+            _ => unique_file && !self.has_competing_file && is_unknown_file_error(error),
         };
         attributable.then_some(index)
     }

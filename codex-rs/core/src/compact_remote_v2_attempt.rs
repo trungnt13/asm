@@ -18,7 +18,7 @@ use crate::compact_remote_history::trim_function_call_history_to_fit_context_win
 use crate::context::world_state::WorldState;
 use crate::context_manager::ContextManager;
 use crate::context_manager::rejected_audio;
-use crate::context_manager::replace_unresolvable_image_files;
+use crate::context_manager::replace_unresolvable_media_files;
 use crate::responses_metadata::CompactionTurnMetadata;
 use crate::session::CompactionPrefix;
 use crate::session::session::Session;
@@ -177,8 +177,8 @@ pub(super) async fn run_remote_compact_v2_attempt(
             .iter()
             .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
-    let mut prompt = Prompt {
-        input,
+    let mut prompt = Arc::new(Prompt {
+        input: input.into_iter().map(Arc::new).collect(),
         tools: if tools_in_history {
             tool_router
                 .model_visible_specs()
@@ -195,7 +195,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         output_schema_strict: true,
         prompt_cache_ttl: turn_context.prompt_cache_ttl,
         cyber_access_program: turn_context.cyber_access_program,
-    };
+    });
 
     let mut responses_metadata = match captured_window {
         Some(window) => {
@@ -210,7 +210,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     // The file may disappear after the availability check, or the store may
     // defer validation to Responses. Retry only an unambiguously rejected ID.
     let mut submitted_audio = rejected_audio::SubmittedFileAudio::from_request(
-        &prompt.input,
+        prompt.input.iter().map(Arc::as_ref),
         /*accepted*/ None,
         prompt
             .input
@@ -225,13 +225,20 @@ pub(super) async fn run_remote_compact_v2_attempt(
         response_id,
         token_usage,
     } = loop {
-        prompt.input.push(ResponseItem::CompactionTrigger {});
-        let trace_attempt = compaction_trace.start_attempt(&serde_json::json!({
-            "model": model_info.slug.as_str(),
-            "instructions": prompt.base_instructions.text.as_str(),
-            "input": &prompt.input,
-            "parallel_tool_calls": prompt.parallel_tool_calls,
-        }));
+        Arc::make_mut(&mut prompt)
+            .input
+            .push(Arc::new(ResponseItem::CompactionTrigger {}));
+        // A retry can edit its input while the worker still holds this attempt's snapshot.
+        let trace_prompt = Arc::clone(&prompt);
+        let trace_model = model_info.slug.clone();
+        let trace_attempt = compaction_trace.start_attempt(move || {
+            serde_json::json!({
+                "model": trace_model,
+                "instructions": trace_prompt.base_instructions.text.as_str(),
+                "input": &trace_prompt.input,
+                "parallel_tool_calls": trace_prompt.parallel_tool_calls,
+            })
+        });
         let compaction_output_result = run_remote_compaction_request_v2(
             sess,
             step_context,
@@ -246,30 +253,33 @@ pub(super) async fn run_remote_compact_v2_attempt(
                 .as_ref()
                 .map(|output| std::slice::from_ref(&output.compaction_output)),
         );
-        prompt.input.pop();
-        match compaction_output_result {
+        let rejected_id = match compaction_output_result {
             Ok(output) => break output,
-            Err(error) => {
-                let Some(id) = submitted_audio
-                    .take()
-                    .and_then(|audio| audio.rejected_file_id(error.details()))
-                else {
-                    return Err(error);
-                };
-                unavailable.insert(id);
-                rejected_audio::project_compaction_audio(
-                    &mut prompt.input,
-                    &mut prompt_input_metadata,
-                    &unavailable,
-                );
-            }
-        }
+            Err(error) => submitted_audio
+                .take()
+                .and_then(|audio| audio.rejected_file_id(error.details()))
+                .ok_or(error)?,
+        };
+        unavailable.insert(rejected_id);
+        let mut input = std::mem::take(&mut Arc::make_mut(&mut prompt).input)
+            .into_iter()
+            .map(Arc::unwrap_or_clone)
+            .collect::<Vec<_>>();
+        input.pop();
+        rejected_audio::project_compaction_audio(
+            &mut input,
+            &mut prompt_input_metadata,
+            &unavailable,
+        );
+        Arc::make_mut(&mut prompt).input = input.into_iter().map(Arc::new).collect();
     };
+    let mut prompt_input = Arc::unwrap_or_clone(prompt).input;
+    prompt_input.pop(); // Exclude the request-only trigger from checkpoint history.
     Ok(RemoteCompactV2Attempt {
         rejected_audio_file_ids: unavailable,
         input_goal_ids,
         trace_input_history,
-        prompt_input: prompt.input,
+        prompt_input: prompt_input.into_iter().map(Arc::unwrap_or_clone).collect(),
         prompt_input_metadata,
         compaction_output,
         compaction_response_id: response_id,
@@ -338,7 +348,7 @@ pub(crate) async fn run_background_compaction(
 ) -> CodexResult<BackgroundCompactionCandidate> {
     tokio::select! {
         _ = shutdown_cancellation.cancelled() => return Err(CodexErr::TurnAborted),
-        () = replace_unresolvable_image_files(
+        () = replace_unresolvable_media_files(
             prepared_input.input.iter_mut(),
             sess.services.image_store.as_ref(),
         ) => {},

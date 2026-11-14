@@ -27,7 +27,6 @@ use codex_login::AgentIdentityAuthPolicy;
 use codex_model_provider::SharedModelProvider;
 use codex_model_provider::WorkspaceRoutingContext;
 use codex_protocol::error::CodexErr;
-use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::SessionSource;
@@ -36,6 +35,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+pub(super) const INPUT_TOKEN_MARGIN: usize = 256;
 pub(crate) const MODEL: &str = "gpt-5.6-luna";
 pub(crate) const CLASSIFICATION_TOKEN_USAGE_METRIC: &str =
     "codex.guardian_v2.classification.token_usage";
@@ -172,53 +172,50 @@ impl LunaSampler {
         }
     }
 
-    // Normalize new evidence while preserving the retained prefix and its item IDs.
-    pub(super) fn prepare_input(
+    /// Builds fresh classifier setup with stable IDs before evidence selection.
+    pub(super) fn prepare_setup(request: &LunaSamplingRequest) -> Vec<ResponseItemEnvelope> {
+        let mut input = vec![
+            ResponseItemEnvelope::new(ResponseItem::AdditionalTools {
+                id: None,
+                role: "developer".to_owned(),
+                tools: Arc::from([]),
+            }),
+            ResponseItemEnvelope::new(ResponseItem::from(request.instructions.clone())),
+        ];
+        input.extend(
+            request
+                .parent_compaction
+                .clone()
+                .map(ResponseItemEnvelope::new),
+        );
+        Self::assign_item_ids(request, &mut input);
+        input
+    }
+
+    /// Assigns IDs and counts prepared setup and evidence, excluding committed history.
+    pub(super) fn finish_input(
         request: &LunaSamplingRequest,
-        history: Option<Vec<ResponseItemEnvelope>>,
-        mut evidence: Vec<ResponseItemEnvelope>,
+        mut input: Vec<ResponseItemEnvelope>,
+        evidence: Vec<ResponseItemEnvelope>,
     ) -> (Vec<ResponseItemEnvelope>, usize) {
-        let mut input = history.unwrap_or_else(|| {
-            let mut input = vec![
-                ResponseItemEnvelope::new(ResponseItem::AdditionalTools {
-                    id: None,
-                    role: "developer".to_owned(),
-                    tools: Arc::from([]),
-                }),
-                ResponseItemEnvelope::new(ResponseItem::from(request.instructions.clone())),
-            ];
-            input.extend(
-                request
-                    .parent_compaction
-                    .clone()
-                    .map(ResponseItemEnvelope::new),
-            );
-            input
-        });
-        // Normalize only new evidence; never rewrite the committed prefix.
-        for item in &mut evidence {
-            if let ResponseItem::Message { content, .. } = &mut item.item {
-                for content in content {
-                    if let ContentItem::InputImage { detail, .. } = content {
-                        *detail = None;
-                    }
-                }
-            }
-        }
         input.extend(evidence);
+        Self::assign_item_ids(request, &mut input);
+        let tokens = input
+            .iter()
+            .map(|item| codex_guardian_context::estimate_input_tokens(&item.item))
+            .fold(0usize, usize::saturating_add);
+        (input, tokens)
+    }
+
+    fn assign_item_ids(request: &LunaSamplingRequest, input: &mut [ResponseItemEnvelope]) {
         // Assign IDs once so retries reuse the same input item identities.
-        for item in &mut input {
+        for item in input {
             if item.id().is_none()
                 && let Some(prefix) = item.id_prefix()
             {
                 item.set_id(Some((request.item_id_generator)(prefix)));
             }
         }
-        let tokens = input
-            .iter()
-            .map(|item| codex_guardian_context::estimate_input_tokens(&item.item))
-            .fold(0usize, usize::saturating_add);
-        (input, tokens)
     }
 
     fn execution(
@@ -229,7 +226,7 @@ impl LunaSampler {
     ) -> execution::SamplingExecution {
         let api_request = ResponsesApiRequest {
             model: MODEL.to_owned(),
-            input,
+            input: input.into_iter().map(Arc::new).collect(),
             tools: None,
             tool_choice: "none".to_owned(),
             parallel_tool_calls: false,
@@ -289,7 +286,7 @@ impl LunaSampler {
             remaining_tokens: self
                 .config
                 .max_input_tokens
-                .saturating_sub(/*rhs*/ 256)
+                .saturating_sub(INPUT_TOKEN_MARGIN)
                 .saturating_sub(review_request.input_tokens),
         };
         // Transport sees model items; delivery proof follows the unchanged input prefix.
@@ -305,17 +302,22 @@ impl LunaSampler {
             sampling.pending_score.clone(),
         );
         let result = execution.run(&mut completion, &mut telemetry).await;
-        execution
-            .request
-            .input
-            .extend(completion.finish(result, &mut telemetry)?);
+        execution.request.input.extend(
+            completion
+                .finish(result, &mut telemetry)?
+                .into_iter()
+                .map(Arc::new),
+        );
         Some(
             execution
                 .request
                 .input
                 .into_iter()
                 .zip(metadata.into_iter().chain(std::iter::repeat(None)))
-                .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
+                .map(|(item, metadata)| ResponseItemEnvelope {
+                    item: Arc::unwrap_or_clone(item),
+                    metadata,
+                })
                 .collect(),
         )
     }

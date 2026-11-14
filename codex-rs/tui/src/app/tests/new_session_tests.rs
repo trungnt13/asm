@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::backend_sessions::BackendSessions;
+use crate::app::session_lifecycle::FreshSessionStart;
 use crate::app_server_session::AppServerSessionEvent;
 use codex_app_server_protocol::SkillMetadata;
 use codex_app_server_protocol::SkillScope;
@@ -63,7 +64,7 @@ async fn new_session_refreshes_account_for_the_started_provider() -> Result<()> 
         Box::pin(app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         ))
@@ -183,7 +184,7 @@ async fn new_sessions_preserve_yolo_launch_and_later_permission_choices() -> Res
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         )
@@ -244,7 +245,7 @@ async fn new_session_preserves_vim_line_yank() -> Result<()> {
     app.start_fresh_session(
         &mut tui,
         &mut server,
-        /*session_start_source*/ None,
+        FreshSessionStart::PreserveCurrentView(None),
         /*initial_user_message*/ None,
         /*new_thread_name*/ None,
     )
@@ -459,7 +460,7 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         )
@@ -760,7 +761,7 @@ async fn replacement_failure_keeps_current_task_and_restores_input() -> Result<(
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             Some("keep this request".into()),
             /*new_thread_name*/ None,
         )
@@ -904,6 +905,7 @@ async fn backend_handoff_errors_are_snapshotted() -> Result<()> {
     let trust_error = next_history_message(&mut events);
     insta::assert_snapshot!(trust_error, @"■ Unable to check folder trust: config/read failed while checking remote project trust");
 
+    tui.pause_events();
     // Starting a fresh thread must observe the same destination trust check as resuming one.
     app.start_new_session_on_other_backend(
         &mut tui,
@@ -1200,6 +1202,9 @@ async fn check_retained_draft_handoff(
         let mode = server_mode.as_mut().expect("test has a mode to update");
         mode.mode = ModeKind::Plan;
         mode.settings.developer_instructions = Some("Instructions from the parked task".into());
+        if parked_policy.is_some() {
+            mode.settings.reasoning_effort = Some(ReasoningEffortConfig::High);
+        }
         Some(mode.clone())
     } else {
         None
@@ -1221,6 +1226,7 @@ async fn check_retained_draft_handoff(
         let settings = ThreadSettingsUpdateParams {
             thread_id: thread_id.to_string(),
             collaboration_mode,
+            effort: parked_policy.map(|_| ReasoningEffortConfig::High),
             approval_policy: parked_policy,
             ..Default::default()
         };
@@ -1237,6 +1243,15 @@ async fn check_retained_draft_handoff(
             let (destination, parked_inputs) = backends.session_and_parked_inputs(destination_slot);
             app.handle_polled_backend_event(destination, outgoing, parked_inputs, event)
                 .await;
+        } else if saved_history && retained_blank {
+            // A formerly blank thread must ignore settings cached before it acquired history.
+            let mut stale_update = update;
+            stale_update.thread_settings.model = "old-model".into();
+            backends
+                .parked_inputs_mut(destination_slot)
+                .get_mut(&thread_id)
+                .unwrap()
+                .pending_thread_settings = Some(stale_update);
         }
     }
     let settings = app.backend_settings();
@@ -1361,7 +1376,7 @@ async fn replacement_preserves_remote_launch_paths_and_older_servers() -> Result
         app.start_fresh_session(
             &mut tui,
             &mut server,
-            /*session_start_source*/ None,
+            FreshSessionStart::PreserveCurrentView(None),
             /*initial_user_message*/ None,
             /*new_thread_name*/ None,
         )

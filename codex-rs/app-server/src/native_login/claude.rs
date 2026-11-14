@@ -14,6 +14,7 @@ pub(super) fn command(cwd: &Path) -> Command {
     command.env_remove("CLAUDE_CODE_USE_FOUNDRY");
     command.env_remove("CLAUDE_CODE_USE_ANTHROPIC_AWS");
     command.env_remove("CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD");
+    command.env_remove("CLAUDE_CODE_USE_MANTLE");
     command.env_remove("CLAUDE_CODE_OAUTH_TOKEN");
     command.env_remove("CLAUDE_CODE_OAUTH_REFRESH_TOKEN");
     command.env_remove("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR");
