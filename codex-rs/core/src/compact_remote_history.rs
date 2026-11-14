@@ -89,14 +89,15 @@ pub(crate) fn trim_function_call_history_to_fit_context_window(
         i128::try_from(approx_token_count(&base_instructions.text)).unwrap_or(i128::MAX);
     let audio_durations = &history.file_audio_durations;
     let original_items = history.annotated_items();
-    let mut estimated_tokens = history_item_groups(original_items.iter().map(|item| &item.item))
-        .map(|group| group.estimated_token_count(audio_durations))
-        .fold(base_tokens, i128::saturating_add);
+    let mut estimated_tokens =
+        history_item_groups(original_items.iter().map(|item| item.item.as_ref()))
+            .map(|group| group.estimated_token_count(audio_durations))
+            .fold(base_tokens, i128::saturating_add);
     let initial_estimated_tokens = i64::try_from(estimated_tokens).unwrap_or(i64::MAX);
     let mut rewritten_items = Vec::new();
     let mut consumed_items: usize = 0;
 
-    for group in history_item_groups(original_items.iter().map(|item| &item.item))
+    for group in history_item_groups(original_items.iter().map(|item| item.item.as_ref()))
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
@@ -149,7 +150,7 @@ pub(crate) fn trim_function_call_history_to_fit_context_window(
 fn rewritten_output_for_context_window(
     envelope: &ResponseItemEnvelope,
 ) -> Option<ResponseItemEnvelope> {
-    let item = match &envelope.item {
+    let item = match envelope.item.as_ref() {
         ResponseItem::FunctionCallOutput {
             id,
             call_id,
@@ -196,7 +197,7 @@ fn rewritten_output_for_context_window(
         _ => return None,
     };
     Some(ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: envelope.metadata.clone(),
     })
 }

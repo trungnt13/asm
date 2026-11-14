@@ -93,7 +93,7 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
     let input_images = |input: &[ResponseItemEnvelope]| {
         input
             .iter()
-            .flat_map(|item| match &item.item {
+            .flat_map(|item| match item.item.as_ref() {
                 ResponseItem::Message { content, .. } => content.as_slice(),
                 _ => &[],
             })
@@ -126,8 +126,8 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
         first
             .input
             .iter()
-            .filter(|item| matches!(item.item, ResponseItem::AgentMessage { .. }))
-            .map(|item| item.item.clone())
+            .filter(|item| matches!(item.item.as_ref(), ResponseItem::AgentMessage { .. }))
+            .map(|item| item.item.as_ref().clone())
             .collect::<Vec<_>>(),
         vec![native.clone()]
     );
@@ -173,8 +173,8 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
         second
             .input
             .iter()
-            .filter(|item| matches!(item.item, ResponseItem::AgentMessage { .. }))
-            .map(|item| item.item.clone())
+            .filter(|item| matches!(item.item.as_ref(), ResponseItem::AgentMessage { .. }))
+            .map(|item| item.item.as_ref().clone())
             .collect::<Vec<_>>(),
         vec![native.clone(), next_native.clone()]
     );
@@ -182,7 +182,7 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
     let delta = serde_json::to_string(
         &second.input[committed.len()..]
             .iter()
-            .map(|item| &item.item)
+            .map(|item| item.item.as_ref())
             .collect::<Vec<_>>(),
     )
     .unwrap();
@@ -192,7 +192,7 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
     assert!(delta.contains("Do not write files."));
     assert!(delta.contains("read_file"));
     assert!(
-        matches!(&second.input[committed.len()].item, ResponseItem::Message { role, .. } if role == "user")
+        matches!(second.input[committed.len()].item.as_ref(), ResponseItem::Message { role, .. } if role == "user")
     );
     assert!(!delta.contains("Approved reading README.md only."));
     // A rebuilt conversation must receive the current images again.
@@ -204,8 +204,8 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
         rebuilt
             .input
             .iter()
-            .filter(|item| matches!(item.item, ResponseItem::AgentMessage { .. }))
-            .map(|item| item.item.clone())
+            .filter(|item| matches!(item.item.as_ref(), ResponseItem::AgentMessage { .. }))
+            .map(|item| item.item.as_ref().clone())
             .collect::<Vec<_>>(),
         vec![native, next_native]
     );
@@ -280,7 +280,7 @@ fn complete_budget_counts_setup_checkpoint_images_and_trusted_evidence() {
         .prepare_retained(&evidence, &mut state, INPUT_BUDGET)
         .unwrap();
     assert_eq!(
-        Some(&request.input[2].item),
+        Some(request.input[2].item.as_ref()),
         config.parent_compaction.as_ref()
     );
     assert!(request.input_tokens > 10_000);

@@ -682,12 +682,7 @@ async fn voice_requires_started_thread() {
         .map(|line| line.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    let expected = if codex_realtime_webrtc::RealtimeWebrtcSession::is_supported() {
-        "■ Start a conversation before using voice mode."
-    } else {
-        "■ Voice requires macOS, an MSVC-based Windows build, or a glibc-based Linux build."
-    };
-    assert_eq!(rendered, expected);
+    insta::assert_snapshot!(rendered, @"■ Terminal voice is not included in this ASM build.");
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Inactive

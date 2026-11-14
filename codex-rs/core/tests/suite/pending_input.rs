@@ -642,7 +642,7 @@ async fn queue_only_agent_mail_wakes_sleeping_root_with_previous_turn_context(
             item,
             RolloutItem::ResponseItem(envelope)
                 if matches!(
-                    &envelope.item,
+                    envelope.item.as_ref(),
                     codex_protocol::models::ResponseItem::AgentMessage { content, .. }
                         if content.iter().any(|content| matches!(
                             content,
@@ -2797,7 +2797,7 @@ async fn terminal_compaction_error_does_not_retry_pending_input(
             let RolloutItem::ResponseItem(envelope) = item else {
                 return None;
             };
-            match &envelope.item {
+            match envelope.item.as_ref() {
                 ResponseItem::Message { role, content, .. } if role == "user" => {
                     content.iter().find_map(|item| match item {
                         ContentItem::InputText { text } if text == PENDING_MESSAGE => {

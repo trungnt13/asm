@@ -693,7 +693,7 @@ async fn extension_tool_executors_are_model_visible_and_dispatchable() -> anyhow
         .await?;
 
     let response = result.into_response().item;
-    match response {
+    match std::sync::Arc::unwrap_or_clone(response) {
         ResponseItem::FunctionCallOutput {
             call_id, output, ..
         } => {

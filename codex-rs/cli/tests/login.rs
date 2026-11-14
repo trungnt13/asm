@@ -12,7 +12,6 @@ use codex_login::AuthKeyringBackendKind;
 use codex_login::CLIENT_ID;
 use codex_login::CODEX_ACCESS_TOKEN_ENV_VAR;
 use codex_login::REVOKE_TOKEN_URL_OVERRIDE_ENV_VAR;
-use codex_login::login_with_bedrock_access_keys;
 use codex_models_manager::bundled_models_response;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::shell_environment::OPENAI_FEDERATION_RULE_ID_ENV_VAR;
@@ -258,13 +257,11 @@ fn logout_clears_only_the_selected_bedrock_provider() -> Result<()> {
             ),
         )?;
         if managed_bedrock_auth {
-            login_with_bedrock_access_keys(
-                codex_home.path(),
-                "managed-access-key-id",
-                "managed-secret-access-key",
-                Some("managed-session-token"),
-                AuthCredentialsStoreMode::File,
-                AuthKeyringBackendKind::default(),
+            std::fs::write(
+                codex_home.path().join("auth.json"),
+                serde_json::to_vec(
+                    &serde_json::json!({"auth_mode": "bedrockAccessKeys", "bedrock_access_keys": {"access_key_id": "managed-access-key-id", "secret_access_key": "managed-secret-access-key", "session_token": Some("managed-session-token")}}),
+                )?,
             )?;
         }
         let mut expected_config: toml::Value =

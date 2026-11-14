@@ -32,6 +32,8 @@ use crate::types::ToolSuggestConfig;
 use crate::types::Tui;
 use crate::types::UriBasedFileOpener;
 use crate::types::WindowsToml;
+#[cfg(not(feature = "config-schema"))]
+use codex_app_server_protocol_noop_macros::JsonSchema as ConfigJsonSchema;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
@@ -57,6 +59,8 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::Platform;
+#[cfg(feature = "config-schema")]
+use schemars::JsonSchema as ConfigJsonSchema;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -162,7 +166,7 @@ pub struct FeatureToggleToml {
 }
 
 /// Base config deserialized from ~/.codex/config.toml.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, ConfigJsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
     /// Optional override of model selection.

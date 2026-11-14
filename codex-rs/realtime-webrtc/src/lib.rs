@@ -1,26 +1,11 @@
-mod client;
-mod helper_exit;
-#[cfg(any(target_os = "linux", test))]
-mod linux_alsa;
-mod message_reader;
-mod protocol;
-mod session;
+mod audio_device;
+mod unsupported;
 
-pub use client::ConnectionError;
-pub use client::VoiceHost;
-pub use helper_exit::HelperExitStage;
-pub use protocol::AudioControls;
-pub use protocol::AudioDevice;
-pub use protocol::AudioDeviceKind;
-pub use protocol::AudioDeviceSelection;
-pub use protocol::AudioState;
-pub use protocol::MAX_FRAME_BYTES;
-pub use protocol::Message;
-pub use protocol::RUNTIME_ENVIRONMENT;
-pub use protocol::SessionDescription;
-pub use protocol::decode_frame;
-pub use protocol::encode_frame;
-pub use protocol::read_message;
-pub use session::RealtimeWebrtcSession;
-pub use session::RealtimeWebrtcSessionHandle;
-pub use session::StartedRealtimeWebrtcSession;
+pub use audio_device::AudioDevice;
+pub use audio_device::AudioDeviceKind;
+pub use audio_device::AudioDeviceSelection;
+pub use unsupported::ConnectionError;
+pub use unsupported::RealtimeWebrtcSession;
+pub use unsupported::RealtimeWebrtcSessionHandle;
+pub use unsupported::StartedRealtimeWebrtcSession;
+pub use unsupported::VoiceHost;

@@ -137,7 +137,7 @@ impl ThreadStore for GatedReviewerStore {
                 .await?;
                 let reviews = history.items.iter().filter(|item| matches!(
                     item, RolloutItem::ResponseItem(item)
-                        if matches!(&item.item, ResponseItem::Message { role, .. } if role == "assistant")
+                        if matches!(item.item.as_ref(), ResponseItem::Message { role, .. } if role == "assistant")
                 )).count();
                 let mut reviewer = self.reviewer.lock().await;
                 if reviews > reviewer.reviews {

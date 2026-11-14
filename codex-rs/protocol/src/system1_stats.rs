@@ -1,7 +1,7 @@
+use crate::TS;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use ts_rs::TS;
 
 /// Decision totals for one loaded thread runtime, excluding warmup.
 /// Totals reset when the runtime unloads; each child has separate totals.

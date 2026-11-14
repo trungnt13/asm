@@ -40,7 +40,7 @@ impl LunaSamplingRequest {
             .unwrap_or_default();
         let (mut context, _) = evidence.compose(cursor, history).ok()?;
         context.retain_new_instructions(history);
-        context.retain_new_images(history.iter().map(|item| &item.item), |image, _| {
+        context.retain_new_images(history.iter().map(|item| item.item.as_ref()), |image, _| {
             Some(Cow::Borrowed(image))
         });
         let truncations = std::mem::take(&mut context.truncations);

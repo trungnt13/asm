@@ -113,14 +113,14 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                 continue;
             }
             TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) => {
-                let original = &envelope.item;
+                let original = envelope.item.as_ref();
                 let mut plaintext = original.clone();
                 plaintext.clear_encrypted_content();
                 if plaintext != *original || encrypted_parts(original) {
                     skipped += 1;
                     continue;
                 }
-                envelope.item = context_item(original)?;
+                envelope.item = context_item(original)?.into();
             }
             TurnInput::UserInput { content, .. } => {
                 for part in content {

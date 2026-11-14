@@ -1719,7 +1719,7 @@ async fn manual_compact_emits_context_compaction_items() {
                     .as_ref()
                     .is_some_and(|metadata| metadata.compaction_output) =>
             {
-                Some(envelope.item)
+                Some(envelope.into_item())
             }
             _ => None,
         })

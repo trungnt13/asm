@@ -78,8 +78,6 @@ use codex_login::CodexAuth;
 use codex_login::default_client::RESIDENCY_HEADER_NAME;
 use codex_login::test_support::auth_manager_from_optional_auth;
 use codex_model_provider::ProviderCapabilities;
-use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
-use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_model_provider_info::WireApi;
 use codex_models_manager::bundled_models_response;
 use codex_network_proxy::NetworkMode;
@@ -11252,59 +11250,6 @@ async fn active_project_preserves_cwd_alias_and_repo_root_precedence() -> anyhow
     Ok(())
 }
 
-#[test]
-fn test_set_default_oss_provider() -> std::io::Result<()> {
-    let temp_dir = TempDir::new()?;
-    let codex_home = temp_dir.path();
-    let config_path = codex_home.join(CONFIG_TOML_FILE);
-
-    // Test setting valid provider on empty config
-    set_default_oss_provider(codex_home, OLLAMA_OSS_PROVIDER_ID)?;
-    let content = std::fs::read_to_string(&config_path)?;
-    assert!(content.contains("oss_provider = \"ollama\""));
-
-    // Test updating existing config
-    std::fs::write(&config_path, "model = \"gpt-4\"\n")?;
-    set_default_oss_provider(codex_home, LMSTUDIO_OSS_PROVIDER_ID)?;
-    let content = std::fs::read_to_string(&config_path)?;
-    assert!(content.contains("oss_provider = \"lmstudio\""));
-    assert!(content.contains("model = \"gpt-4\""));
-
-    // Test overwriting existing oss_provider
-    set_default_oss_provider(codex_home, OLLAMA_OSS_PROVIDER_ID)?;
-    let content = std::fs::read_to_string(&config_path)?;
-    assert!(content.contains("oss_provider = \"ollama\""));
-    assert!(!content.contains("oss_provider = \"lmstudio\""));
-
-    // Test invalid provider
-    let result = set_default_oss_provider(codex_home, "invalid_provider");
-    assert!(result.is_err());
-    let error = result.unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-    assert!(error.to_string().contains("Invalid OSS provider"));
-    assert!(error.to_string().contains("invalid_provider"));
-
-    Ok(())
-}
-
-#[test]
-fn test_set_default_oss_provider_rejects_legacy_ollama_chat_provider() -> std::io::Result<()> {
-    let temp_dir = TempDir::new()?;
-    let codex_home = temp_dir.path();
-
-    let result = set_default_oss_provider(codex_home, LEGACY_OLLAMA_CHAT_PROVIDER_ID);
-    assert!(result.is_err());
-    let error = result.unwrap_err();
-    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
-    assert!(
-        error
-            .to_string()
-            .contains(OLLAMA_CHAT_PROVIDER_REMOVED_ERROR)
-    );
-
-    Ok(())
-}
-
 #[tokio::test]
 async fn test_load_config_rejects_legacy_ollama_chat_provider_with_helpful_error()
 -> std::io::Result<()> {
@@ -11468,42 +11413,6 @@ async fn derive_sandbox_policy_preserves_windows_downgrade_for_unsupported_fallb
         assert_eq!(resolution, SandboxPolicy::new_workspace_write_policy());
     }
     Ok(())
-}
-
-#[test]
-fn test_resolve_oss_provider_explicit_override() {
-    let config_toml = ConfigToml::default();
-    let result = resolve_oss_provider(Some("custom-provider"), &config_toml);
-    assert_eq!(result, Some("custom-provider".to_string()));
-}
-
-#[test]
-fn test_resolve_oss_provider_from_global_config() {
-    let config_toml = ConfigToml {
-        oss_provider: Some("global-provider".to_string()),
-        ..Default::default()
-    };
-
-    let result = resolve_oss_provider(/*explicit_provider*/ None, &config_toml);
-    assert_eq!(result, Some("global-provider".to_string()));
-}
-
-#[test]
-fn test_resolve_oss_provider_none_when_not_configured() {
-    let config_toml = ConfigToml::default();
-    let result = resolve_oss_provider(/*explicit_provider*/ None, &config_toml);
-    assert_eq!(result, None);
-}
-
-#[test]
-fn test_resolve_oss_provider_explicit_overrides_global() {
-    let config_toml = ConfigToml {
-        oss_provider: Some("global-provider".to_string()),
-        ..Default::default()
-    };
-
-    let result = resolve_oss_provider(Some("explicit-provider"), &config_toml);
-    assert_eq!(result, Some("explicit-provider".to_string()));
 }
 
 #[test]

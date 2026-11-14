@@ -16,8 +16,6 @@ use codex_extension_api::ExtensionWarning;
 use codex_extension_api::PromptFragment;
 use codex_extension_api::PromptSlot;
 use codex_extension_api::SkillInvocationContributor;
-use codex_extension_api::SkillInvocationInput;
-use codex_extension_api::SkillInvocationKind;
 use codex_extension_api::ThreadLifecycleContributor;
 use codex_extension_api::ThreadStartInput;
 use codex_extension_api::ToolCall;
@@ -57,7 +55,6 @@ use crate::render::truncate_utf8_to_bytes;
 use crate::render_observability::CatalogSurface;
 use crate::render_observability::record_catalog_render;
 use crate::selection::collect_explicit_skill_mentions;
-use crate::shadow_selection_experiment::ShadowSelectionExperiment;
 use crate::sources::SkillProviders;
 use crate::state::HostSkillsCatalogInWorldState;
 use crate::state::SkillsSessionState;
@@ -77,7 +74,6 @@ struct SkillsExtension<C> {
     providers: SkillProviders,
     event_sink: Arc<dyn ExtensionEventSink>,
     config_from_host: Arc<dyn Fn(&C) -> SkillsExtensionConfig + Send + Sync>,
-    shadow_selection: Arc<ShadowSelectionExperiment>,
 }
 
 #[derive(Default)]
@@ -304,26 +300,6 @@ where
     fn requires_host_skill_discovery(&self) -> bool {
         self.providers.has_host_provider()
     }
-
-    fn on_skill_invocation<'a>(
-        &'a self,
-        input: SkillInvocationInput<'a>,
-    ) -> ExtensionFuture<'a, ()> {
-        Box::pin(async move {
-            match input.kind {
-                SkillInvocationKind::Implicit => {
-                    if let Some(state) = input
-                        .thread_store
-                        .get::<SkillsThreadState>()
-                        .and_then(|state| state.shadow_selection_turn(input.turn_id))
-                    {
-                        state.record_invocation(input.skill_resource);
-                    }
-                }
-                SkillInvocationKind::Explicit => {}
-            }
-        })
-    }
 }
 
 impl<C> TurnInputContributor for SkillsExtension<C>
@@ -376,26 +352,6 @@ where
             }
 
             let selected_entries = collect_explicit_skill_mentions(&input.user_input, &catalog);
-            let shadow_selection_turn = if config.shadow_selection_enabled {
-                let mut shadow_catalog = catalog.clone();
-                if let Some(host_skills) = host_skills {
-                    shadow_catalog.extend(host_skills.clone());
-                }
-                let shadow_selected_entries =
-                    collect_explicit_skill_mentions(&input.user_input, &shadow_catalog);
-                Some(self.shadow_selection.start(
-                    &input,
-                    shadow_catalog,
-                    &shadow_selected_entries,
-                    host_snapshot.clone(),
-                    Arc::clone(&thread_state.recent_skill_invocations),
-                    Arc::clone(&thread_state.shadow_task_context),
-                ))
-            } else {
-                None
-            };
-            thread_state
-                .replace_shadow_selection_turn(input.turn_id.clone(), shadow_selection_turn);
             let mut fragments: Vec<Box<dyn ContextualUserFragment + Send>> = Vec::new();
             if config.include_instructions && !host_catalog_in_world_state {
                 let mut turn_catalog = catalog.clone();
@@ -618,7 +574,7 @@ pub fn install_with_providers<C>(
 pub fn install_with_providers_and_metrics<C>(
     registry: &mut ExtensionRegistryBuilder<C>,
     providers: SkillProviders,
-    metrics_client: Option<MetricsClient>,
+    _metrics_client: Option<MetricsClient>,
     config_from_host: impl Fn(&C) -> SkillsExtensionConfig + Send + Sync + 'static,
 ) where
     C: Send + Sync + 'static,
@@ -627,7 +583,6 @@ pub fn install_with_providers_and_metrics<C>(
         providers,
         event_sink: registry.event_sink(),
         config_from_host: Arc::new(config_from_host),
-        shadow_selection: Arc::new(ShadowSelectionExperiment::new(metrics_client)),
     });
     registry.thread_lifecycle_contributor(extension.clone());
     registry.turn_lifecycle_contributor(Arc::new(SkillTelemetry));

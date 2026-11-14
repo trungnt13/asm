@@ -1878,7 +1878,7 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
 
 #[instrument(level = "trace", skip_all)]
 pub(crate) fn build_prompt(
-    input: Vec<ResponseItem>,
+    input: Vec<Arc<ResponseItem>>,
     step_context: &StepContext,
     base_instructions: BaseInstructions,
     incremental_tools: bool,
@@ -2021,7 +2021,7 @@ async fn run_sampling_request(
             .await?;
         }
         if first_attempt && turn_context.config.notify.is_some() {
-            notify_messages = legacy_notify_input_messages(&prompt.input);
+            notify_messages = legacy_notify_input_messages(prompt.input.iter().map(Arc::as_ref));
         }
         let _native_search = crate::model_search::SearchOwner::reserve_server_fallback(
             &step_context.extension_data,
@@ -2040,13 +2040,13 @@ async fn run_sampling_request(
                 &turn_context.sub_id,
                 model,
                 provider,
-                &prompt.input,
+                prompt.input.iter().map(Arc::as_ref),
             );
             let clear_checkpoints = history.annotated_items().iter().filter_map(|envelope| {
-                rejected_audio::clear_checkpoint(&envelope.item, envelope.metadata.as_ref())
+                rejected_audio::clear_checkpoint(envelope.item.as_ref(), envelope.metadata.as_ref())
             });
             let submitted = rejected_audio::SubmittedFileAudio::from_request(
-                &prompt.input,
+                prompt.input.iter().map(Arc::as_ref),
                 accepted,
                 clear_checkpoints,
             );
@@ -2182,6 +2182,12 @@ pub(crate) async fn prepare_tool_recommendations(
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum StepToolRouting {
+    ResponsesApi,
+    NativeMessaging,
+}
+
 #[allow(clippy::too_many_arguments)]
 #[instrument(level = "trace",
     skip_all,
@@ -2191,7 +2197,7 @@ pub(crate) async fn prepare_tool_recommendations(
         apps_enabled = turn_context.apps_enabled()
     )
 )]
-pub(crate) async fn built_tools(
+pub(super) async fn built_tools(
     sess: &Session,
     turn_context: &TurnContext,
     model_info: &codex_protocol::openai_models::ModelInfo,
@@ -2199,6 +2205,7 @@ pub(crate) async fn built_tools(
     mcp: &Arc<codex_mcp::McpBinding>,
     step_store: &ExtensionData,
     prepared_recommendations: PreparedToolRecommendations,
+    routing: StepToolRouting,
     dynamic_tools: &[codex_protocol::dynamic_tools::DynamicToolSpec],
 ) -> CodexResult<Arc<ToolRouter>> {
     let all_mcp_tools = mcp.tools();
@@ -2261,6 +2268,19 @@ pub(crate) async fn built_tools(
             .instrument(trace_span!("built_tools.load_discoverable_tools"))
             .await
         };
+    if matches!(routing, StepToolRouting::NativeMessaging) {
+        // Native bridges replace this router before dispatch. Keep discovery above,
+        // but do not construct API tool schemas and handlers that cannot be used.
+        return Ok(Arc::new(ToolRouter::from_parts(
+            crate::tools::registry::ToolRegistry::with_tool_policy(Arc::clone(&sess.tool_policy)),
+            Vec::new(),
+            codex_protocol::openai_models::ToolMode::Direct,
+            Default::default(),
+            /*exec_definitions*/ None,
+            /*tool_namespaces_info*/ None,
+            &[],
+        )));
+    }
     Ok(Arc::new(build_tool_router(
         sess,
         turn_context,
@@ -2911,7 +2931,7 @@ async fn drain_in_flight(
                 mark_thread_memory_mode_polluted_if_external_context(
                     sess.as_ref(),
                     turn_context.as_ref(),
-                    &envelope.item,
+                    envelope.item.as_ref(),
                 )
                 .await;
                 sess.record_annotated_conversation_items(

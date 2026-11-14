@@ -18,10 +18,7 @@ use codex_login::AuthKeyringBackendKind;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::auth::AgentIdentityAuthPolicy;
-use codex_login::auth::BedrockApiKeyAuth;
 use codex_login::default_client::originator;
-use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
-use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_model_provider_info::built_in_model_providers;
@@ -211,47 +208,6 @@ async fn responses_request_preserves_flex_without_catalog_support_or_fast_mode()
             response_mock.single_request().body_json()["service_tier"],
             json!("flex"),
             "configure_at_start={configure_at_start}",
-        );
-    }
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_request_uses_implicit_default_tier_for_bedrock() -> anyhow::Result<()> {
-    skip_if_no_network!(Ok(()));
-    for provider_id in [
-        AMAZON_BEDROCK_PROVIDER_ID,
-        AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
-    ] {
-        let server = start_mock_server().await;
-        let response_mock = mount_sse_once(&server, sse(vec![ev_completed("done")])).await;
-        let test = test_codex()
-            .with_auth(CodexAuth::BedrockApiKey(BedrockApiKeyAuth {
-                api_key: "dummy".to_string(),
-                region: "us-east-1".to_string(),
-            }))
-            .with_model("gpt-5.4")
-            .with_model_info_override("gpt-5.4", |model| model.service_tiers.clear())
-            .with_config(move |config| {
-                let base_url = config.model_provider.base_url.clone();
-                config.model_provider_id = provider_id.to_string();
-                config.model_provider = built_in_model_providers(/*openai_base_url*/ None)
-                    .remove(provider_id)
-                    .expect("built-in Bedrock provider");
-                config.model_provider.base_url = base_url;
-                config.service_tier = Some("flex".to_string());
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        test.submit_turn("hello").await?;
-
-        assert_eq!(
-            response_mock
-                .single_request()
-                .body_json()
-                .get("service_tier"),
-            None,
-            "provider={provider_id}",
         );
     }
     Ok(())
@@ -1722,45 +1678,6 @@ async fn provider_auth_command_recovers_after_initial_resolution_failure() {
     send_provider_auth_request(&server, auth_fixture.auth()).await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn amazon_bedrock_proxy_uses_command_auth_and_custom_headers() {
-    skip_if_no_network!();
-
-    let server = MockServer::start().await;
-    let response = mount_sse_once(
-        &server,
-        sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-    )
-    .await;
-    let auth_fixture = ProviderAuthCommandFixture::new(&["command-token"]).unwrap();
-    let mut provider = built_in_model_providers(/*openai_base_url*/ None)
-        .remove(AMAZON_BEDROCK_PROVIDER_ID)
-        .expect("Amazon Bedrock provider should be built in");
-    provider.base_url = Some(format!("{}/v1", server.uri()));
-    provider.auth = Some(auth_fixture.auth());
-    provider.aws = None;
-    provider
-        .http_headers
-        .get_or_insert_default()
-        .insert("x-some-header".to_string(), "foo".into());
-
-    send_request_with_provider(provider).await;
-
-    let request = response.single_request();
-    assert_eq!(request.path(), "/v1/responses");
-    assert_eq!(
-        request.header("authorization"),
-        Some("Bearer command-token".to_string())
-    );
-    assert_eq!(request.header("x-amz-date"), None);
-    assert_eq!(request.header("x-some-header"), Some("foo".to_string()));
-    assert_eq!(
-        request.header("x-amzn-mantle-client-agent"),
-        Some("codex".to_string())
-    );
-    assert_eq!(request.body_json()["store"], false);
-}
-
 /// Issues one streamed Responses request through a provider configured with command-backed auth.
 ///
 /// The caller owns the server-side assertions, so this helper only validates that the request
@@ -1867,7 +1784,7 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
             .expect("preconnect should recover authentication before the first turn");
     }
     let mut prompt = Prompt::default();
-    prompt.input.push(ResponseItem::Message {
+    prompt.input.push(Arc::new(ResponseItem::Message {
         status: None,
         encrypted_content: None,
         id: None,
@@ -1877,7 +1794,7 @@ async fn send_request_with_provider(provider: ModelProviderInfo) {
         }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,
-    });
+    }));
 
     let mut stream = client_session
         .stream(
@@ -3362,7 +3279,7 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
     let mut client_session = client.new_session();
 
     let mut prompt = Prompt::default();
-    prompt.input.push(ResponseItem::Reasoning {
+    prompt.input.push(Arc::new(ResponseItem::Reasoning {
         id: Some(ResponseItemId::with_suffix("rs", "reasoning-id")),
         summary: vec![ReasoningItemReasoningSummary::SummaryText {
             text: "summary".into(),
@@ -3372,8 +3289,8 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         }]),
         encrypted_content: None,
         internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::Message {
+    }));
+    prompt.input.push(Arc::new(ResponseItem::Message {
         status: None,
         encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("msg", "message-id")),
@@ -3385,8 +3302,8 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::WebSearchCall {
+    }));
+    prompt.input.push(Arc::new(ResponseItem::WebSearchCall {
         encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("ws", "web-search-id")),
         status: Some("completed".into()),
@@ -3395,8 +3312,8 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
             queries: None,
         }),
         internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::FunctionCall {
+    }));
+    prompt.input.push(Arc::new(ResponseItem::FunctionCall {
         status: None,
         encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("fc", "function-id")),
@@ -3406,16 +3323,18 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         call_id: "function-call-id".into(),
         encrypted_function_args: None,
         internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::FunctionCallOutput {
-        id: None,
-        call_id: Some("function-call-id".into()),
-        name: None,
-        namespace: None,
-        output: FunctionCallOutputPayload::from_text("ok".into()),
-        internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::LocalShellCall {
+    }));
+    prompt
+        .input
+        .push(Arc::new(ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: Some("function-call-id".into()),
+            name: None,
+            namespace: None,
+            output: FunctionCallOutputPayload::from_text("ok".into()),
+            internal_chat_message_metadata_passthrough: None,
+        }));
+    prompt.input.push(Arc::new(ResponseItem::LocalShellCall {
         encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("lsh", "local-shell-id")),
         call_id: Some("local-shell-call-id".into()),
@@ -3428,8 +3347,8 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
             user: None,
         }),
         internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::CustomToolCall {
+    }));
+    prompt.input.push(Arc::new(ResponseItem::CustomToolCall {
         encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("ctc", "custom-tool-id")),
         status: Some("completed".into()),
@@ -3438,14 +3357,16 @@ async fn azure_responses_request_does_not_store_and_preserves_prefixed_item_ids(
         namespace: None,
         input: "{}".into(),
         internal_chat_message_metadata_passthrough: None,
-    });
-    prompt.input.push(ResponseItem::CustomToolCallOutput {
-        id: None,
-        call_id: "custom-tool-call-id".into(),
-        name: None,
-        output: FunctionCallOutputPayload::from_text("ok".into()),
-        internal_chat_message_metadata_passthrough: None,
-    });
+    }));
+    prompt
+        .input
+        .push(Arc::new(ResponseItem::CustomToolCallOutput {
+            id: None,
+            call_id: "custom-tool-call-id".into(),
+            name: None,
+            output: FunctionCallOutputPayload::from_text("ok".into()),
+            internal_chat_message_metadata_passthrough: None,
+        }));
     prompt.input.push(
         serde_json::from_value(json!({
             "type": "message",

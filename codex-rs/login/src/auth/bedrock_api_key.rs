@@ -5,10 +5,7 @@ use codex_config::types::AuthCredentialsStoreMode;
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::manager::save_auth;
-use super::storage::AuthDotJson;
 use super::storage::AuthKeyringBackendKind;
-use codex_protocol::auth::AuthMode;
 
 /// Managed Amazon Bedrock API key persisted in `auth.json`.
 #[derive(Deserialize, Serialize, Clone, PartialEq, Eq)]
@@ -26,33 +23,18 @@ impl fmt::Debug for BedrockApiKeyAuth {
     }
 }
 
-/// Writes an `auth.json` that contains only the Amazon Bedrock API key auth.
+/// Retains the login API without writing unsupported Bedrock credentials.
 pub fn login_with_bedrock_api_key(
-    codex_home: &Path,
-    api_key: &str,
-    region: &str,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-    keyring_backend_kind: AuthKeyringBackendKind,
+    _codex_home: &Path,
+    _api_key: &str,
+    _region: &str,
+    _auth_credentials_store_mode: AuthCredentialsStoreMode,
+    _keyring_backend_kind: AuthKeyringBackendKind,
 ) -> std::io::Result<()> {
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::BedrockApiKey),
-        openai_api_key: None,
-        tokens: None,
-        last_refresh: None,
-        agent_identity: None,
-        personal_access_token: None,
-        bedrock_api_key: Some(BedrockApiKeyAuth {
-            api_key: api_key.to_string(),
-            region: region.to_string(),
-        }),
-        bedrock_access_keys: None,
-    };
-    save_auth(
-        codex_home,
-        &auth_dot_json,
-        auth_credentials_store_mode,
-        keyring_backend_kind,
-    )
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Amazon Bedrock is unsupported in this build.",
+    ))
 }
 
 #[cfg(test)]

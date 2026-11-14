@@ -105,7 +105,7 @@ impl PreviousReviews {
             internal_chat_message_metadata_passthrough: None,
         };
         ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(CodexHarnessMetadata {
                 guardian_review_ids: ids,
                 ..Default::default()

@@ -21,7 +21,11 @@ path = "tests/all.rs"
 [lints]
 workspace = true
 
+[features]
+ts = ["codex-protocol/ts"]
+
 [dependencies]
+codex-app-server-protocol-noop-macros = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 codex-arg0 = { workspace = true }
@@ -42,7 +46,6 @@ codex-protocol = { workspace = true }
 codex-rollout = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-cli = { workspace = true }
-codex-utils-oss = { workspace = true }
 codex-utils-path-uri = { workspace = true }
 codex-utils-sandbox-summary = { workspace = true }
 codex-worktree = { workspace = true }
@@ -68,6 +71,7 @@ uuid = { workspace = true }
 
 
 [dev-dependencies]
+codex-protocol = { workspace = true, features = ["ts"] }
 assert_cmd = { workspace = true }
 codex-apply-patch = { workspace = true }
 codex-utils-cargo-bin = { workspace = true }

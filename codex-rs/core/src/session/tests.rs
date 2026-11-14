@@ -886,7 +886,10 @@ pub(super) fn raw_history_items(history: &ContextManager) -> Vec<ResponseItem> {
 }
 
 fn raw_envelopes(items: &[ResponseItemEnvelope]) -> Vec<ResponseItem> {
-    items.iter().map(|envelope| envelope.item.clone()).collect()
+    items
+        .iter()
+        .map(|envelope| envelope.item.as_ref().clone())
+        .collect()
 }
 
 fn developer_input_texts(items: &[ResponseItem]) -> Vec<&str> {
@@ -2617,9 +2620,11 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
                 },
             ) => Some(("delivery", Some(*acceptance_order))),
             RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: ResponseItem::AgentMessage { .. },
+                item,
                 metadata: Some(metadata),
-            }) => Some(("communication", metadata.user_input_order)),
+            }) if matches!(item.as_ref(), ResponseItem::AgentMessage { .. }) => {
+                Some(("communication", metadata.user_input_order))
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -2654,7 +2659,7 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
     let communication = live
         .annotated_items()
         .iter()
-        .find(|item| matches!(item.item, ResponseItem::AgentMessage { .. }))
+        .find(|item| matches!(item.item.as_ref(), ResponseItem::AgentMessage { .. }))
         .expect("live communication");
     assert_eq!(
         communication.metadata.as_ref().unwrap().user_input_order,
@@ -2750,7 +2755,7 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
             trigger_turn: false,
         },
         RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: expected_item.clone(),
+            item: expected_item.clone().into(),
             metadata: Some(CodexHarnessMetadata {
                 user_input_order: Some(0),
                 history_sequence: Some(1),
@@ -2817,7 +2822,7 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     };
     let persisted_item_id = resumed.history.iter().find_map(|item| match item {
         RolloutItem::ResponseItem(item)
-            if matches!(&item.item, ResponseItem::AgentMessage { .. }) =>
+            if matches!(item.item.as_ref(), ResponseItem::AgentMessage { .. }) =>
         {
             item.id()
         }
@@ -2892,7 +2897,7 @@ async fn annotated_history_uses_explicit_model_without_a_step(
     item.set_turn_id_if_missing("existing-turn");
     item.set_create_time_if_missing(123.into());
     let expected = ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: retain_metadata.then_some(CodexHarnessMetadata {
             client_authored: true,
             history_truncation_token_limit: saved_budget,
@@ -2908,7 +2913,8 @@ async fn annotated_history_uses_explicit_model_without_a_step(
                 name: None,
                 output: FunctionCallOutputPayload::from_text(text.clone()),
                 internal_chat_message_metadata_passthrough: None,
-            },
+            }
+            .into(),
             metadata: retain_metadata.then_some(CodexHarnessMetadata {
                 client_authored: true,
                 history_truncation_token_limit: saved_budget,
@@ -2916,8 +2922,8 @@ async fn annotated_history_uses_explicit_model_without_a_step(
             }),
         },
     ];
-    expected[1].item.set_turn_id_if_missing("existing-turn");
-    expected[1].item.set_create_time_if_missing(123.into());
+    Arc::make_mut(&mut expected[1].item).set_turn_id_if_missing("existing-turn");
+    Arc::make_mut(&mut expected[1].item).set_create_time_if_missing(123.into());
     session
         .record_annotated_conversation_items(&turn_context, &model_info, expected.clone())
         .await;
@@ -2933,7 +2939,8 @@ async fn annotated_history_uses_explicit_model_without_a_step(
         metadata.sampled_through_sequence = Some(0);
         metadata.history_truncation_token_limit = Some(expected_budget);
         let (ResponseItem::FunctionCallOutput { output, .. }
-        | ResponseItem::CustomToolCallOutput { output, .. }) = &mut envelope.item
+        | ResponseItem::CustomToolCallOutput { output, .. }) =
+            std::sync::Arc::make_mut(&mut envelope.item)
         else {
             unreachable!("fixture is a tool output");
         };
@@ -3063,7 +3070,7 @@ async fn prepares_resumed_history_before_installing_it() {
             history_revision: None,
             conversation_id: ThreadId::default(),
             history: Arc::new(vec![RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: resumed_item,
+                item: resumed_item.into(),
                 metadata: Some(CodexHarnessMetadata::default()),
             })]),
             rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
@@ -4177,7 +4184,7 @@ async fn record_initial_history_assigns_and_persists_id_for_forked_response_item
         }),
     };
     let response_item = ResponseItemEnvelope {
-        item: response_item,
+        item: response_item.into(),
         metadata: Some(CodexHarnessMetadata::default()),
     };
 
@@ -11749,7 +11756,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
     assert_eq!(restored_snapshot, expected_snapshot);
     let initial_a = initial_a
         .into_iter()
-        .map(|item| item.item)
+        .map(|item| std::sync::Arc::unwrap_or_clone(item.item))
         .collect::<Vec<_>>();
     let a_text = developer_input_texts(&initial_a).join("\n");
     let b_text = developer_input_texts(&initial_b).join("\n");

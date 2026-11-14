@@ -92,6 +92,7 @@ use codex_protocol::auth::AuthMode;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
+use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -431,7 +432,7 @@ struct LastResponse {
 
 struct WebsocketContinuation {
     response_id: String,
-    items: Vec<ResponseItem>,
+    items: Vec<Arc<ResponseItem>>,
     from_untraced_warmup: bool,
 }
 
@@ -639,6 +640,61 @@ pub(crate) struct RealtimeWebrtcCallStart {
     pub(crate) sideband_headers: ApiHeaderMap,
     pub(crate) sideband_auth: SharedAuthProvider,
     pub(crate) sideband_http_client_factory: HttpClientFactory,
+}
+
+fn request_copy_needs_edit(item: &ResponseItem, is_openai: bool, include_internal: bool) -> bool {
+    let metadata = item.executed_tool_call_metadata();
+    let clear_metadata = metadata.is_some_and(|value| {
+        value.content_item_metadata.is_some()
+            || *value == InternalChatMessageMetadataPassthrough::default()
+            || !is_openai
+    });
+    let clear_encrypted_content = !is_openai
+        && match item {
+            ResponseItem::Message {
+                encrypted_content, ..
+            }
+            | ResponseItem::LocalShellCall {
+                encrypted_content, ..
+            }
+            | ResponseItem::FunctionCall {
+                encrypted_content, ..
+            }
+            | ResponseItem::ToolSearchCall {
+                encrypted_content, ..
+            }
+            | ResponseItem::CustomToolCall {
+                encrypted_content, ..
+            }
+            | ResponseItem::WebSearchCall {
+                encrypted_content, ..
+            }
+            | ResponseItem::ImageGenerationCall {
+                encrypted_content, ..
+            } => encrypted_content.is_some(),
+            ResponseItem::Reasoning { .. }
+            | ResponseItem::Compaction { .. }
+            | ResponseItem::ContextCompaction { .. }
+            | ResponseItem::AdditionalTools { .. }
+            | ResponseItem::AgentMessage { .. }
+            | ResponseItem::FunctionCallOutput { .. }
+            | ResponseItem::CustomToolCallOutput { .. }
+            | ResponseItem::ToolSearchOutput { .. }
+            | ResponseItem::ConfigurationUpdate { .. }
+            | ResponseItem::CompactionTrigger { .. }
+            | ResponseItem::Other => false,
+        };
+    clear_metadata
+        || clear_encrypted_content
+        || (!include_internal && item.has_tool_result_metadata())
+        || (!is_openai
+            && matches!(
+                item,
+                ResponseItem::FunctionCall {
+                    encrypted_function_args: Some(_),
+                    ..
+                }
+            ))
 }
 
 impl ModelClient {
@@ -1259,11 +1315,11 @@ impl ModelClient {
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.
             // Filter only the request copy; persisted history remains unchanged.
-            input.retain(|item| !matches!(item, ResponseItem::ConfigurationUpdate { .. }));
+            input.retain(|item| !matches!(**item, ResponseItem::ConfigurationUpdate { .. }));
         } else {
             input.dedup_by(|next, previous| {
-                if matches!(next, ResponseItem::ConfigurationUpdate { .. })
-                    && matches!(previous, ResponseItem::ConfigurationUpdate { .. })
+                if matches!(**next, ResponseItem::ConfigurationUpdate { .. })
+                    && matches!(**previous, ResponseItem::ConfigurationUpdate { .. })
                 {
                     // Keep the latest update; dedup_by removes `next`.
                     std::mem::swap(previous, next);
@@ -1284,14 +1340,14 @@ impl ModelClient {
         let tools = if model_info.use_responses_lite {
             if !prompt.tools.is_empty() {
                 let tools = create_tools_json_for_responses_lite(&prompt.tools)?;
-                prefix.push(ResponseItem::AdditionalTools {
+                prefix.push(Arc::new(ResponseItem::AdditionalTools {
                     id: Some(ResponseItemId::with_suffix(
                         "at",
                         Uuid::new_v5(&prefix_namespace, &serde_json::to_vec(&tools)?),
                     )),
                     role: "developer".to_string(),
                     tools: Arc::from(tools),
-                });
+                }));
             }
             None
         } else {
@@ -1305,16 +1361,19 @@ impl ModelClient {
                 "msg",
                 Uuid::new_v5(&prefix_namespace, prompt.base_instructions.text.as_bytes()),
             )));
-            prefix.push(instructions);
+            prefix.push(Arc::new(instructions));
         }
         input.splice(0..0, prefix);
-        // Responses Lite selection does not prove deployed endpoints accept per-content attribution.
-        // Omit only this field from the request copy until support is established; retain local metadata.
+        // Edit only request copies; unchanged items stay shared with the prompt and retries.
         for item in &mut input {
+            if !request_copy_needs_edit(item, is_openai, include_internal) {
+                continue;
+            }
+            let item = Arc::make_mut(item);
+            // Responses Lite selection does not prove deployed endpoints accept per-content
+            // attribution. Omit only this field until support is established; retain local metadata.
             item.clear_content_item_metadata();
-        }
-        if !is_openai {
-            for item in &mut input {
+            if !is_openai {
                 item.clear_internal_chat_message_metadata_passthrough();
                 if !matches!(
                     item,
@@ -1331,6 +1390,9 @@ impl ModelClient {
                 {
                     *encrypted_function_args = None;
                 }
+            }
+            if !include_internal {
+                item.clear_tool_result_metadata();
             }
         }
         let reasoning = self.build_reasoning(model_info, effort, summary);
@@ -1371,11 +1433,6 @@ impl ModelClient {
                         .iter()
                         .any(|supported| supported.id == *tier)
             });
-        if !include_internal {
-            for item in &mut input {
-                item.clear_tool_result_metadata();
-            }
-        }
         let client_metadata = responses_metadata.client_metadata(include_internal);
         let request = ResponsesApiRequest {
             model: model_info.slug.clone(),
@@ -1400,16 +1457,27 @@ impl ModelClient {
         Ok(request)
     }
 
-    fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
+    fn prepare_response_items_for_request(&self, input: &mut [Arc<ResponseItem>]) {
         for item in input {
             // A provider can echo a bare reserved prefix or return an opaque ID.
-            if item
+            let clear_id = item
                 .id()
-                .is_some_and(|id| id.allocation().is_none() && !id.is_prefixed())
-            {
+                .is_some_and(|id| id.allocation().is_none() && !id.is_prefixed());
+            // `clear_content_item_kinds` also drops empty metadata, so empty metadata is an edit.
+            let clear_kinds = !self.state.content_item_kinds_enabled
+                && item.executed_tool_call_metadata().is_some_and(|metadata| {
+                    metadata.content_item_kinds.is_some()
+                        || metadata.content_item_metadata.is_some()
+                        || *metadata == InternalChatMessageMetadataPassthrough::default()
+                });
+            if !clear_id && !clear_kinds {
+                continue;
+            }
+            let item = Arc::make_mut(item);
+            if clear_id {
                 item.set_id(/*new_id*/ None);
             }
-            if !self.state.content_item_kinds_enabled {
+            if clear_kinds {
                 item.clear_content_item_kinds();
             }
         }
@@ -1765,7 +1833,7 @@ impl ModelClientSession {
         &self,
         request: &ResponsesApiRequest,
         last_response: &LastResponse,
-    ) -> std::result::Result<Vec<ResponseItem>, NonIncrementalReason> {
+    ) -> std::result::Result<Vec<Arc<ResponseItem>>, NonIncrementalReason> {
         let previous_request = self
             .websocket_session
             .last_request
@@ -1776,7 +1844,11 @@ impl ModelClientSession {
         }
 
         let response_items = &last_response.items_added;
-        let previous_items = previous_request.input.iter().chain(response_items);
+        let previous_items = previous_request
+            .input
+            .iter()
+            .map(Arc::as_ref)
+            .chain(response_items);
         let mut current_items = request.input.iter();
         for previous in previous_items {
             let Some(current) = current_items.next() else {
@@ -2181,7 +2253,10 @@ impl ResponsesHttpExecutor<'_> {
             inference_trace_attempt.add_request_headers(&mut options.extra_headers);
             if let Some(input) = tool_metadata::bounded_input(&request, &request.input) {
                 if let Some(recorder) = &self.client.executed_tool_calls {
-                    recorder.invalidate_wire_inventory_loss(&request.input, &input);
+                    recorder.invalidate_wire_inventory_loss(
+                        request.input.iter().map(Arc::as_ref),
+                        input.iter().map(Arc::as_ref),
+                    );
                 }
                 request.input = input;
             }
@@ -2465,19 +2540,25 @@ impl ModelClientSession {
                 Some(continuation) => (Some(continuation.response_id), Some(continuation.items)),
                 None => (None, None),
             };
-            let original_item_ids = if let Some(incremental_items) = &mut incremental_items {
+            let cleared_item_ids = if let Some(incremental_items) = &mut incremental_items {
                 self.client
                     .prepare_response_items_for_request(incremental_items);
-                None
+                Vec::new()
             } else {
-                let original_item_ids = request
+                // Request preparation preserves allocated IDs; restore only those it strips.
+                let cleared_item_ids = request
                     .input
                     .iter()
-                    .map(|item| item.id().cloned())
+                    .enumerate()
+                    .filter_map(|(index, item)| {
+                        item.id()
+                            .filter(|id| id.allocation().is_none() && !id.is_prefixed())
+                            .map(|id| (index, id.clone()))
+                    })
                     .collect::<Vec<_>>();
                 self.client
                     .prepare_response_items_for_request(&mut request.input);
-                Some(original_item_ids)
+                cleared_item_ids
             };
             let mut ws_payload = ResponseCreateWsRequest {
                 previous_response_id,
@@ -2508,7 +2589,10 @@ impl ModelClientSession {
             let bounded_input = tool_metadata::bounded_input(&ws_request, payload.input);
             if let Some(input) = bounded_input.as_deref() {
                 if let Some(recorder) = &self.client.executed_tool_calls {
-                    recorder.invalidate_wire_inventory_loss(payload.input, input);
+                    recorder.invalidate_wire_inventory_loss(
+                        payload.input.iter().map(Arc::as_ref),
+                        input.iter().map(Arc::as_ref),
+                    );
                 }
                 let ResponsesWsRequest::ResponseCreate(payload) = &mut ws_request;
                 payload.input = input;
@@ -2545,10 +2629,8 @@ impl ModelClientSession {
                     Some(Arc::clone(&self.turn_state)),
                 )
                 .await;
-            if let Some(original_item_ids) = original_item_ids {
-                for (item, original_item_id) in request.input.iter_mut().zip(original_item_ids) {
-                    item.set_id(original_item_id);
-                }
+            for (index, original_item_id) in cleared_item_ids {
+                Arc::make_mut(&mut request.input[index]).set_id(Some(original_item_id));
             }
             self.websocket_session.last_request = Some(request);
             self.websocket_session.last_response_from_untraced_warmup = warmup;

@@ -2,7 +2,6 @@ use super::*;
 use crate::async_scorer::authorization::ScoreAuthorization;
 use crate::async_scorer::conversation::ConversationBackend;
 use crate::async_scorer::conversation::ConversationRequest;
-use crate::async_scorer::decisions::DecisionsCredential;
 use crate::async_scorer::sampler::LunaSampler;
 use crate::async_scorer::sampler::LunaSamplerError;
 use crate::async_scorer::sampler::LunaSamplingRequest;
@@ -80,15 +79,11 @@ async fn pending_request(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn configured_reset_limit_rebuilds_history_without_rejecting_fresh_evidence() -> Result<()> {
-    use crate::async_scorer::decisions::DecisionsSampler;
-    use codex_http_client::HttpClientFactory;
-    use codex_http_client::OutboundProxyPolicy;
-
     skip_if_no_network!(Ok(()));
     for (limit, reused) in [(1, false), (100_000, true)] {
         let server = responses::start_mock_server().await;
         let fixture = GuardianFailureFixture::with_config(&format!(
-            "[features]\nguardianv2_decisions_comparison = true\n[features.guardianv2]\nasync_classifier_mode = 'conversation'\nasync_classifier_conversation_token_limit = {limit}"
+            "[features.guardianv2]\nasync_classifier_mode = 'conversation'\nasync_classifier_conversation_token_limit = {limit}"
         ))
         .await?;
         let store = fixture.test.codex.thread_extension_data();
@@ -104,21 +99,6 @@ async fn configured_reset_limit_rebuilds_history_without_rejecting_fresh_evidenc
             ev_completed("score"),
         ]);
         let mock = responses::mount_sse_sequence(&server, vec![events; 2]).await;
-        let (finish_decisions, decisions_gate) = tokio::sync::oneshot::channel();
-        let (decisions_server, _) = start_streaming_sse_server(vec![vec![StreamingSseChunk {
-            gate: Some(decisions_gate),
-            body: json!({
-                "answers":[{"type":"choice", "name":"guardian_risk", "choice":"high"}]
-            })
-            .to_string(),
-        }]])
-        .await;
-        store.insert(DecisionsSampler::new(
-            HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
-            DecisionsCredential::ApiKey("synthetic-key".into()),
-            format!("{}/v1/responses", decisions_server.uri()),
-            /*auth_context*/ None,
-        )?);
         let (mut request, score) = pending_request(&fixture, "parent").await?;
         request.metrics = Some(metrics.clone());
         let reservation = backend.reserve(|| 0).1.unwrap();
@@ -143,31 +123,6 @@ async fn configured_reset_limit_rebuilds_history_without_rejecting_fresh_evidenc
             published.scores,
             BTreeMap::from([("action_risk".into(), 0.0)])
         );
-        tokio::time::timeout(
-            ASYNC_TEST_TIMEOUT,
-            decisions_server.wait_for_request_count(/*count*/ 1),
-        )
-        .await?;
-        finish_decisions.send(()).unwrap();
-        tokio::time::timeout(ASYNC_TEST_TIMEOUT, async {
-            loop {
-                if metrics.0.lock().unwrap().iter().any(|sample| matches!(sample,
-                    RecordedMetric::Counter(name, _, _) if name == "codex.guardian_v2.decisions_comparison.comparison")) {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await?;
-        // Success rules out a timeout before Guardian published.
-        assert!(metrics.0.lock().unwrap().contains(&RecordedMetric::Counter(
-            "codex.guardian_v2.decisions_comparison".into(),
-            1,
-            vec![
-                ("outcome".into(), "success".into()),
-                ("reason".into(), "none".into()),
-            ],
-        )));
         let requests = mock.requests();
         assert_eq!(requests.len(), 2);
         let expected_buckets = requests
@@ -212,17 +167,8 @@ async fn configured_reset_limit_rebuilds_history_without_rejecting_fresh_evidenc
             serde_json::to_string(&input)?.contains("TRANSCRIPT DELTA START"),
             reused
         );
-        let evidence = input[2..]
-            .iter()
-            .map(|item| json!({"role":item["role"], "content":item["content"]}))
-            .collect::<Vec<_>>();
-        let decisions_requests = decisions_server.requests().await;
-        assert_eq!(decisions_requests.len(), 1);
-        let body: serde_json::Value = serde_json::from_slice(&decisions_requests[0])?;
-        assert_eq!(body["input"], json!(evidence));
         drop(backend);
         fixture.test.codex.shutdown_and_wait().await?;
-        decisions_server.shutdown().await;
     }
     Ok(())
 }

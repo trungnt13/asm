@@ -23,7 +23,6 @@ use test_case::test_case;
 
 #[test_case("openai", true, true; "openai_treatment")]
 #[test_case("openai", false, false; "openai_control")]
-#[test_case("amazon-bedrock-runtime", true, false; "bedrock")]
 #[test_case("litellm-hybrid", true, false; "litellm")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn native_agent_review_requires_openai_on_start_and_resume(

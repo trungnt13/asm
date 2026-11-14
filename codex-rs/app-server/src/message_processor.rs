@@ -625,14 +625,7 @@ impl MessageProcessor {
         );
         let external_agent_config_processor =
             ExternalAgentConfigRequestProcessor::new(ExternalAgentConfigRequestProcessorArgs {
-                outgoing: outgoing.clone(),
-                thread_manager: Arc::clone(&thread_manager),
-                thread_store: Arc::clone(&thread_store),
-                config_manager: config_manager.clone(),
-                config_processor: config_processor.clone(),
                 state_db,
-                analytics_events_client,
-                arg0_paths,
                 codex_home: config.codex_home.to_path_buf(),
             });
         let environment_processor =

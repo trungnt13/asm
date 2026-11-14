@@ -96,7 +96,7 @@ impl AdditionalContextStore {
             .filter(|(key, value)| self.values.get(*key) != Some(*value))
             .map(|(key, entry)| match entry {
                 StoredAdditionalContext::ToolOutput(output) => ResponseItemEnvelope {
-                    item: output.clone().into(),
+                    item: std::sync::Arc::new(output.clone().into()),
                     metadata: Some(CodexHarnessMetadata {
                         additional_context_tool_output: true,
                         ..Default::default()

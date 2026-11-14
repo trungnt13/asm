@@ -1,8 +1,11 @@
+#[cfg(not(any(test, feature = "ts")))]
+use codex_app_server_protocol_noop_macros::TS;
 use codex_protocol::models::WebSearchAction;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+#[cfg(any(test, feature = "ts"))]
 use ts_rs::TS;
 
 /// Top-level JSONL events emitted by codex exec

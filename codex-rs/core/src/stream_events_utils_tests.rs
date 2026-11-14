@@ -387,7 +387,7 @@ async fn direct_results_keep_their_own_records_when_call_ids_repeat() {
     let mut outputs = Vec::new();
     for (arguments, future) in pending.into_iter().rev() {
         let envelope = future.await.expect("plan result");
-        let item = &envelope.item;
+        let item = envelope.item.as_ref();
         let ResponseItem::FunctionCallOutput {
             call_id: output_call_id,
             output,
@@ -454,7 +454,7 @@ async fn direct_results_keep_their_own_records_when_call_ids_repeat() {
         .attach_to_prompt(&mut outputs, &mut Default::default());
     let mut expected = original;
     for item in &mut expected {
-        item.clear_executed_tool_calls();
+        std::sync::Arc::make_mut(item).clear_executed_tool_calls();
     }
     assert_eq!(outputs, expected);
 

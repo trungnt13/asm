@@ -618,9 +618,11 @@ pub(crate) async fn run_post_compact_hooks(
     }
 }
 
-pub(crate) fn legacy_notify_input_messages(input: &[ResponseItem]) -> Vec<String> {
+pub(crate) fn legacy_notify_input_messages<'a>(
+    input: impl IntoIterator<Item = &'a ResponseItem>,
+) -> Vec<String> {
     input
-        .iter()
+        .into_iter()
         .filter_map(|item| {
             let ResponseItem::Message { role, content, .. } = item else {
                 return None;
@@ -787,7 +789,7 @@ pub(crate) async fn record_pending_input(
                 namespace,
                 output,
                 ..
-            } = item.item
+            } = std::sync::Arc::unwrap_or_clone(item.item)
             {
                 let item = TurnItem::FunctionCallOutput(FunctionCallOutputItem {
                     id: id.to_string(),

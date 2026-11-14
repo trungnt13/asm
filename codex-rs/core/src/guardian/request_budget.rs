@@ -44,7 +44,7 @@ pub(super) fn estimate_request_tokens(request: &ResponsesApiRequest) -> usize {
     let input = request
         .input
         .iter()
-        .map(estimate_item_token_count)
+        .map(|item| estimate_item_token_count(item))
         .fold(0i64, i64::saturating_add);
     let metadata = serde_json::to_vec(&(&request.tools, &request.text))
         .map(|bytes| TruncationPolicy::Bytes(bytes.len()).token_budget())
@@ -115,7 +115,7 @@ pub(crate) async fn prepare_prompt(
             })?;
         let mut messages = context.into_annotated_messages();
         for envelope in &mut messages {
-            let message = &mut envelope.item;
+            let message = std::sync::Arc::make_mut(&mut envelope.item);
             let ResponseItem::Message { content, .. } = message else {
                 return Err(CodexErr::InvalidRequest(
                     "expected restored Guardian text".to_owned(),

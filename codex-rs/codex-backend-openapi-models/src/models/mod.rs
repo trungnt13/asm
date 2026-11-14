@@ -8,9 +8,6 @@ pub mod analytics;
 pub(crate) mod config_bundle_response;
 pub use self::config_bundle_response::ConfigBundleResponse;
 
-pub(crate) mod config_file_response;
-pub use self::config_file_response::ConfigFileResponse;
-
 pub(crate) mod delivered_config_toml;
 pub use self::delivered_config_toml::DeliveredConfigToml;
 
@@ -22,25 +19,6 @@ pub use self::delivered_requirements_toml::DeliveredRequirementsToml;
 
 pub(crate) mod delivered_toml_fragment;
 pub use self::delivered_toml_fragment::DeliveredTomlFragment;
-
-// Cloud Tasks
-pub(crate) mod code_task_details_response;
-pub use self::code_task_details_response::CodeTaskDetailsResponse;
-
-pub(crate) mod task_response;
-pub use self::task_response::TaskResponse;
-
-pub(crate) mod external_pull_request_response;
-pub use self::external_pull_request_response::ExternalPullRequestResponse;
-
-pub(crate) mod git_pull_request;
-pub use self::git_pull_request::GitPullRequest;
-
-pub(crate) mod task_list_item;
-pub use self::task_list_item::TaskListItem;
-
-pub(crate) mod paginated_list_task_list_item_;
-pub use self::paginated_list_task_list_item_::PaginatedListTaskListItem;
 
 // Rate Limits
 pub(crate) mod additional_rate_limit_details;

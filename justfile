@@ -45,11 +45,6 @@ code-mode-host *args:
 assemble-codex-package *args:
     {{ python }} {{ justfile_directory() }}/scripts/build_codex_package.py {args}
 
-# Build the CLI and run the app-server test client
-app-server-test-client *args:
-    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" build -p codex-cli
-    {{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" run -p codex-app-server-test-client -- --codex-bin "$({{ python }} "{{ justfile_directory() }}/scripts/local-cargo.py" --print-target-dir)/{{ local_profile_dir }}/codex" {args}
-
 # Format all sources, or pass --files <paths> / --rust for an explicit scope.
 fmt *args:
     @{{ python }} ../scripts/format.py {args}

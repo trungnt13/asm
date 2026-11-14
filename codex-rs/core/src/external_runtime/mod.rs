@@ -445,7 +445,7 @@ async fn run_conversation(
             }
             let bridge = if messaging {
                 let step = session
-                    .capture_speculative_step_context(Arc::clone(turn), cancellation)
+                    .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
                     .await?;
                 let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
                 let bridge = ExternalMessageBridge::start(std::time::Duration::from_millis(
@@ -523,6 +523,8 @@ async fn run_conversation(
                 usage_baseline,
             });
         }
+        // History snapshots pin the shared item vector and force copies when recording input.
+        drop(original_history);
         let runtime = lease
             .runtime
             .as_mut()
@@ -544,6 +546,7 @@ async fn run_conversation(
                 RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
             },
         )?;
+        drop(messages);
         if runtime.checkpoint.effort != effort {
             match &mut runtime.runtime {
                 RuntimeProcess::Claude(process) => process.set_effort(effort.as_deref()).await?,
@@ -568,6 +571,7 @@ async fn run_conversation(
         }
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items())?;
+        drop(history);
         let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
         let mut prompt = prompt_content(&pending_messages)?;
         if matches!(&prompt, codex_external_runtime::Prompt::Text(text) if text.trim().is_empty()) {
@@ -577,9 +581,10 @@ async fn run_conversation(
             pending_messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
             prompt = prompt_content(&pending_messages)?;
         }
+        drop(pending_messages);
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = session
-                .capture_speculative_step_context(Arc::clone(turn), cancellation)
+                .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
                 .await?;
             bridge
                 .set_turn(Arc::clone(session), step, cancellation.clone())
@@ -587,6 +592,7 @@ async fn run_conversation(
         }
         runtime.checkpoint.input_count = messages.len();
         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
+        drop(messages);
         runtime.checkpoint.in_flight = true;
         runtime.checkpoint.fork_point = None;
         runtime
@@ -656,10 +662,12 @@ async fn run_conversation(
                         if pending.is_empty() { continue; }
                         let history = session.clone_history().await;
                         let messages = input_messages(history.raw_items())?;
+                        drop(history);
                         if let Err(error) = validate_pending_prompt(session, &messages[runtime.checkpoint.input_count..], &pending, /*boundary*/ None, codex_external_runtime::validate_claude_prompt) {
                             session.send_event(turn, EventMsg::Warning(WarningEvent { message: format!("Claude queued input was rejected: {error}") })).await;
                             continue;
                         }
+                        drop(messages);
                         for item in pending {
                             record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
                                 codex_thread_store::PersistContext::TurnStart).await;
@@ -668,6 +676,7 @@ async fn run_conversation(
                         let prompt = prompt_content(&messages[runtime.checkpoint.input_count..])?;
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
+                        drop(messages);
                         session.flush_rollout().await?;
                         runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                         steering_tx.try_send(prompt).context("Claude steering channel was not ready; explicit recovery is required")?;
@@ -697,6 +706,7 @@ async fn run_conversation(
                             .collect::<anyhow::Result<Vec<_>>>()?;
                         runtime.checkpoint.input_count = messages.len();
                         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
+                        drop(messages);
                         session.flush_rollout().await?;
                         runtime.linkage.save(&runtime.checkpoint, &runtime.checkpoint_path)?;
                         // The internal oneshot confirms only bridge receipt, not native delivery.

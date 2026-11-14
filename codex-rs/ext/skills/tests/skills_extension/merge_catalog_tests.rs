@@ -1337,7 +1337,7 @@ async fn v1_retains_legacy_plugin_disablement() -> TestResult {
 }
 
 #[tokio::test]
-async fn v2_shadow_observation_tracks_merged_skills_independently_of_read_route() -> TestResult {
+async fn v2_merged_skill_reads_preserve_routes_without_instructions() -> TestResult {
     for executor_route in [false, true] {
         let metrics = MetricsClient::new(
             MetricsConfig::in_memory(
@@ -1419,23 +1419,10 @@ async fn v2_shadow_observation_tracks_merged_skills_independently_of_read_route(
             );
             if turn_id == "turn-1" {
                 let entry = if executor_route { &installed } else { &cloud };
-                // Repeated reads should yield only one shadow observation for this turn.
                 for _ in 0..2 {
                     let output = call_tool(&tools, "read", json!({"package": entry.id.0})).await?;
                     assert_eq!(output["resource"], json!(entry.main_prompt.as_str()));
                 }
-            } else {
-                // The next turn must recover the observed Cloud candidate in both history selectors.
-                harness.registry.skill_invocation_contributors()[0]
-                    .on_skill_invocation(SkillInvocationInput {
-                        session_store: &harness.session_store,
-                        thread_store: &harness.thread_store,
-                        turn_store: &harness.turn_store,
-                        turn_id,
-                        skill_resource: cloud.main_prompt.as_str(),
-                        kind: SkillInvocationKind::Implicit,
-                    })
-                    .await;
             }
         }
         let requested = if executor_route { &installed } else { &cloud };
@@ -1461,49 +1448,6 @@ async fn v2_shadow_observation_tracks_merged_skills_independently_of_read_route(
             ]
         );
         assert!(read_request_keys(other_reads).is_empty());
-
-        let snapshots = super::shadow_task_context_tests::collect_shadow_observations(
-            &metrics,
-            "codex.skills.shadow_selection.invocation",
-            /*expected*/ 24,
-        )
-        .await?;
-        let actual = snapshots
-            .iter()
-            .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
-            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
-            .filter(|metric| metric.name() == "codex.skills.shadow_selection.invocation")
-            .flat_map(|metric| match metric.data() {
-                AggregatedMetrics::U64(MetricData::Sum(sum)) => sum.data_points(),
-                data => panic!("unexpected shadow metric: {data:?}"),
-            })
-            .filter_map(|point| {
-                let attribute = |key| {
-                    point
-                        .attributes()
-                        .find(|attribute| attribute.key.as_str() == key)
-                        .map(|attribute| attribute.value.as_str().to_string())
-                };
-                let method = attribute("method")?;
-                matches!(method.as_str(), "lru_v1" | "task_context_fusion_v1")
-                    .then(|| ((method, attribute("hit").expect("hit tag")), point.value()))
-            })
-            .fold(
-                std::collections::BTreeMap::new(),
-                |mut totals, (key, count)| {
-                    *totals.entry(key).or_insert(0) += count;
-                    totals
-                },
-            );
-        let expected = ["lru_v1", "task_context_fusion_v1"]
-            .into_iter()
-            .flat_map(|method| {
-                ["false", "true"]
-                    .into_iter()
-                    .map(move |hit| ((method.to_string(), hit.to_string()), 1))
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
-        assert_eq!(actual, expected, "executor_route={executor_route}");
     }
     Ok(())
 }

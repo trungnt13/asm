@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[cfg(not(any(test, feature = "ts")))]
+use codex_app_server_protocol_noop_macros::TS;
 use futures::StreamExt;
 use futures::stream;
 use schemars::JsonSchema;
@@ -10,6 +12,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::process::Command;
 use tokio::time::Duration as TokioDuration;
+#[cfg(any(test, feature = "ts"))]
 use ts_rs::TS;
 
 use crate::GitSha;

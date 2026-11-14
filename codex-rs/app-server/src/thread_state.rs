@@ -240,6 +240,7 @@ impl ThreadState {
 
     pub(crate) fn track_current_turn_event(&mut self, event_turn_id: &str, event: &EventMsg) {
         if let EventMsg::TurnStarted(payload) = event {
+            self.current_turn_history.discard_turn_snapshots();
             self.turn_summary = TurnSummary {
                 started_at: payload.started_at,
                 ..Default::default()
@@ -263,11 +264,23 @@ impl ThreadState {
                 .get_or_insert_default()
                 .add_assign(usage);
         }
-        if self.evict_superseded_agent_text {
-            self.current_turn_history.handle_live_paginated_event(event);
-        } else {
-            self.current_turn_history
-                .handle_event_for_history_mode(event, self.history_mode);
+        let targets_current_turn = match event {
+            EventMsg::TurnComplete(payload) => {
+                self.current_turn_history.active_turn_id() == Some(payload.turn_id.as_str())
+            }
+            EventMsg::TurnAborted(payload) => {
+                self.current_turn_history.active_turn_id()
+                    == Some(payload.turn_id.as_deref().unwrap_or(event_turn_id))
+            }
+            _ => true,
+        };
+        if targets_current_turn {
+            if self.evict_superseded_agent_text {
+                self.current_turn_history.handle_live_paginated_event(event);
+            } else {
+                self.current_turn_history
+                    .handle_event_for_history_mode(event, self.history_mode);
+            }
         }
         if matches!(event, EventMsg::TurnAborted(_) | EventMsg::TurnComplete(_)) {
             self.last_terminal_turn_id = Some(event_turn_id.to_string());
@@ -792,3 +805,7 @@ impl ThreadStateManager {
             .map(|thread_entry| thread_entry.has_connections_watcher.subscribe())
     }
 }
+
+#[cfg(test)]
+#[path = "thread_state_history_tests.rs"]
+mod history_tests;

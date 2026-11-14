@@ -70,7 +70,7 @@ fn sampling_checkpoint_excludes_input_appended_during_request() {
     );
     history.record_annotated_items(
         &mut [ResponseItemEnvelope {
-            item: assistant_msg("response to the earlier request"),
+            item: assistant_msg("response to the earlier request").into(),
             metadata: Some(CodexHarnessMetadata {
                 sampled_through_sequence: Some(request_sequence),
                 ..Default::default()
@@ -278,10 +278,11 @@ fn conversation_history_snapshot_binds_review_mode_and_hash_to_the_latest_item(
     latest_hash: Option<&str>,
 ) {
     let checkpoint = ResponseItemEnvelope {
-        item: serde_json::from_value(serde_json::json!({
+        item: serde_json::from_value::<codex_protocol::models::ResponseItem>(serde_json::json!({
             "type": "compaction", "id": "known", "encrypted_content": "opaque checkpoint"
         }))
-        .expect("checkpoint fixture"),
+        .expect("checkpoint fixture")
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             compaction_model_hash: Some("producer-hash".to_owned()),
             ..Default::default()
@@ -464,10 +465,11 @@ fn plaintext_checkpoint_without_backup_preserves_root_instructions(
     // Compaction removes the only plaintext copy. Resume must keep it available
     // to worker authorization without adding it back to the reviewer's model window.
     let compacted = vec![ResponseItemEnvelope {
-        item: serde_json::from_value(serde_json::json!({
+        item: serde_json::from_value::<codex_protocol::models::ResponseItem>(serde_json::json!({
             "type": "compaction", "id": "new-checkpoint", "encrypted_content": "opaque"
         }))
-        .expect("new checkpoint"),
+        .expect("new checkpoint")
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             compaction_model_hash: Some("reviewer".to_owned()),
             ..Default::default()
@@ -495,7 +497,7 @@ fn plaintext_checkpoint_without_backup_preserves_root_instructions(
             GuardianContextMode::ThreadOwned,
             compacted
                 .into_iter()
-                .map(|envelope| envelope.item)
+                .map(|envelope| Arc::unwrap_or_clone(envelope.item))
                 .collect::<Vec<_>>(),
             vec!["Only publish privately.".to_owned()],
         ),
@@ -522,7 +524,7 @@ fn legacy_checkpoint_rollback_keeps_answers_before_a_same_turn_steer() {
         ], "incomplete": false}
     })).expect("legacy checkpoint");
     for envelope in checkpoint.replacement_history.as_mut().unwrap() {
-        envelope.item.set_turn_id_if_missing("shared-turn");
+        std::sync::Arc::make_mut(&mut envelope.item).set_turn_id_if_missing("shared-turn");
     }
     let expected = checkpoint
         .retained_context
@@ -611,7 +613,7 @@ fn guardian_checkpoint_applies_additional_context_policy_after_resume(include: b
     history.record_annotated_items(
         &mut [
             ResponseItemEnvelope {
-                item: additional_context.clone(),
+                item: additional_context.clone().into(),
                 metadata: Some(CodexHarnessMetadata {
                     additional_context_tool_output: true,
                     ..Default::default()
@@ -962,7 +964,7 @@ async fn retains_only_harness_authored_configuration_updates() {
         },
     };
     let trusted = ResponseItemEnvelope {
-        item: update.clone(),
+        item: update.clone().into(),
         metadata: Some(CodexHarnessMetadata {
             history_sequence: Some(4),
             sampled_through_sequence: Some(0),
@@ -975,7 +977,7 @@ async fn retains_only_harness_authored_configuration_updates() {
         &mut [
             ResponseItemEnvelope::new(update.clone()),
             ResponseItemEnvelope {
-                item: update,
+                item: update.into(),
                 metadata: Some(CodexHarnessMetadata {
                     client_authored: true,
                     ..Default::default()
@@ -992,7 +994,8 @@ async fn retains_only_harness_authored_configuration_updates() {
                     }],
                     phase: None,
                     internal_chat_message_metadata_passthrough: None,
-                },
+                }
+                .into(),
                 metadata: Some(CodexHarnessMetadata {
                     harness_authored_configuration: true,
                     ..Default::default()
@@ -1006,7 +1009,7 @@ async fn retains_only_harness_authored_configuration_updates() {
     assert_eq!(history.annotated_items(), [trusted.clone()]);
 
     let last_high = ResponseItemEnvelope {
-        item: trusted.item.clone(),
+        item: trusted.item.clone().into(),
         metadata: Some(CodexHarnessMetadata {
             harness_authored_configuration: true,
             history_sequence: Some(5),
@@ -1020,14 +1023,15 @@ async fn retains_only_harness_authored_configuration_updates() {
             reasoning: ConfigurationReasoning {
                 effort: ReasoningEffort::Low,
             },
-        },
+        }
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             history_sequence: Some(7),
             ..last_high.metadata.clone().unwrap()
         }),
     };
     let untrusted = ResponseItemEnvelope {
-        item: low.item.clone(),
+        item: low.item.clone().into(),
         metadata: Some(CodexHarnessMetadata {
             history_sequence: Some(5),
             sampled_through_sequence: Some(0),
@@ -1035,7 +1039,7 @@ async fn retains_only_harness_authored_configuration_updates() {
         }),
     };
     let client_authored = ResponseItemEnvelope {
-        item: low.item.clone(),
+        item: low.item.clone().into(),
         metadata: Some(CodexHarnessMetadata {
             client_authored: true,
             history_sequence: Some(6),
@@ -1068,7 +1072,7 @@ async fn retains_only_harness_authored_configuration_updates() {
             vec![
                 trusted.clone(),
                 ResponseItemEnvelope {
-                    item: custom_tool_call_output("orphan", "discard"),
+                    item: custom_tool_call_output("orphan", "discard").into(),
                     metadata: Some(CodexHarnessMetadata {
                         history_sequence: Some(6),
                         sampled_through_sequence: Some(0),
@@ -1098,10 +1102,13 @@ async fn retains_only_harness_authored_configuration_updates() {
                 history
                     .clone()
                     .for_prompt(&[InputModality::Text], &InlineAttachmentStore)
-                    .await,
+                    .await
+                    .into_iter()
+                    .map(std::sync::Arc::unwrap_or_clone)
+                    .collect::<Vec<_>>(),
                 expected
                     .iter()
-                    .map(|envelope| envelope.item.clone())
+                    .map(|envelope| envelope.item.as_ref().clone())
                     .collect::<Vec<_>>()
             );
             assert_eq!(history.annotated_items(), raw);
@@ -1117,7 +1124,8 @@ fn drop_last_n_user_turns_removes_post_input_configuration_update_with_its_turn(
         [ReasoningEffort::Low, ReasoningEffort::High].map(|effort| ResponseItemEnvelope {
             item: ResponseItem::ConfigurationUpdate {
                 reasoning: ConfigurationReasoning { effort },
-            },
+            }
+            .into(),
             metadata: Some(CodexHarnessMetadata {
                 harness_authored_configuration: true,
                 ..Default::default()
@@ -1259,7 +1267,10 @@ async fn for_prompt_preserves_inter_agent_assistant_messages() {
     assert_eq!(
         history
             .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![item]
     );
 }
@@ -1292,7 +1303,7 @@ fn cloned_history_shares_items_until_mutated() {
 #[test]
 fn annotated_history_apis_preserve_envelopes() {
     let first_envelope = ResponseItemEnvelope {
-        item: assistant_msg("first"),
+        item: assistant_msg("first").into(),
         metadata: Some(CodexHarnessMetadata {
             history_sequence: Some(7),
             sampled_through_sequence: Some(4),
@@ -1334,7 +1345,8 @@ fn record_annotated_items_preserves_metadata_while_processing_item(
                 success: Some(true),
             },
             internal_chat_message_metadata_passthrough: None,
-        },
+        }
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             history_truncation_token_limit,
             ..Default::default()
@@ -1353,7 +1365,9 @@ fn record_annotated_items_preserves_metadata_while_processing_item(
         history.annotated_items()[0].item != envelope.item,
         expected_truncation
     );
-    let ResponseItem::FunctionCallOutput { output, .. } = &history.annotated_items()[0].item else {
+    let ResponseItem::FunctionCallOutput { output, .. } =
+        history.annotated_items()[0].item.as_ref()
+    else {
         panic!("expected function call output");
     };
     assert_eq!(
@@ -1386,7 +1400,8 @@ async fn for_prompt_annotated_preserves_metadata_while_normalizing_item() {
             ],
             phase: None,
             internal_chat_message_metadata_passthrough: None,
-        },
+        }
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             history_sequence: Some(7),
             sampled_through_sequence: Some(4),
@@ -1549,7 +1564,7 @@ async fn for_prompt_replaces_unavailable_message_images() {
     }))
     .unwrap();
     let mut expected_envelope = history.annotated_items()[0].clone();
-    expected_envelope.item = expected;
+    expected_envelope.item = expected.into();
     assert_eq!(projected, vec![expected_envelope]);
     assert_eq!(raw_items(&history), vec![original]);
 }
@@ -1595,7 +1610,10 @@ async fn for_prompt_replaces_unavailable_tool_images() {
                     ],
                     &FailingAttachmentStore,
                 )
-                .await,
+                .await
+                .into_iter()
+                .map(std::sync::Arc::unwrap_or_clone)
+                .collect::<Vec<_>>(),
             vec![call.clone(), expected]
         );
         assert_eq!(raw_items(&history), vec![call, original]);
@@ -1710,7 +1728,10 @@ async fn for_prompt_strips_media_when_model_does_not_support_it() {
     let text_only_modalities = vec![InputModality::Text];
     let stripped = history
         .for_prompt(&text_only_modalities, &InlineAttachmentStore)
-        .await;
+        .await
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
 
     let expected = vec![
         ResponseItem::Message {
@@ -1823,7 +1844,10 @@ async fn for_prompt_strips_media_when_model_does_not_support_it() {
                 ],
                 &InlineAttachmentStore
             )
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         fully_supported_items
     );
 
@@ -1850,7 +1874,10 @@ async fn for_prompt_strips_media_when_model_does_not_support_it() {
     }]);
     let preserved = with_images
         .for_prompt(&modalities, &InlineAttachmentStore)
-        .await;
+        .await
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
     assert_eq!(preserved.len(), 1);
     if let ResponseItem::Message { content, .. } = &preserved[0] {
         assert_eq!(content.len(), 2);
@@ -1879,7 +1906,10 @@ async fn for_prompt_strips_media_when_model_does_not_support_it() {
                 &[InputModality::Text, InputModality::Audio],
                 &InlineAttachmentStore
             )
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![audio_message]
     );
 }
@@ -1911,7 +1941,10 @@ async fn for_prompt_preserves_image_generation_calls_when_images_are_supported()
     assert_eq!(
         history
             .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![
             ResponseItem::ImageGenerationCall {
                 encrypted_content: None,
@@ -1963,7 +1996,10 @@ async fn for_prompt_clears_image_generation_result_when_images_are_unsupported()
     assert_eq!(
         history
             .for_prompt(&[InputModality::Text], &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![
             ResponseItem::Message {
                 encrypted_content: None,
@@ -2133,7 +2169,10 @@ async fn drop_last_n_user_turns_preserves_prefix() {
     assert_eq!(
         history
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![
             assistant_msg("session prefix item"),
             user_msg("u1"),
@@ -2153,7 +2192,10 @@ async fn drop_last_n_user_turns_preserves_prefix() {
         history
             .clone()
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![assistant_msg("session prefix item")]
     );
     // With no remaining instruction boundary, rollback must not revoke facts from a
@@ -2235,7 +2277,7 @@ fn rollback_removes_assistant_sources_recorded_ahead_of_queued_input() {
         (user_msg("Also run tests."), 1),
     ]
     .map(|(item, order)| ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: Some(CodexHarnessMetadata {
             user_input_order: Some(order),
             ..Default::default()
@@ -2300,7 +2342,10 @@ async fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
     assert_eq!(
         history
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         expected_prefix_and_first_turn
     );
 
@@ -2339,7 +2384,10 @@ async fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
     assert_eq!(
         history
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         expected_prefix_only
     );
 
@@ -2364,7 +2412,10 @@ async fn drop_last_n_user_turns_ignores_session_prefix_user_messages() {
     assert_eq!(
         history
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         expected_prefix_only
     );
 }
@@ -2407,7 +2458,10 @@ async fn drop_last_n_user_turns_trims_context_updates_above_rolled_back_turn() {
         history
             .clone()
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![
             assistant_msg("session prefix item"),
             user_input_text_msg("turn 1 user"),
@@ -2537,7 +2591,10 @@ async fn drop_last_n_user_turns_trims_saved_prefix_update_above_rolled_back_turn
     assert_eq!(
         history
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![
             assistant_msg("session prefix item"),
             user_input_text_msg("turn 1 user"),
@@ -2571,7 +2628,10 @@ async fn drop_last_n_user_turns_clears_reference_context_for_mixed_developer_con
         history
             .clone()
             .for_prompt(&modalities, &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![
             user_input_text_msg("turn 1 user"),
             assistant_msg("turn 1 assistant"),
@@ -2637,7 +2697,10 @@ async fn normalization_retains_local_shell_outputs() {
     let history = create_history_with_items(items.clone());
     let normalized = history
         .for_prompt(&modalities, &InlineAttachmentStore)
-        .await;
+        .await
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
     assert_eq!(normalized, items);
 }
 
@@ -2667,7 +2730,7 @@ fn record_items_truncates_function_call_output_content() {
     history.record_items([&item], policy);
 
     assert_eq!(history.items.len(), 1);
-    match &history.items[0].item {
+    match history.items[0].item.as_ref() {
         ResponseItem::FunctionCallOutput { output, .. } => {
             let content = output.text_content().unwrap_or_default();
             assert_ne!(content, long_output);
@@ -2702,7 +2765,7 @@ fn record_items_truncates_custom_tool_call_output_content() {
     history.record_items([&item], policy);
 
     assert_eq!(history.items.len(), 1);
-    match &history.items[0].item {
+    match history.items[0].item.as_ref() {
         ResponseItem::CustomToolCallOutput { output, .. } => {
             let output = output.text_content().unwrap_or_default();
             assert_ne!(output, long_output);
@@ -2738,7 +2801,7 @@ fn record_items_respects_custom_token_limit() {
 
     history.record_items([&item], policy);
 
-    let stored = match &history.items[0].item {
+    let stored = match history.items[0].item.as_ref() {
         ResponseItem::FunctionCallOutput { output, .. } => output,
         other => panic!("unexpected history item: {other:?}"),
     };
@@ -3155,7 +3218,10 @@ async fn normalize_preserves_named_function_call_output_without_call_id() {
     assert_eq!(
         history
             .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
-            .await,
+            .await
+            .into_iter()
+            .map(std::sync::Arc::unwrap_or_clone)
+            .collect::<Vec<_>>(),
         vec![item]
     );
 }
@@ -3189,10 +3255,16 @@ async fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_his
 
     let first = create_history_with_items(items.clone())
         .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
-        .await;
+        .await
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
     let second = create_history_with_items(items)
         .for_prompt(&default_input_modalities(), &InlineAttachmentStore)
-        .await;
+        .await
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
 
     assert_eq!(
         first, second,

@@ -68,8 +68,6 @@ pub(super) fn exclusion(
 ) -> Option<&'static str> {
     if cli.no_daemon {
         Some("--no-daemon")
-    } else if cli.oss {
-        Some("--oss")
     } else if workload_identity_selected {
         Some("workload identity")
     } else if exec_server_url.is_some() {

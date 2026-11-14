@@ -149,7 +149,7 @@ impl ToolCallRuntime {
                     .delivered_assistant_message = Some(text.clone());
             }
             recorder.attach_direct_call_to_output(
-                &mut response.item,
+                std::sync::Arc::make_mut(&mut response.item),
                 recorded_call,
                 &item_id_generator,
             );

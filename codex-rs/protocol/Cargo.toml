@@ -12,7 +12,11 @@ doctest = false
 [lints]
 workspace = true
 
+[features]
+ts = []
+
 [dependencies]
+codex-app-server-protocol-noop-macros = { workspace = true }
 chardetng = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 codex-async-utils = { workspace = true }

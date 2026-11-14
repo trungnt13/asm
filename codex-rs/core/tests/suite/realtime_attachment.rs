@@ -217,12 +217,10 @@ async fn initiated_sideband_detach_preserves_queued_transcript_in_history() -> R
         let history = test.codex.load_history(/*include_archived*/ false).await?;
         let tails = history.items.iter().filter(|item| {
             matches!(item,
-                codex_history::RolloutItem::ResponseItem(codex_history::ResponseItemEnvelope {
-                    item: codex_protocol::models::ResponseItem::Message { role, content, .. }, ..
-                }) if role == "user" && content.iter().any(|item| matches!(item,
+                codex_history::RolloutItem::ResponseItem(envelope) if matches!(envelope.item.as_ref(), codex_protocol::models::ResponseItem::Message { role, content, .. } if role == "user" && content.iter().any(|item| matches!(item,
                     codex_protocol::models::ContentItem::InputText { text: recorded }
                         if recorded.contains(&text)
-                ))
+                )))
             )
         }).count();
         assert_eq!(

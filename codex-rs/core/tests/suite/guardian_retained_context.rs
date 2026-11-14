@@ -808,7 +808,7 @@ async fn inherited_instruction_authorization_after_cold_resume(restricted: bool)
     };
     let instruction = "Publish the report.";
     let inherited = RolloutItem::ResponseItem(ResponseItemEnvelope {
-        item: user_message_item(instruction),
+        item: user_message_item(instruction).into(),
         metadata: Some(CodexHarnessMetadata {
             inherited_user_message: true,
             ..Default::default()

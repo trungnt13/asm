@@ -476,7 +476,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
         .record_conversation_items(
             &turn.step.turn,
             &turn.step.settings.model_info,
-            &[output.item],
+            &[std::sync::Arc::unwrap_or_clone(output.item)],
         )
         .await;
     if tool.name == "wait_agent"
@@ -529,3 +529,7 @@ fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
     };
     Ok(json!({"isError":output.success == Some(false), "content":content}))
 }
+
+#[cfg(test)]
+#[path = "bridge_tests.rs"]
+mod tests;

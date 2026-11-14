@@ -78,7 +78,6 @@ use codex_core::config::bootstrap_auth_config;
 use codex_core::config::edit::ConfigEditsBuilder;
 use codex_core::config::find_codex_home;
 use codex_core::config::load_config_toml_with_layer_stack;
-use codex_core::config::resolve_oss_provider;
 use codex_core::config::resolve_profile_v2_config_path;
 use codex_core::find_thread_meta_by_name_str;
 use codex_core::format_exec_policy_error_with_source;
@@ -93,8 +92,6 @@ use codex_login::default_client::set_default_client_residency_requirement;
 use codex_login::default_client::set_default_originator;
 use codex_login::enforce_login_restrictions;
 use codex_login::is_workload_identity_selected;
-use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
-use codex_model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use codex_otel::set_parent_from_context;
 use codex_otel::traceparent_context_from_env;
 use codex_protocol::SessionId;
@@ -117,8 +114,6 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::canonicalize_existing_preserving_symlinks;
 use codex_utils_cli::SharedCliOptions;
-use codex_utils_oss::ensure_oss_provider_ready;
-use codex_utils_oss::get_default_model_for_oss_provider;
 use codex_worktree::CreateWorktree;
 use codex_worktree::WorktreeManager;
 use codex_worktree::WorktreeSettings;
@@ -170,7 +165,6 @@ use std::path::PathBuf;
 use supports_color::Stream;
 use tokio::sync::mpsc;
 use tracing::Instrument;
-use tracing::error;
 use tracing::field;
 use tracing::info;
 use tracing::info_span;
@@ -236,9 +230,7 @@ struct ExecRunArgs {
     images: Vec<PathBuf>,
     json_mode: bool,
     last_message_file: Option<PathBuf>,
-    model_provider: Option<String>,
     managed_worktree: Option<ManagedExecWorktree>,
-    oss: bool,
     output_schema_path: Option<PathBuf>,
     prompt: Option<String>,
     skip_git_repo_check: bool,
@@ -314,8 +306,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     let SharedCliOptions {
         images,
         model: model_cli_arg,
-        oss,
-        oss_provider,
         config_profile_v2,
         sandbox_mode: sandbox_mode_cli_arg,
         auto_review: _,
@@ -359,7 +349,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
 
     // Parse `-c` overrides from the CLI.
-    let mut cli_kv_overrides = match config_overrides.parse_overrides() {
+    let cli_kv_overrides = match config_overrides.parse_overrides() {
         Ok(v) => v,
         #[allow(clippy::print_stderr)]
         Err(e) => {
@@ -510,7 +500,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         CloudConfigBundleLoader::default(),
     )
     .await;
-    let bootstrap_config_toml = &bootstrap_config.config_toml;
     let bootstrap_auth_config = embedded_network_policy
         .bind_bootstrap_auth(bootstrap_auth_config(&codex_home, &bootstrap_config)?);
     // API keys cannot fetch workspace-managed configuration. Preserve the
@@ -574,53 +563,8 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         }
     }
 
-    let model_provider = if oss {
-        let bootstrap_config_with_cloud_config;
-        let config_toml_for_oss = if oss_provider.is_none() {
-            // The first load intentionally skips cloud config so we can read
-            // auth/base-url settings needed to fetch the bundle. If OSS mode
-            // needs a default provider from config, reload with the bundle.
-            bootstrap_config_with_cloud_config = load_bootstrap_config_or_exit(
-                &codex_home,
-                Some(&config_cwd),
-                cli_kv_overrides.clone(),
-                loader_overrides.clone(),
-                strict_config,
-                cloud_config_bundle.clone(),
-            )
-            .await;
-            &bootstrap_config_with_cloud_config.config_toml
-        } else {
-            bootstrap_config_toml
-        };
-
-        let resolved = resolve_oss_provider(oss_provider.as_deref(), config_toml_for_oss);
-
-        if let Some(provider) = resolved {
-            Some(provider)
-        } else {
-            return Err(anyhow::anyhow!(
-                "No default OSS provider configured. Use --local-provider=provider or set oss_provider to one of: {LMSTUDIO_OSS_PROVIDER_ID}, {OLLAMA_OSS_PROVIDER_ID} in config.toml"
-            ));
-        }
-    } else {
-        None // No OSS mode enabled
-    };
-
-    // When using `--oss`, let the bootstrapper pick the model based on selected provider
-    let model = if let Some(model) = model_cli_arg {
-        Some(model)
-    } else if oss {
-        model_provider
-            .as_ref()
-            .and_then(|provider_id| get_default_model_for_oss_provider(provider_id))
-            .map(std::borrow::ToOwned::to_owned)
-    } else {
-        None // No model specified, will use the default.
-    };
-
     let overrides = ConfigOverrides {
-        model,
+        model: model_cli_arg,
         review_model: None,
         // Default to never ask for approvals in headless mode. Rebuild below if
         // the fully resolved reviewer is AutoReview.
@@ -633,7 +577,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         persisted_permission_profile: None,
         cwd: resolved_cwd,
         workspace_roots: None,
-        model_provider: model_provider.clone(),
+        model_provider: None,
         service_tier: None,
         codex_self_exe: arg0_paths.codex_self_exe.clone(),
         codex_linux_sandbox_exe: arg0_paths.codex_linux_sandbox_exe.clone(),
@@ -642,7 +586,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         developer_instructions: None,
         personality: None,
         compact_prompt: None,
-        show_raw_agent_reasoning: oss.then_some(true),
+        show_raw_agent_reasoning: None,
         tools_web_search_request: None,
         ephemeral: ephemeral.then_some(true),
         bypass_hook_trust: bypass_hook_trust.then_some(true),
@@ -783,10 +727,6 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         )
         .await?
     };
-    if let Some(provider) = &model_provider {
-        // Keep app-server config reloads aligned with the explicit --oss selection.
-        cli_kv_overrides.push(("model_provider".to_string(), provider.clone().into()));
-    }
 
     let in_process_start_args = InProcessClientStartArgs {
         required_human_approval: false,
@@ -832,9 +772,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         images,
         json_mode,
         last_message_file,
-        model_provider,
         managed_worktree,
-        oss,
         output_schema_path,
         prompt,
         skip_git_repo_check,
@@ -934,9 +872,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         images,
         json_mode,
         last_message_file,
-        model_provider,
         managed_worktree,
-        oss,
         output_schema_path,
         prompt,
         skip_git_repo_check,
@@ -944,19 +880,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         thread_source,
         cyber_access_program,
     } = args;
-
-    if config.features.enabled(Feature::CliDaybreak)
-        && config.daybreak_enabled
-        && !matches!(&command, Some(ExecCommand::Review(_)))
-    {
-        anyhow::ensure!(
-            !oss || matches!(
-                &command,
-                Some(ExecCommand::Resume(_) | ExecCommand::Fork(_))
-            ),
-            "Daybreak requires the OpenAI model provider"
-        );
-    }
 
     let mut event_processor: Box<dyn EventProcessor> = match json_mode {
         true => Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone())),
@@ -966,22 +889,6 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
             last_message_file.clone(),
         )),
     };
-    if oss {
-        // We're in the oss section, so provider_id should be Some
-        // Let's handle None case gracefully though just in case
-        let provider_id = match model_provider.as_ref() {
-            Some(id) => id,
-            None => {
-                error!("OSS provider unexpectedly not set when oss flag is used");
-                return Err(anyhow::anyhow!(
-                    "OSS provider not set but oss flag was used"
-                ));
-            }
-        };
-        ensure_oss_provider_ready(provider_id, &config)
-            .await
-            .map_err(|e| anyhow::anyhow!("OSS setup failed: {e}"))?;
-    }
 
     let default_cwd = config.cwd.to_path_buf();
     let default_approval_policy = config.permissions.approval_policy.value();

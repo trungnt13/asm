@@ -12,7 +12,6 @@ use codex_core::TurnInputRequest;
 use codex_core::TurnInputSubmission;
 use codex_core::test_support::auth_manager_from_auth;
 use codex_history::InitialHistory;
-use codex_history::ResponseItemEnvelope;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
 use codex_login::OPENAI_API_KEY_ENV_VAR;
@@ -2395,10 +2394,9 @@ async fn assert_transport_close_tail_flush(
     // Closed must be a history barrier, including when there is no active turn.
     let history = test.codex.load_history(/*include_archived*/ false).await?;
     let tails = history.items.iter().filter(|item| {
-        matches!(item, RolloutItem::ResponseItem(ResponseItemEnvelope { item: ResponseItem::Message { role, content, .. }, .. })
-            if role == "user" && content.iter().any(|item| matches!(item,
+        matches!(item, RolloutItem::ResponseItem(envelope) if matches!(envelope.item.as_ref(), ResponseItem::Message { role, content, .. } if role == "user" && content.iter().any(|item| matches!(item,
                 ContentItem::InputText { text } if text.contains("<source>transcript_tail_flush</source>")
-                    && text.contains("user: transport tail"))))
+                    && text.contains("user: transport tail")))))
     }).count();
     assert_eq!(tails, usize::from(flush_transcript_tail_on_session_end));
     assert!(response_mock.requests().is_empty());
@@ -5342,10 +5340,9 @@ async fn conversation_close_routes_only_remaining_transcript_tail_once() -> Resu
 
     let history = test.codex.load_history(/*include_archived*/ false).await?;
     let tails = history.items.iter().filter(|item| {
-        matches!(item, RolloutItem::ResponseItem(ResponseItemEnvelope { item: ResponseItem::Message { role, content, .. }, .. })
-            if role == "user" && content.iter().any(|item| matches!(item,
+        matches!(item, RolloutItem::ResponseItem(envelope) if matches!(envelope.item.as_ref(), ResponseItem::Message { role, content, .. } if role == "user" && content.iter().any(|item| matches!(item,
                 ContentItem::InputText { text } if text.contains("<source>transcript_tail_flush</source>")
-                    && text.contains("assistant: remaining answer\nuser: remaining question"))))
+                    && text.contains("assistant: remaining answer\nuser: remaining question")))))
     }).count();
     assert_eq!(tails, 1);
     assert_eq!(response_mock.requests().len(), 1);
@@ -5977,10 +5974,8 @@ async fn inbound_handoff_request_updates_realtime_state_during_active_turn(
     if flush_transcript_tail_on_session_end {
         let history = test.codex.load_history(/*include_archived*/ false).await?;
         assert!(history.items.iter().any(|item| {
-            matches!(item, RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: ResponseItem::Message { role, content, .. }, ..
-            }) if role == "user" && content.iter().any(|item| matches!(item,
-                ContentItem::InputText { text } if text.contains("user: final transcript tail"))))
+            matches!(item, RolloutItem::ResponseItem(envelope) if matches!(envelope.item.as_ref(), ResponseItem::Message { role, content, .. } if role == "user" && content.iter().any(|item| matches!(item,
+                ContentItem::InputText { text } if text.contains("user: final transcript tail")))))
         }));
     }
     if interrupt {

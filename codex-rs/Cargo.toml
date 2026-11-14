@@ -20,7 +20,6 @@ members = [
     "app-server-client",
     "app-server-protocol",
     "app-server-protocol-noop-macros",
-    "app-server-test-client",
     "apply-patch",
     "arg0",
     "feedback",
@@ -34,9 +33,6 @@ members = [
     "plugin-host",
     "codex-home",
     "cloud-config",
-    "cloud-tasks",
-    "cloud-tasks-client",
-    "cloud-tasks-mock-client",
     "cli",
     "collaboration-mode-templates",
     "connectors",
@@ -81,12 +77,10 @@ members = [
     "ext/queue",
     "ext/skills",
     "ext/web-search",
-    "external-agent-migration",
     "keyring-store",
     "file-search",
     "file-watcher",
     "linux-sandbox",
-    "lmstudio",
     "login",
     "codex-mcp",
     "memories/read",
@@ -98,17 +92,14 @@ members = [
     "mxc-sandbox",
     "models-manager",
     "network-proxy",
-    "ollama",
     "process-hardening",
     "realtime-webrtc",
-    "voice-host",
     "protocol",
     "protocol/tests/support",
     "prompts",
     "rollout",
     "rollout-trace",
     "rmcp-client",
-    "responses-api-proxy",
     "runtime-agent-instance",
     "response-debug-context",
     "sandboxing",
@@ -149,7 +140,6 @@ members = [
     "utils/model-facing-id",
     "utils/sleep-inhibitor",
     "utils/approval-presets",
-    "utils/oss",
     "utils/output-truncation",
     "utils/path-utils",
     "utils/plugins",
@@ -196,7 +186,6 @@ codex-app-server-daemon = { path = "app-server-daemon" }
 codex-app-server-client = { path = "app-server-client" }
 codex-app-server-protocol = { path = "app-server-protocol" }
 codex-app-server-protocol-noop-macros = { path = "app-server-protocol-noop-macros" }
-codex-app-server-test-client = { path = "app-server-test-client" }
 codex-apply-patch = { path = "apply-patch" }
 codex-arg0 = { path = "arg0" }
 codex-async-utils = { path = "async-utils" }
@@ -206,8 +195,6 @@ codex-chatgpt = { path = "chatgpt" }
 codex-client = { path = "codex-client" }
 codex-collaboration-mode-templates = { path = "collaboration-mode-templates" }
 codex-cloud-config = { path = "cloud-config" }
-codex-cloud-tasks-client = { path = "cloud-tasks-client" }
-codex-cloud-tasks-mock-client = { path = "cloud-tasks-mock-client" }
 codex-code-mode = { path = "code-mode" }
 codex-code-mode-protocol = { path = "code-mode-protocol" }
 codex-code-mode-runtime = { path = "code-mode-runtime" }
@@ -249,7 +236,6 @@ codex-guardian-v2 = { path = "ext/guardian-v2" }
 codex-guardian-v3 = { path = "ext/guardian-v3" }
 codex-history-notes-extension = { path = "ext/history-notes" }
 codex-image-generation-extension = { path = "ext/image-generation" }
-codex-external-agent-migration = { path = "external-agent-migration" }
 codex-experimental-api-macros = { path = "codex-experimental-api-macros" }
 codex-features = { path = "features" }
 codex-feedback = { path = "feedback" }
@@ -262,7 +248,6 @@ codex-hooks = { path = "hooks" }
 codex-history = { path = "history" }
 codex-keyring-store = { path = "keyring-store" }
 codex-linux-sandbox = { path = "linux-sandbox" }
-codex-lmstudio = { path = "lmstudio" }
 codex-login = { path = "login" }
 codex-mermaid = { path = "mermaid" }
 codex-message-history = { path = "message-history" }
@@ -276,7 +261,6 @@ codex-model-provider-info = { path = "model-provider-info" }
 codex-models-manager = { path = "models-manager" }
 codex-mxc-sandbox = { path = "mxc-sandbox" }
 codex-network-proxy = { path = "network-proxy" }
-codex-ollama = { path = "ollama" }
 codex-otel = { path = "otel" }
 codex-otel-trace-websocket = { path = "otel-trace-websocket" }
 codex-plugin = { path = "plugin" }
@@ -286,7 +270,6 @@ codex-protocol = { path = "protocol" }
 codex-protocol-test-support = { path = "protocol/tests/support" }
 codex-prompts = { path = "prompts" }
 codex-queue-extension = { path = "ext/queue" }
-codex-responses-api-proxy = { path = "responses-api-proxy" }
 codex-response-debug-context = { path = "response-debug-context" }
 codex-rmcp-client = { path = "rmcp-client" }
 codex-rollout = { path = "rollout" }
@@ -321,7 +304,6 @@ codex-utils-home-dir = { path = "utils/home-dir" }
 codex-utils-image = { path = "utils/image" }
 codex-utils-json-to-toml = { path = "utils/json-to-toml" }
 codex-utils-model-facing-id = { path = "utils/model-facing-id" }
-codex-utils-oss = { path = "utils/oss" }
 codex-utils-output-truncation = { path = "utils/output-truncation" }
 codex-utils-path = { path = "utils/path-utils" }
 codex-utils-path-uri = { path = "utils/path-uri" }

@@ -225,7 +225,6 @@ class DotSlashReleaseConfigTests(unittest.TestCase):
                 "dotslash-config.json": {
                     "codex",
                     "codex-app-server",
-                    "codex-responses-api-proxy",
                     "bwrap",
                     "codex-command-runner",
                     "codex-windows-sandbox-setup",

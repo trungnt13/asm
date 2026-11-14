@@ -13,8 +13,6 @@
 //codex-rs/app-server-client:app-server-client-unit-tests	51
 //codex-rs/app-server-daemon:app-server-daemon-unit-tests	4
 //codex-rs/app-server-protocol:app-server-protocol-unit-tests	19
-//codex-rs/app-server-test-client:app-server-test-client-unit-tests	25
-//codex-rs/app-server-test-client:codex-app-server-test-client-bin-unit-tests	1
 //codex-rs/app-server-transport:app-server-transport-unit-tests	65
 //codex-rs/app-server/tests/common:common-unit-tests	26
 //codex-rs/app-server:app-server-all-test-windows-cross	2835
@@ -63,10 +61,6 @@
 //codex-rs/cli:codex-bin-unit-tests	60
 //codex-rs/cli:logs_client-bin-unit-tests	1
 //codex-rs/cloud-config:cloud-config-unit-tests	47
-//codex-rs/cloud-tasks-client:cloud-tasks-client-unit-tests	35
-//codex-rs/cloud-tasks-mock-client:cloud-tasks-mock-client-unit-tests	59
-//codex-rs/cloud-tasks:cloud-tasks-env_filter-test-windows-cross	1
-//codex-rs/cloud-tasks:cloud-tasks-unit-tests	1
 //codex-rs/code-mode-host:code-mode-host-grpc-test-windows-cross	28
 //codex-rs/code-mode-host:code-mode-host-grpc_notifications-test-windows-cross	25
 //codex-rs/code-mode-host:code-mode-host-grpc_tcp-test-windows-cross	1

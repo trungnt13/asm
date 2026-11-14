@@ -420,19 +420,39 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
             session.services.image_store.as_ref(),
         )
         .await;
-    assert_eq!(prompt.input, persisted);
+    assert_eq!(
+        prompt
+            .input
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>(),
+        persisted
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>()
+    );
     assert!(
         persisted
             .iter()
-            .all(crate::context::is_guardian_context_message)
+            .all(|item| crate::context::is_guardian_context_message(item))
     );
     assert!(
         !persisted
             .iter()
-            .any(crate::context::is_user_authorization_message)
+            .any(|item| crate::context::is_user_authorization_message(item))
     );
     super::super::request_budget::prepare_prompt(&session, &mut prompt, &step, &metadata)
         .await
         .unwrap();
-    assert_eq!(prompt.input, persisted);
+    assert_eq!(
+        prompt
+            .input
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>(),
+        persisted
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>()
+    );
 }

@@ -9,7 +9,6 @@ use codex_context_fragments::ContextualUserFragment;
 use codex_context_fragments::SIDE_BOUNDARY_TITLE;
 use codex_context_fragments::SideConversationPolicy;
 use codex_protocol::models::ContentItem;
-use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutItem;
 use codex_rollout::read_session_meta_line;
 use futures::StreamExt;
@@ -29,10 +28,10 @@ pub(super) async fn side_context_checkpoint(path: Option<&Path>) -> io::Result<O
         let record = codex_rollout::parse_rollout_line(&line)?;
         match record.item {
             RolloutItem::SessionMeta(meta) if !meta.meta.attached_thread => return Ok(None),
-            RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: ResponseItem::Message { role, content, .. },
-                ..
-            }) => {
+            RolloutItem::ResponseItem(envelope) => {
+                let ResponseItem::Message { role, content, .. } = envelope.item.as_ref() else {
+                    continue;
+                };
                 let [ContentItem::InputText { text }] = content.as_slice() else {
                     continue;
                 };

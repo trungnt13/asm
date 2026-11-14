@@ -176,11 +176,6 @@ jobs:
           tool: nextest
           version: 0.9.103
 
-      - name: Set up native voice dependencies
-        uses: ./third_party/voice/cargo-ci/setup
-        with:
-          target: ${{ inputs.target }}
-
       - name: Build nextest archive
         shell: bash
         run: |
@@ -193,8 +188,7 @@ jobs:
             free -h
             export CARGO_BUILD_JOBS=4
           fi
-          printf '%s\n' "$CODEX_VOICE_RUNTIME_RELATIVE" > "$archive_dir/voice-runtime-path.txt"
-          cargo nextest --tool-config-file "codex-voice:$CODEX_VOICE_NEXTEST_CONFIG" archive \
+          cargo nextest archive \
             --target "${CODEX_CI_TARGET}" \
             --cargo-profile "${CODEX_CI_PROFILE}" \
             --timings \
@@ -366,14 +360,11 @@ jobs:
           workspace_root="$(pwd)"
           extract_dir="${RUNNER_TEMP}/nextest-extracted"
           mkdir -p "$extract_dir"
-          runtime_relative="$(cat "${RUNNER_TEMP}/nextest-archive/voice-runtime-path.txt")"
-          export CODEX_TEST_VOICE_RUNTIME="$extract_dir/target/$runtime_relative"
 
           if [[ "${RUNNER_OS}" == "Windows" ]]; then
             archive_file="$(cygpath -w "${archive_file}")"
             workspace_root="$(cygpath -w "${workspace_root}")"
             extract_dir="$(cygpath -w "$extract_dir")"
-            CODEX_TEST_VOICE_RUNTIME="$(cygpath -w "$CODEX_TEST_VOICE_RUNTIME")"
           fi
 
           if [[ "${RUNNER_OS}" == "Linux" ]]; then

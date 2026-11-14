@@ -243,7 +243,7 @@ impl ConversationHistorySnapshot for SharedConversationHistory {
                         history
                             .reviewable_items()
                             .filter(|item| self.allows_additional_context(item))
-                            .map(|item| &item.item),
+                            .map(|item| item.item.as_ref()),
                     )
                 },
             );
@@ -299,7 +299,7 @@ impl SharedConversationHistory {
             .filter(|envelope| !codex_guardian_context::is_inherited_manual_approval(envelope))
             .map(|envelope| {
                 (
-                    &envelope.item,
+                    envelope.item.as_ref(),
                     envelope
                         .metadata
                         .as_ref()
@@ -497,8 +497,8 @@ impl ContextManager {
             // Prefer the backup over a compacted copy that retains the original ID.
             let original = checkpoint
                 .into_iter()
-                .flat_map(|checkpoint| checkpoint.0.iter().map(|entry| &entry.item))
-                .chain(items.iter().map(|envelope| &envelope.item))
+                .flat_map(|checkpoint| checkpoint.0.iter().map(|entry| entry.item.as_ref()))
+                .chain(items.iter().map(|envelope| envelope.item.as_ref()))
                 .find(|item| item.id().is_some_and(|item_id| item_id.as_str() == id));
             let Some(TurnItem::UserMessage(original)) = original.and_then(parse_turn_item) else {
                 return None;
@@ -621,7 +621,14 @@ impl ContextManager {
         I::Item: Deref<Target = ResponseItem>,
     {
         for item in items {
-            self.record_item_with_metadata(&item, /*metadata*/ None, policy);
+            if is_api_message(&item, /*metadata*/ None) {
+                self.record_item_with_metadata(
+                    &item,
+                    Arc::new((*item).clone()),
+                    /*metadata*/ None,
+                    policy,
+                );
+            }
         }
     }
 
@@ -634,9 +641,12 @@ impl ContextManager {
     ) {
         for envelope in items {
             self.sampling.record(envelope);
-            if let Some(source) =
-                self.record_item_with_metadata(&envelope.item, envelope.metadata.as_ref(), policy)
-            {
+            if let Some(source) = self.record_item_with_metadata(
+                &envelope.item,
+                Arc::clone(&envelope.item),
+                envelope.metadata.as_ref(),
+                policy,
+            ) {
                 envelope.metadata.get_or_insert_default().retained_source = Some(source);
             }
         }
@@ -648,8 +658,12 @@ impl ContextManager {
         envelope: &ResponseItemEnvelope,
         policy: TruncationPolicy,
     ) {
-        let captured =
-            self.record_item_with_metadata(&envelope.item, envelope.metadata.as_ref(), policy);
+        let captured = self.record_item_with_metadata(
+            &envelope.item,
+            Arc::clone(&envelope.item),
+            envelope.metadata.as_ref(),
+            policy,
+        );
         if let Some(source) = envelope
             .metadata
             .as_ref()
@@ -667,6 +681,7 @@ impl ContextManager {
     fn record_item_with_metadata(
         &mut self,
         item: &ResponseItem,
+        shared_item: Arc<ResponseItem>,
         metadata: Option<&CodexHarnessMetadata>,
         policy: TruncationPolicy,
     ) -> Option<codex_history::RetainedSource> {
@@ -674,13 +689,20 @@ impl ContextManager {
             return None;
         }
         let mut processed = ResponseItemEnvelope {
-            item: item.clone(),
+            item: shared_item,
             metadata: metadata.cloned(),
         };
         self.sampling.record(&mut processed);
-        if let ResponseItem::FunctionCallOutput { output, .. }
-        | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
-        {
+        if matches!(
+            processed.item.as_ref(),
+            ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. }
+        ) {
+            let (ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. }) =
+                Arc::make_mut(&mut processed.item)
+            else {
+                unreachable!("tool output checked before copy-on-write");
+            };
             // The override already includes the tool's serialization allowance.
             let policy = metadata
                 .and_then(|metadata| metadata.history_truncation_token_limit)
@@ -721,11 +743,11 @@ impl ContextManager {
         self,
         input_modalities: &[InputModality],
         image_store: &dyn AttachmentStore,
-    ) -> Vec<ResponseItem> {
+    ) -> Vec<Arc<ResponseItem>> {
         self.for_prompt_annotated(input_modalities, image_store)
             .await
             .into_iter()
-            .map(ResponseItemEnvelope::into_item)
+            .map(|envelope| envelope.item)
             .collect()
     }
 
@@ -737,8 +759,10 @@ impl ContextManager {
     ) -> Vec<ResponseItemEnvelope> {
         // Replacements can bypass recording's admission check; never trust their raw updates.
         Arc::make_mut(&mut self.items).retain(|envelope| {
-            !matches!(envelope.item, ResponseItem::ConfigurationUpdate { .. })
-                || is_api_message(&envelope.item, envelope.metadata.as_ref())
+            !matches!(
+                envelope.item.as_ref(),
+                ResponseItem::ConfigurationUpdate { .. }
+            ) || is_api_message(envelope.item.as_ref(), envelope.metadata.as_ref())
         });
         self.normalize_history(input_modalities);
         replace_unresolvable_image_files(
@@ -753,8 +777,13 @@ impl ContextManager {
         // After normalization removes items, keep the last complete envelope in each update run.
         items.reverse();
         items.dedup_by(|earlier, later| {
-            matches!(earlier.item, ResponseItem::ConfigurationUpdate { .. })
-                && matches!(later.item, ResponseItem::ConfigurationUpdate { .. })
+            matches!(
+                earlier.item.as_ref(),
+                ResponseItem::ConfigurationUpdate { .. }
+            ) && matches!(
+                later.item.as_ref(),
+                ResponseItem::ConfigurationUpdate { .. }
+            )
         });
         items.reverse();
         items
@@ -776,7 +805,7 @@ impl ContextManager {
     pub(crate) fn raw_items(
         &self,
     ) -> impl Clone + ExactSizeIterator<Item = &ResponseItem> + DoubleEndedIterator {
-        self.items.iter().map(|envelope| &envelope.item)
+        self.items.iter().map(|envelope| envelope.item.as_ref())
     }
 
     pub(crate) fn has_tool_declarations(&self) -> bool {
@@ -872,7 +901,10 @@ impl ContextManager {
             .items
             .iter()
             .map(|envelope| {
-                estimate_item_token_count_with_audio(&envelope.item, &self.file_audio_durations)
+                estimate_item_token_count_with_audio(
+                    envelope.item.as_ref(),
+                    &self.file_audio_durations,
+                )
             })
             .fold(0i64, i64::saturating_add);
 
@@ -1020,8 +1052,8 @@ impl ContextManager {
             .iter()
             .filter(|envelope| {
                 !source.acceptance_order().is_some_and(|boundary| {
-                    (matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "assistant")
-                        || matches!(&envelope.item, ResponseItem::FunctionCall { .. }))
+                    (matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "assistant")
+                        || matches!(envelope.item.as_ref(), ResponseItem::FunctionCall { .. }))
                         && RetainedInputSource::from(envelope.metadata.as_ref())
                             .acceptance_order().is_some_and(|order| order >= boundary)
                 })
@@ -1033,9 +1065,9 @@ impl ContextManager {
         {
             retained_items.retain_mut(|item| {
                 if item.turn_id() == Some(first_turn_id)
-                    && matches!(&item.item, ResponseItem::Message { role, .. } if role == "developer")
+                    && matches!(item.item.as_ref(), ResponseItem::Message { role, .. } if role == "developer")
                 {
-                    let Some(mut content) = to_annotated_content(&mut item.item) else {
+                    let Some(mut content) = to_annotated_content(Arc::make_mut(&mut item.item)) else {
                         return false;
                     };
                     content.retain(|content| {
@@ -1047,7 +1079,7 @@ impl ContextManager {
                                     || PersistentModeState::matches_text(text)
                         )
                     });
-                    !content.is_empty() && set_annotated_content(&mut item.item, content).is_some()
+                    !content.is_empty() && set_annotated_content(Arc::make_mut(&mut item.item), content).is_some()
                 } else {
                     true
                 }
@@ -1077,7 +1109,7 @@ impl ContextManager {
                 // Legacy answers follow their original call, not later steers in the same turn.
                 if let Some(source_index) = snapshot.iter().rposition(|item| {
                     item.turn_id() == Some(answer.turn_id.as_str())
-                        && matches!(&item.item, ResponseItem::FunctionCall { call_id, .. }
+                        && matches!(item.item.as_ref(), ResponseItem::FunctionCall { call_id, .. }
                             if call_id == &answer.call_id)
                 }) {
                     return source_index < cut_idx;
@@ -1146,7 +1178,7 @@ impl ContextManager {
             .take(last_user_index.min(self.last_server_reported_usage_item_count))
             .filter(|envelope| {
                 matches!(
-                    &envelope.item,
+                    envelope.item.as_ref(),
                     ResponseItem::Reasoning {
                         encrypted_content: Some(_),
                         ..
@@ -1154,7 +1186,10 @@ impl ContextManager {
                 )
             })
             .map(|envelope| {
-                estimate_item_token_count_with_audio(&envelope.item, &self.file_audio_durations)
+                estimate_item_token_count_with_audio(
+                    envelope.item.as_ref(),
+                    &self.file_audio_durations,
+                )
             })
             .fold(0i64, i64::saturating_add)
     }
@@ -1165,7 +1200,7 @@ impl ContextManager {
     ) -> impl Clone + ExactSizeIterator<Item = &ResponseItem> + DoubleEndedIterator {
         self.items[self.last_server_reported_usage_item_count..]
             .iter()
-            .map(|envelope| &envelope.item)
+            .map(|envelope| envelope.item.as_ref())
     }
 
     pub(crate) fn get_total_token_usage(&self) -> i64 {
@@ -1243,7 +1278,7 @@ impl ContextManager {
         mut cut_idx: usize,
     ) -> usize {
         while cut_idx > first_instruction_turn_idx {
-            match &snapshot[cut_idx - 1].item {
+            match snapshot[cut_idx - 1].item.as_ref() {
                 ResponseItem::Message {
                     role,
                     content,

@@ -1,3 +1,4 @@
+#[cfg(feature = "config-schema")]
 use crate::config_toml::ConfigToml;
 use crate::types::RawMcpServerConfig;
 use codex_features::FEATURES;
@@ -5,15 +6,18 @@ use codex_features::legacy_feature_keys;
 use codex_protocol::protocol::GranularApprovalConfig;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
+#[cfg(feature = "config-schema")]
 use schemars::r#gen::SchemaSettings;
 use schemars::schema::InstanceType;
 use schemars::schema::ObjectValidation;
+#[cfg(feature = "config-schema")]
 use schemars::schema::RootSchema;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::schema::SubschemaValidation;
 use serde_json::Map;
 use serde_json::Value;
+#[cfg(feature = "config-schema")]
 use std::path::Path;
 
 /// Determines the conditions under which the user is consulted to approve
@@ -247,6 +251,7 @@ pub fn mcp_servers_schema(schema_gen: &mut SchemaGenerator) -> Schema {
 }
 
 /// Build the config schema for `config.toml`.
+#[cfg(feature = "config-schema")]
 pub fn config_schema() -> RootSchema {
     let mut schema = SchemaSettings::draft07()
         .with(|settings| {
@@ -258,6 +263,7 @@ pub fn config_schema() -> RootSchema {
     schema
 }
 
+#[cfg(feature = "config-schema")]
 fn add_shell_environment_policy_constraints(schema: &mut RootSchema) {
     let Some(Schema::Object(policy)) = schema.definitions.get_mut("ShellEnvironmentPolicyToml")
     else {
@@ -303,6 +309,7 @@ pub fn canonicalize(value: &Value) -> Value {
 }
 
 /// Render the config schema as pretty-printed JSON.
+#[cfg(feature = "config-schema")]
 pub fn config_schema_json() -> anyhow::Result<Vec<u8>> {
     let schema = config_schema();
     let value = serde_json::to_value(schema)?;
@@ -312,6 +319,7 @@ pub fn config_schema_json() -> anyhow::Result<Vec<u8>> {
 }
 
 /// Write the config schema fixture to disk.
+#[cfg(feature = "config-schema")]
 pub fn write_config_schema(out_path: &Path) -> anyhow::Result<()> {
     let json = config_schema_json()?;
     std::fs::write(out_path, json)?;
