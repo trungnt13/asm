@@ -52,7 +52,8 @@
       "experimental_supported_tools": [],
       "supports_reasoning_summary_parameter": false,
       "node_repl_disabled": true,
-      "context_window": 1000000
+      "context_window": 484000,
+      "max_context_window": 1000000
     },
     {
       "slug": "claude-code/sonnet-5-5",
