@@ -103,8 +103,6 @@ fn event_thread_id(event: &TrackEventRequest) -> Option<&str> {
         | TrackEventRequest::PluginUninstalled(_)
         | TrackEventRequest::PluginEnabled(_)
         | TrackEventRequest::PluginDisabled(_)
-        | TrackEventRequest::PluginInstallFailed(_)
-        | TrackEventRequest::ExternalAgentConfigImportCompleted(_)
-        | TrackEventRequest::ExternalAgentConfigImportFailure(_) => None,
+        | TrackEventRequest::PluginInstallFailed(_) => None,
     }
 }

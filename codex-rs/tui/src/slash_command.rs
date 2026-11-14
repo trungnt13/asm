@@ -27,7 +27,6 @@ pub enum SlashCommand {
     AutoReview,
     Memories,
     Skills,
-    Import,
     Hooks,
     Review,
     Rename,
@@ -125,7 +124,6 @@ impl SlashCommand {
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Skills => "use skills to improve how ASM performs specific tasks",
-            SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Daemon => "Manage the local background server",
             SlashCommand::Warnings => "view retained warnings and diagnostic details",
@@ -283,7 +281,6 @@ impl SlashCommand {
             | SlashCommand::ElevateSandbox
             | SlashCommand::Experimental
             | SlashCommand::Memories
-            | SlashCommand::Import
             | SlashCommand::Review
             | SlashCommand::Plan
             | SlashCommand::Cd

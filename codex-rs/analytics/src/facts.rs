@@ -638,8 +638,6 @@ pub(crate) enum CustomAnalyticsFact {
     PluginStateChanged(PluginStateChangedInput),
     PluginInstallFailed(PluginInstallFailedInput),
     PluginMeasurements(PluginMeasurementsInput),
-    ExternalAgentConfigImportCompleted(ExternalAgentConfigImportCompletedInput),
-    ExternalAgentConfigImportFailure(ExternalAgentConfigImportFailureInput),
 }
 
 pub(crate) struct ArtifactOperationInput {
@@ -738,31 +736,11 @@ pub(crate) struct PluginStateChangedInput {
 #[serde(rename_all = "snake_case")]
 pub enum PluginInstallSource {
     Manual,
-    ExternalAgentMigration,
 }
 
 pub(crate) struct PluginInstallFailedInput {
     pub plugin: PluginTelemetryMetadata,
     pub source: PluginInstallSource,
-    pub error_type: String,
-    pub sub_error_type: Option<String>,
-}
-
-pub struct ExternalAgentConfigImportCompletedInput {
-    pub import_id: String,
-    pub source: String,
-    pub provider_id: String,
-    pub item_type: String,
-    pub success_count: usize,
-    pub failed_count: usize,
-}
-
-pub struct ExternalAgentConfigImportFailureInput {
-    pub import_id: String,
-    pub source: String,
-    pub provider_id: String,
-    pub item_type: String,
-    pub failure_stage: String,
     pub error_type: String,
     pub sub_error_type: Option<String>,
 }

@@ -838,13 +838,6 @@ class CommandExecutionStatus(Enum):
     declined = "declined"
 
 
-class CommandMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
-
-
 class ComputerUseMacosConfig(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1383,88 +1376,6 @@ class ExperimentalFeatureStage(Enum):
     stable = "stable"
     deprecated = "deprecated"
     removed = "removed"
-
-
-class ExternalAgentConfigDetectParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cwds: Annotated[
-        list[str] | None,
-        Field(description="Zero or more working directories to include for repo-scoped detection."),
-    ] = None
-    include_home: Annotated[
-        bool | None,
-        Field(
-            alias="includeHome",
-            description="If true, include detection under the user's home directory.",
-        ),
-    ] = None
-    max_session_age_days: Annotated[
-        int | None,
-        Field(
-            alias="maxSessionAgeDays",
-            description="Maximum age in days for detected sessions. Missing values use the default limit.",
-            ge=0,
-        ),
-    ] = None
-    max_sessions: Annotated[
-        int | None,
-        Field(
-            alias="maxSessions",
-            description="Maximum number of sessions to detect. Missing values use the default limit.",
-            ge=0,
-        ),
-    ] = None
-    migration_source: Annotated[
-        str | None,
-        Field(
-            alias="migrationSource",
-            description="Optional migration-source selector. Missing or unrecognized values use the default source.",
-        ),
-    ] = None
-    source: Annotated[
-        str | None,
-        Field(
-            description="Deprecated field retained for compatibility. This field is ignored; use `migrationSource` to select the migration source."
-        ),
-    ] = None
-
-
-class ExternalAgentConfigImportHistoryRecordResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    import_id: Annotated[str, Field(alias="importId")]
-
-
-class ExternalAgentConfigImportResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    import_id: Annotated[str, Field(alias="importId")]
-
-
-class ExternalAgentConfigMigrationItemType(Enum):
-    agents_md = "AGENTS_MD"
-    config = "CONFIG"
-    skills = "SKILLS"
-    plugins = "PLUGINS"
-    mcp_server_config = "MCP_SERVER_CONFIG"
-    subagents = "SUBAGENTS"
-    hooks = "HOOKS"
-    commands = "COMMANDS"
-    memory = "MEMORY"
-    sessions = "SESSIONS"
-
-
-class ExternalAgentDetectedConnectorSource(Enum):
-    remote_mcp_servers_config = "remoteMcpServersConfig"
-    session_tool_use = "sessionToolUse"
-
-
-class ExternalAgentImportedConnectorSource(RootModel[Literal["remoteMcpServersConfig"]]):
-    root: Literal["remoteMcpServersConfig"]
 
 
 class FeedbackRequirements(BaseModel):
@@ -2121,13 +2032,6 @@ class HookHandlerType(Enum):
     agent = "agent"
 
 
-class HookMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
-
-
 class HookOutputEntryKind(Enum):
     warning = "warning"
     stop = "stop"
@@ -2706,13 +2610,6 @@ class McpServerInfo(BaseModel):
     title: str | None = None
     version: str
     website_url: Annotated[str | None, Field(alias="websiteUrl")] = None
-
-
-class McpServerMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
 
 
 class McpServerOauthClientRegistration(Enum):
@@ -3759,14 +3656,6 @@ class PluginUninstallResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-
-
-class PluginsMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    marketplace_name: Annotated[str, Field(alias="marketplaceName")]
-    plugin_names: Annotated[list[str], Field(alias="pluginNames")]
 
 
 class ProcessExitedNotification(BaseModel):
@@ -5183,15 +5072,6 @@ class ServerRequestResolvedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
-class SessionMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cwd: str
-    path: str
-    title: str | None = None
-
-
 class SessionSourceValue(Enum):
     cli = "cli"
     vscode = "vscode"
@@ -5243,13 +5123,6 @@ class SkillInterface(BaseModel):
         Field(alias="iconSmallUrl", description="Remote small icon URL from the plugin catalog."),
     ] = None
     short_description: Annotated[str | None, Field(alias="shortDescription")] = None
-
-
-class SkillMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
 
 
 class SkillScope(Enum):
@@ -5384,13 +5257,6 @@ class OtherSubAgentSource(BaseModel):
         populate_by_name=True,
     )
     other: str
-
-
-class SubagentMigration(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
 
 
 class System1DecisionConnection(BaseModel):
@@ -8566,30 +8432,6 @@ class ConfigReadRequest(BaseModel):
     params: ConfigReadParams
 
 
-class ExternalAgentConfigDetectRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["externalAgentConfig/detect"],
-        Field(title="ExternalAgentConfig/detectRequestMethod"),
-    ]
-    params: ExternalAgentConfigDetectParams
-
-
-class ExternalAgentConfigImportReadHistoriesRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["externalAgentConfig/import/readHistories"],
-        Field(title="ExternalAgentConfig/import/readHistoriesRequestMethod"),
-    ]
-    params: Annotated[None, Field(None)] = None
-
-
 class ConfigRequirementsReadRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9008,73 +8850,6 @@ class ExperimentalFeatureListResponse(BaseModel):
             description="Opaque cursor to pass to the next call to continue after the last item. If None, there are no more items to return.",
         ),
     ] = None
-
-
-class ExternalAgentConfigImportHistoryRecordSuccessParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cwd: str | None = None
-    item_type: Annotated[ExternalAgentConfigMigrationItemType, Field(alias="itemType")]
-    source: str | None = None
-    target: str | None = None
-    title: Annotated[
-        str | None, Field(description="Original title for an imported session, when available.")
-    ] = None
-
-
-class ExternalAgentConfigImportItemTypeFailure(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cwd: str | None = None
-    error_type: Annotated[str | None, Field(alias="errorType")] = None
-    failure_stage: Annotated[str, Field(alias="failureStage")]
-    item_type: Annotated[ExternalAgentConfigMigrationItemType, Field(alias="itemType")]
-    message: str
-    source: str | None = None
-    sub_error_type: Annotated[str | None, Field(alias="subErrorType")] = None
-
-
-class ExternalAgentConfigImportItemTypeSuccess(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cwd: str | None = None
-    item_type: Annotated[ExternalAgentConfigMigrationItemType, Field(alias="itemType")]
-    source: str | None = None
-    target: str | None = None
-    title: Annotated[
-        str | None,
-        Field(description="Original title for an imported session; null for other item types."),
-    ] = None
-
-
-class ExternalAgentConfigImportTypeResult(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    failures: list[ExternalAgentConfigImportItemTypeFailure]
-    item_type: Annotated[ExternalAgentConfigMigrationItemType, Field(alias="itemType")]
-    successes: list[ExternalAgentConfigImportItemTypeSuccess]
-
-
-class ExternalAgentDetectedConnectorCandidate(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
-    session_count: Annotated[int, Field(alias="sessionCount", ge=0)]
-    source: ExternalAgentDetectedConnectorSource
-
-
-class ExternalAgentImportedConnectorCandidate(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    name: str
-    session_count: Annotated[int, Field(alias="sessionCount", ge=0)]
-    source: ExternalAgentImportedConnectorSource
 
 
 class FeedbackSaveParams(BaseModel):
@@ -9697,22 +9472,6 @@ class MemoryCitation(BaseModel):
     )
     entries: list[MemoryCitationEntry]
     thread_ids: Annotated[list[str], Field(alias="threadIds")]
-
-
-class MigrationDetails(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    commands: Annotated[list[CommandMigration] | None, Field(validate_default=True)] = []
-    hooks: Annotated[list[HookMigration] | None, Field(validate_default=True)] = []
-    mcp_servers: Annotated[
-        list[McpServerMigration] | None, Field(alias="mcpServers", validate_default=True)
-    ] = []
-    memory: list[str] | None = None
-    plugins: Annotated[list[PluginsMigration] | None, Field(validate_default=True)] = []
-    sessions: Annotated[list[SessionMigration] | None, Field(validate_default=True)] = []
-    skills: Annotated[list[SkillMigration] | None, Field(validate_default=True)] = []
-    subagents: Annotated[list[SubagentMigration] | None, Field(validate_default=True)] = []
 
 
 class MisalignmentErrorDetails(BaseModel):
@@ -12206,61 +11965,6 @@ class ErrorNotification(BaseModel):
     will_retry: Annotated[bool, Field(alias="willRetry")]
 
 
-class ExternalAgentConfigImportCompletedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    import_id: Annotated[str, Field(alias="importId")]
-    item_type_results: Annotated[
-        list[ExternalAgentConfigImportTypeResult], Field(alias="itemTypeResults")
-    ]
-
-
-class ExternalAgentConfigImportHistory(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    completed_at_ms: Annotated[int, Field(alias="completedAtMs")]
-    failures: list[ExternalAgentConfigImportItemTypeFailure]
-    import_id: Annotated[str, Field(alias="importId")]
-    provider_id: Annotated[str | None, Field(alias="providerId")] = None
-    successes: list[ExternalAgentConfigImportItemTypeSuccess]
-
-
-class ExternalAgentConfigImportHistoryRecordTypeResultParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    failures: list[ExternalAgentConfigImportItemTypeFailure]
-    item_type: Annotated[ExternalAgentConfigMigrationItemType, Field(alias="itemType")]
-    successes: list[ExternalAgentConfigImportHistoryRecordSuccessParams]
-
-
-class ExternalAgentConfigImportProgressNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    import_id: Annotated[str, Field(alias="importId")]
-    item_type_results: Annotated[
-        list[ExternalAgentConfigImportTypeResult], Field(alias="itemTypeResults")
-    ]
-
-
-class ExternalAgentConfigMigrationItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cwd: Annotated[
-        str | None,
-        Field(
-            description="Null or empty means home-scoped migration; non-empty means repo-scoped migration."
-        ),
-    ] = None
-    description: str
-    details: MigrationDetails | None = None
-    item_type: Annotated[ExternalAgentConfigMigrationItemType, Field(alias="itemType")]
-
-
 class FileChangePatchUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12783,42 +12487,6 @@ class AppListUpdatedServerNotification(BaseModel):
     params: AppListUpdatedNotification
 
 
-class ExternalAgentConfigImportProgressServerNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    emitted_at_ms: Annotated[
-        int | None,
-        Field(
-            alias="emittedAtMs",
-            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
-        ),
-    ] = None
-    method: Annotated[
-        Literal["externalAgentConfig/import/progress"],
-        Field(title="ExternalAgentConfig/import/progressNotificationMethod"),
-    ]
-    params: ExternalAgentConfigImportProgressNotification
-
-
-class ExternalAgentConfigImportCompletedServerNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    emitted_at_ms: Annotated[
-        int | None,
-        Field(
-            alias="emittedAtMs",
-            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
-        ),
-    ] = None
-    method: Annotated[
-        Literal["externalAgentConfig/import/completed"],
-        Field(title="ExternalAgentConfig/import/completedNotificationMethod"),
-    ]
-    params: ExternalAgentConfigImportCompletedNotification
-
-
 class ThreadRealtimeItemStartedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13301,70 +12969,6 @@ class ConfigRequirementsReadResponse(BaseModel):
             alias="supportsIndependentSpeedModes",
             description="Whether Fast and Ultra Fast requirements are enforced independently. Older servers omit this field and use Fast mode as a shared speed gate.",
         ),
-    ] = None
-
-
-class ExternalAgentConfigDetectResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    connectors: Annotated[
-        list[ExternalAgentDetectedConnectorCandidate] | None, Field(validate_default=True)
-    ] = []
-    items: list[ExternalAgentConfigMigrationItem]
-
-
-class ExternalAgentConfigImportHistoriesReadResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    connectors: list[ExternalAgentImportedConnectorCandidate]
-    data: list[ExternalAgentConfigImportHistory]
-
-
-class ExternalAgentConfigImportHistoryRecordParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    item_type_results: Annotated[
-        list[ExternalAgentConfigImportHistoryRecordTypeResultParams],
-        Field(
-            alias="itemTypeResults", description="Completed results grouped by imported item type."
-        ),
-    ]
-    provider_id: Annotated[
-        str,
-        Field(
-            alias="providerId",
-            description="Opaque provider identifier for the externally completed import.",
-        ),
-    ]
-
-
-class ExternalAgentConfigImportParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    migration_items: Annotated[
-        list[ExternalAgentConfigMigrationItem], Field(alias="migrationItems")
-    ]
-    migration_source: Annotated[
-        str | None,
-        Field(
-            alias="migrationSource",
-            description="Migration-source selector used to produce the migration items. Pass the same value to detection and import; missing or unrecognized values use the default source.",
-        ),
-    ] = None
-    provider_id: Annotated[
-        str | None,
-        Field(
-            alias="providerId",
-            description="Opaque provider identifier supplied by the caller for analytics attribution and import history display. This does not select the migration source.",
-        ),
-    ] = None
-    source: Annotated[
-        str | None,
-        Field(description="Optional identifier for the product that initiated the import."),
     ] = None
 
 
@@ -14135,30 +13739,6 @@ class TurnStartRequest(BaseModel):
     params: TurnStartParams
 
 
-class ExternalAgentConfigImportRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["externalAgentConfig/import"],
-        Field(title="ExternalAgentConfig/importRequestMethod"),
-    ]
-    params: ExternalAgentConfigImportParams
-
-
-class ExternalAgentConfigImportRecordHistoryRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["externalAgentConfig/import/recordHistory"],
-        Field(title="ExternalAgentConfig/import/recordHistoryRequestMethod"),
-    ]
-    params: ExternalAgentConfigImportHistoryRecordParams
-
-
 class ClientRequest(
     RootModel[
         InitializeRequest
@@ -14262,10 +13842,6 @@ class ClientRequest(
         | CommandExecTerminateRequest
         | CommandExecResizeRequest
         | ConfigReadRequest
-        | ExternalAgentConfigDetectRequest
-        | ExternalAgentConfigImportRequest
-        | ExternalAgentConfigImportRecordHistoryRequest
-        | ExternalAgentConfigImportReadHistoriesRequest
         | ConfigValueWriteRequest
         | ConfigBatchWriteRequest
         | ConfigRequirementsReadRequest
@@ -14375,10 +13951,6 @@ class ClientRequest(
         | CommandExecTerminateRequest
         | CommandExecResizeRequest
         | ConfigReadRequest
-        | ExternalAgentConfigDetectRequest
-        | ExternalAgentConfigImportRequest
-        | ExternalAgentConfigImportRecordHistoryRequest
-        | ExternalAgentConfigImportReadHistoriesRequest
         | ConfigValueWriteRequest
         | ConfigBatchWriteRequest
         | ConfigRequirementsReadRequest
@@ -14615,8 +14187,6 @@ class ServerNotification(
         | AccountRateLimitsUpdatedServerNotification
         | AppListUpdatedServerNotification
         | RemoteControlStatusChangedServerNotification
-        | ExternalAgentConfigImportProgressServerNotification
-        | ExternalAgentConfigImportCompletedServerNotification
         | FsChangedServerNotification
         | ItemReasoningSummaryTextDeltaServerNotification
         | ItemReasoningSummaryPartAddedServerNotification
@@ -14706,8 +14276,6 @@ class ServerNotification(
         | AccountRateLimitsUpdatedServerNotification
         | AppListUpdatedServerNotification
         | RemoteControlStatusChangedServerNotification
-        | ExternalAgentConfigImportProgressServerNotification
-        | ExternalAgentConfigImportCompletedServerNotification
         | FsChangedServerNotification
         | ItemReasoningSummaryTextDeltaServerNotification
         | ItemReasoningSummaryPartAddedServerNotification

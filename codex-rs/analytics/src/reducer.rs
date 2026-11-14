@@ -26,10 +26,6 @@ use crate::events::CodexImageGenerationEventParams;
 use crate::events::CodexImageGenerationEventRequest;
 use crate::events::CodexMcpToolCallEventParams;
 use crate::events::CodexMcpToolCallEventRequest;
-use crate::events::CodexOnboardingExternalAgentImportCompleteEventRequest;
-use crate::events::CodexOnboardingExternalAgentImportCompleteMetadata;
-use crate::events::CodexOnboardingExternalAgentImportFailureEventRequest;
-use crate::events::CodexOnboardingExternalAgentImportFailureMetadata;
 use crate::events::CodexPluginEventRequest;
 use crate::events::CodexPluginInstallFailedEventRequest;
 use crate::events::CodexPluginInstallFailedMetadata;
@@ -92,8 +88,6 @@ use crate::facts::ControlToolCallFact;
 use crate::facts::ControlToolCallStatus;
 use crate::facts::CustomAnalyticsFact;
 use crate::facts::ElicitationType;
-use crate::facts::ExternalAgentConfigImportCompletedInput;
-use crate::facts::ExternalAgentConfigImportFailureInput;
 use crate::facts::HookRunInput;
 use crate::facts::ImagePreparationFact;
 use crate::facts::ImagePreparationMetadata;
@@ -876,12 +870,6 @@ impl AnalyticsReducer {
                 CustomAnalyticsFact::PluginMeasurements(input) => {
                     self.ingest_plugin_measurements(input, out);
                 }
-                CustomAnalyticsFact::ExternalAgentConfigImportCompleted(input) => {
-                    self.ingest_external_agent_config_import_completed(input, out);
-                }
-                CustomAnalyticsFact::ExternalAgentConfigImportFailure(input) => {
-                    self.ingest_external_agent_config_import_failure(input, out);
-                }
             },
         }
     }
@@ -1617,49 +1605,6 @@ impl AnalyticsReducer {
                     source,
                     error_type,
                     sub_error_type,
-                },
-            },
-        ));
-    }
-
-    fn ingest_external_agent_config_import_completed(
-        &mut self,
-        input: ExternalAgentConfigImportCompletedInput,
-        out: &mut Vec<TrackEventRequest>,
-    ) {
-        out.push(TrackEventRequest::ExternalAgentConfigImportCompleted(
-            CodexOnboardingExternalAgentImportCompleteEventRequest {
-                event_type: "codex_onboarding_external_agent_import_complete",
-                event_params: CodexOnboardingExternalAgentImportCompleteMetadata {
-                    import_id: input.import_id,
-                    source: input.source,
-                    provider_id: input.provider_id,
-                    item_type: input.item_type,
-                    success_count: input.success_count,
-                    failed_count: input.failed_count,
-                    product_client_id: Some(originator().value),
-                },
-            },
-        ));
-    }
-
-    fn ingest_external_agent_config_import_failure(
-        &mut self,
-        input: ExternalAgentConfigImportFailureInput,
-        out: &mut Vec<TrackEventRequest>,
-    ) {
-        out.push(TrackEventRequest::ExternalAgentConfigImportFailure(
-            CodexOnboardingExternalAgentImportFailureEventRequest {
-                event_type: "codex_onboarding_external_agent_import_failure",
-                event_params: CodexOnboardingExternalAgentImportFailureMetadata {
-                    import_id: input.import_id,
-                    source: input.source,
-                    provider_id: input.provider_id,
-                    item_type: input.item_type,
-                    failure_stage: input.failure_stage,
-                    error_type: input.error_type,
-                    sub_error_type: input.sub_error_type,
-                    product_client_id: Some(originator().value),
                 },
             },
         ));

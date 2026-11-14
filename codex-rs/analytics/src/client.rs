@@ -14,8 +14,6 @@ use crate::facts::ArtifactOperationInput;
 use crate::facts::CodexGoalEvent;
 use crate::facts::CustomAnalyticsFact;
 use crate::facts::ElicitationType;
-use crate::facts::ExternalAgentConfigImportCompletedInput;
-use crate::facts::ExternalAgentConfigImportFailureInput;
 use crate::facts::HookRunFact;
 use crate::facts::HookRunInput;
 use crate::facts::ImagePreparationFact;
@@ -768,24 +766,6 @@ impl AnalyticsEventsClient {
                 error_type,
                 sub_error_type,
             }),
-        ));
-    }
-
-    pub fn track_external_agent_config_import_completed(
-        &self,
-        input: ExternalAgentConfigImportCompletedInput,
-    ) {
-        self.record_fact(AnalyticsFact::Custom(
-            CustomAnalyticsFact::ExternalAgentConfigImportCompleted(input),
-        ));
-    }
-
-    pub fn track_external_agent_config_import_failure(
-        &self,
-        input: ExternalAgentConfigImportFailureInput,
-    ) {
-        self.record_fact(AnalyticsFact::Custom(
-            CustomAnalyticsFact::ExternalAgentConfigImportFailure(input),
         ));
     }
 
