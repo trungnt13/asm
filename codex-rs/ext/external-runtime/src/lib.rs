@@ -34,15 +34,19 @@ pub enum InputBlock {
     Image { mime_type: String, data: String },
 }
 
-#[derive(Debug)]
+/// A failed turn that the native CLI closed at a confirmed idle boundary, so the session
+/// stays resumable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExternalTurnFailure {
     Authentication,
+    UsageLimit,
 }
 
 impl std::fmt::Display for ExternalTurnFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Authentication => formatter.write_str("Native authentication is required"),
+            Self::UsageLimit => formatter.write_str("Native usage limit reached"),
         }
     }
 }

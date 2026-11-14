@@ -126,9 +126,13 @@ impl ClaudeDriver {
             "ANTHROPIC_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
             "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_PROFILE",
             "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_USE_VERTEX",
             "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+            "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+            "CLAUDE_CODE_USE_MANTLE",
         ] {
             command.env_remove(name);
         }
@@ -380,7 +384,7 @@ impl ClaudeDriver {
         let mut authentication_error = false;
         let mut tool_work_observed = false;
         let mut pending_failure = None;
-        let mut authentication_deadline = None;
+        let mut failure_deadline = None;
         let mut idle = false;
 
         loop {
@@ -390,9 +394,10 @@ impl ClaudeDriver {
                     || (latest_command_succeeded && commands.is_empty()))
                 && (pending_failure.is_none()
                     || (commands.is_empty()
-                        && cancelled_commands.contains(user_message_uuid)
                         && self.active_agents.is_empty()
-                        && !self.background_work))
+                        && !self.background_work
+                        && (pending_failure == Some(ExternalTurnFailure::UsageLimit)
+                            || cancelled_commands.contains(user_message_uuid))))
                 && (pending_result.is_some() || user_message_uuid.is_empty())
                 && steering
                     .as_mut()
@@ -410,7 +415,7 @@ impl ClaudeDriver {
                 biased;
                 _ = cancel.cancelled(), if interrupt_id.is_none() => {
                     if pending_failure.is_some() {
-                        bail!("Claude authentication failure cleanup was cancelled before idle; explicit recovery is required");
+                        bail!("Claude provider failure cleanup was cancelled before idle; explicit recovery is required");
                     }
                     let request_id = Uuid::new_v4().to_string();
                     let deadline = Instant::now() + STOP_TIMEOUT;
@@ -424,14 +429,14 @@ impl ClaudeDriver {
                     continue;
                 }
                 _ = async {
-                    if let Some(deadline) = interrupt_deadline.or(authentication_deadline) {
+                    if let Some(deadline) = interrupt_deadline.or(failure_deadline) {
                         sleep_until(deadline).await;
                     } else {
                         std::future::pending::<()>().await;
                     }
                 } => {
                     if pending_failure.is_some() {
-                        bail!("Claude authentication failure did not reach a confirmed idle boundary");
+                        bail!("Claude provider failure did not reach a confirmed idle boundary");
                     }
                     bail!("Claude interrupt acknowledgement and idle timed out");
                 },
@@ -479,7 +484,7 @@ impl ClaudeDriver {
                     Some("tool_use" | "server_tool_use" | "tool_result")
                 )
             };
-            tool_work_observed |= frame
+            let tool_work = frame
                 .pointer("/message/content")
                 .and_then(Value::as_array)
                 .is_some_and(|blocks| blocks.iter().any(tool_block))
@@ -495,6 +500,7 @@ impl ClaudeDriver {
                     .is_some_and(|id| !id.is_null())
                 || (frame.get("type").and_then(Value::as_str) == Some("system")
                     && frame.get("subtype").and_then(Value::as_str) == Some("task_started"));
+            tool_work_observed |= tool_work;
             if frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
                 && let Some(id) = frame.get("command_uuid").and_then(Value::as_str)
                 && submitted_commands.contains(id)
@@ -592,14 +598,14 @@ impl ClaudeDriver {
                 }
             }
             if pending_failure.is_some()
-                && (tool_work_observed
+                && (tool_work
                     || matches!(
                         frame.get("type").and_then(Value::as_str),
                         Some("assistant" | "stream_event" | "result")
                     ))
             {
                 bail!(
-                    "Claude emitted new activity after its authentication failure; explicit recovery is required"
+                    "Claude emitted new activity after its provider failure; explicit recovery is required"
                 );
             }
             let is_result = frame.get("type").and_then(Value::as_str) == Some("result");
@@ -623,7 +629,7 @@ impl ClaudeDriver {
                 }
             }
             let send = events.send(frame.clone());
-            if let Some(deadline) = interrupt_deadline.or(authentication_deadline) {
+            if let Some(deadline) = interrupt_deadline.or(failure_deadline) {
                 tokio::time::timeout_at(deadline, send)
                     .await
                     .context("Claude bounded cleanup event delivery timed out")?
@@ -652,15 +658,29 @@ impl ClaudeDriver {
                 if interrupted_execution && let Some(id) = result_command {
                     interrupted_commands.insert(id.to_owned());
                 }
-                let authentication_failed = authentication_error
+                // Native reports provider failures as an error result with the `success` subtype.
+                // A usage limit can end a turn after tool work; authentication fails before any.
+                let failure = if interrupt_id.is_some()
+                    || frame.get("is_error").and_then(Value::as_bool) != Some(true)
+                    || frame.get("subtype").and_then(Value::as_str) != Some("success")
+                {
+                    None
+                } else if authentication_error
                     && !tool_work_observed
-                    && interrupt_id.is_none()
                     && submitted_steering_count == 0
                     && result_command == Some(user_message_uuid)
-                    && frame.get("is_error").and_then(Value::as_bool) == Some(true)
-                    && frame.get("subtype").and_then(Value::as_str) == Some("success");
+                {
+                    Some(ExternalTurnFailure::Authentication)
+                } else if frame.get("api_error").and_then(Value::as_str)
+                    == Some("usage_limit_reached")
+                    && result_command.is_some_and(|id| submitted_commands.contains(id))
+                {
+                    Some(ExternalTurnFailure::UsageLimit)
+                } else {
+                    None
+                };
                 if !interrupted_execution
-                    && !authentication_failed
+                    && failure.is_none()
                     && (frame.get("is_error").and_then(Value::as_bool) != Some(false)
                         || frame.get("subtype").and_then(Value::as_str) != Some("success"))
                 {
@@ -677,10 +697,10 @@ impl ClaudeDriver {
                     self.failure_result = Some(frame);
                     bail!("Claude returned an unsuccessful turn result: {category}");
                 }
-                if authentication_failed {
+                if failure.is_some() {
                     self.failure_result = Some(frame.clone());
-                    pending_failure = Some(ExternalTurnFailure::Authentication);
-                    authentication_deadline = Some(Instant::now() + STOP_TIMEOUT);
+                    pending_failure = failure;
+                    failure_deadline = Some(Instant::now() + STOP_TIMEOUT);
                     idle = false;
                 }
                 if result_command == Some(latest_command.as_str()) && !interrupted_execution {
