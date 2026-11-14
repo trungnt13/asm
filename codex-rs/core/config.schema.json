@@ -1377,6 +1377,9 @@
             "output_token_replay": {
               "type": "boolean"
             },
+            "per_environment_context": {
+              "type": "boolean"
+            },
             "personality": {
               "type": "boolean"
             },
@@ -8806,6 +8809,9 @@
           "type": "boolean"
         },
         "output_token_replay": {
+          "type": "boolean"
+        },
+        "per_environment_context": {
           "type": "boolean"
         },
         "personality": {

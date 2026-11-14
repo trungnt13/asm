@@ -85,6 +85,7 @@ Use PRs against `main` for implementation, documentation, and syncs. The lead al
 
 - Stage only finished task changes, tests, generated files, and intent. Inspect the staged diff.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`; fix local config if needed. Ask before attribution-only published-history rewrites.
+- All internal and external models, runtimes, and engines must never add or mention AI attribution in commits, PR/MR titles or descriptions, or other authored deliverables. This includes co-author trailers, generated-by lines, session links, and assistant, tool, model, runtime, or engine credits. Apply this rule to root agents, subagents, native tools, and automatic runtime post-processing, regardless of provider defaults. Disable automatic attribution and verify the final commit message and published PR/MR text; configuration alone is not proof. This instruction records policy; it does not enforce native-runtime behavior. Discuss attribution only when the user explicitly asks to investigate or change it. Preserve required third-party copyright and license notices.
 - Before branch updates, recheck the PR base. Resolve mechanical conflicts without new approval when they preserve this guide. Verify affected behavior against base, fork, and upstream. For unsafe changes, ambiguous intent, or owner decisions, inspect all exposed conflicts; ask one question with recommendations. Later commits can expose more conflicts.
 - Reconcile task-owned duplicate edits without losing others' work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
 - Report changes, exact check results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference unchanged results in later handoffs/integration reports. Refresh changed results/status. Readiness does not authorize merge.
@@ -140,11 +141,19 @@ The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #17
 
 For PR #190, the owner accepted the unchanged ordinary stock cold-history limitation through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. Source inspection confirms that the ordinary stock timeline, turn and item readers still lack catch-up; this is not a stock runtime build of that commit. New realtime readers do materialize their cache and are not covered by this ordinary cold-read finding. Keep the cold-stock result unresolved and resume-assisted recovery separate. This exception does not waive fresh-writer validation or other failures.
 
+For PR #200, the owner accepted the unchanged ordinary stock cold-history limitation through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Fresh canonical history passes ASM cold reads; stock alpha.11 still needs resume before exact saved items are readable. This exception does not waive other checks or cover later commits.
+
 #### Upstream voice-history reader boundary
 
 Upstream adds canonical realtime records `Frame`, `TurnInputAccepted` and `SessionEndInputSaved`. The checked published stock readers (`rust-v0.169.0` and `rust-v0.171.0-alpha.5`) do not recognize these variants and can skip them while loading history. Successful resume therefore does not prove exact voice-history handoff. Exact interchange needs an independent stock reader containing upstream `5943d7acdf` or later. Keep the upstream format; do not rewrite saved records for older readers.
 
 The owner accepted this separate upstream compatibility boundary for PR #190 through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. It does not establish actual Desktop voice behavior or exact voice handoff, does not apply to later upstream commits, and does not waive ordinary text-history checks or other validation failures.
+
+For PR #200, the owner accepted this unchanged older-stock voice-reader boundary through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Keep the upstream records unchanged. This acceptance does not establish exact voice handoff or actual Desktop voice behavior, waive text-history checks, or cover later commits.
+
+#### Opt-in per-environment context
+
+Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
 
 ### Live backend model catalog
 
@@ -152,7 +161,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `05229d1874d4e04bc746a9954c71931a1ab852c6`, 2026-11-14. Subject: Add snapshot pagination for persisted realtime history (#61480).
+Last incorporated commit: `65a5410f72dac1f4b40862c34ef0a8b71b12834a`, 2026-11-14. Subject: Add trusted request-country metadata to Responses requests (#61535).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

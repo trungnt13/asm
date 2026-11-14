@@ -359,7 +359,7 @@ async fn spawn_agent_uses_explorer_role_and_preserves_approval_policy() {
         .await
         .expect("root thread should start");
     session.thread_id = root.thread_id;
-    let invocation = invocation(
+    let mut invocation = invocation(
         Arc::new(session),
         Arc::new(turn),
         "spawn_agent",
@@ -368,6 +368,14 @@ async fn spawn_agent_uses_explorer_role_and_preserves_approval_policy() {
             "agent_type": "explorer"
         })),
     );
+    let settings = Arc::make_mut(
+        &mut Arc::get_mut(&mut invocation.step_context)
+            .expect("unshared invocation step")
+            .settings,
+    );
+    update_selected_settings_for_test(settings, |selected| {
+        selected.request_country = codex_protocol::RequestCountry::UNKNOWN;
+    });
     let output = SpawnAgentHandlerV2::default()
         .handle(invocation)
         .await
@@ -392,6 +400,10 @@ async fn spawn_agent_uses_explorer_role_and_preserves_approval_policy() {
         .expect("spawned agent thread should exist")
         .config_snapshot()
         .await;
+    assert_eq!(
+        snapshot.request_country,
+        codex_protocol::RequestCountry::UNKNOWN
+    );
     assert_eq!(snapshot.approval_policy, AskForApproval::OnRequest);
     assert_eq!(snapshot.model_provider_id, "ollama");
 }
