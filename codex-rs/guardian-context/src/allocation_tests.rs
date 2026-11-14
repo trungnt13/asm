@@ -51,7 +51,7 @@ fn reserves_escaped_ids_for_user_messages_and_native_call_outputs() {
     let measure = |items: &[ResponseItemEnvelope]| {
         items
             .iter()
-            .map(|item| estimate_input_tokens(&item.item))
+            .map(|item| estimate_input_tokens(item.item.as_ref()))
             .sum::<usize>()
     };
     let before = measure(&suffix);
@@ -59,7 +59,7 @@ fn reserves_escaped_ids_for_user_messages_and_native_call_outputs() {
     assert!(suffix.iter().all(|item| item.id().is_some()));
     let delivered_call = suffix
         .iter()
-        .find(|item| matches!(item.item, ResponseItem::FunctionCall { .. }))
+        .find(|item| matches!(item.item.as_ref(), ResponseItem::FunctionCall { .. }))
         .unwrap();
     assert_eq!(delivered_call.id(), call_id.as_ref());
     assert!(measure(&suffix) - before <= reserved.tokens());

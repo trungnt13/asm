@@ -1282,7 +1282,10 @@ async fn migration_rolls_back_inter_agent_metadata_with_its_delivery() {
     assert!(!read_rollout(&path).iter().any(|line| match &line.item {
         RolloutItem::InterAgentCommunicationMetadata { .. } => true,
         RolloutItem::ResponseItem(response_item) => {
-            matches!(&response_item.item, ResponseItem::AgentMessage { .. })
+            matches!(
+                response_item.item.as_ref(),
+                ResponseItem::AgentMessage { .. }
+            )
         }
         _ => false,
     }));
@@ -1845,7 +1848,7 @@ async fn assert_migrated_evidence_order(steer_order: Option<u64>) {
             user_message(INITIAL),
             RolloutItem::RetainedContext(answers[0].clone()),
             RolloutItem::ResponseItem(codex_rollout::ResponseItemEnvelope {
-                item: serde_json::from_value(json!({
+                item: serde_json::from_value::<ResponseItem>(json!({
                     "type": "message", "id": "late-assistant", "role": "assistant",
                     "content": [{"type": "output_text", "text": "Late assistant question?"}],
                     "internal_chat_message_metadata_passthrough": {"turn_id": "shared-turn"}

@@ -2094,7 +2094,7 @@ async fn thread_fork_freezes_active_paginated_turn_as_interrupted(
                 ..
             },
         ] if matches!(
-            &response_item.item,
+            response_item.item.as_ref(),
             codex_protocol::models::ResponseItem::Message { role, .. }
                 if role == expected_marker_role
         ) && aborted.turn_id.as_deref() == Some("active-turn")

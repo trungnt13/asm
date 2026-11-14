@@ -16,7 +16,7 @@ fn previous_reviews_checks_count_and_size_without_rewriting_fragments() {
         MAX_PREVIOUS_REVIEWS
     ];
     let reviews = PreviousReviews::try_from_fragments(fragments.clone()).unwrap();
-    let ResponseItem::Message { content, .. } = reviews.into_annotated_message().item else {
+    let ResponseItem::Message { content, .. } = reviews.into_annotated_message().into_item() else {
         panic!("expected a review message");
     };
     assert_eq!(
@@ -77,7 +77,9 @@ fn review_delivery_requires_complete_host_metadata_and_preserves_distinct_comple
     for (history, expected) in [
         (Vec::new(), both.clone()),
         (
-            vec![ResponseItemEnvelope::new(first_message.item.clone())],
+            vec![ResponseItemEnvelope::new(
+                first_message.item.as_ref().clone(),
+            )],
             both.clone(),
         ),
         (vec![shortened], both.clone()),

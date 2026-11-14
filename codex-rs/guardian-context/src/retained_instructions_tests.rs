@@ -590,7 +590,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
     let mut history = RetainedTranscript {
         retained,
         messages: vec![ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(codex_history::CodexHarnessMetadata {
                 retained_source: Some(source),
                 ..Default::default()
@@ -721,7 +721,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
     history.messages.insert(
         /*index*/ 0,
         ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(codex_history::CodexHarnessMetadata {
                 retained_source: Some(source),
                 ..Default::default()
@@ -754,7 +754,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
         "newer".to_owned(),
     )));
     history.messages.push(ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: Some(codex_history::CodexHarnessMetadata {
             retained_source: Some(source),
             ..Default::default()

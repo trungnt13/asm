@@ -453,7 +453,10 @@ async fn cancellation_closes_http_before_headers_and_while_draining_the_body() -
         let mut request = sample_request("first");
         let evidence = std::mem::take(&mut request.input)
             .into_iter()
-            .map(ResponseItemEnvelope::new)
+            .map(|item| ResponseItemEnvelope {
+                item,
+                metadata: None,
+            })
             .collect();
         let (input, input_tokens) =
             LunaSampler::finish_input(&request, LunaSampler::prepare_setup(&request), evidence);

@@ -241,7 +241,10 @@ fn rollback_discards_assistant_sources_without_ordering_in_old_backups() {
     let mut history = TranscriptHistory::default();
     history.reset([&original, &assistant, &boundary]);
     history.truncate_before(&boundary);
-    assert_eq!(history.items().collect::<Vec<_>>(), vec![&original.item]);
+    assert_eq!(
+        history.items().collect::<Vec<_>>(),
+        vec![original.item.as_ref()]
+    );
 }
 
 #[test]

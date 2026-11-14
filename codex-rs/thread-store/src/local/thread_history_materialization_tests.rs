@@ -3176,7 +3176,7 @@ fn contains_user_message(items: &[RolloutItem], expected: &str) -> bool {
         let RolloutItem::ResponseItem(response_item) = item else {
             return false;
         };
-        let ResponseItem::Message { content, .. } = &response_item.item else {
+        let ResponseItem::Message { content, .. } = response_item.item.as_ref() else {
             return false;
         };
         content

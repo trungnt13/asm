@@ -1,6 +1,7 @@
 //! Attaches host observations to request metadata without changing tool execution.
 
 use super::*;
+use codex_protocol::models::normalize_executed_tool_call_completeness;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RequestKind {
@@ -58,37 +59,7 @@ impl ExecutedToolCalls {
 
         // Argument truncation preserves inventory completeness; omitted calls or
         // names still invalidate completion across the cell's outputs.
-        let damaged_cells = items
-            .iter()
-            .filter_map(|item| {
-                let metadata = item.executed_tool_call_metadata()?;
-                metadata
-                    .executed_tool_calls
-                    .iter()
-                    .flatten()
-                    .any(|call| !call.has_complete_inventory())
-                    .then_some(metadata.cell_id.as_ref())
-                    .flatten()
-                    .cloned()
-            })
-            .collect::<HashSet<_>>();
-        for item in items.iter_mut() {
-            let damaged = item.executed_tool_call_metadata().is_some_and(|metadata| {
-                metadata.tool_calls_complete.is_some()
-                    && (metadata
-                        .executed_tool_calls
-                        .iter()
-                        .flatten()
-                        .any(|call| !call.has_complete_inventory())
-                        || metadata
-                            .cell_id
-                            .as_ref()
-                            .is_some_and(|id| damaged_cells.contains(id)))
-            });
-            if damaged {
-                Arc::make_mut(item).clear_tool_calls_complete();
-            }
-        }
+        normalize_executed_tool_call_completeness(items);
     }
 
     fn attach_pending_to_prompt_with_state(

@@ -322,7 +322,10 @@ async fn decisions_startup_uses_thread_runtime_and_staging_destination() -> anyh
                 .input
                 .iter()
                 .cloned()
-                .map(ResponseItemEnvelope::new)
+                .map(|item| ResponseItemEnvelope {
+                    item,
+                    metadata: None,
+                })
                 .collect(),
         );
         for mode in [RuntimeAuthMode::DualHeader, RuntimeAuthMode::AssertionOnly] {

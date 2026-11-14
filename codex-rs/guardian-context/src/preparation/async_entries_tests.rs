@@ -121,20 +121,25 @@ fn classifier_entry_caps_preserve_whole_evidence_and_only_sent_review_ids() {
     assert!(delivered.contains(&expected_review));
     let developers = delivered
         .iter()
-        .filter_map(|envelope| match &envelope.item {
-            ResponseItem::Message { role, .. } if role == "developer" => Some(&envelope.item),
+        .filter_map(|envelope| match envelope.item.as_ref() {
+            ResponseItem::Message { role, .. } if role == "developer" => {
+                Some(envelope.item.as_ref())
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
     let expected_skill = codex_context_fragments::ContextualUserFragment::into(TrustedSkills {
         paths: vec![skill.to_owned()],
     });
-    assert_eq!(developers, vec![&expected_review.item, &expected_skill]);
+    assert_eq!(
+        developers,
+        vec![expected_review.item.as_ref(), &expected_skill]
+    );
     assert!(
         serde_json::to_string(
             &delivered
                 .iter()
-                .map(|envelope| &envelope.item)
+                .map(|envelope| envelope.item.as_ref())
                 .collect::<Vec<_>>()
         )
         .unwrap()
