@@ -14,7 +14,7 @@ Follow this procedure and the guide’s gates. Skill use does not expand task sc
 ## Procedure
 
 - Use private temporary `CODEX_HOME` with `diagnostic_log_capture = true`, not ephemeral mode. Retain diagnostic history outside personal history. Securely provision only needed config, authentication, and resources. Preserve intended profile/model. Put sessions, databases, and logs inside that home. Never copy personal history or symlink shared mutable state.
-- In the isolated config, explicitly set `tool_namespace = "agents"` under `[features.multi_agent_v2]`; do not fall back to the default `collaboration` namespace. Preserve the intended multi-agent settings from the user's config, including `enabled` and `disable_direct_message`, unless the check specifically targets a different configuration. Confirm these settings before provider calls; an isolated home must not silently change the agent tool surface being validated.
+- Before live calls, set `[features.multi_agent_v2].tool_namespace = "agents"` in the isolated config and preserve the user's other multi-agent settings unless testing an intentional override.
 - Unless behavior needs a specific checkout, use a temporary working directory. Use `--no-daemon`; for daemon/remote checks, use an isolated server, never the personal shared daemon.
 - Record session IDs, commands, binary/source identity, and expected/actual results. Before cleanup, retain private rollouts, output, and diagnostics. Never report or commit credentials.
 - Keep failed homes until triage ends. Remove only task-owned state after retaining evidence. Titles do not make personal sessions disposable.
