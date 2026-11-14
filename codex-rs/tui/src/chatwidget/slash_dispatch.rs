@@ -36,7 +36,6 @@ struct PreparedSlashCommandArgs {
 }
 
 const SIDE_STARTING_CONTEXT_LABEL: &str = "Side starting...";
-const PARALLEL_STARTING_CONTEXT_LABEL: &str = "Parallel starting...";
 const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
     "Press Ctrl+C to return to the main thread first.";
 const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
@@ -128,8 +127,17 @@ impl ChatWidget {
         self.request_redraw();
         self.app_event_tx.send(AppEvent::StartSide {
             parent_thread_id,
+            mode: if user_message.is_some() {
+                crate::app_event::SideStartMode::New
+            } else {
+                crate::app_event::SideStartMode::Reuse
+            },
             user_message,
         });
+    }
+
+    pub(crate) fn sidebar_chooser_available(&self) -> bool {
+        !self.review.is_review_mode && !self.is_external_writer_view()
     }
 
     fn request_empty_side_conversation(&mut self, cmd: SlashCommand) {
@@ -142,19 +150,6 @@ impl ChatWidget {
         };
 
         self.request_side_conversation(parent_thread_id, /*user_message*/ None);
-    }
-
-    fn request_parallel_conversation(
-        &mut self,
-        parent_thread_id: ThreadId,
-        user_message: Option<UserMessage>,
-    ) {
-        self.set_side_conversation_context_label(Some(PARALLEL_STARTING_CONTEXT_LABEL.to_string()));
-        self.request_redraw();
-        self.app_event_tx.send(AppEvent::StartParallel {
-            parent_thread_id,
-            user_message,
-        });
     }
 
     fn emit_raw_output_mode_changed(&self, enabled: bool) {
@@ -185,7 +180,7 @@ impl ChatWidget {
             || (cmd == SlashCommand::Export && self.input_queue.suppress_queue_autosend)
     }
 
-    pub(super) fn dispatch_command(&mut self, cmd: SlashCommand) {
+    pub(crate) fn dispatch_command(&mut self, cmd: SlashCommand) {
         self.dispatch_command_from_source(cmd, SlashCommandDispatchSource::Live);
     }
 
@@ -258,17 +253,7 @@ impl ChatWidget {
                 });
             }
             SlashCommand::Feedback => {
-                if !self.config.feedback_enabled {
-                    let params = crate::bottom_pane::feedback_disabled_params();
-                    self.bottom_pane.show_selection_view(params);
-                    self.request_redraw();
-                    return;
-                }
-                // Step 1: pick a category (UI built in feedback_view)
-                let params =
-                    crate::bottom_pane::feedback_selection_params(self.app_event_tx.clone());
-                self.bottom_pane.show_selection_view(params);
-                self.request_redraw();
+                self.app_event_tx.send(AppEvent::OpenFeedback);
             }
             SlashCommand::New => {
                 self.show_session_checkout_picker(ManagedWorktreeMode::New, /*name*/ None);
@@ -310,7 +295,8 @@ impl ChatWidget {
                 self.bottom_pane.show_selection_view(SelectionViewParams {
                     title: Some("Delete this session?".to_string()),
                     subtitle: Some(
-                        "Cannot be undone. Subagent threads will also be deleted.".to_string(),
+                        "Also deletes subagents and saved side chats. Cannot be undone."
+                            .to_string(),
                     ),
                     footer_hint: Some(standard_popup_hint_line()),
                     items: vec![
@@ -321,12 +307,7 @@ impl ChatWidget {
                             ..Default::default()
                         },
                         SelectionItem {
-                            name: if self.parallel_conversation_active() {
-                                "Yes, delete and return to main"
-                            } else {
-                                "Yes, delete and return to command center"
-                            }
-                            .to_string(),
+                            name: "Yes, delete and return to command center".to_string(),
                             description: Some("Permanently delete this session now".to_string()),
                             actions: vec![Box::new(|tx| {
                                 tx.send(AppEvent::DeleteCurrentThread);
@@ -472,15 +453,6 @@ impl ChatWidget {
             }
             SlashCommand::Side | SlashCommand::Btw => {
                 self.request_empty_side_conversation(cmd);
-            }
-            SlashCommand::Parallel => {
-                let Some(parent_thread_id) = self.thread_id else {
-                    self.add_error_message(
-                        "'/parallel' is unavailable before the session starts.".to_string(),
-                    );
-                    return;
-                };
-                self.request_parallel_conversation(parent_thread_id, /*user_message*/ None);
             }
             SlashCommand::Agents => {
                 self.app_event_tx.send(AppEvent::OpenAgentsOverview);
@@ -961,8 +933,38 @@ impl ChatWidget {
                     && !name.trim().is_empty()
                 {
                     if let Some(thread_id) = self.thread_id {
+                        // Keep the old name-only syntax intact, including spaces and quotes.
+                        let (name, environment_id) = if name.split_whitespace().any(|word| {
+                            word == "--environment" || word.starts_with("--environment=")
+                        }) {
+                            let args = match super::slash_command_args::parse(
+                                name,
+                                &["--environment"],
+                                &[],
+                                &[],
+                            ) {
+                                Ok(args) => args,
+                                Err(error) => {
+                                    self.add_error_message(error);
+                                    return;
+                                }
+                            };
+                            if args.positionals.is_empty() {
+                                self.add_error_message(
+                                    "Usage: /mcp login <name> [--environment <id>]".to_string(),
+                                );
+                                return;
+                            }
+                            (
+                                args.positionals.join(" "),
+                                args.value("--environment").map(str::to_owned),
+                            )
+                        } else {
+                            (name.trim().to_string(), None)
+                        };
                         self.app_event_tx.send(AppEvent::StartMcpLogin {
-                            name: name.trim().to_string(),
+                            name,
+                            environment_id,
                             thread_id,
                         });
                     } else {
@@ -971,14 +973,18 @@ impl ChatWidget {
                         );
                     }
                 } else {
-                    self.add_error_message("Usage: /mcp [verbose | login <name>]".to_string());
+                    self.add_error_message(
+                        "Usage: /mcp [verbose | login <name> [--environment <id>]]".to_string(),
+                    );
                 }
             }
             SlashCommand::Keymap => match trimmed.to_ascii_lowercase().as_str() {
                 "" => self.open_keymap_picker(),
                 "debug" => {
-                    match crate::keymap::RuntimeKeymap::from_config(&self.local_settings.tui.keymap)
-                    {
+                    match crate::keymap::RuntimeKeymap::for_session(
+                        &self.local_settings.tui.keymap,
+                        self.local_settings.workspace_enabled(self.config_ref()),
+                    ) {
                         Ok(runtime_keymap) => self.open_keymap_debug(&runtime_keymap),
                         Err(err) => {
                             self.add_error_message(format!(
@@ -1212,9 +1218,7 @@ impl ChatWidget {
                     self.clear_live_goal_submission();
                 }
             }
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
-                if !trimmed.is_empty() =>
-            {
+            SlashCommand::Side | SlashCommand::Btw if !trimmed.is_empty() => {
                 let Some(parent_thread_id) = self.thread_id else {
                     let command = cmd.command();
                     self.add_error_message(format!(
@@ -1230,11 +1234,7 @@ impl ChatWidget {
                     mention_bindings,
                     source,
                 );
-                if cmd == SlashCommand::Parallel {
-                    self.request_parallel_conversation(parent_thread_id, Some(user_message));
-                } else {
-                    self.request_side_conversation(parent_thread_id, Some(user_message));
-                }
+                self.request_side_conversation(parent_thread_id, Some(user_message));
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 self.submit_op(AppCommand::review(ReviewTarget::Custom {
@@ -1471,7 +1471,6 @@ impl ChatWidget {
             | SlashCommand::Btw
             | SlashCommand::SendLast
             | SlashCommand::Sync
-            | SlashCommand::Parallel
             | SlashCommand::Keymap
             | SlashCommand::Agents
             | SlashCommand::MultiAgents
@@ -1543,11 +1542,7 @@ impl ChatWidget {
     }
 
     fn ensure_side_command_allowed_outside_review(&mut self, cmd: SlashCommand) -> bool {
-        if !matches!(
-            cmd,
-            SlashCommand::Side | SlashCommand::Btw | SlashCommand::Parallel
-        ) || !self.review.is_review_mode
-        {
+        if !matches!(cmd, SlashCommand::Side | SlashCommand::Btw) || !self.review.is_review_mode {
             return true;
         }
 

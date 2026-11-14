@@ -49,6 +49,7 @@ mod logs;
 mod logs_maintenance;
 mod memories;
 mod memory_versions;
+pub(crate) mod model_ids;
 mod projects;
 mod queued_items;
 pub(crate) mod reclamation;
@@ -105,6 +106,7 @@ pub struct StateRuntime {
     default_provider: String,
     pool: Arc<sqlx::SqlitePool>,
     logs_pool: Option<Arc<sqlx::SqlitePool>>,
+    diagnostic_logs_error: Option<String>,
     thread_goals: GoalStore,
     memories: MemoryStore,
     memories_v2: Arc<tokio::sync::OnceCell<MemoryStore>>,
@@ -160,21 +162,28 @@ impl StateRuntime {
             }
         };
         let has_memories_v2 = tokio::fs::try_exists(sqlite.memories_v2_db_path()).await?;
-        let logs_pool = if sqlite.diagnostic_log_capture() == DiagnosticLogCapture::Enabled {
-            match sqlite
-                .open_logs_db(&runtime_logs_migrator(), telemetry_override)
-                .await
-            {
-                Ok(db) => Some(Arc::new(db)),
-                Err(err) => {
-                    warn!("failed to open logs db at {}: {err}", logs_path.display());
-                    close_sqlite_pools(&[Some(pool.as_ref())]).await;
-                    return Err(err);
+        let (logs_pool, diagnostic_logs_error) =
+            if sqlite.diagnostic_log_capture() == DiagnosticLogCapture::Enabled {
+                match sqlite
+                    .open_logs_db(&runtime_logs_migrator(), telemetry_override)
+                    .await
+                {
+                    Ok(db) => (Some(Arc::new(db)), None),
+                    Err(err) if is_sqlite_corruption_error(&err) => {
+                        pool.close().await;
+                        return Err(err);
+                    }
+                    Err(err) => (
+                        None,
+                        Some(format!(
+                            "failed to open logs db at {}: {err:#}",
+                            logs_path.display()
+                        )),
+                    ),
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                (None, None)
+            };
         let goals_pool = match sqlite
             .open_goals_db(&goals_migrator, telemetry_override)
             .await
@@ -286,6 +295,7 @@ impl StateRuntime {
             thread_queue: SqliteQueueStore::new(queue_pool),
             pool,
             logs_pool,
+            diagnostic_logs_error,
             sqlite,
             default_provider,
             thread_updated_at_millis: Arc::new(AtomicI64::new(thread_updated_at_millis)),
@@ -301,7 +311,7 @@ impl StateRuntime {
             runtime.close().await;
             return Err(err);
         }
-        if runtime.logs_pool.is_some() {
+        if runtime.sqlite.diagnostic_log_capture() == DiagnosticLogCapture::Enabled {
             runtime.start_periodic_logs_maintenance(std::time::Duration::from_secs(
                 /*secs*/ 30 * 60,
             ));
@@ -325,6 +335,21 @@ impl StateRuntime {
     /// Return the durable, SQLite-backed user-message queue.
     pub fn thread_queue(&self) -> &SqliteQueueStore {
         &self.thread_queue
+    }
+
+    /// Startup failure to report after tracing is installed and before destructive cleanup.
+    pub fn diagnostic_logs_error(&self) -> Option<&str> {
+        self.diagnostic_logs_error.as_deref()
+    }
+
+    fn diagnostic_logs_pool(&self) -> anyhow::Result<&SqlitePool> {
+        self.logs_pool.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "diagnostic database unavailable: {}",
+                self.diagnostic_logs_error()
+                    .unwrap_or("diagnostic log capture is disabled")
+            )
+        })
     }
 
     /// Close all SQLite pools and wait for outstanding pool workers to exit.

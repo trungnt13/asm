@@ -132,7 +132,7 @@ pub(crate) enum StatusLineItem {
     /// Total output tokens generated.
     TotalOutputTokens,
 
-    /// Latest successful request output tokens per second, including reasoning and latency.
+    /// Latest successful request non-reasoning output tokens per second, excluding initial latency.
     OutputTps,
 
     /// Estimated credits attributed directly to the current enterprise thread.
@@ -172,6 +172,13 @@ pub(crate) enum StatusLineItem {
     /// Model provider ID for the active thread.
     #[strum(to_string = "provider", serialize = "model-provider")]
     Provider,
+}
+
+impl serde::Serialize for StatusLineItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Display emits the canonical config ID even when the item was parsed from an alias.
+        serializer.collect_str(self)
+    }
 }
 
 impl StatusLineItem {
@@ -220,9 +227,7 @@ impl StatusLineItem {
                 "Cached share of the latest request's input tokens (omitted until available)"
             }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
-            StatusLineItem::OutputTps => {
-                "Latest successful request output tokens/s, including reasoning and latency"
-            }
+            StatusLineItem::OutputTps => "Non-reasoning output tokens/s, excluding initial latency",
             StatusLineItem::ThreadCredits => {
                 "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
             }
@@ -320,19 +325,14 @@ impl StatusLineSetupView {
         list_keymap: ListKeymap,
     ) -> Self {
         let mut used_ids = HashSet::new();
-        let show_theme_colors =
-            preview_data.renderer == super::status_line_content::StatusLineRenderer::Native;
-        let mut items = Vec::new();
-        if show_theme_colors {
-            items.push(MultiSelectItem {
-                id: STATUS_LINE_USE_THEME_COLORS_ITEM_ID.to_string(),
-                name: "Use theme colors".to_string(),
-                description: Some("Apply colors from the active /theme".to_string()),
-                enabled: use_theme_colors,
-                orderable: false,
-                section_break_after: true,
-            });
-        }
+        let mut items = vec![MultiSelectItem {
+            id: STATUS_LINE_USE_THEME_COLORS_ITEM_ID.to_string(),
+            name: "Use theme colors".to_string(),
+            description: Some("Apply colors from the active /theme".to_string()),
+            enabled: use_theme_colors,
+            orderable: false,
+            section_break_after: true,
+        }];
 
         if let Some(selected_items) = status_line_items.as_ref() {
             for id in *selected_items {
@@ -366,14 +366,7 @@ impl StatusLineSetupView {
         Self {
             picker: MultiSelectPicker::builder(
                 "Configure Status Line".to_string(),
-                Some(
-                    if show_theme_colors {
-                        "Select which items to display in the status line."
-                    } else {
-                        "Select items to display. The extension renderer uses plain text."
-                    }
-                    .to_string(),
-                ),
+                Some("Select which items to display in the status line.".to_string()),
                 app_event_tx,
             )
             .list_keymap(list_keymap)
@@ -382,24 +375,21 @@ impl StatusLineSetupView {
             .on_preview_content(move |items| {
                 let use_theme_colors = items
                     .iter()
-                    .find(|item| item.id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID)
-                    .map(|item| item.enabled)
-                    .unwrap_or(use_theme_colors);
-                preview_data.status_line_for_items(
-                    items
-                        .iter()
-                        .filter(|item| item.enabled)
-                        .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
-                    use_theme_colors,
-                )
+                    .any(|item| item.id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID && item.enabled);
+                preview_data
+                    .status_line_for_items(
+                        items
+                            .iter()
+                            .filter(|item| item.enabled)
+                            .filter_map(|item| item.id.parse::<StatusLineItem>().ok()),
+                        use_theme_colors,
+                    )
+                    .map(Into::into)
             })
-            .on_confirm(move |ids, app_event| {
-                let use_theme_colors = if show_theme_colors {
-                    ids.iter()
-                        .any(|id| id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID)
-                } else {
-                    use_theme_colors
-                };
+            .on_confirm(|ids, app_event| {
+                let use_theme_colors = ids
+                    .iter()
+                    .any(|id| id == STATUS_LINE_USE_THEME_COLORS_ITEM_ID);
                 let items = ids
                     .iter()
                     .filter_map(|id| id.parse::<StatusLineItem>().ok())
@@ -480,7 +470,7 @@ impl Renderable for StatusLineSetupView {
 mod tests {
     use super::*;
     use crate::app_event_sender::AppEventSender;
-    use crate::bottom_pane::footer_content::FooterContent;
+    use crate::terminal_hyperlinks::HyperlinkLine;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use ratatui::buffer::Buffer;
@@ -729,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn extension_picker_previews_the_pr_link_and_preserves_the_color_preference() {
+    fn picker_previews_the_pr_link_and_preserves_the_color_preference() {
         let url = "https://example.com/pr/42";
         for use_theme_colors in [false, true] {
             let (tx, mut rx) = unbounded_channel();
@@ -737,8 +727,6 @@ mod tests {
                 StatusLineItem::PullRequestNumber.preview_item(),
                 "PR #42",
             )]);
-            preview.renderer =
-                crate::bottom_pane::status_line_content::StatusLineRenderer::Extension;
             preview.pull_request_url = Some(url.to_owned());
             let mut view = StatusLineSetupView::new(
                 Some(&[StatusLineItem::PullRequestNumber.to_string()]),
@@ -749,7 +737,6 @@ mod tests {
             );
             let output = render_lines(&view, /*width*/ 80);
             assert!(output.contains(&crate::terminal_hyperlinks::osc8_hyperlink(url, "P")));
-            assert!(!output.contains("Use theme colors"));
             view.handle_key_event(crossterm::event::KeyCode::Enter.into());
             assert!(matches!(
                 rx.try_recv(),
@@ -880,7 +867,7 @@ mod tests {
             .join("\n")
     }
 
-    fn line_text(content: Option<FooterContent>) -> Option<String> {
-        content.map(|content| content.into_hyperlink_line().line.to_string())
+    fn line_text(content: Option<HyperlinkLine>) -> Option<String> {
+        content.map(|line| line.line.to_string())
     }
 }

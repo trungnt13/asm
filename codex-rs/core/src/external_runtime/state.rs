@@ -45,6 +45,17 @@ impl Checkpoint {
             !self.in_flight,
             "ASM could not confirm that the native runtime finished the previous turn. This chat is blocked to prevent duplicate execution; start a new chat."
         );
+        self.validate_live(model, auto_compact_window, cwd, messaging, messages)
+    }
+
+    pub(super) fn validate_live(
+        &self,
+        model: &str,
+        auto_compact_window: Option<i64>,
+        cwd: &std::path::Path,
+        messaging: bool,
+        messages: &[serde_json::Value],
+    ) -> anyhow::Result<()> {
         anyhow::ensure!(
             self.model == model
                 && self.auto_compact_window == auto_compact_window
@@ -82,7 +93,7 @@ impl Checkpoint {
 /// The official CLI process serving one loaded native session.
 pub(super) enum RuntimeProcess {
     Claude(ClaudeRuntime),
-    Cursor(CursorRuntime),
+    Cursor(Box<CursorRuntime>),
 }
 
 impl RuntimeProcess {
@@ -121,6 +132,8 @@ enum TemporaryFork {
 
 pub(crate) struct ExternalSession {
     pub(super) runtime: RuntimeProcess,
+    pub(super) foreground_idle: bool,
+    pub(super) page_context: codex_config::PageContextPolicy,
     pub(super) bridge: Option<ExternalMessageBridge>,
     pub(super) checkpoint: Checkpoint,
     pub(super) checkpoint_path: PathBuf,
@@ -206,7 +219,8 @@ impl ExternalSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
         bridge: Option<&ExternalMessageBridge>,
-        disallowed_tools: Vec<String>,
+        mut disallowed_tools: Vec<String>,
+        claude_config: &codex_config::ClaudeCodeConfig,
         role_instructions: Option<String>,
         session_kind: codex_external_runtime::ClaudeSessionKind,
         checkpoint: &mut Checkpoint,
@@ -237,7 +251,7 @@ impl ExternalSession {
             .await?;
             // Cursor assigns new session IDs; link before the first prompt is submitted.
             checkpoint.session_id = runtime.session_id().to_owned();
-            return Ok(RuntimeProcess::Cursor(runtime));
+            return Ok(RuntimeProcess::Cursor(Box::new(runtime)));
         }
         let model = if model.starts_with("sonnet-") || model.starts_with("opus-") {
             format!("claude-{model}")
@@ -251,6 +265,11 @@ impl ExternalSession {
                 codex_external_runtime::ClaudeSession::Fork { parent, at, id }
             }
         };
+        disallowed_tools.extend(claude_config.disallowed_tools.iter().cloned());
+        let skill_overrides = serde_json::to_value(&claude_config.skill_overrides)?
+            .as_object()
+            .context("Claude skill overrides must be an object")?
+            .clone();
         ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
@@ -261,6 +280,7 @@ impl ExternalSession {
             role_instructions,
             session,
             disallowed_tools,
+            skill_overrides,
             bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
         })
         .await
@@ -326,11 +346,26 @@ impl ExternalSession {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct RuntimeSlot {
     pub(crate) authentication_required: std::sync::atomic::AtomicBool,
     state: std::sync::Mutex<SlotState>,
     returned: tokio::sync::Notify,
+    pub(crate) continuation_admission: tokio::sync::Semaphore,
+    pub(super) continuation_listener: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    pub(crate) turn_finished: tokio::sync::Notify,
+}
+
+impl Default for RuntimeSlot {
+    fn default() -> Self {
+        Self {
+            authentication_required: Default::default(),
+            state: Default::default(),
+            returned: Default::default(),
+            continuation_admission: tokio::sync::Semaphore::new(/*permits*/ 1),
+            continuation_listener: Default::default(),
+            turn_finished: Default::default(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -359,7 +394,9 @@ impl RuntimeSlot {
             || state.runtime.as_ref().is_some_and(|session| {
                 session.checkpoint.in_flight
                     || match &session.runtime {
-                        RuntimeProcess::Claude(runtime) => runtime.has_background_work(),
+                        RuntimeProcess::Claude(runtime) => {
+                            runtime.has_background_work() || runtime.has_unprojected_activity()
+                        }
                         RuntimeProcess::Cursor(_) => false,
                     }
             })
@@ -461,5 +498,18 @@ impl Drop for RuntimeLease<'_> {
         }
         state.leased = false;
         self.slot.returned.notify_waiters();
+    }
+}
+
+impl Drop for RuntimeSlot {
+    fn drop(&mut self) {
+        if let Some(listener) = self
+            .continuation_listener
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            listener.abort();
+        }
     }
 }

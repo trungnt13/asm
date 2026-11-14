@@ -1,4 +1,5 @@
 use crate::session::tests::update_turn_settings_for_test;
+use codex_mcp::McpServerKey;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -41,6 +42,7 @@ use serde_json::json;
 
 use crate::WaitForEnvironmentToolConfig;
 use crate::config::CurrentTimeReminderConfig;
+use crate::environment_selection::EnvironmentAttachment;
 use crate::environment_selection::TurnEnvironmentState;
 use crate::responses_metadata::TurnToolFunctionInfo;
 use crate::responses_metadata::TurnToolNamespacesInfo;
@@ -52,7 +54,6 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::handlers::McpHandler;
 use crate::tools::handlers::ToolSearchHandlerCache;
 use crate::tools::handlers::WaitForEnvironmentHandler;
-use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::RegisteredTool;
 use crate::tools::router::ToolRouter;
@@ -396,7 +397,7 @@ fn duplicate_primary_environment(turn: &mut TurnContext) {
 
 fn mcp_tool(server: &str, namespace: &str, name: &str) -> ToolInfo {
     ToolInfo {
-        server_name: server.to_string(),
+        server_key: McpServerKey::unscoped(server),
         supports_parallel_tool_calls: false,
         server_origin: None,
         callable_name: name.to_string(),
@@ -634,6 +635,7 @@ async fn reviewer_tool_policy_respect_managed_shell_restrictions() {
                 Some(codex_config::Sourced::new(
                     codex_config::FeatureRequirementsToml {
                         entries: BTreeMap::from([(feature.key().to_string(), false)]),
+                        ..Default::default()
                     },
                     codex_config::RequirementSource::Unknown,
                 )),
@@ -1017,6 +1019,15 @@ async fn exec_command_guidance_follows_executor_platform_and_fallbacks() {
 
 #[tokio::test]
 async fn disabling_shell_tools_disables_command_tools_for_all_environments() {
+    let (attachment, _guard, _) = EnvironmentAttachment::new(
+        "remote",
+        Arc::new(
+            codex_exec_server::Environment::create_for_tests(Some(
+                "ws://127.0.0.1:1/remote-exec-server".to_string(),
+            ))
+            .expect("remote test environment"),
+        ),
+    );
     let remote_environment = probe(|turn| {
         set_feature(turn, Feature::ShellTool, /*enabled*/ false);
         update_turn_settings_for_test(turn, |settings| {
@@ -1032,12 +1043,7 @@ async fn disabling_shell_tools_disables_command_tools_for_all_environments() {
             panic!("primary environment should be ready");
         };
         environment.selection.environment_id = "remote".to_string();
-        environment.environment = Arc::new(
-            codex_exec_server::Environment::create_for_tests(Some(
-                "ws://127.0.0.1:1/remote-exec-server".to_string(),
-            ))
-            .expect("remote test environment"),
-        );
+        environment.attachment = attachment;
     })
     .await;
     remote_environment.assert_visible_lacks(&["exec_command", "write_stdin"]);
@@ -1142,7 +1148,12 @@ async fn environment_tools_follow_the_step_context() {
             /*tool_suggest_candidates*/ None,
             /*wait_for_environment_tool_config*/ None,
         ),
-        super::hosted_model_tool_specs(turn.as_ref(), turn.model_info(), &[]),
+        super::hosted_model_tool_specs(
+            turn.as_ref(),
+            turn.model_info(),
+            turn.config.web_search_mode.value(),
+            &[],
+        ),
         &Default::default(),
     ));
 
@@ -2341,6 +2352,7 @@ async fn tool_search_cache_rebuilds_when_deferred_sources_change() {
         super::hosted_model_tool_specs(
             first_step_context.turn.as_ref(),
             first_step_context.turn.model_info(),
+            first_step_context.turn.config.web_search_mode.value(),
             &[],
         ),
         &cache,
@@ -2375,6 +2387,7 @@ async fn tool_search_cache_rebuilds_when_deferred_sources_change() {
         super::hosted_model_tool_specs(
             second_step_context.turn.as_ref(),
             second_step_context.turn.model_info(),
+            second_step_context.turn.config.web_search_mode.value(),
             &[],
         ),
         &cache,
@@ -2440,6 +2453,7 @@ async fn tool_search_cache_rebuilds_when_deferred_world_state_changes() {
             super::hosted_model_tool_specs(
                 step_context.turn.as_ref(),
                 step_context.turn.model_info(),
+                step_context.turn.config.web_search_mode.value(),
                 &[],
             ),
             &cache,
@@ -2805,9 +2819,9 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ false);
     })
     .await;
-    v1.assert_visible_contains(&[MULTI_AGENT_V1_NAMESPACE]);
-    assert!(v1.can_manage_children);
+    assert!(!v1.can_manage_children);
     v1.assert_visible_lacks(&[
+        "multi_agent_v1",
         "spawn_agent",
         "send_input",
         "resume_agent",
@@ -2816,44 +2830,8 @@ async fn multi_agent_feature_selects_one_agent_tool_family() {
         "interrupt_agent",
         "send_message",
         "followup_task",
-        "assign_task",
         "list_agents",
     ]);
-    assert_eq!(
-        v1.namespace_function_names(MULTI_AGENT_V1_NAMESPACE),
-        &[
-            "close_agent".to_string(),
-            "resume_agent".to_string(),
-            "send_input".to_string(),
-            "spawn_agent".to_string(),
-            "wait_agent".to_string(),
-        ]
-    );
-    let ToolSpec::Namespace(namespace) = v1.visible_spec(MULTI_AGENT_V1_NAMESPACE) else {
-        panic!("expected v1 multi-agent namespace");
-    };
-    let Some(ResponsesApiNamespaceTool::Function(spawn_agent)) =
-        namespace.tools.iter().find(|tool| {
-            matches!(
-                tool,
-                ResponsesApiNamespaceTool::Function(tool) if tool.name == "spawn_agent"
-            )
-        })
-    else {
-        panic!("expected v1 spawn_agent function");
-    };
-    let properties = spawn_agent
-        .parameters
-        .properties
-        .as_ref()
-        .expect("spawn_agent should use object params");
-    for property in ["model", "reasoning_effort"] {
-        assert!(
-            properties.contains_key(property),
-            "expected v1 spawn_agent to expose `{property}`"
-        );
-    }
-    assert!(!properties.contains_key("agent_type"));
 
     let v2 = probe(|turn| {
         set_feature(turn, Feature::MultiAgentV2, /*enabled*/ true);
@@ -3014,58 +2992,6 @@ async fn tool_mode_selector_overrides_feature_flags() {
         codex_code_mode::PUBLIC_TOOL_NAME,
         codex_code_mode::WAIT_TOOL_NAME,
     ]);
-}
-
-#[tokio::test]
-async fn v1_multi_agent_tools_defer_when_tool_search_available() {
-    let plan = probe(|turn| {
-        set_feature(
-            turn,
-            Feature::DeferredToolWorldState,
-            /*enabled*/ false,
-        );
-        update_turn_settings_for_test(turn, |settings| {
-            Arc::make_mut(&mut settings.model_info).supports_search_tool = true;
-        });
-        set_feature(turn, Feature::Collab, /*enabled*/ true);
-        set_feature(turn, Feature::MultiAgentV2, /*enabled*/ false);
-    })
-    .await;
-
-    plan.assert_visible_contains(&["tool_search"]);
-    plan.assert_visible_lacks(&[
-        "spawn_agent",
-        "send_input",
-        "resume_agent",
-        "wait_agent",
-        "close_agent",
-        "interrupt_agent",
-    ]);
-    for tool_name in [
-        "spawn_agent",
-        "send_input",
-        "resume_agent",
-        "wait_agent",
-        "close_agent",
-    ] {
-        let namespaced_tool_name = ToolName::namespaced(MULTI_AGENT_V1_NAMESPACE, tool_name);
-        let namespaced_tool_name = namespaced_tool_name.to_string();
-        assert!(
-            plan.registered_names.contains(&namespaced_tool_name),
-            "expected namespaced runtime for {tool_name}"
-        );
-        assert!(
-            !plan
-                .registered_names
-                .contains(&ToolName::plain(tool_name).to_string()),
-            "expected no plain runtime for deferred {tool_name}"
-        );
-        assert_eq!(plan.exposure(&namespaced_tool_name), ToolExposure::Deferred);
-    }
-    let ToolSpec::ToolSearch { description, .. } = plan.visible_spec("tool_search") else {
-        panic!("expected visible tool_search spec");
-    };
-    assert!(description.contains("- Multi-agent tools: Spawn and manage sub-agents."));
 }
 
 #[tokio::test]

@@ -5,15 +5,16 @@
 use crate::agent::api::AgentInput;
 use crate::agent::api::SpawnRequest;
 use crate::agent::child_config::SpawnConfigOptions;
-use crate::agent::child_config::SpawnConfigVersion;
 use crate::agent::child_config::prepare_agent_spawn_config;
 use crate::agent::exceeds_thread_spawn_depth_limit;
+use crate::agent::helper_daybreak::turn::explicit_program_for_spawn;
 use crate::agent::next_thread_spawn_depth;
 use crate::agent::types::AgentMessage;
 use crate::agent::types::LiveAgent;
 use crate::agent::types::MessageDeliveryMode;
 use crate::agent::types::SpawnAgentForkMode;
 use crate::agent::types::SpawnAgentOptions;
+use crate::agent::types::SpawnProgramSource;
 use crate::codex_thread::ThreadConfigSnapshot;
 use crate::config::Config;
 use crate::session::multi_agents::resolve_usage_hints;
@@ -168,7 +169,6 @@ pub(crate) async fn prepare(
         session,
         step_context,
         SpawnConfigOptions {
-            version: SpawnConfigVersion::V2,
             full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
             role_name,
             model: model.as_deref(),
@@ -231,7 +231,8 @@ pub(crate) async fn prepare(
                 environments: Some(step_context.inherited_environments.clone()),
                 disabled_plugin_ids: Some(turn.disabled_plugin_ids.clone()),
                 multi_agent_v2_usage_hints,
-                cyber_access_program: turn.cyber_access_program,
+                cyber_access_program: explicit_program_for_spawn(turn),
+                cyber_access_program_source: SpawnProgramSource::ParentTurn,
             },
         },
         task_name,

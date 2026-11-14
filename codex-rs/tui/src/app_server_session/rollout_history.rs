@@ -71,9 +71,6 @@ impl AppServerSession {
                 })
                 .await?;
             thread.turns = page.data.into_iter().rev().collect();
-            if let Some(side) = self.side_conversation(thread_id) {
-                side.trim_turns(&mut thread.turns);
-            }
             self.history_pagination.remove(&thread_id);
             history_notice = Some(
                 "Showing up to 100 recent prompts and final replies. Intermediate messages and tool activity are unavailable.",
@@ -81,7 +78,7 @@ impl AppServerSession {
         }
         let mut session = thread_session_state_from_thread_response(
             &thread.id,
-            crate::windows_sandbox::host_from_environments(thread.environments.as_deref()),
+            thread.environments.as_deref(),
             thread.forked_from_id.clone(),
             thread.name.clone(),
             thread.path.clone(),
@@ -101,6 +98,7 @@ impl AppServerSession {
         .await
         .map_err(color_eyre::eyre::Report::msg)?;
         session.thread_source = thread.thread_source.clone().map(Into::into);
+        session.read_only_history = true;
         self.freeze_viewed_receipt(thread_id);
         Ok((
             AppServerStartedThread {
@@ -162,11 +160,15 @@ impl AppServerSession {
         permission_overrides: crate::resume_permissions::ResumePermissions,
     ) -> Result<AppServerStartedThread> {
         if self.thread_params_mode().settings_owner() == ThreadSettingsOwner::Client {
-            self.thread_tool_transport().validate_config(&config)?;
+            self.thread_tool_transport()
+                .check_namespace(&self.request_handle, &config.cwd)
+                .await?;
         }
         let session_config = if matches!(
             model_settings,
-            ResumeModelSettings::RestoreFromThread | ResumeModelSettings::PreserveExistingThread
+            ResumeModelSettings::RestoreFromThread
+                | ResumeModelSettings::PreserveExistingThread
+                | ResumeModelSettings::PreserveSideConversation
         ) {
             config.clone()
         } else {
@@ -280,6 +282,9 @@ impl AppServerSession {
                 ));
             }
         };
+        if let Some(subscribed) = &mut self.attachment_subscribed {
+            *subscribed = true;
+        }
         self.hydrate_initial_thread_history(
             &mut response.thread,
             response.turns_backwards_cursor.clone(),

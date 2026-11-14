@@ -18,11 +18,13 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
-/// API request payload for a single model turn
-#[derive(Debug, Clone)]
+/// Core inputs to provider request formatting for a single model turn.
+/// The rollout trace serializes this shape before transport-specific rewrites.
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Prompt {
     /// Conversation context input items.
-    pub input: Vec<ResponseItem>,
+    #[serde(serialize_with = "codex_rollout_trace::serialize_trace_items")]
+    pub input: Vec<Arc<ResponseItem>>,
 
     /// Tool definitions to inject into this request, empty when supplied by history.
     pub(crate) tools: Arc<[ToolSpec]>,
@@ -38,6 +40,8 @@ pub struct Prompt {
     /// Whether the Responses API should strictly validate `output_schema`.
     pub output_schema_strict: bool,
 
+    pub(crate) prompt_cache_ttl: Option<crate::PromptCacheTtl>,
+
     pub(crate) cyber_access_program: Option<codex_protocol::turn_input::CyberAccessProgram>,
 }
 
@@ -50,6 +54,7 @@ impl Default for Prompt {
             base_instructions: BaseInstructions::default(),
             output_schema: None,
             output_schema_strict: true,
+            prompt_cache_ttl: None,
             cyber_access_program: None,
         }
     }
@@ -59,59 +64,111 @@ impl Prompt {
     pub(crate) fn get_formatted_input_for_request(
         &self,
         model_info: &ModelInfo,
-    ) -> Vec<ResponseItem> {
+    ) -> Vec<Arc<ResponseItem>> {
         let mut input = self.input.clone();
-        normalize_image_details(&mut input, model_info);
+        for item in &mut input {
+            if image_details(item)
+                .any(|detail| normalized_image_detail(detail, model_info) != detail)
+            {
+                normalize_image_details(Arc::make_mut(item), model_info);
+            }
+        }
         input
     }
 }
 
-fn normalize_image_details(items: &mut [ResponseItem], model_info: &ModelInfo) {
-    for item in items {
-        match item {
-            ResponseItem::Message { content, .. } => {
+/// Lists image details in the same items and order that `normalize_image_details` edits.
+fn image_details(item: &ResponseItem) -> impl Iterator<Item = Option<ImageDetail>> + '_ {
+    let (message, output) = match item {
+        ResponseItem::Message { content, .. } => (content.as_slice(), &[][..]),
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => {
+            (&[][..], output.content_items().unwrap_or_default())
+        }
+        ResponseItem::AdditionalTools { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::Compaction { .. }
+        | ResponseItem::ConfigurationUpdate { .. }
+        | ResponseItem::CompactionTrigger { .. }
+        | ResponseItem::ContextCompaction { .. }
+        | ResponseItem::Other => (&[][..], &[][..]),
+    };
+    let message = message
+        .iter()
+        .filter_map(|content_item| match content_item {
+            ContentItem::InputImage { detail, .. } => Some(*detail),
+            ContentItem::InputText { .. }
+            | ContentItem::InputAudio { .. }
+            | ContentItem::OutputText { .. } => None,
+        });
+    let output = output.iter().filter_map(|content_item| match content_item {
+        FunctionCallOutputContentItem::InputImage { detail, .. } => Some(*detail),
+        FunctionCallOutputContentItem::InputText { .. }
+        | FunctionCallOutputContentItem::InputAudio { .. }
+        | FunctionCallOutputContentItem::EncryptedContent { .. } => None,
+    });
+    message.chain(output)
+}
+
+fn normalize_image_details(item: &mut ResponseItem, model_info: &ModelInfo) {
+    match item {
+        ResponseItem::Message { content, .. } => {
+            for content_item in content {
+                if let ContentItem::InputImage { detail, .. } = content_item {
+                    normalize_image_detail(detail, model_info);
+                }
+            }
+        }
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => {
+            if let Some(content) = output.content_items_mut() {
                 for content_item in content {
-                    if let ContentItem::InputImage { detail, .. } = content_item {
+                    if let FunctionCallOutputContentItem::InputImage { detail, .. } = content_item {
                         normalize_image_detail(detail, model_info);
                     }
                 }
             }
-            ResponseItem::FunctionCallOutput { output, .. }
-            | ResponseItem::CustomToolCallOutput { output, .. } => {
-                if let Some(content) = output.content_items_mut() {
-                    for content_item in content {
-                        if let FunctionCallOutputContentItem::InputImage { detail, .. } =
-                            content_item
-                        {
-                            normalize_image_detail(detail, model_info);
-                        }
-                    }
-                }
-            }
-            ResponseItem::AdditionalTools { .. }
-            | ResponseItem::Reasoning { .. }
-            | ResponseItem::AgentMessage { .. }
-            | ResponseItem::LocalShellCall { .. }
-            | ResponseItem::FunctionCall { .. }
-            | ResponseItem::ToolSearchCall { .. }
-            | ResponseItem::CustomToolCall { .. }
-            | ResponseItem::ToolSearchOutput { .. }
-            | ResponseItem::WebSearchCall { .. }
-            | ResponseItem::ImageGenerationCall { .. }
-            | ResponseItem::Compaction { .. }
-            | ResponseItem::ConfigurationUpdate { .. }
-            | ResponseItem::CompactionTrigger { .. }
-            | ResponseItem::ContextCompaction { .. }
-            | ResponseItem::Other => {}
         }
+        ResponseItem::AdditionalTools { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::AgentMessage { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. }
+        | ResponseItem::Compaction { .. }
+        | ResponseItem::ConfigurationUpdate { .. }
+        | ResponseItem::CompactionTrigger { .. }
+        | ResponseItem::ContextCompaction { .. }
+        | ResponseItem::Other => {}
     }
 }
 
 fn normalize_image_detail(detail: &mut Option<ImageDetail>, model_info: &ModelInfo) {
+    *detail = normalized_image_detail(*detail, model_info);
+}
+
+fn normalized_image_detail(
+    detail: Option<ImageDetail>,
+    model_info: &ModelInfo,
+) -> Option<ImageDetail> {
     if model_info.use_responses_lite {
-        *detail = None;
-    } else if *detail == Some(ImageDetail::Original) && !model_info.supports_image_detail_original {
-        *detail = Some(DEFAULT_IMAGE_DETAIL);
+        None
+    } else if detail == Some(ImageDetail::Original) && !model_info.supports_image_detail_original {
+        Some(DEFAULT_IMAGE_DETAIL)
+    } else {
+        detail
     }
 }
 

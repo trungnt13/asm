@@ -618,9 +618,11 @@ pub(crate) async fn run_post_compact_hooks(
     }
 }
 
-pub(crate) fn legacy_notify_input_messages(input: &[ResponseItem]) -> Vec<String> {
+pub(crate) fn legacy_notify_input_messages<'a>(
+    input: impl IntoIterator<Item = &'a ResponseItem>,
+) -> Vec<String> {
     input
-        .iter()
+        .into_iter()
         .filter_map(|item| {
             let ResponseItem::Message { role, content, .. } = item else {
                 return None;
@@ -699,6 +701,7 @@ pub(crate) async fn run_legacy_after_agent_hook(
         misalignment: None,
         message,
         codex_error_info: Some(CodexErrorInfo::Other),
+        rejected_audio_file_ids: Vec::new(),
     });
     sess.send_event(turn_context, event).await;
     true

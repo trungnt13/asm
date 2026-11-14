@@ -389,7 +389,8 @@ fn build_message_tools(
         specs,
         ToolMode::Direct,
         Default::default(),
-        None,
+        /*exec_definitions*/ None,
+        /*tool_namespaces_info*/ None,
         &[],
     );
     Ok((router, tools))

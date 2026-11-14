@@ -112,7 +112,6 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
         &root,
         codex_home,
         &[
-            "--no-daemon",
             "--no-alt-screen",
             "-c",
             "features.worktrees=true",
@@ -128,14 +127,9 @@ async fn picker_side_worktree_fork_and_cd_run_on_the_production_stack() -> Resul
 
     // Starting and closing a side conversation both rebuild the displayed chat widget.
     // Repeat through the real event loop, whose dev-build frames share the production stack.
-    for (attempt, (command, title)) in [
-        ("/side", "Side"),
-        ("/side", "Side"),
-        ("/side", "Side"),
-        ("/parallel", "Parallel"),
-    ]
-    .into_iter()
-    .enumerate()
+    for (attempt, (command, title)) in [("/side", "Side"), ("/side", "Side"), ("/side", "Side")]
+        .into_iter()
+        .enumerate()
     {
         submit(&mut terminal, command)?;
         terminal.wait_for_screen(&format!("{title} from main thread"))?;

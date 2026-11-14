@@ -24,9 +24,6 @@ pub(super) fn server_request_thread_id(request: &ServerRequest) -> Option<Thread
         ServerRequest::DynamicToolCall { params, .. } => {
             ThreadId::from_string(&params.thread_id).ok()
         }
-        ServerRequest::CurrentTimeRead { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
-        }
         ServerRequest::ChatgptAuthTokensRefresh { .. }
         | ServerRequest::AttestationGenerate { .. }
         | ServerRequest::ApplyPatchApproval { .. }
@@ -270,6 +267,7 @@ mod tests {
             system1_error: None,
             system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
+            environments: None,
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: codex_app_server_protocol::AskForApproval::Never,
             approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::User,
@@ -338,6 +336,7 @@ mod tests {
         let thread_id = ThreadId::new();
         let notification =
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(thread_id.to_string()),
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,
@@ -354,6 +353,7 @@ mod tests {
     fn mcp_startup_notifications_without_threads_are_app_scoped() {
         let notification =
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: None,
                 name: "sentry".to_string(),
                 status: McpServerStartupState::Failed,

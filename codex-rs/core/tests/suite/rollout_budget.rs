@@ -265,6 +265,7 @@ async fn subagent_usage_draws_from_the_shared_budget(host_accounting: bool) -> R
     let spawn_args = json!({
         "message": CHILD_PROMPT,
         "task_name": "budget_worker",
+        "fork_turns": "all",
     })
     .to_string();
     mount_sse_once_match(
@@ -689,7 +690,10 @@ async fn host_accounting_reports_raw_usage_and_preserves_error_semantics(
     let test = test_codex()
         .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {
-            config.features.enable(Feature::InstantInterrupt).unwrap();
+            config
+                .features
+                .enable(Feature::InstantInterrupt)
+                .expect("enable instant interrupt");
             config.model_provider.stream_max_retries = Some(2);
             config.model_provider.request_max_retries = Some(0);
             config.rollout_budget = None;

@@ -2,7 +2,7 @@
 source: tui/src/app/tests/new_session_tests.rs
 expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))"
 ---
-  >_ OpenAI Codex (v0.0.0)
+  >_ ASM (v0.0.0)
      /tmp/project
 
 
@@ -10,7 +10,7 @@ expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))
   statsig  [Skill]
 
   enter insert · esc close
-
+                                                                           Main
 › $stat
 
-  GPT-5.6-Sol default · /tmp/project
+  sol56 def·/tmp/project

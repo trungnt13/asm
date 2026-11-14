@@ -152,6 +152,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     conversation_id: ThreadId,
     conversation: Arc<CodexThread>,
     thread_manager: Arc<ThreadManager>,
+    thread_store: Option<Arc<dyn codex_thread_store::ThreadStore>>,
     outgoing: ThreadScopedOutgoingMessageSender,
     thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     thread_watch_manager: ThreadWatchManager,
@@ -255,6 +256,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let notification = McpServerStatusUpdatedNotification {
                 thread_id: Some(conversation_id.to_string()),
                 name: update.server,
+                environment_id: update.environment_id,
                 status,
                 error,
                 failure_reason,
@@ -494,6 +496,12 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::RealtimeConversationRealtime(event) => match event.payload {
+            RealtimeEvent::HistoryItemStarted(item) | RealtimeEvent::HistoryItemCompleted(item)
+                if matches!(
+                    &item.content,
+                    codex_protocol::realtime::RealtimeItemContent::TurnInputAccepted { .. }
+                        | codex_protocol::realtime::RealtimeItemContent::SessionEndInputSaved { .. }
+                ) => {}
             RealtimeEvent::HistoryItemStarted(item) => {
                 outgoing
                     .send_server_notification(ServerNotification::ThreadRealtimeItemStarted(
@@ -688,6 +696,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             tokio::spawn(async move {
                 on_file_change_request_approval_response(
                     item_id,
+                    event.turn_id,
                     pending_request_id,
                     rx,
                     conversation,
@@ -969,6 +978,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 thread_id: conversation_id.to_string(),
                 turn_id,
                 server_name: request.server_name.clone(),
+                environment_id: request.environment_id.clone(),
                 request: request_body,
             };
             let (pending_request_id, rx) = outgoing
@@ -1161,6 +1171,19 @@ pub(crate) async fn apply_bespoke_event_handling(
                 outgoing.send_server_notification(notification).await;
             }
             if let Some(params) = dynamic_tool_call_params {
+                if crate::desktop_worktrees::handles(&params) {
+                    let outgoing = outgoing.clone();
+                    tokio::spawn(async move {
+                        crate::desktop_worktrees::execute(
+                            params,
+                            conversation,
+                            thread_store,
+                            outgoing,
+                        )
+                        .await;
+                    });
+                    return;
+                }
                 let call_id = params.call_id.clone();
                 let (_pending_request_id, rx) = outgoing
                     .send_request(ServerRequestPayload::DynamicToolCall(params))
@@ -2053,6 +2076,7 @@ fn map_file_change_approval_decision(decision: FileChangeApprovalDecision) -> Re
 #[allow(clippy::too_many_arguments)]
 async fn on_file_change_request_approval_response(
     item_id: String,
+    turn_id: String,
     pending_request_id: RequestId,
     receiver: oneshot::Receiver<ClientRequestResult>,
     codex: Arc<CodexThread>,
@@ -2081,13 +2105,17 @@ async fn on_file_change_request_approval_response(
         }
     };
 
-    if let Err(err) = codex
-        .submit(Op::PatchApproval {
+    let op = match decision {
+        ReviewDecision::Abort => Op::CancelPatchApproval {
+            id: item_id,
+            turn_id,
+        },
+        decision => Op::PatchApproval {
             id: item_id,
             decision,
-        })
-        .await
-    {
+        },
+    };
+    if let Err(err) = codex.submit(op).await {
         error!("failed to submit PatchApproval: {err}");
     }
 }
@@ -2428,6 +2456,7 @@ mod tests {
                 self.conversation_id,
                 self.conversation.clone(),
                 self.thread_manager.clone(),
+                /*thread_store*/ None,
                 self.outgoing.clone(),
                 self.thread_state.clone(),
                 self.thread_watch_manager.clone(),
@@ -3266,6 +3295,7 @@ mod tests {
             conversation_id,
             Arc::clone(&conversation),
             Arc::clone(&thread_manager),
+            /*thread_store*/ None,
             outgoing.clone(),
             Arc::clone(&thread_state),
             thread_watch_manager.clone(),
@@ -3307,6 +3337,7 @@ mod tests {
                 conversation_id,
                 Arc::clone(&conversation),
                 Arc::clone(&thread_manager),
+                /*thread_store*/ None,
                 outgoing.clone(),
                 Arc::clone(&thread_state),
                 thread_watch_manager.clone(),
@@ -3355,6 +3386,7 @@ mod tests {
                 conversation_id,
                 Arc::clone(&conversation),
                 Arc::clone(&thread_manager),
+                /*thread_store*/ None,
                 outgoing.clone(),
                 Arc::clone(&thread_state),
                 thread_watch_manager.clone(),
@@ -3394,6 +3426,7 @@ mod tests {
                 conversation_id,
                 Arc::clone(&conversation),
                 Arc::clone(&thread_manager),
+                /*thread_store*/ None,
                 outgoing.clone(),
                 Arc::clone(&thread_state),
                 thread_watch_manager.clone(),
@@ -3458,6 +3491,7 @@ mod tests {
             Event {
                 id: "turn-1".to_string(),
                 msg: EventMsg::ItemCompleted(ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id: conversation_id,
                     turn_id: "turn-1".to_string(),
                     item: CoreTurnItem::SubAgentActivity(SubAgentActivityItem {
@@ -3476,6 +3510,7 @@ mod tests {
             conversation_id,
             conversation,
             thread_manager,
+            /*thread_store*/ None,
             outgoing,
             new_thread_state(),
             thread_watch_manager.clone(),
@@ -3566,6 +3601,7 @@ mod tests {
             conversation_id,
             conversation,
             thread_manager,
+            /*thread_store*/ None,
             outgoing,
             new_thread_state(),
             ThreadWatchManager::new(),
@@ -3612,6 +3648,17 @@ mod tests {
             ThreadId::new(),
         );
         let thread_state = new_thread_state();
+        handle_error(
+            conversation_id,
+            TurnError {
+                misalignment: None,
+                message: "conversation is not running".to_string(),
+                codex_error_info: Some(V2CodexErrorInfo::Other),
+                additional_details: None,
+            },
+            &thread_state,
+        )
+        .await;
         let event = turn_complete_event(&event_turn_id);
         {
             let mut state = thread_state.lock().await;
@@ -3630,9 +3677,11 @@ mod tests {
             state.track_current_turn_event(
                 &event_turn_id,
                 &EventMsg::ItemCompleted(ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id: conversation_id,
                     turn_id: event_turn_id.clone(),
                     item: CoreTurnItem::AgentMessage(CoreAgentMessageItem {
+                        moderation: None,
                         id: "msg-1".to_string(),
                         content: vec![
                             CoreAgentMessageContent::Text {
@@ -3654,9 +3703,11 @@ mod tests {
             state.track_current_turn_event(
                 &event_turn_id,
                 &EventMsg::ItemCompleted(ItemCompletedEvent {
+                    content_token_count: None,
                     thread_id: conversation_id,
                     turn_id: event_turn_id.clone(),
                     item: CoreTurnItem::AgentMessage(CoreAgentMessageItem {
+                        moderation: None,
                         id: "msg-2".to_string(),
                         content: vec![CoreAgentMessageContent::Text {
                             text: "  ".to_string(),
@@ -3791,6 +3842,18 @@ mod tests {
         let conversation_id = ThreadId::new();
         let event_turn_id = "complete_err1".to_string();
         let thread_state = new_thread_state();
+        thread_state.lock().await.track_current_turn_event(
+            &event_turn_id,
+            &EventMsg::TurnStarted(codex_protocol::protocol::TurnStartedEvent {
+                turn_attribution: None,
+                turn_id: event_turn_id.clone(),
+                root_turn_id: None,
+                trace_id: None,
+                started_at: Some(42),
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            }),
+        );
         handle_error(
             conversation_id,
             TurnError {

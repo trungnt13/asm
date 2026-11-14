@@ -72,8 +72,11 @@ const SUPPORTED_EXPERIMENTAL_FEATURE_ENABLEMENT: &[&str] = &[
     "auth_elicitation",
     BACKGROUND_PAGINATED_ROLLOUT_MIGRATION_FEATURE,
     "codex_apps_mcp_2026_07_28",
+    "daybreak_program_propagation",
     "mcp_2026_07_28",
     "mcp_connection_sharing",
+    "mcp_lazy_stdio_startup",
+    "mcp_shared_repl_cwd",
     "memories",
     "mentions_v2",
     "remote_control",
@@ -238,6 +241,25 @@ impl ConfigRequestProcessor {
         Ok(response)
     }
 
+    pub(crate) fn model_provider_default_set(
+        &self,
+        params: codex_app_server_protocol::ModelProviderDefaultSetParams,
+    ) -> futures::future::BoxFuture<'_, Result<ClientResponsePayload, JSONRPCErrorError>> {
+        // Keep provider config resolution off the shared request dispatcher stack.
+        Box::pin(async move {
+            let result = self
+                .config_manager
+                .model_provider_default_set(params)
+                .await
+                .map_err(map_error);
+            let response = self.handle_config_mutation_result(result).await?;
+            if response.status == codex_app_server_protocol::WriteStatus::Ok {
+                self.model_catalog.invalidate().await;
+            }
+            Ok(ClientResponsePayload::ModelProviderDefaultSet(response))
+        })
+    }
+
     pub(crate) async fn model_provider_capabilities_read(
         &self,
     ) -> Result<ModelProviderCapabilitiesReadResponse, JSONRPCErrorError> {
@@ -357,16 +379,9 @@ impl ConfigRequestProcessor {
             .map_err(|_| internal_error("failed to update feature enablement"))?;
 
         let config = self.load_latest_config(/*fallback_cwd*/ None).await?;
-        self.thread_manager
-            .get_models_manager()
-            .set_api_key_model_discovery_enabled(
-                config.features.enabled(Feature::ApiKeyModelDiscovery),
-            );
-        self.model_catalog
-            .set_api_key_model_discovery_enabled(
-                config.features.enabled(Feature::ApiKeyModelDiscovery),
-            )
-            .await;
+        self.thread_manager.set_api_key_model_discovery_enabled(
+            config.features.enabled(Feature::ApiKeyModelDiscovery),
+        );
         if should_start_background_rollout_migration && config.features.enabled(feature) {
             self.thread_manager.start_background_rollout_migration();
         }

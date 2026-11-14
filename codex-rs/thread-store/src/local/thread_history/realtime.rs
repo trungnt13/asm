@@ -97,6 +97,7 @@ pub(in crate::local) async fn list_timeline(
             .map(|value| sqlite_integer(value, "rollout ordinal"))
             .transpose()?
             .unwrap_or(i64::MAX);
+        store.ensure_history_projection(segment).await?;
         let segment_rows = sqlx::query_as::<
             _,
             (
@@ -130,6 +131,7 @@ ORDER BY rollout_ordinal DESC, item_id DESC LIMIT ?7
 SELECT rollout_ordinal, 2 AS kind, item_id AS id, NULL AS turn_id, item_json
 FROM thread_realtime_items
 WHERE thread_id = ?1 AND rollout_ordinal >= ?2
+  AND item_type NOT IN ('turn_input_accepted', 'session_end_input_saved')
   AND rollout_ordinal < ?3 AND rollout_ordinal <= ?4
   AND (rollout_ordinal, 2, item_id) < (?4, ?5, ?6)
 ORDER BY rollout_ordinal DESC, item_id DESC LIMIT ?7
@@ -223,6 +225,7 @@ LIMIT ?7
         if upper < segment.start_ordinal() {
             continue;
         }
+        store.ensure_history_projection(segment).await?;
         let boundary = sqlx::query_as::<_, (String, String)>(
             r#"
 SELECT item_type, json_extract(item_json, '$.realtime_session_id')

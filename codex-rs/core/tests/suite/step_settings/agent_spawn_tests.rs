@@ -19,21 +19,14 @@ enum EnvironmentInheritanceCase {
     Pending,
 }
 
-#[test_case(false, None, EnvironmentInheritanceCase::Configured; "v1 inherits captured settings")]
-#[test_case(true, None, EnvironmentInheritanceCase::Configured; "v2 inherits captured settings")]
-#[test_case(false, Some(ReasoningEffort::Medium), EnvironmentInheritanceCase::Configured; "v1 validates effort against captured model")]
-#[test_case(true, Some(ReasoningEffort::Medium), EnvironmentInheritanceCase::Configured; "v2 validates effort against captured model")]
-#[test_case(false, None, EnvironmentInheritanceCase::Empty; "v1 excludes turn-only attachments")]
-#[test_case(true, None, EnvironmentInheritanceCase::Empty; "v2 excludes turn-only attachments")]
-#[test_case(false, None, EnvironmentInheritanceCase::Fork; "v1 fork inherits configured attachments")]
-#[test_case(true, None, EnvironmentInheritanceCase::Fork; "v2 fork inherits configured attachments")]
-#[test_case(false, None, EnvironmentInheritanceCase::Pending; "v1 retains replaced pending attachment")]
-#[test_case(true, None, EnvironmentInheritanceCase::Pending; "v2 retains replaced pending attachment")]
-#[test_case(false, None, EnvironmentInheritanceCase::Legacy; "v1 retains turn attachments before rollout")]
-#[test_case(true, None, EnvironmentInheritanceCase::Legacy; "v2 retains turn attachments before rollout")]
+#[test_case(None, EnvironmentInheritanceCase::Configured; "v2 inherits captured settings")]
+#[test_case(Some(ReasoningEffort::Medium), EnvironmentInheritanceCase::Configured; "v2 validates effort against captured model")]
+#[test_case(None, EnvironmentInheritanceCase::Empty; "v2 excludes turn-only attachments")]
+#[test_case(None, EnvironmentInheritanceCase::Fork; "v2 fork inherits configured attachments")]
+#[test_case(None, EnvironmentInheritanceCase::Pending; "v2 retains replaced pending attachment")]
+#[test_case(None, EnvironmentInheritanceCase::Legacy; "v2 retains turn attachments before rollout")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spawn_inherits_captured_settings_after_a_turn_update(
-    multi_agent_v2: bool,
     requested_effort: Option<ReasoningEffort>,
     inheritance: EnvironmentInheritanceCase,
 ) -> Result<()> {
@@ -41,20 +34,14 @@ async fn spawn_inherits_captured_settings_after_a_turn_update(
 
     let server = start_mock_server().await;
     let mut spawn_arguments = json!({ "message": "Complete the delegated task." });
-    let namespace = if multi_agent_v2 {
-        spawn_arguments["task_name"] = json!("worker");
-        spawn_arguments["fork_turns"] =
-            json!(if matches!(inheritance, EnvironmentInheritanceCase::Fork) {
-                "all"
-            } else {
-                "none"
-            });
-        "collaboration"
-    } else {
-        spawn_arguments["fork_context"] =
-            json!(matches!(inheritance, EnvironmentInheritanceCase::Fork));
-        "multi_agent_v1"
-    };
+    spawn_arguments["task_name"] = json!("worker");
+    spawn_arguments["fork_turns"] =
+        json!(if matches!(inheritance, EnvironmentInheritanceCase::Fork) {
+            "all"
+        } else {
+            "none"
+        });
+    let namespace = "collaboration";
     if let Some(effort) = &requested_effort {
         spawn_arguments["reasoning_effort"] = json!(effort);
     }
@@ -95,17 +82,10 @@ async fn spawn_inherits_captured_settings_after_a_turn_update(
                 .features
                 .enable(Feature::Collab)
                 .expect("enable collab");
-            if multi_agent_v2 {
-                config
-                    .features
-                    .enable(Feature::MultiAgentV2)
-                    .expect("enable V2");
-            } else {
-                config
-                    .features
-                    .disable(Feature::MultiAgentV2)
-                    .expect("disable V2");
-            }
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2");
             for model in &mut config.model_catalog.as_mut().expect("model catalog").models {
                 // An effort-only override must be validated against B, not the turn's initial A.
                 model.supported_reasoning_levels = if model.slug == MODEL_B {

@@ -10,11 +10,13 @@ use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnModerationMetadataEvent;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::turn_input::CyberAccessProgram;
+use codex_protocol::turn_input::PromptCacheTtl;
 use futures::Stream;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use serde_json::value::RawValue;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -77,6 +79,40 @@ pub struct MemorySummarizeOutput {
 #[derive(Clone, Debug)]
 pub struct ResponseId(pub String);
 
+/// A bounded reason for removing a replayed reasoning item from model input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReasoningRemovalReason {
+    OrganizationMismatch,
+    EndUserMismatch,
+    ModelMismatch,
+    PrefixMismatch,
+    TurnBoundary,
+    Other,
+}
+
+impl ReasoningRemovalReason {
+    /// Every metric category, including unrecognized API reasons.
+    pub const ALL: [Self; 6] = [
+        Self::OrganizationMismatch,
+        Self::EndUserMismatch,
+        Self::ModelMismatch,
+        Self::PrefixMismatch,
+        Self::TurnBoundary,
+        Self::Other,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OrganizationMismatch => "organization_mismatch",
+            Self::EndUserMismatch => "end_user_mismatch",
+            Self::ModelMismatch => "model_mismatch",
+            Self::PrefixMismatch => "prefix_mismatch",
+            Self::TurnBoundary => "turn_boundary",
+            Self::Other => "other",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ResponseEvent {
     Created {
@@ -105,6 +141,11 @@ pub enum ResponseEvent {
         usage_metadata: Option<ResponseUsageMetadata>,
         /// Elapsed milliseconds for a successful transport attempt through completion.
         request_duration_ms: Option<i64>,
+        /// Elapsed milliseconds from the first nonempty text or tool-argument delta through completion.
+        generation_duration_ms: Option<i64>,
+        /// Reported reasoning removals by bounded reason. Missing or non-array
+        /// reports are unavailable; an empty map means no removals were reported.
+        reasoning_removals: Option<BTreeMap<ReasoningRemovalReason, i64>>,
         /// Did the model affirmatively end its turn? Some providers do not set this,
         /// so we rely on fallback logic when this is `None`.
         end_turn: Option<bool>,
@@ -279,6 +320,11 @@ impl Serialize for ResponsesApiTools {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct PromptCacheOptions {
+    pub ttl: PromptCacheTtl,
+}
+
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct ResponsesApiRequest {
     // Keep routing fields first: serde serializes struct fields in declaration order, and
@@ -287,7 +333,8 @@ pub struct ResponsesApiRequest {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
-    pub input: Vec<ResponseItem>,
+    /// Request copies share items until an edit needs an owned copy.
+    pub input: Vec<Arc<ResponseItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<ResponsesApiTools>,
     pub tool_choice: String,
@@ -299,6 +346,8 @@ pub struct ResponsesApiRequest {
     pub include: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_options: Option<PromptCacheOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<TextControls>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -323,6 +372,7 @@ impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
             include: &request.include,
             service_tier: request.service_tier.as_deref(),
             prompt_cache_key: request.prompt_cache_key.as_deref(),
+            prompt_cache_options: request.prompt_cache_options,
             text: request.text.as_ref(),
             generate: None,
             client_metadata: request.client_metadata.clone(),
@@ -341,7 +391,7 @@ pub struct ResponseCreateWsRequest<'a> {
     pub service_tier: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<String>,
-    pub input: &'a [ResponseItem],
+    pub input: &'a [Arc<ResponseItem>],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<&'a RawValue>,
     pub tool_choice: &'a str,
@@ -353,6 +403,8 @@ pub struct ResponseCreateWsRequest<'a> {
     pub include: &'a [String],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_options: Option<PromptCacheOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<&'a TextControls>,
     #[serde(skip_serializing_if = "Option::is_none")]

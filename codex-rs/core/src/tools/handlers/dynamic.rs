@@ -172,7 +172,7 @@ impl DynamicToolHandler {
                 Some(response) => response,
                 None if !cancellation_token.is_cancelled() => {
                     return Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                        super::tui_wait::interrupted(reason).to_string(),
+                        super::tui_wait::interrupted(reason, "codex_tui.wait_threads").to_string(),
                         /*success*/ Some(true),
                     )));
                 }

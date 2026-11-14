@@ -4,10 +4,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 ---
 owned=false
 startup:
+     /tmp/project
 
 
 › draft during startup
-
 
 attached:
 
@@ -19,11 +19,12 @@ attached:
 owned=true
 startup:
 
+
+
 › draft during startup
 
-
-
 attached:
+
 
 › draft during startup
 

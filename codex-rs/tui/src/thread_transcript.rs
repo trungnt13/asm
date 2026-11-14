@@ -8,9 +8,9 @@ use crate::app_server_session::AppServerSession;
 use crate::app_server_session::HistoryHydrationScope;
 use crate::git_action_directives::parse_assistant_markdown;
 use crate::history_cell::AgentMarkdownCell;
+use crate::history_cell::DelegatedMessageCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::PlainHistoryCell;
-use crate::history_cell::PrefixedWrappedHistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::split_reasoning_summary_parts;
 use crate::inline_visualization::InlineVisualizationContext;
@@ -81,7 +81,7 @@ pub(crate) async fn load_session_transcript(
             /*item_cursor*/ None,
             /*config*/ None,
             /*local_settings*/ None,
-            HistoryHydrationScope::Complete,
+            HistoryHydrationScope::FullTranscript,
         )
         .await
         .map_err(std::io::Error::other)?;
@@ -311,6 +311,7 @@ fn item_to_cells(
                     },
                 ));
             }
+            let legacy_answer = phase.is_none();
             let parsed = parse_assistant_markdown(&text, cwd.as_path());
             if !parsed.visible_markdown.trim().is_empty() {
                 cells.push(Arc::new(
@@ -319,10 +320,11 @@ fn item_to_cells(
                         cwd.as_path(),
                         inline_visualization_context,
                     )
+                    .with_phase(phase)
                     .with_questions(questions.as_deref().unwrap_or_default()),
                 ));
             }
-            if phase.is_none() {
+            if legacy_answer {
                 cells.push(Arc::new(
                     crate::history_cell::TurnActivityBoundary::LegacyAnswer { turn_id: None },
                 ));
@@ -341,10 +343,9 @@ fn item_to_cells(
                     &output,
                 )
             {
-                cells.push(Arc::new(PrefixedWrappedHistoryCell::new(
-                    format!("Sent by Codex from task {source_thread_id}\n{prompt}"),
-                    "• ".dim(),
-                    "  ",
+                cells.push(Arc::new(DelegatedMessageCell::new(
+                    &source_thread_id,
+                    prompt,
                 )));
             }
         }

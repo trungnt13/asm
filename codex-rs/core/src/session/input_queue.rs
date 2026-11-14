@@ -7,11 +7,11 @@ use codex_diagnostics::GaugeGuard;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::turn_input::TurnStartOptions;
 use codex_protocol::user_input::UserInput;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,13 +20,18 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
 /// Host capture metadata belonging to one input, including steers within another turn.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserInputMetadata {
+    /// Private extension data carried with this queued input through completion.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extension_data: BTreeMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_order: Option<u64>,
     /// Optional host-assigned UUID for this particular Responses user item.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_item_uuid: Option<uuid::Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_dictation: Option<bool>,
     #[serde(
         default,
         skip_serializing_if = "codex_history::UserInputOrigin::is_user"
@@ -202,38 +207,6 @@ impl InputQueue {
         (activity_rx, pending_activity)
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub(crate) async fn deliver_mailbox_communication_to_current_turn(
-        &self,
-        active_turn: &Mutex<Option<ActiveTurn>>,
-        communication: InterAgentCommunication,
-        expected_turn_id: Option<&str>,
-    ) -> bool {
-        let active = active_turn.lock().await;
-        let Some(active_turn) = active.as_ref().filter(|turn| {
-            turn.task.as_ref().is_some_and(|task| {
-                expected_turn_id.is_none_or(|id| {
-                    task.turn_context.sub_id == id && !task.cancellation_token.is_cancelled()
-                })
-            })
-        }) else {
-            return false;
-        };
-        let mut turn_state = active_turn.turn_state.lock().await;
-        if !turn_state.accepts_mailbox_delivery_for_current_turn() {
-            return false;
-        }
-        turn_state
-            .pending_input
-            .items
-            .push(TurnInput::InterAgentCommunication(communication.into()));
-        self.activity_tx.send_replace(InputQueueActivity::Mailbox);
-        true
-    }
-
     pub(crate) async fn enqueue_mailbox_communication(
         &self,
         communication: crate::PendingAgentMessage,
@@ -331,15 +304,25 @@ impl InputQueue {
         items
     }
 
-    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
-        let pending_mails = self.drain_mailbox().await;
+    pub(crate) async fn pending_wake_options(&self) -> Option<TurnStartOptions> {
+        let mut mails = self.mailbox_pending_mails.lock().await;
+        self.read_mailbox(&mut mails);
+        let mut options = Self::trigger_turn_options(&mails)?;
+        if let Some(mail) = mails.iter().find(|mail| mail.communication.trigger_turn) {
+            options.initiating_agent_path = Some(mail.communication.author.clone());
+        }
+        Some(options)
+    }
+
+    fn trigger_turn_options(
+        pending_mails: &VecDeque<PendingMailboxCommunication>,
+    ) -> Option<TurnStartOptions> {
         // A later follow-up supersedes the earlier choice, including an omitted choice.
         let mut start_options = pending_mails
             .iter()
             .rev()
             .find(|mail| mail.communication.trigger_turn)
-            .map(|mail| mail.start_options.clone())
-            .unwrap_or_default();
+            .map(|mail| mail.start_options.clone())?;
         start_options.parent_turn_id = pending_mails
             .iter()
             .filter(|mail| mail.communication.trigger_turn)
@@ -358,8 +341,15 @@ impl InputQueue {
                     .filter(|id| !id.trim().is_empty())
             })
             .map(str::to_string);
+        Some(start_options)
+    }
+
+    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
+        let mut pending_mails = self.mailbox_pending_mails.lock().await;
+        self.read_mailbox(&mut pending_mails);
+        let start_options = Self::trigger_turn_options(&pending_mails).unwrap_or_default();
         let items = pending_mails
-            .into_iter()
+            .drain(..)
             .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
             .collect();
         (items, start_options)
@@ -405,12 +395,34 @@ impl InputQueue {
 
     /// Clear any pending waiters and input buffered for the current turn.
     pub(crate) async fn clear_pending(&self, active_turn: &ActiveTurn) {
-        let mut turn_state = active_turn.turn_state.lock().await;
-        turn_state.clear_pending_waiters();
         // Pending mail can own extension attachments whose destructors need the lock released.
-        let pending_input = std::mem::take(&mut turn_state.pending_input);
-        drop(turn_state);
-        drop(pending_input);
+        let pending_input = {
+            let mut turn_state = active_turn.turn_state.lock().await;
+            turn_state.clear_pending_waiters();
+            std::mem::take(&mut turn_state.pending_input)
+        };
+        // A terminal result still in the queue has no writer yet. Keep it available
+        // to the next turn or to the source writer during a graceful drain.
+        let results: Vec<_> = pending_input
+            .items
+            .into_iter()
+            .filter_map(|input| match input {
+                TurnInput::InterAgentCommunication(message) if message.is_terminal_result() => {
+                    Some(message)
+                }
+                _ => None,
+            })
+            .collect();
+        if !results.is_empty() {
+            let mut pending = self.mailbox_pending_mails.lock().await;
+            for communication in results.into_iter().rev() {
+                pending.push_front(PendingMailboxCommunication {
+                    communication,
+                    start_options: TurnStartOptions::default(),
+                    _diagnostics_guard: PENDING_MAILBOX_MESSAGES.track(),
+                });
+            }
+        }
     }
 
     pub(crate) async fn defer_mailbox_delivery_to_next_turn(
@@ -589,8 +601,21 @@ mod tests {
     use super::*;
     use codex_history::CodexHarnessMetadata;
     use codex_protocol::AgentPath;
+    use codex_protocol::protocol::InterAgentCommunication;
     use codex_protocol::user_input::UserInput;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn user_input_extension_data_round_trips_without_changing_legacy_input() {
+        let legacy = serde_json::json!({"UserInput": {"content": [], "client_id": "m"}});
+        let input: TurnInput = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(serde_json::to_value(input).unwrap(), legacy);
+
+        let mut annotated = legacy;
+        annotated["UserInput"]["extension_data"] = serde_json::json!({"example": ["private"]});
+        let input: TurnInput = serde_json::from_value(annotated.clone()).unwrap();
+        assert_eq!(serde_json::to_value(input).unwrap(), annotated);
+    }
 
     #[test_case::test_case("ResponseItem", TurnInput::ResponseItem)]
     #[test_case::test_case("FunctionCallOutput", TurnInput::FunctionCallOutput)]

@@ -6,6 +6,7 @@ use crate::context::NodeReplReviewEvidence;
 use crate::context::NodeReplReviewEvidenceMode;
 use crate::context::node_repl_review_evidence_mode;
 use crate::function_tool::FunctionCallError;
+use crate::image_preparation::prompt_image_decoder;
 use crate::mcp_tool_call::handle_mcp_tool_call;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::session::session::Session;
@@ -25,6 +26,7 @@ use crate::tools::registry::PreToolUsePayload;
 use crate::tools::registry::ToolExecutor;
 use crate::tools::registry::ToolTelemetryTags;
 use codex_extension_api::McpToolContext;
+use codex_mcp::McpServerExposure;
 use codex_mcp::ToolInfo;
 use codex_protocol::mcp::is_node_repl_backed_connector;
 use codex_protocol::user_input::UserInput;
@@ -51,6 +53,7 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
 /// Immutable tool metadata and normalized schema, shared only within an MCP manager.
 pub(crate) struct McpHandlerDefinition {
+    exposure: McpServerExposure,
     tool_info: ToolInfo,
     agent_plugin: bool,
     schema_max_bytes: Option<usize>,
@@ -62,6 +65,7 @@ impl McpHandlerDefinition {
         tool_info: ToolInfo,
         agent_plugin: bool,
         schema_max_bytes: Option<usize>,
+        exposure: McpServerExposure,
     ) -> Result<Self, serde_json::Error> {
         let spec = Arc::new(create_tool_spec(
             &tool_info,
@@ -69,6 +73,7 @@ impl McpHandlerDefinition {
             schema_max_bytes,
         )?);
         Ok(Self {
+            exposure,
             tool_info,
             agent_plugin,
             schema_max_bytes,
@@ -81,15 +86,17 @@ impl McpHandlerDefinition {
         tool_info: &ToolInfo,
         agent_plugin: bool,
         schema_max_bytes: Option<usize>,
+        exposure: McpServerExposure,
     ) -> bool {
         self.tool_info == *tool_info
+            && self.exposure == exposure
             && self.agent_plugin == agent_plugin
             && self.schema_max_bytes == schema_max_bytes
     }
 }
 
 pub struct McpHandler {
-    definition: Arc<McpHandlerDefinition>,
+    pub(crate) definition: Arc<McpHandlerDefinition>,
     code_mode_tool_definitions: OnceLock<(Option<usize>, Vec<codex_code_mode::ToolDefinition>)>,
 }
 
@@ -116,6 +123,7 @@ impl McpHandler {
             tool_info,
             agent_plugin,
             schema_max_bytes,
+            McpServerExposure::EnvironmentQualified,
         )?)))
     }
 }
@@ -137,7 +145,12 @@ impl McpHandler {
     }
 
     fn hook_tool_name(&self) -> HookToolName {
-        HookToolName::new(ensure_mcp_prefix(&join_tool_name(&self.tool_name())))
+        Self::hook_tool_name_for(self.tool_info())
+    }
+
+    pub(crate) fn hook_tool_name_for(tool_info: &ToolInfo) -> HookToolName {
+        let name = tool_info.canonical_tool_name();
+        HookToolName::new(ensure_mcp_prefix(&join_tool_name(&name)))
     }
 }
 
@@ -191,7 +204,17 @@ impl ToolExecutor<ToolInvocation> for McpHandler {
             .as_deref()
             .map(str::trim)
             .filter(|connector_name| !connector_name.is_empty())
-            .unwrap_or_else(|| self.definition.tool_info.server_name.trim());
+            .unwrap_or_else(|| self.definition.tool_info.server_name().trim());
+        let source_name = if self
+            .definition
+            .exposure
+            .environment_id(self.definition.tool_info.server_key())
+            .is_some()
+        {
+            self.definition.tool_info.callable_namespace.as_str()
+        } else {
+            source_name
+        };
         let source_info = (!source_name.is_empty()).then(|| ToolSearchSourceInfo {
             name: source_name.to_string(),
             description: effective_namespace_description(
@@ -227,16 +250,15 @@ impl McpHandler {
             .session
             .prepare_mcp_call(&self.definition.tool_info)
             .await;
+        let prepared = prepared_mcp_call.as_ref().ok();
         // Use the executed call's binding; a later catalog refresh must not change eligibility.
         let result_metadata_capture_allowed = invocation
             .session
             .services
             .analytics_events_client
             .is_enabled()
-            && prepared_mcp_call
-                .as_ref()
-                .is_some_and(codex_mcp::PreparedMcpCall::is_host_owned_apps);
-        let mcp_tool = prepared_mcp_call.as_ref().map(|call| {
+            && prepared.is_some_and(codex_mcp::PreparedMcpCall::is_host_owned_apps);
+        let mcp_tool = prepared.map(|call| {
             McpToolContext::from_prepared_call(
                 call,
                 invocation
@@ -271,12 +293,11 @@ impl McpHandler {
         };
 
         // Capture presentation policy from the same config snapshot used for execution.
-        let truncation_policy = prepared_mcp_call
-            .as_ref()
+        let truncation_policy = prepared
             .and_then(codex_mcp::PreparedMcpCall::output_token_limit)
             .map(TruncationPolicy::Tokens)
             .unwrap_or(step_context.settings.model_info.truncation_policy.into());
-        let owned_wait = self.definition.tool_info.server_name == "codex_tui"
+        let owned_wait = self.definition.tool_info.server_name() == "codex_tui"
             && self.definition.tool_info.tool.name == "wait_threads"
             && self
                 .definition
@@ -314,6 +335,11 @@ impl McpHandler {
             payload,
         ));
         let result = if let Some(reason) = &reason {
+            let wait_tool = format!(
+                "{}.{}",
+                self.definition.tool_info.callable_namespace,
+                self.definition.tool_info.callable_name
+            );
             match super::tui_wait::observe(
                 result,
                 step_context.preempt.as_ref(),
@@ -321,12 +347,29 @@ impl McpHandler {
             )
             .await
             {
-                Some(result) => result,
+                Some(mut result) => {
+                    for content in &mut result.result.content {
+                        if let Some(text) = content
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            && let Ok(mut value) = serde_json::from_str::<Value>(&text)
+                            && value.get("timedOut").is_some()
+                            && value.get("polls").is_some()
+                        {
+                            value["message"] = serde_json::json!(
+                                reason.reminder(&wait_tool, codex_tools::WaitReminder::Returned)
+                            );
+                            content["text"] = Value::String(value.to_string());
+                        }
+                    }
+                    result
+                }
                 None if !cancellation_token.is_cancelled() => {
                     crate::mcp_tool_call::HandledMcpToolCall {
                         result: codex_protocol::mcp::CallToolResult {
                             content: vec![
-                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason).to_string()}),
+                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &wait_tool).to_string()}),
                             ],
                             structured_content: None,
                             is_error: Some(false),
@@ -363,13 +406,13 @@ impl CoreToolRuntime for McpHandler {
         &self,
         invocation: &ToolInvocation,
     ) -> Result<ToolEnvironments, FunctionCallError> {
-        let server = &self.tool_info().server_name;
+        let server = self.tool_info().server_name();
         Ok(ToolEnvironments::Mcp {
-            server: Some(server.clone()),
+            server: Some(server.to_owned()),
             owner: invocation
                 .step_context
                 .mcp
-                .server_environment_id(server)
+                .server_environment_id(self.tool_info().server_key())
                 .map(str::to_owned),
         })
     }
@@ -399,7 +442,7 @@ impl CoreToolRuntime for McpHandler {
     fn wait_until_ready<'a>(&'a self, session: &'a Arc<Session>) -> Option<BoxFuture<'a, ()>> {
         Some(Box::pin(async move {
             session
-                .wait_for_mcp_server(&self.definition.tool_info.server_name)
+                .wait_for_mcp_server(self.definition.tool_info.server_key())
                 .await;
         }))
     }
@@ -408,8 +451,8 @@ impl CoreToolRuntime for McpHandler {
         true
     }
 
-    fn mcp_server_name(&self) -> Option<&str> {
-        Some(&self.definition.tool_info.server_name)
+    fn mcp_tool_info(&self) -> Option<&ToolInfo> {
+        Some(self.tool_info())
     }
 
     fn on_tool_result_accepted(&self, invocation: &ToolInvocation, result: &dyn ToolOutput) {
@@ -429,7 +472,7 @@ impl CoreToolRuntime for McpHandler {
             .get::<NodeReplReviewEvidence>()
             .is_some_and(|evidence| evidence.image_capture_enabled());
         if !is_node_repl_backed_connector(
-            &self.definition.tool_info.server_name,
+            self.definition.tool_info.server_name(),
             self.definition.tool_info.connector_id.as_deref(),
         ) || !result.success_for_logging()
             || evidence_mode == NodeReplReviewEvidenceMode::Disabled && !image_capture_enabled
@@ -447,6 +490,7 @@ impl CoreToolRuntime for McpHandler {
                 .and_then(Value::as_bool)
                 == Some(true)
         };
+        let decoder = prompt_image_decoder(&invocation.turn.config.features);
         let mut captured_image_bytes = 0_usize;
         let mut items = content
             .iter()
@@ -490,8 +534,12 @@ impl CoreToolRuntime for McpHandler {
                             .and_then(|detail| serde_json::from_value(detail.clone()).ok());
                         let image_url =
                             format!("data:{};base64,{payload}", mime_type.to_ascii_lowercase());
-                        load_data_url_for_prompt_uncached(&image_url, PromptImageMode::Original)
-                            .ok()?;
+                        load_data_url_for_prompt_uncached(
+                            &image_url,
+                            PromptImageMode::Original,
+                            decoder,
+                        )
+                        .ok()?;
                         captured_image_bytes = next_image_bytes;
                         Some(UserInput::Image {
                             image: codex_protocol::models::ImageReference::Inline { image_url },
@@ -526,7 +574,8 @@ impl CoreToolRuntime for McpHandler {
             .record(
                 &format!(
                     "{}.{}",
-                    self.definition.tool_info.server_name, self.definition.tool_info.tool.name
+                    self.definition.tool_info.server_name(),
+                    self.definition.tool_info.tool.name
                 ),
                 cell_id,
                 &invocation.call_id,
@@ -535,7 +584,10 @@ impl CoreToolRuntime for McpHandler {
     }
 
     fn telemetry_tags(&self, _invocation: &ToolInvocation) -> ToolTelemetryTags {
-        let mut tags = vec![("mcp_server", self.definition.tool_info.server_name.clone())];
+        let mut tags = vec![(
+            "mcp_server",
+            self.definition.tool_info.server_name().to_owned(),
+        )];
         if let Some(origin) = &self.definition.tool_info.server_origin {
             tags.push(("mcp_server_origin", origin.clone()));
         }
@@ -663,7 +715,7 @@ fn build_mcp_search_text(info: &ToolInfo, agent_plugin: bool) -> String {
         flat_tool_name(&tool_name).into_owned(),
         info.callable_name.clone(),
         info.tool.name.to_string(),
-        info.server_name.clone(),
+        info.server_name().to_owned(),
     ];
     if let Some(title) = info.tool.title.as_deref().map(str::trim)
         && !title.is_empty()
@@ -1004,7 +1056,7 @@ mod tests {
 
     fn tool_info(server_name: &str, callable_namespace: &str, tool_name: &str) -> ToolInfo {
         ToolInfo {
-            server_name: server_name.to_string(),
+            server_key: codex_mcp::McpServerKey::unscoped(server_name),
             supports_parallel_tool_calls: false,
             server_origin: None,
             callable_name: tool_name.to_string(),

@@ -43,7 +43,9 @@ async fn responses_api_parent_and_subagent_requests_include_identity_headers_and
 
     let server = start_mock_server().await;
 
-    let spawn_args = serde_json::to_string(&json!({ "message": CHILD_PROMPT }))?;
+    let spawn_args = serde_json::to_string(
+        &json!({ "message": CHILD_PROMPT, "task_name": "worker", "fork_turns": "none" }),
+    )?;
     let parent_mock = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| {
@@ -54,7 +56,7 @@ async fn responses_api_parent_and_subagent_requests_include_identity_headers_and
             ev_response_created("resp-parent-1"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                "multi_agent_v1",
+                "collaboration",
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -91,6 +93,10 @@ async fn responses_api_parent_and_subagent_requests_include_identity_headers_and
     .await;
 
     let mut builder = test_codex().with_config(|config| {
+        config
+            .features
+            .enable(Feature::MultiAgentV2)
+            .expect("enable V2");
         config
             .features
             .disable(Feature::EnableRequestCompression)

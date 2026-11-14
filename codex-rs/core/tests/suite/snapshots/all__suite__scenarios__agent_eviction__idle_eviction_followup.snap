@@ -6,8 +6,8 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=b9c63f6bbc35452c):
-        - namespace/functions; hash=ed4c53cad82986b1
+00:additional_tools/developer (2; hash=26eea8e186e27c30):
+        - namespace/functions; hash=96bee3ec56b62113
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -39,7 +39,7 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
     There are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 04:message/developer:
     <MULTI_AGENT_MODE>
 05:message/user:
@@ -65,8 +65,8 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=b9c63f6bbc35452c):
-        - namespace/functions; hash=ed4c53cad82986b1
+00:additional_tools/developer (2; hash=26eea8e186e27c30):
+        - namespace/functions; hash=96bee3ec56b62113
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -98,7 +98,7 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
     There are 2 available concurrency slots, meaning that up to 2 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d...uctions; when doing so, set `fork_turns` to `"none"`. [hash=18ccf7e93ecabab9]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins...uctions; when doing so, set `fork_turns` to `"none"`. [hash=5cda6d682a534f4a]
 04:message/developer:
     <MULTI_AGENT_MODE>
 05:message/user:

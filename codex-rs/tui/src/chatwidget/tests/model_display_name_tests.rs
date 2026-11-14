@@ -151,6 +151,9 @@ async fn compact_status_line_labels_preserve_model_and_title() {
         preset.model = model.to_string();
         preset.display_name = display_name.to_string();
         chat.model_catalog = Arc::new(ModelCatalog::new(vec![preset]));
+        chat.set_service_tier(Some(
+            codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE.into(),
+        ));
         chat.show_welcome_banner = false;
         chat.local_settings.tui.status_line = Some(vec![
             "model".into(),
@@ -192,7 +195,6 @@ async fn compact_status_line_labels_preserve_model_and_title() {
             .expect("status preview");
         assert_eq!(
             preview
-                .into_hyperlink_line()
                 .line
                 .spans
                 .iter()
@@ -221,7 +223,6 @@ async fn compact_status_line_labels_preserve_model_and_title() {
             /*use_theme_colors*/ false,
         )
         .expect("placeholder preview")
-        .into_hyperlink_line()
         .line
         .to_string();
     assert_eq!(placeholders, "cod52·med·cod52 med");

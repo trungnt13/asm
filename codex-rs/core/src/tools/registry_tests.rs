@@ -537,7 +537,6 @@ async fn spawn_agent_function_tools_use_agent_matcher_alias() {
     let hook_payloads = [
         codex_tools::ToolName::plain("spawn_agent"),
         codex_tools::ToolName::namespaced(DEFAULT_FUNCTION_NAMESPACE, "spawn_agent"),
-        codex_tools::ToolName::namespaced(MULTI_AGENT_V1_NAMESPACE, "spawn_agent"),
     ]
     .into_iter()
     .map(|tool_name| {
@@ -557,10 +556,6 @@ async fn spawn_agent_function_tools_use_agent_matcher_alias() {
     assert_eq!(
         hook_payloads,
         vec![
-            Some(PreToolUsePayload {
-                tool_name: HookToolName::spawn_agent(),
-                tool_input: serde_json::json!({ "message": "inspect this repo" }),
-            }),
             Some(PreToolUsePayload {
                 tool_name: HookToolName::spawn_agent(),
                 tool_input: serde_json::json!({ "message": "inspect this repo" }),
@@ -642,7 +637,7 @@ fn post_tool_use_feedback_output_preserves_fallback_token_limit_override(
     };
 
     assert_eq!(
-        result.into_response(),
+        result.into_response(/*file_backed_tool_audio*/ false),
         ResponseItemEnvelope {
             item: ResponseItem::from(ResponseInputItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
@@ -654,6 +649,45 @@ fn post_tool_use_feedback_output_preserves_fallback_token_limit_override(
             }),
         }
     );
+}
+
+#[test_case::test_case(true; "file-backed audio enabled")]
+#[test_case::test_case(false; "file-backed audio disabled")]
+fn mcp_audio_producer_limit_is_transient_until_history_admission(file_backed_tool_audio: bool) {
+    let result = AnyToolResult {
+        call_id: "clip".into(),
+        payload: ToolPayload::Function {
+            arguments: "{}".into(),
+        },
+        result: Box::new(crate::tools::context::McpToolOutput {
+            result: codex_protocol::mcp::CallToolResult {
+                content: vec![serde_json::json!({
+                    "type": "audio",
+                    "mimeType": "audio/wav",
+                    "data": "UklGRiYAAABXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQIAAAAAAA==",
+                })],
+                structured_content: None,
+                is_error: None,
+                meta: None,
+            },
+            tool_input: serde_json::json!({}),
+            result_metadata_capture_allowed: false,
+            wall_time: Duration::ZERO,
+            original_image_detail_supported: false,
+            truncation_policy: TruncationPolicy::Tokens(100),
+        }),
+        post_tool_use_payload: None,
+    };
+
+    let metadata = result
+        .into_response(file_backed_tool_audio)
+        .metadata
+        .unwrap();
+    assert_eq!(metadata.producer_bounded_tool_audio, file_backed_tool_audio);
+    assert!(!metadata.tool_audio_budget_applied);
+    let serialized = serde_json::to_value(&metadata).unwrap();
+    assert!(serialized.get("producer_bounded_tool_audio").is_none());
+    assert!(serialized.get("tool_audio_budget_applied").is_none());
 }
 
 #[test]
@@ -676,7 +710,7 @@ fn post_tool_use_feedback_output_keeps_code_mode_result_typed() {
     };
 
     assert_eq!(
-        result.into_response(),
+        result.into_response(/*file_backed_tool_audio*/ false),
         ResponseItemEnvelope::new(
             ResponseInputItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),

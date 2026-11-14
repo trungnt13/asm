@@ -5,17 +5,22 @@ use codex_app_server_protocol::ThreadGuardianAssessment;
 use codex_app_server_protocol::ThreadGuardianReviewParams;
 use codex_app_server_protocol::ThreadGuardianReviewResponse;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadPrepareApprovedPlanParams;
+use codex_app_server_protocol::ThreadPrepareApprovedPlanResponse;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference as CoreImageReference;
+use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::protocol::TurnSettingsUpdate;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
 use codex_protocol::turn_input::AnnotatedResponseItem;
+use codex_protocol::turn_input::InjectedResponseItem;
 use codex_protocol::turn_input::ResponseItemAnnotations;
+use codex_utils_path_uri::PathUri;
 
 use crate::image_url::REMOTE_IMAGE_URL_ERROR;
 use crate::image_url::is_remote_image_url;
@@ -80,8 +85,8 @@ fn validate_response_item_image_urls(items: &[ResponseItem]) -> Result<(), JSONR
 
 #[derive(Clone)]
 pub(crate) struct TurnRequestProcessor {
-    auth_manager: Arc<AuthManager>,
     thread_manager: Arc<ThreadManager>,
+    thread_store: Arc<dyn codex_thread_store::ThreadStore>,
     outgoing: Arc<OutgoingMessageSender>,
     analytics_events_client: AnalyticsEventsClient,
     config: Arc<Config>,
@@ -139,8 +144,8 @@ struct ThreadSettingsBuildParams {
 impl TurnRequestProcessor {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        auth_manager: Arc<AuthManager>,
         thread_manager: Arc<ThreadManager>,
+        thread_store: Arc<dyn codex_thread_store::ThreadStore>,
         outgoing: Arc<OutgoingMessageSender>,
         analytics_events_client: AnalyticsEventsClient,
         config: Arc<Config>,
@@ -152,8 +157,8 @@ impl TurnRequestProcessor {
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     ) -> Self {
         Self {
-            auth_manager,
             thread_manager,
+            thread_store,
             outgoing,
             analytics_events_client,
             config,
@@ -242,6 +247,33 @@ impl TurnRequestProcessor {
             .map(|response| Some(response.into()))
     }
 
+    pub(crate) async fn thread_prepare_approved_plan(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadPrepareApprovedPlanParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        let (_, thread) = self.load_thread(&params.thread_id).await?;
+        self.ensure_direct_input_allowed(request_id, thread.as_ref())
+            .await?;
+        let actual_chars = params.markdown.chars().count();
+        if actual_chars > MAX_USER_INPUT_TEXT_CHARS {
+            return Err(Self::input_too_large_error(actual_chars));
+        }
+        let attachment_path = params
+            .attachment_path
+            .map(PathUri::from_host_native_path)
+            .transpose()
+            .map_err(|_| invalid_params("`attachmentPath` must be absolute on the app server"))?;
+        let prompt = thread
+            .prepare_approved_plan(attachment_path.as_ref(), &params.markdown)
+            .await
+            .map_err(|err| match err.details() {
+                CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
+                _ => internal_error(format!("failed to prepare the approved plan: {err}")),
+            })?;
+        Ok(Some(ThreadPrepareApprovedPlanResponse { prompt }.into()))
+    }
+
     pub(crate) async fn thread_settings_update(
         &self,
         request_id: &ConnectionRequestId,
@@ -260,6 +292,8 @@ impl TurnRequestProcessor {
         let (_, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
+        let environments =
+            resolve_turn_environment_requests(self.thread_manager.as_ref(), params.environments)?;
         let (reply, outcome) = oneshot::channel();
         self.submit_core_op(
             request_id,
@@ -270,7 +304,7 @@ impl TurnRequestProcessor {
                     approvals_reviewer: params
                         .approvals_reviewer
                         .map(codex_app_server_protocol::ApprovalsReviewer::to_core),
-                    environments: None,
+                    environments,
                     model: params.model,
                     // Match thread/settings/update: public null does not clear effort.
                     effort: params.effort.map(Some),
@@ -632,7 +666,7 @@ impl TurnRequestProcessor {
             .await
             .side_settings_initialization
             .as_ref()
-            .is_some_and(|initialization| initialization.pending_first_turn);
+            .is_some_and(|initialization| initialization.pending_first_turn.is_some());
         if pending_first_turn {
             let (mut snapshot, selected_service_tier) = thread.resume_config_snapshot().await;
             snapshot.service_tier = selected_service_tier;
@@ -720,11 +754,12 @@ impl TurnRequestProcessor {
                     .on_start(TurnStartOptions {
                         turn_trigger: params.turn_trigger,
                         parent_turn_id: params.parent_turn_id,
-                        initiating_agent_path: None,
                         root_turn_id: params.root_turn_id,
                         final_output_json_schema: params.output_schema,
                         service_tier: params.service_tier_for_turn,
+                        prompt_cache_ttl: None,
                         cyber_access_program: params.cyber_access_program.map(Into::into),
+                        ..Default::default()
                     })
                     .with_additional_context(additional_context)
                     .with_responses_metadata(params.responsesapi_client_metadata)
@@ -772,7 +807,7 @@ impl TurnRequestProcessor {
                 .side_settings_initialization
                 .as_mut()
         {
-            initialization.pending_first_turn = false;
+            initialization.pending_first_turn = None;
         }
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
@@ -781,7 +816,6 @@ impl TurnRequestProcessor {
             {
                 codex_memories_write::start_memories_startup_task(
                     Arc::clone(&self.thread_manager),
-                    Arc::clone(&self.auth_manager),
                     thread_id,
                     Arc::clone(&thread),
                     thread.config().await,
@@ -902,9 +936,6 @@ impl TurnRequestProcessor {
         let collaboration_mode =
             collaboration_mode.map(|mode| self.normalize_collaboration_mode(mode));
         let has_environment_override = environment_requests.is_some();
-        // `thread/settings/update` only acknowledges that the update was queued.
-        // Clients that send dependent partial updates should wait for
-        // `thread/settings/updated` or combine the fields in one request.
         let snapshot = if permissions.is_some() {
             Some(thread.config_snapshot().await)
         } else {
@@ -975,6 +1006,7 @@ impl TurnRequestProcessor {
                     runtime_workspace_roots: runtime_workspace_roots.clone(),
                     approval_policy,
                     approvals_reviewer,
+                    requested_approvals_reviewer: None,
                     sandbox_policy: sandbox_policy.clone(),
                     permission_profile: permission_profile.clone(),
                     active_permission_profile: active_permission_profile.clone(),
@@ -1028,12 +1060,14 @@ impl TurnRequestProcessor {
             params.service_tier.is_some(),
         );
         let cwd = resolve_request_cwd(params.cwd)?;
+        let environments =
+            resolve_turn_environment_requests(self.thread_manager.as_ref(), params.environments)?;
         let environment_override = self
             .build_environment_override(
                 thread.as_ref(),
                 cwd,
                 /*workspace_roots*/ None,
-                /*environment_requests*/ None,
+                environments,
             )
             .await;
         let mut thread_settings = self
@@ -1066,23 +1100,31 @@ impl TurnRequestProcessor {
             .await
             .side_settings_initialization
             .as_ref()
-            .is_some_and(|initialization| initialization.pending_first_turn);
+            .is_some_and(|initialization| initialization.pending_first_turn.is_some());
         if params.system1_enabled.is_some() || pending_side_initialization {
             thread
                 .update_thread_settings(thread_settings)
                 .await
                 .map_err(|error| invalid_request(error.to_string()))?;
         } else if thread_settings != codex_protocol::protocol::ThreadSettingsOverrides::default() {
+            let (reply, outcome) = oneshot::channel();
             self.submit_core_op(
                 request_id,
                 thread.as_ref(),
                 Op::ThreadSettings {
                     thread_settings,
-                    reply: None,
+                    reply: Some(reply),
                 },
             )
             .await
             .map_err(|err| internal_error(format!("failed to update thread settings: {err}")))?;
+            outcome
+                .await
+                .map_err(|_| internal_error("thread settings operation ended before replying"))?
+                .map_err(|err| match err.details() {
+                    CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
+                    _ => internal_error(format!("failed to update thread settings: {err}")),
+                })?;
         }
 
         if let Some(initialization) = self
@@ -1126,26 +1168,51 @@ impl TurnRequestProcessor {
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
 
-        let items = params
+        let mut items = params
             .items
             .into_iter()
             .enumerate()
             .map(|(index, value)| {
-                serde_json::from_value::<ResponseItem>(value)
+                serde_json::from_value::<InjectedResponseItem>(value)
                     .map_err(|err| format!("items[{index}] is not a valid response item: {err}"))
             })
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(invalid_request)?;
-        validate_response_item_image_urls(&items)?;
+        for item in &items {
+            validate_response_item_image_urls(std::slice::from_ref(&item.item))?;
+        }
 
-        let side_boundary = super::desktop_side::is_boundary(&items);
+        let side_boundary = matches!(items.as_slice(), [item]
+            if super::desktop_side::is_desktop_side_boundary(std::slice::from_ref(&item.item)));
+        if side_boundary {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            let state = thread_state.lock().await;
+            if let Some(prompt) = state
+                .side_settings_initialization
+                .as_ref()
+                .and_then(|initialization| initialization.pending_prompt.clone())
+            {
+                items.push(prompt.into());
+            }
+        }
         thread
-            .inject_response_items(items)
+            .inject_response_items_with_retention(items)
             .await
             .map_err(|err| match err.details() {
                 CodexErrorDetails::InvalidRequest(message) => invalid_request(message.clone()),
                 _ => internal_error(format!("failed to inject response items: {err}")),
             })?;
+        if side_boundary {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            if let Some(initialization) = thread_state
+                .lock()
+                .await
+                .side_settings_initialization
+                .as_mut()
+            {
+                initialization.pending_prompt = None;
+            }
+        }
         {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             let synchronize = {
@@ -1154,7 +1221,11 @@ impl TurnRequestProcessor {
                     .side_settings_initialization
                     .as_mut()
                     .is_some_and(|initialization| {
-                        (side_boundary || initialization.pending_first_turn)
+                        (side_boundary
+                            || matches!(
+                                initialization.pending_first_turn,
+                                Some(super::desktop_side::SideOrigin::Start)
+                            ))
                             && std::mem::take(&mut initialization.pending_sync)
                     })
             };
@@ -1186,16 +1257,8 @@ impl TurnRequestProcessor {
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
     ) -> Result<(), JSONRPCErrorError> {
-        let mcp_elicitations_auto_deny = xcode_26_4_mcp_elicitations_auto_deny(
-            app_server_client_name.as_deref(),
-            app_server_client_version.as_deref(),
-        );
         thread
-            .set_app_server_client_info(
-                app_server_client_name,
-                app_server_client_version,
-                mcp_elicitations_auto_deny,
-            )
+            .set_app_server_client_info(app_server_client_name, app_server_client_version)
             .await
             .map_err(|err| internal_error(format!("failed to set app server client info: {err}")))
     }
@@ -1421,6 +1484,23 @@ impl TurnRequestProcessor {
                 "Native runtimes do not support realtime conversations",
             ));
         }
+        let voice = match params.voice {
+            Some(voice) => Some(Some(voice)),
+            None if !attaches_existing_call
+                && params.version == Some(RealtimeConversationVersion::V3) =>
+            {
+                let current = thread.config().await;
+                let latest = Box::pin(self.config_manager.load_latest_config_with_session_layers(
+                    &current.config_layer_stack,
+                    &current.cwd,
+                ))
+                .await
+                .map_err(|error| config_load_error(&error))?;
+                // Preserve a cleared preference instead of inheriting the thread's old voice.
+                Some(latest.realtime.voice)
+            }
+            None => None,
+        };
         self.submit_core_op(
             request_id,
             thread.as_ref(),
@@ -1470,7 +1550,7 @@ impl TurnRequestProcessor {
                     }
                 }),
                 version: params.version,
-                voice: params.voice,
+                voice,
             }),
         )
         .await
@@ -1668,6 +1748,7 @@ impl TurnRequestProcessor {
     fn listener_task_context(&self) -> ListenerTaskContext {
         ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
+            thread_store: Arc::clone(&self.thread_store),
             thread_state_manager: self.thread_state_manager.clone(),
             outgoing: Arc::clone(&self.outgoing),
             pending_thread_unloads: Arc::clone(&self.pending_thread_unloads),
@@ -1692,15 +1773,4 @@ impl TurnRequestProcessor {
         )
         .await
     }
-}
-
-fn xcode_26_4_mcp_elicitations_auto_deny(
-    client_name: Option<&str>,
-    client_version: Option<&str>,
-) -> bool {
-    // Xcode 26.4 shipped before app-server MCP elicitation requests were
-    // client-visible. Keep elicitations auto-denied for that client line.
-    // TODO: Remove this compatibility hack once Xcode 26.4 ages out.
-    client_name == Some("Xcode")
-        && client_version.is_some_and(|version| version.starts_with("26.4"))
 }

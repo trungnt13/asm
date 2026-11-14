@@ -93,130 +93,86 @@ async fn owned_initial_history_stops_after_viewport_or_scan_budget() {
     }
 }
 
-#[test]
-fn side_boundary_stops_initial_and_older_turn_pages_in_server_order() {
-    use codex_app_server_protocol::ThreadTurnsListResponse;
-    use codex_app_server_protocol::Turn;
-    use codex_app_server_protocol::TurnItemsView;
-    use codex_app_server_protocol::TurnStatus;
-    let turn = |id: &str| Turn {
-        id: id.into(),
-        root_turn_id: None,
-        items: Vec::new(),
-        items_view: TurnItemsView::NotLoaded,
-        token_usage: None,
-        status: TurnStatus::Completed,
-        error: None,
-        started_at: None,
-        completed_at: None,
-        duration_ms: None,
-    };
-    let mut recent = ThreadTurnsListResponse {
-        data: vec![turn("a-newest"), turn("z-newer")],
-        next_cursor: Some("older".into()),
-        backwards_cursor: None,
-    };
-    super::trim_side_turn_page(&mut recent, Some("m-parent"));
-    assert_eq!(
-        recent
-            .data
-            .iter()
-            .map(|turn| turn.id.as_str())
-            .collect::<Vec<_>>(),
-        ["a-newest", "z-newer"]
-    );
-    assert_eq!(recent.next_cursor.as_deref(), Some("older"));
-    let mut older = ThreadTurnsListResponse {
-        data: vec![
-            turn("b-side-first"),
-            turn("m-parent"),
-            turn("zz-parent-older"),
-        ],
-        next_cursor: Some("inherited".into()),
-        backwards_cursor: None,
-    };
-    super::trim_side_turn_page(&mut older, Some("m-parent"));
-    assert_eq!(
-        older
-            .data
-            .iter()
-            .map(|turn| turn.id.as_str())
-            .collect::<Vec<_>>(),
-        ["b-side-first"]
-    );
-    assert_eq!(older.next_cursor, None);
-}
-
 #[tokio::test]
-async fn side_item_paging_stops_before_inherited_items_even_with_an_empty_boundary_turn()
--> color_eyre::Result<()> {
-    use codex_app_server_protocol::ThreadItem;
-    use codex_app_server_protocol::ThreadItemEntry;
-    use codex_app_server_protocol::ThreadItemsListResponse;
-    use codex_app_server_protocol::Turn;
-    use codex_app_server_protocol::TurnItemsView;
-    use codex_app_server_protocol::TurnStatus;
+async fn saved_fork_preserves_daybreak_and_legacy_history_on_resume() -> color_eyre::Result<()> {
+    use super::super::*;
     let home = tempfile::tempdir()?;
     let config = ConfigBuilder::default()
         .codex_home(home.path().to_path_buf())
         .build()
         .await?;
+    let parent = ThreadId::from_string(
+        &app_test_support::create_fake_rollout(
+            home.path(),
+            "2025-01-05T12-00-00",
+            "2025-01-05T12:00:00Z",
+            "Inherited user message",
+            Some(config.model_provider_id.as_str()),
+            /*git_info*/ None,
+        )
+        .expect("create legacy rollout"),
+    )?;
+    let settings = LocalSettings::from(&config);
     let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
-    let visible = ThreadItem::untimed(
-        codex_app_server_protocol::ThreadItemPayload::ContextCompaction {
-            id: "side-item".into(),
-        },
+    server.thread_read(parent, /*include_turns*/ false).await?;
+    let request_id = server.next_request_id();
+    let _: ThreadMetadataUpdateResponse = server
+        .request_handle
+        .request_typed(ClientRequest::ThreadMetadataUpdate {
+            request_id,
+            params: ThreadMetadataUpdateParams {
+                thread_id: parent.to_string(),
+                project_id: None,
+                git_info: None,
+                daybreak_enabled: Some(true),
+            },
+        })
+        .await?;
+    let fork = server
+        .fork_thread(&settings, config.clone(), parent)
+        .await?;
+    let side = fork.session.thread_id;
+    assert_eq!(
+        (
+            server
+                .thread_read(side, /*include_turns*/ false)
+                .await?
+                .daybreak_enabled,
+            fork.session.daybreak_enabled,
+        ),
+        (Some(true), true),
     );
-    let mut turns = vec![Turn {
-        id: "side-turn".into(),
-        root_turn_id: None,
-        items: Vec::new(),
-        items_view: TurnItemsView::NotLoaded,
-        token_usage: None,
-        status: TurnStatus::Completed,
-        error: None,
-        started_at: None,
-        completed_at: None,
-        duration_ms: None,
-    }];
-    let mut state = super::ThreadHistoryPagination {
-        side_boundary: Some("empty-inherited-turn".into()),
-        next_item_cursor: Some("page".into()),
-        ..Default::default()
-    };
-    let page = ThreadItemsListResponse {
-        data: vec![
-            ThreadItemEntry {
-                turn_id: "side-turn".into(),
-                item: visible.clone(),
-                started_at_ms: None,
-                completed_at_ms: None,
-            },
-            ThreadItemEntry {
-                turn_id: "older-parent-turn".into(),
-                item: ThreadItem::untimed(
-                    codex_app_server_protocol::ThreadItemPayload::ContextCompaction {
-                        id: "parent-item".into(),
-                    },
-                ),
-                started_at_ms: None,
-                completed_at_ms: None,
-            },
-        ],
-        next_cursor: Some("parent-items".into()),
-        backwards_cursor: None,
-    };
-    let items = server
-        .merge_thread_item_page(
-            codex_protocol::ThreadId::new(),
-            page,
-            &mut state,
-            &mut turns,
+    let mut temporary_config = config.clone();
+    temporary_config.ephemeral = true;
+    let temporary = server
+        .fork_side_thread(
+            &settings,
+            temporary_config,
+            parent,
+            /*selected_profile*/ None,
+            crate::app_server_session::SideChatStorage::Temporary,
         )
         .await?;
-    assert_eq!(items, vec![visible.payload.clone()]);
-    assert_eq!(turns[0].items, vec![visible]);
-    assert_eq!(state.next_item_cursor, None);
+    assert!(!temporary.session.daybreak_enabled);
+    let inherited = server.thread_read(side, /*include_turns*/ true).await?;
+    assert_eq!(inherited.history_mode, ThreadHistoryMode::Legacy);
+    let inherited_turns = inherited.turns;
+    assert!(!inherited_turns.is_empty());
+    server.shutdown().await?;
+
+    let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
+    let resumed = server
+        .resume_thread(
+            &settings,
+            config.clone(),
+            side,
+            ResumeModelSettings::PreserveExistingThread,
+        )
+        .await?;
+    assert_eq!(resumed.turns, inherited_turns);
+    assert!(resumed.session.daybreak_enabled);
+    let parent = server.thread_read(parent, /*include_turns*/ true).await?;
+    assert!(!parent.turns.is_empty());
     server.shutdown().await?;
     Ok(())
 }

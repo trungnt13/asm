@@ -13,6 +13,10 @@ concurrency:
   group: ${{ github.workflow }}::${{ github.event.pull_request.number > 0 && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
 
+env:
+  CODEX_BAZEL_GCS_BUCKET: ${{ secrets.CODEX_BAZEL_GCS_BUCKET }}
+  CODEX_BAZEL_GCS_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.CODEX_BAZEL_GCS_WORKLOAD_IDENTITY_PROVIDER }}
+
 jobs:
   metadata:
     runs-on: ubuntu-latest
@@ -77,6 +81,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
+      id-token: write
       actions: read
     environment:
       name: bazel
@@ -181,7 +186,6 @@ jobs:
 
       - name: Build Bazel V8 release pair
         env:
-          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
           PLATFORM: ${{ matrix.platform }}
           SANDBOX: ${{ matrix.sandbox }}
           TARGET: ${{ matrix.target }}
@@ -208,14 +212,13 @@ jobs:
             bazel_args+=(--jobs=2)
           fi
 
-          ./.github/scripts/run_bazel_with_buildbuddy.py \
+          ./.github/scripts/run_bazel.py \
             --noexperimental_remote_repo_contents_cache \
             "${bazel_args[@]}"
 
       - name: Stage release pair
         env:
           BAZEL_CONFIG: ${{ matrix.bazel_config }}
-          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
           PLATFORM: ${{ matrix.platform }}
           SANDBOX: ${{ matrix.sandbox }}
           TARGET: ${{ matrix.target }}

@@ -33,19 +33,23 @@ across account switches. Resume and revert preserve that distinction; forks are 
 Scoped requests skip candidates whose rollout header cannot be read. API-key
 logins see all local history. Direct access by thread ID remains available.
 
-# Thread list exclusions
+# Thread list ID filters
 
-`thread/list` accepts `excludedThreadIds`, an optional array of up to 100
-thread ID strings. Omitted, null, or empty lists do not exclude anything.
-Invalid IDs or more than 100 entries return JSON-RPC error `-32602`;
-duplicates count toward that bound and no entries are silently truncated.
+`thread/list` accepts `includedThreadIds` to list specific saved threads and
+`excludedThreadIds` to omit them. Each accepts up to 100 thread ID strings.
+Omitting an array or sending null leaves that filter unrestricted. An empty
+inclusion matches nothing. An empty exclusion removes nothing. Invalid IDs
+or more than 100 entries in either array return JSON-RPC error `-32602`.
+Duplicates count toward each bound.
 
-Exclusions apply before the returned result limit, along with the existing
-source, provider, archive, project, section and cwd filters. Pages refill to
-the requested limit (at most 100) unless history is exhausted. Send the same
-exclusions and filters with each returned cursor. Clients that display a saved
-manual order can load those summaries separately, then exclude the entire saved
-ID set when listing the remainder. This field does not save or sort that order.
+Both ID filters apply alongside the other list filters, including `currentAccountOnly`,
+before pagination. Pages fill to the requested limit (up to 100) or exhaust the matches.
+Exclusions win when an ID appears in both arrays. Send the same filters with
+each cursor. The regular list sort determines the order of matches.
+The local store uses indexed metadata when an inclusion array is present, even
+when `useStateDbOnly` is false. IDs absent from its index produce no match.
+Older App Servers ignore `includedThreadIds`. Clients that reconcile saved IDs
+must establish server support before treating missing matches as removals.
 
 DB-only requests (`useStateDbOnly: true`) return JSON-RPC error `-32603`
 when the local state DB cannot serve the query, even for an empty cwd filter.
@@ -121,12 +125,20 @@ denial limit, and interrupted status; neither emits a separate `Error` event.
 
 # Model catalog provider requirements
 
-`model/list` and periodic model catalog refreshes check the startup provider against
-current managed provider requirements before using the catalog. If that provider no longer
+`modelProvider/default/set` selects a configured provider for new threads and unscoped model lists.
+Send `{"providerId": "my_gateway"}`. The response uses the same `ConfigWriteResponse` as other config writes.
+An effective selection refreshes the catalog on its next read. Editing the active provider through
+`modelProvider/config/write` also refreshes that snapshot.
+
+`model/list` uses the current default when `modelProvider` is omitted. Pass a provider ID to list
+models for a chat that retained its provider after a default change. An unknown selector returns JSON-RPC error
+`-32600` with `data.type = "modelProviderNotConfigured"` and the requested `modelProvider`.
+
+`model/list` checks its selected provider, and periodic model catalog refreshes check the
+current default provider, against current managed provider requirements. If that provider no longer
 complies, `model/list` returns JSON-RPC error `-32600` asking the client to restart Codex,
 and background refreshes skip the old endpoint. Requirement load failures also block these
-operations. Checks apply even when the catalog is cached. Existing startup provider selection
-and caching behavior remain in effect while the provider satisfies current requirements.
+operations. Checks apply even when the catalog is cached.
 
 # MCP App UI
 
@@ -140,6 +152,14 @@ render without waiting for the full MCP catalog.
 The field is null for older history and tools that declare widgets only in
 result metadata; clients retain catalog discovery for those calls. Existing
 resource URI fields remain available for older clients.
+
+Clients can pass an optional `_meta` object on `mcpServer/resource/read`.
+The app server forwards its entries to MCP `resources/read`, including reads
+bound to an originating tool call. The keys `x-codex-turn-metadata`, `threadId`,
+and `codex/connectionLease` are reserved for host context on every MCP server. Reads to `codex_apps`
+additionally reserve `connector_id`, `link_id`, and the nested
+`_codex_apps.resource_uri` field for hosted app routing. A request that includes
+a reserved field in `_meta` is rejected before the MCP read is sent.
 
 # Initial Daybreak choice (experimental)
 
@@ -181,6 +201,10 @@ prompt to close. The original RPC completes independently, with
 `cancelled/interrupted` when cancellation prevents completion. Cancellation
 cannot roll back completed effects. It remains effective while a proof waits for
 outbound queue capacity, but cannot retract a response already enqueued.
+
+`biometricType` reports the native method used for that successful signature when known.
+It is `"fingerprint"` for a successful Touch ID protected signing operation and `null`
+when unknown. Older servers omit it. It is context, not an additional signed proof field.
 
 Canceling or resolving an elicitation does not itself stop a separate
 `userVerification/verify` RPC. Clients must cancel that RPC separately and discard
@@ -269,7 +293,7 @@ ChatGPT account identity.
 | `userVerification/status` | `{}`                              | `{credentialId, unavailableReason, unavailableMessage}` |
 | `userVerification/enroll` | `{}`                              | `{credentialId, algorithm?, publicKey?}`                |
 | `userVerification/delete` | `{}`                              | `{}`                                                    |
-| `userVerification/verify` | `{challenge, title, description}` | `{proof: {credentialId, signature}}`                    |
+| `userVerification/verify` | `{challenge, title, description}` | `{proof: {credentialId, signature}, biometricType}`     |
 | `userVerification/cancel` | `{requestId}`                     | `{}`                                                    |
 
 Status reads local readiness without prompting or contacting a backend. A null
@@ -343,16 +367,13 @@ be loaded. This covers turn start/steer, review, compaction, manual queue start,
 updates. Realtime connections use separate routing configuration and are not checked here.
 Interrupt, realtime stop, and goal pause/clear remain available.
 
-Resume and input RPCs also reject a thread whose saved provider differs from the current
-configured provider, including profile and app-server launch overrides. The JSON-RPC error's
-`data` contains `ModelProviderError`: `modelProviderMismatch` has `modelProvider` and
-`currentModelProvider`, `modelProviderNotConfigured` identifies a missing provider, and
-`modelProviderPolicyConflict` identifies a mandatory-policy conflict. Clients can still use
-`thread/read` to display history and disable the composer with the error's explanation.
-Changing the resume request's provider does not bypass validation of the saved provider;
-switch the configured provider back to continue the chat. Input is also rejected when the
-current provider configuration cannot be loaded. Older clients retain their normal error
-fallback for unrecognized structured error variants.
+Resume and input use the thread's saved provider even when a different provider is the default.
+A cold resume resolves the saved provider from configuration. A loaded thread uses its retained
+provider configuration and checks current managed policy before accepting input. The JSON-RPC
+error's `data` contains `modelProviderNotConfigured` for a missing provider or
+`modelProviderPolicyConflict` for a mandatory-policy conflict. Clients can use `thread/read`
+to display history when input is blocked. A resume request that explicitly selects a
+different provider cannot change the thread's saved provider.
 
 ## Managed network requirements
 
@@ -364,10 +385,11 @@ alongside `[permissions.filesystem]`:
 enabled = true
 ```
 
-`[network_proxy]` and its compatibility alias `[experimental_network]` still work.
-Do not mix either with `[permissions.network]`, even across requirements layers. A single
-layer cannot use both top-level names; across layers the top-level names merge with normal
-precedence. `configRequirements/read` returns the result in `requirements.network`.
+Codex reads `[network_proxy]` and its alias `[experimental_network]` as
+`[permissions.network]` within each source before merging managed requirements.
+Across sources, use the same surface (legacy or nested). Use at most one top-level spelling per layer.
+If a layer also sets `[permissions.network]`, both tables must describe the same policy.
+`configRequirements/read` returns the result in `requirements.network`.
 
 In `config.toml`, `[features.network_proxy]` configures the proxy, while
 `[permissions.<profile>.network]` configures a profile's network settings. Managed requirements
@@ -505,6 +527,12 @@ Read the selection from `threadSettings.disabledPluginIds` in
 across resume. Forks restore the selection from the history retained at the
 requested fork boundary.
 
+# Environment settings
+
+`turn/settings/update` can replace the environments used by later steps of the running turn; an already-started step and future turns are unchanged. `thread/settings/update` changes the selection for future turns without affecting the running turn. Both accept the same `environments` list as `turn/start`: omission or `null` keeps the selection, and `[]` clears it. A thread settings request that provides `cwd` without an explicit environment list selects the default environments for that directory. Selected environments inherit the thread's configuration.
+
+`thread/settings/update` returns success after Core accepts the update, including an unchanged selection. Rejections are returned as request errors. `thread/settings/updated` reports effective changes, including the ordered `environments` selection, and is not a per-request acknowledgment. Updating both scopes requires two separate requests; they are not atomic.
+
 # Deprecated thread personality setting
 
 `thread/start`, `thread/resume`, `thread/settings/update`, and `turn/start` still
@@ -565,7 +593,18 @@ cancels the previous attempt and waits for its callback listener to close. Use
 `account/login/cancel` to cancel explicitly. Start a fresh session after success to
 use the saved grant.
 
+# Account identity
+
+`account/read` returns a nullable `userId` alongside `account`. For ChatGPT and
+personal access token sessions, this is the canonical ChatGPT user ID from the
+authenticated account metadata, when available. API-only and signed-out sessions
+return `null`. The ID belongs to the same account snapshot as the rest of the
+response. Clients should also accept an absent field from older app servers.
+PAT sessions continue to return no bearer token from `getAuthStatus`.
+
 # Selected workspace routing
+
+`account/securitySetup/read` returns an optional backend-owned security reminder for the saved ChatGPT login. A returned notice includes its account and user IDs; clients must discard it after an account change and validate its copy and action URL before rendering. Ineligible, unavailable, and timed-out reads return `notice: null`. Older app-servers may not support this optional read.
 
 The experimental `account/read.workspaceRouting` response field returns the selected ChatGPT workspace's `chatgptAccountId`, resolved HTTPS `backendOrigin`, and backend-provided `accountRoutingOverride`. The routing value is `us`, `us_cr`, or the explicit `NO_CONSTRAINT` value. API-only and signed-out accounts return `null` and do not need `accounts/check`.
 
@@ -599,8 +638,8 @@ process control and custom output caps do not apply to MXC.
 
 ### Gateway OAuth sign-in
 
-Providers configured with `gateway_oauth` require a secondary OAuth credential in
-addition to their primary authentication. Clients with a gateway sign-in UI set
+A provider can obtain its gateway token through browser OAuth or a credential
+export command. Clients with a gateway sign-in UI set
 `initialize.capabilities.explicitGatewayOauth: true`, complete initialization, and
 successfully call `account/gatewayOAuth/read` before sending authenticated requests,
 including startup `model/list` and inference requests. Repeat this probe on each
@@ -619,39 +658,65 @@ With explicit login enabled, app-server refreshes existing credentials, but only
 `account/gatewayOAuth/login` RPC starts browser authorization. Requests needing
 sign-in fail promptly so the client can offer that flow.
 
+Configure `[model_providers.<id>.gateway_oauth.credential_export]` to obtain the
+gateway access token from a command on first use. Set `command`, optional `args`,
+and optional `timeout_ms` (default 30000). The command prints one access token to
+stdout. Codex caches it in memory and applies the configured gateway header or
+cookie. Choose either `credential_export` or OAuth settings such as
+`authorization_url`, `token_url`, and `client_id`. If the command fails,
+the request returns the export error. Use direct
+inference and catalog URLs because command credentials require same-origin catalog
+access and reject HTTP redirects. After an inference HTTP 401 or a rejected
+WebSocket upgrade with status 401, Codex clears the cached export and reruns
+the command once for the retry.
+
 Clients that omit the capability or set it to `false`, including the TUI, retain
 automatic browser authorization after initialization. Startup credential reads
 cannot open a browser before initialization. Explicit opt-in is shared by gateway
 managers using the same home and network configuration within the process and
 cannot be undone by a later connection that omits the capability.
 
-- `account/gatewayOAuth/read` returns the current effective `providerId`,
-  `providerName`, `required`, `status`, and `error`. `required` indicates that this
-  provider uses gateway OAuth, including when already signed in. This operation
-  does not refresh tokens or open a browser; `status` is null for other providers.
+- `account/gatewayOAuth/read` returns the selected `providerId`,
+  `providerName`, `required`, `supportsDeviceAuth`, `status`, and `error`. `required` indicates that this
+  provider uses gateway OAuth, including when already signed in. With a credential
+  exporter, `required` is false and `status` is null. This read does not refresh
+  tokens or open a browser. `supportsDeviceAuth` means a
+  device authorization endpoint is configured. Older servers omit this field.
   `notReady` means credentials are not ready. `succeeded` means saved credentials
   are locally usable, not that a gateway request has been verified. Reads observe
   usable replacement credentials saved by another process sharing the same home.
-- `account/gatewayOAuth/login` starts authorization and returns `{}` after
-  the credential has been saved. Providers requiring OpenAI authentication need a
-  primary account first. A second login request fails while a login is active.
+- `account/gatewayOAuth/login` starts browser authorization and returns
+  `{"prompt": null}` after saving the credential. Providers requiring OpenAI
+  authentication need a primary account first. A second login request fails
+  while a login is active.
   The initiating connection receives a `started` notification with `authUrl`; the
   client must open that URL in a browser that can reach the server callback port.
-  Other status notifications set `authUrl` to null. Login is rejected if the
-  initiating connection opted out of `account/gatewayOAuth/changed` notifications.
+  Pass `deviceAuth: true` to use device authorization. If the saved credential
+  can be reused or refreshed, `prompt` is null. Otherwise it returns a
+  `prompt` with `verificationUrl`, `userCode`, and `loginId` before approval.
+  The initiating connection receives `account/gatewayOAuth/changed` with that
+  login ID when the attempt succeeds or fails. Login requires the connection
+  to accept these notifications.
 - `account/gatewayOAuth/cancel` cancels the calling connection's login and returns
   `{}` after the active login releases its slot, so the client can immediately
   start another login. Closing that connection also cancels its login and releases
   the callback listener. Cancellation makes the pending login request fail.
 - `account/gatewayOAuth/changed` reports `notReady`, `started`, `succeeded`, or
-  `failed`, with an optional `error`. Notifications apply to the current effective
-  gateway configuration. Clients can read readiness when connecting and after
+  `failed`, with an optional `error`. Notifications identify each configured
+  provider sharing the changed gateway credential, even when it is not the current
+  default. Clients can read readiness when connecting and after
   changing configuration. Notifications follow the standard per-connection
   `optOutNotificationMethods` setting.
-  These payloads never contain credentials.
+  These payloads never contain access tokens, refresh tokens, or the device grant credential.
 
-Read, login, and cancel take no params. Read and login use the app's current
-provider, reloading configuration and returning an error if it cannot be loaded.
+Read and login accept an optional `modelProvider`, for example
+`{"modelProvider": "my_gateway"}`. Omitted params, null params, and an omitted or
+null selector use the current provider. An explicit selector uses the provider definitions
+loaded at startup and is checked against current managed provider policy before
+credentials are read. Unknown or forbidden providers return an error instead of
+falling back to the current provider. Login keeps the selected provider for the
+entire attempt, even if the default changes. Cancel takes no params and cancels
+the calling connection's active login, regardless of its provider.
 Status notifications include `providerId`. During browser sign-in, inference
 requests fail promptly and can be retried when sign-in succeeds.
 
@@ -712,6 +777,24 @@ and out-of-scope item IDs return invalid params (`-32602`) with
 Omitted or null cursors preserve normal first-page behavior. Continue anchored
 pages with the returned opaque string `nextCursor`; response fields and
 `backwardsCursor` semantics are unchanged.
+
+Experimental clients can request `"deferOutput": {"commandExecution": true, "mcpToolCall": true}`
+with a `turnId`. Each option applies independently to items with a recorded
+completion time and defaults to false. The server ignores unknown options.
+
+- `commandExecution` returns `item.aggregatedOutput: null` for a successful command with
+  exit code zero and nonempty saved output.
+- `mcpToolCall` returns `item.result.content: []` for a successful tool call with
+  nonempty output made up entirely of plain, unannotated text blocks. Calls with
+  an app resource URI or UI, result metadata, structured content, non-text blocks, or
+  text beginning with a JSON object, array, or Markdown fence retain the full result.
+  Connector identity stays on the item when its output is deferred.
+  The built-in `codex_app` server also keeps its results inline because Desktop
+  renders those calls as native tools, including terminal reads.
+
+Both forms set `outputDeferred: true`. Use `thread/items/read` with the turn
+and item ID to retrieve the saved output. For MCP results over the 64 KiB
+history limit, this returns the bounded preview saved at completion.
 
 ## Workspace switching (experimental)
 
@@ -850,9 +933,11 @@ If the active profile inherits `model_providers.gcp.credential_file` from the ba
 Setup returns an error without saving changes. To use ADC, remove the inherited
 setting from the file named in the error and retry.
 
-Setup rejects a GCP `base_url` override or higher-priority settings that conflict
-with the request. It fetches an access token before saving the settings and
-selecting GCP, then returns `{}`. The next `model/list` reloads the catalog.
+Setup uses the requested project and location to determine the Vertex AI endpoint.
+If another configuration layer would still supply `model_providers.gcp.base_url`
+or otherwise conflict with the request, setup fails. Once it obtains an access
+token, setup clears the active user configuration’s `base_url` override, saves
+the settings, and selects GCP. It returns `{}`. The next `model/list` reloads the catalog.
 `account/read` reports `{ "account": { "type": "gcp" }, "requiresOpenaiAuth": false }`.
 Use a model request to verify Vertex model access.
 

@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=3e39083c16e8bd4c):
-        - namespace/functions; hash=05c05ac35f84c7d6
+00:additional_tools/developer (1; hash=f29b4e577bda6f0c):
+        - namespace/functions; hash=31f7cd014173b64e
           - custom/exec
           - function/wait
           - function/exec_command
@@ -27,15 +27,10 @@ Settings:
           - function/get_context_remaining
           - custom/apply_patch
           - function/view_image
-        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=b573ed69c0b0e6c7
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
-        Deferred tool namespaces:
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
-        </tools>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
 03:message/developer[3]:
     [01] <context_window>
     [02]
@@ -57,8 +52,8 @@ Settings:
 ## Window 2 (after request 2: input diverged at item 03)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=3e39083c16e8bd4c):
-        - namespace/functions; hash=05c05ac35f84c7d6
+00:additional_tools/developer (1; hash=f29b4e577bda6f0c):
+        - namespace/functions; hash=31f7cd014173b64e
           - custom/exec
           - function/wait
           - function/exec_command
@@ -68,15 +63,10 @@ Settings: same as window 1
           - function/get_context_remaining
           - custom/apply_patch
           - function/view_image
-        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=b573ed69c0b0e6c7
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
-        Deferred tool namespaces:
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
-        </tools>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
 03:message/developer[3]:
     [01] <context_window>
     [02]

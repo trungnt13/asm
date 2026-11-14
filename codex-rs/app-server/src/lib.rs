@@ -95,6 +95,9 @@ fn is_unsupported_untrusted_approval_policy_error(err: &std::io::Error) -> bool 
     )
 }
 
+pub use codex_agent_message_board_host::delete_agent_message_boards;
+pub use codex_agent_message_board_host::install_agent_message_board;
+
 mod analytics_utils;
 mod app_info;
 mod app_server_tracing;
@@ -105,6 +108,7 @@ mod code_mode_host;
 mod command_exec;
 mod config_layer;
 mod native_login;
+mod plugin_mcp_launch;
 mod startup_config;
 pub use startup_config::StartupConfigArgs;
 pub use startup_config::print_startup_config;
@@ -113,8 +117,8 @@ mod config_manager;
 mod config_manager_service;
 mod connection_cleanup;
 mod connection_rpc_gate;
-mod current_time;
 mod daemon_thread_recovery;
+mod desktop_worktrees;
 mod dynamic_tools;
 mod effective_plugin_change;
 mod error_code;
@@ -149,6 +153,7 @@ mod startup_warnings;
 mod thread_sample;
 mod thread_state;
 mod thread_status;
+mod transcript_compat;
 mod transport;
 mod turn_admission;
 mod turn_cost_worker;
@@ -159,6 +164,7 @@ pub use crate::code_mode_host::AppServerCodeModeHostArgs;
 pub use crate::code_mode_host::CodeModeHostTransport;
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
+pub use crate::plugin_mcp_launch::PluginMcpLaunchArgs;
 pub use crate::prompt_debug::build_prompt_request;
 pub use crate::transport::AppServerTransport;
 pub use crate::transport::RemoteControlStartupMode;
@@ -200,6 +206,7 @@ enum OutboundControlEvent {
         disconnect_sender: Option<CancellationToken>,
         initialized: Arc<AtomicBool>,
         experimental_api_enabled: Arc<AtomicBool>,
+        asm_transcript_enabled: Arc<AtomicBool>,
         opted_out_notification_methods: Arc<RwLock<HashSet<String>>>,
     },
     /// Remove state for a closed/disconnected connection.
@@ -492,6 +499,7 @@ pub struct AppServerRuntimeOptions {
     pub remote_control_startup_mode: RemoteControlStartupMode,
     pub install_shutdown_signal_handler: bool,
     pub managed_daemon: bool,
+    pub plugin_mcp_launch: PluginMcpLaunchArgs,
 }
 
 impl Default for AppServerRuntimeOptions {
@@ -503,6 +511,7 @@ impl Default for AppServerRuntimeOptions {
             remote_control_startup_mode: RemoteControlStartupMode::ResolvePersisted,
             install_shutdown_signal_handler: true,
             managed_daemon: false,
+            plugin_mcp_launch: PluginMcpLaunchArgs::default(),
         }
     }
 }
@@ -570,7 +579,8 @@ pub async fn run_main_with_transport_options(
         Default::default(),
         arg0_paths.clone(),
         Arc::new(NoopThreadConfigLoader),
-    );
+    )
+    .with_mcp_launch_cwds(runtime_options.plugin_mcp_launch.into_cwds()?);
     let startup = config_manager
         .load_managed_startup_config(startup_cwd.clone())
         .await?;
@@ -675,7 +685,7 @@ pub async fn run_main_with_transport_options(
         Ok(state_db_init) => state_db_init,
         Err(err) => {
             return Err(std::io::Error::other(format!(
-                "failed to initialize sqlite state runtime under {}: {err}",
+                "failed to initialize sqlite state runtime under {}: {err:#}",
                 config.sqlite_config().home().display()
             )));
         }
@@ -717,8 +727,15 @@ pub async fn run_main_with_transport_options(
         });
     }
 
-    let analytics_events_client =
-        analytics_events_client_from_config(Arc::clone(&auth_manager), &config);
+    let runtime_auth_slot = config
+        .features
+        .enabled(Feature::RuntimeAgentInstances)
+        .then(codex_runtime_agent_instance::RuntimeAuthSlot::default);
+    let analytics_events_client = analytics_events_client_from_config(
+        Arc::clone(&auth_manager),
+        &config,
+        runtime_auth_slot.clone(),
+    );
     let outgoing_message_sender = Arc::new(OutgoingMessageSender::new(
         outgoing_tx,
         analytics_events_client.clone(),
@@ -775,6 +792,14 @@ pub async fn run_main_with_transport_options(
         .with(log_db_layer)
         .with(otel_layers)
         .try_init();
+    if let Some(error) = state_db.as_ref().and_then(|db| db.diagnostic_logs_error()) {
+        tracing::warn!(
+            event.name = "diagnostic_database_unavailable",
+            error,
+            "diagnostic database unavailable"
+        );
+    }
+
     #[cfg(unix)]
     if let Some(Err(err)) = nofile_limit_result {
         warn!(%err, "failed to raise managed app-server file descriptor limit");
@@ -896,6 +921,9 @@ pub async fn run_main_with_transport_options(
 
     let (remote_control_accept_handle, remote_control_handle) = start_remote_control(
         RemoteControlStartConfig {
+            runtime_auth: runtime_auth_slot
+                .clone()
+                .map(|slot| (slot, config.runtime_auth_mode)),
             remote_control_url: config.chatgpt_base_url.clone(),
             installation_id: installation_id.clone(),
             policy: remote_control_policy,
@@ -961,18 +989,18 @@ pub async fn run_main_with_transport_options(
                                 disconnect_sender,
                                 initialized,
                                 experimental_api_enabled,
+                                asm_transcript_enabled,
                                 opted_out_notification_methods,
                             } => {
-                                outbound_connections.insert(
-                                    connection_id,
-                                    OutboundConnectionState::new(
-                                        writer,
-                                        initialized,
-                                        experimental_api_enabled,
-                                        opted_out_notification_methods,
-                                        disconnect_sender,
-                                    ),
+                                let mut outbound = OutboundConnectionState::new(
+                                    writer,
+                                    initialized,
+                                    experimental_api_enabled,
+                                    opted_out_notification_methods,
+                                    disconnect_sender,
                                 );
+                                outbound.asm_transcript_enabled = asm_transcript_enabled;
+                                outbound_connections.insert(connection_id, outbound);
                             }
                             OutboundControlEvent::Closed { connection_id } => {
                                 outbound_connections.remove(&connection_id);
@@ -1031,6 +1059,7 @@ pub async fn run_main_with_transport_options(
                 &auth_manager,
             ))),
             auth_manager,
+            runtime_auth_slot,
             installation_id,
             code_mode_session_provider,
             rpc_transport: analytics_rpc_transport(&transport),
@@ -1170,12 +1199,17 @@ pub async fn run_main_with_transport_options(
                                     Arc::new(AtomicBool::new(false));
                                 let outbound_opted_out_notification_methods =
                                     Arc::new(RwLock::new(HashSet::new()));
+                                let outbound_asm_transcript_enabled =
+                                    Arc::new(AtomicBool::new(/*v*/ false));
                                 if outbound_control_tx
                                     .send(OutboundControlEvent::Opened {
                                         connection_id,
                                         writer,
                                         disconnect_sender,
                                         initialized: Arc::clone(&outbound_initialized),
+                                        asm_transcript_enabled: Arc::clone(
+                                            &outbound_asm_transcript_enabled,
+                                        ),
                                         experimental_api_enabled: Arc::clone(
                                             &outbound_experimental_api_enabled,
                                         ),
@@ -1188,16 +1222,15 @@ pub async fn run_main_with_transport_options(
                                 {
                                     break "outbound_router_closed";
                                 }
-                                connections.insert(
-                                    connection_id,
-                                    ConnectionState::new(
-                                        origin,
-                                        auth,
-                                        outbound_initialized,
-                                        outbound_experimental_api_enabled,
-                                        outbound_opted_out_notification_methods,
-                                    ),
+                                let connection = ConnectionState::new(
+                                    origin,
+                                    auth,
+                                    outbound_asm_transcript_enabled,
+                                    outbound_initialized,
+                                    outbound_experimental_api_enabled,
+                                    outbound_opted_out_notification_methods,
                                 );
+                                connections.insert(connection_id, connection);
                             }
                             TransportEvent::ConnectionClosed { connection_id } => {
                                 let Some(connection_state) = connections.remove(&connection_id) else {

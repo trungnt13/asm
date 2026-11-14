@@ -220,7 +220,15 @@ impl ToolSearchHandler {
 
         let args = match payload {
             ToolPayload::ToolSearch { arguments } => arguments,
-            ToolPayload::Function { arguments } if nested => super::parse_arguments(&arguments)?,
+            ToolPayload::Function { arguments }
+                if nested
+                    || crate::tools::harness_tool_search::enabled(
+                        &step_context.turn,
+                        &step_context.settings.model_info,
+                    ) =>
+            {
+                super::parse_arguments(&arguments)?
+            }
             _ => {
                 return Err(FunctionCallError::Fatal(format!(
                     "{TOOL_SEARCH_TOOL_NAME} handler received unsupported payload"
@@ -261,6 +269,20 @@ impl ToolSearchHandler {
                     .tool_input_schema_max_bytes,
                 &indirect_prefixes,
             );
+            return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
+                "tools": tools,
+            }))));
+        }
+
+        if crate::tools::harness_tool_search::enabled(
+            &step_context.turn,
+            &step_context.settings.model_info,
+        ) {
+            let tools = self
+                .search_entries(query)
+                .take(limit)
+                .flat_map(ToolSearchEntry::tool_names)
+                .collect::<Vec<_>>();
             return Ok(boxed_tool_output(JsonToolOutput::new(serde_json::json!({
                 "tools": tools,
             }))));
@@ -588,7 +610,7 @@ mod tests {
 
     fn tool_info(server_name: &str, tool_name: &str, description_prefix: &str) -> ToolInfo {
         ToolInfo {
-            server_name: server_name.to_string(),
+            server_key: codex_mcp::McpServerKey::unscoped(server_name),
             supports_parallel_tool_calls: false,
             server_origin: None,
             callable_name: tool_name.to_string(),

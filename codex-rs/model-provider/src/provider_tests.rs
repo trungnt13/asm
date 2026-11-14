@@ -81,6 +81,7 @@ fn provider_for(base_url: String) -> ModelProviderInfo {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,
@@ -267,7 +268,12 @@ async fn configured_provider_resolves_default_and_explicit_endpoints() {
         Some("https://example.test/v1".to_string())
     );
     assert_eq!(
-        provider.api_provider_and_auth().await.unwrap().0.base_url,
+        provider
+            .request_provider_and_auth(/*scope*/ None)
+            .await
+            .unwrap()
+            .0
+            .base_url,
         "https://example.test/v1"
     );
 
@@ -296,9 +302,12 @@ async fn configured_provider_resolves_default_and_explicit_endpoints() {
         )
         .unwrap();
         auth.reload().await;
-        let (api_provider, api_auth) = provider.api_provider_and_auth().await.unwrap();
+        let (api_provider, resolved) = provider
+            .request_provider_and_auth(/*scope*/ None)
+            .await
+            .unwrap();
         assert_eq!(api_provider.base_url, expected_base_url);
-        let headers = api_auth.to_auth_headers().unwrap();
+        let headers = resolved.auth.to_auth_headers().unwrap();
         assert_eq!(
             headers[http::header::AUTHORIZATION].to_str().unwrap(),
             format!("Bearer {api_key}")
@@ -318,9 +327,12 @@ async fn configured_provider_resolves_default_and_explicit_endpoints() {
         ("commercial-key", "https://api.openai.com/v1", None),
     ] {
         let reads_before = rotating_auth.0.load(Ordering::SeqCst);
-        let (api_provider, api_auth) = provider.api_provider_and_auth().await.unwrap();
+        let (api_provider, resolved) = provider
+            .request_provider_and_auth(/*scope*/ None)
+            .await
+            .unwrap();
         assert_eq!(rotating_auth.0.load(Ordering::SeqCst), reads_before + 1);
-        let headers = api_auth.to_auth_headers().unwrap();
+        let headers = resolved.auth.to_auth_headers().unwrap();
         let expected_authorization = format!("Bearer {api_key}");
         assert_eq!(
             (

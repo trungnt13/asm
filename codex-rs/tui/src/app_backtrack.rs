@@ -156,9 +156,7 @@ impl App {
 
     /// Revert the current thread before the selected prompt.
     pub(crate) fn apply_backtrack_selection(&mut self, selection: BacktrackSelection) {
-        if self.chat_widget.side_conversation_active()
-            || self.chat_widget.parallel_conversation_active()
-        {
+        if self.chat_widget.side_conversation_active() {
             self.reset_backtrack_state();
             self.chat_widget
                 .add_error_message(SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE.to_string());
@@ -398,6 +396,9 @@ impl App {
     /// source of truth for the active cell and its cache invalidation key, and because `App` owns
     /// overlay lifecycle and frame scheduling for animations.
     fn overlay_forward_event(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
+        let hud = self
+            .key_chord_matcher
+            .guide(&self.keymap.chords, &tui.frame_requester());
         let select_exit_key = Self::transcript_select_exit_key(&event);
         if matches!(
             &event,
@@ -446,8 +447,9 @@ impl App {
                 }
             });
             // Refresh visible rows before selection captures this live revision.
-            let result =
-                if input { t.draw(tui) } else { Ok(()) }.and_then(|()| t.handle_event(tui, event));
+            let result = tui.with_shortcut_hud(hud, |tui| {
+                if input { t.draw(tui) } else { Ok(()) }.and_then(|()| t.handle_event(tui, event))
+            });
             if result.is_err() {
                 let _ = tui.set_mouse_capture(tui::MouseCapture::Inherit);
             }
@@ -485,7 +487,7 @@ impl App {
         }
 
         if let Some(overlay) = &mut self.overlay {
-            overlay.handle_event(tui, event)?;
+            tui.with_shortcut_hud(hud, |tui| overlay.handle_event(tui, event))?;
             if overlay.is_done() {
                 self.close_transcript_overlay(tui);
                 tui.frame_requester().schedule_frame();
@@ -678,7 +680,7 @@ pub(crate) fn backtrack_revert_before_turn_id(
         }
     }
 
-    bail!("the selected prompt was not found in the persisted thread")
+    bail!("the selected prompt was not found in the persisted thread");
 }
 
 /// Returns whether a turn is the reconstructed inline-review child with duplicated prompt inputs.

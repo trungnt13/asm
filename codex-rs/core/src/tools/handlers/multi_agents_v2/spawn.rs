@@ -4,7 +4,7 @@ use crate::agent::types::SpawnAgentForkMode;
 use crate::codex_thread::ThreadConfigSnapshot;
 use crate::thread_spawn::ThreadSpawnError;
 use crate::thread_spawn::ThreadSpawnRequest;
-use crate::tools::handlers::multi_agents::collab_tool_call_status;
+use crate::tools::handlers::multi_agents_common::collab_tool_call_status;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::create_spawn_agent_tool_v2;
 use crate::tools::handlers::multi_agents_v2::message_tool::message_content;
@@ -227,15 +227,17 @@ impl SpawnAgentArgs {
         let fork_turns = self
             .fork_turns
             .as_deref()
-            .map(str::trim)
-            .filter(|fork_turns| !fork_turns.is_empty())
-            .unwrap_or("all");
+            .ok_or_else(|| FunctionCallError::RespondToModel("fork_turns is required".to_string()))
+            .map(str::trim)?;
 
         if fork_turns.eq_ignore_ascii_case("none") {
             return Ok(None);
         }
         // Accept legacy turn counts without limiting the inherited history.
-        if fork_turns.eq_ignore_ascii_case("all") || fork_turns.parse::<NonZeroUsize>().is_ok() {
+        if fork_turns.is_empty()
+            || fork_turns.eq_ignore_ascii_case("all")
+            || fork_turns.parse::<NonZeroUsize>().is_ok()
+        {
             return Ok(Some(SpawnAgentForkMode::FullHistory));
         }
 

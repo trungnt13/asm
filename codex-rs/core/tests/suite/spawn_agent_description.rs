@@ -38,7 +38,6 @@ use std::time::Instant;
 use test_case::test_case;
 use tokio::time::sleep;
 
-const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
 const SPAWN_AGENT_TOOL_NAME: &str = "spawn_agent";
 
@@ -119,6 +118,7 @@ fn test_model_info(
         availability_nux: None,
         apply_patch_tool_type: None,
         web_search_tool_type: Default::default(),
+        web_search_provider: None,
         truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
         supports_image_detail_original: false,
         context_window: Some(272_000),
@@ -149,8 +149,6 @@ async fn wait_for_model_available(manager: &SharedModelsManager, slug: &str) {
     }
 }
 
-#[test_case(MultiAgentVersion::V1, false; "v1_default")]
-#[test_case(MultiAgentVersion::V1, true; "v1_context")]
 #[test_case(MultiAgentVersion::V2, false; "v2_default")]
 #[test_case(MultiAgentVersion::V2, true; "v2_context")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -158,7 +156,6 @@ async fn model_catalog_flag_controls_refresh(
     multi_agent_version: MultiAgentVersion,
     model_catalog_in_context: bool,
 ) -> Result<()> {
-    // The V1 opt-in case also snapshots the full request history in scenarios.rs.
     let enabled = model_catalog_refresh_requests(
         multi_agent_version,
         model_catalog_in_context,
@@ -171,11 +168,7 @@ async fn model_catalog_flag_controls_refresh(
         /*include_model_catalog_in_spawn_agent_list*/ false,
     )
     .await?;
-    let namespace = match multi_agent_version {
-        MultiAgentVersion::V1 => MULTI_AGENT_V1_NAMESPACE,
-        MultiAgentVersion::V2 => MULTI_AGENT_V2_NAMESPACE,
-        MultiAgentVersion::Disabled => unreachable!("this test requires spawning"),
-    };
+    let namespace = MULTI_AGENT_V2_NAMESPACE;
     let enabled_body = enabled[0].body_json();
     let disabled_body = disabled[0].body_json();
     let enabled_tool = namespace_child_tool(&enabled_body, namespace, SPAWN_AGENT_TOOL_NAME)
@@ -286,11 +279,7 @@ pub(super) async fn model_catalog_refresh_requests(
 
     let request = resp_mock.single_request();
     let body = request.body_json();
-    let namespace = match multi_agent_version {
-        MultiAgentVersion::V1 => MULTI_AGENT_V1_NAMESPACE,
-        MultiAgentVersion::V2 => MULTI_AGENT_V2_NAMESPACE,
-        MultiAgentVersion::Disabled => unreachable!("this scenario requires spawning"),
-    };
+    let namespace = MULTI_AGENT_V2_NAMESPACE;
     let description = spawn_agent_description(&body, namespace)
         .expect("spawn_agent description should be present");
     let catalog = request.message_input_texts("developer").join("\n");
@@ -342,31 +331,13 @@ pub(super) async fn model_catalog_refresh_requests(
     );
     assert_eq!(
         listing.contains("Service tiers: priority."),
-        include_model_catalog_in_spawn_agent_list,
+        include_model_catalog_in_spawn_agent_list && model_catalog_in_context,
         "expected service tier guidance in model catalog: {catalog:?}"
     );
     assert!(
         !listing.contains("hidden-model"),
         "hidden picker model should be omitted from model catalog: {catalog:?}"
     );
-    if multi_agent_version == MultiAgentVersion::V1 {
-        assert!(
-        description.contains(
-            "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work."
-        ),
-        "expected explicit authorization rule in spawn_agent description: {description:?}"
-    );
-        assert!(
-        description.contains(
-            "Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn."
-        ) && description.contains("### When to delegate vs. do the subtask yourself"),
-        "expected delegation decision guidance in spawn_agent description: {description:?}"
-    );
-        assert!(
-            !description.contains("A mini model can solve many tasks faster than the main model."),
-            "spawn_agent description should not encourage choosing a smaller model by default: {description:?}"
-        );
-    }
 
     // Context placement and disabled catalog instructions both keep tools stable on refresh.
     let manager = test.thread_manager.get_models_manager();
@@ -496,7 +467,7 @@ pub(super) async fn model_catalog_refresh_requests(
     Ok(requests)
 }
 
-#[test_case(false, false, MULTI_AGENT_V1_NAMESPACE; "v1 hides agent type without roles")]
+#[test_case(true, false, "collaboration"; "v2 hides agent type without roles")]
 #[test_case(true, true, "collaboration"; "v2 exposes agent type with a role")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn configured_agent_roles_control_spawn_agent_type(

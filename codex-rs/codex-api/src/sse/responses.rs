@@ -1,4 +1,5 @@
 use super::responses_error::parse_failed_response;
+use crate::common::ReasoningRemovalReason;
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::common::SafetyBuffering;
@@ -21,6 +22,7 @@ use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -188,6 +190,15 @@ where
 }
 
 impl ResponsesStreamEvent {
+    pub(crate) fn is_generation_delta(&self) -> bool {
+        matches!(
+            self.kind(),
+            "response.output_text.delta"
+                | "response.function_call_arguments.delta"
+                | "response.custom_tool_call_input.delta"
+        ) && self.delta.as_ref().is_some_and(|delta| !delta.is_empty())
+    }
+
     pub fn kind(&self) -> &str {
         &self.kind
     }
@@ -374,6 +385,29 @@ impl ResponsesEventError {
     }
 }
 
+// Diagnostic fields are optional and must never make an otherwise valid response fail.
+fn reasoning_removals(response: &Value) -> Option<BTreeMap<ReasoningRemovalReason, i64>> {
+    let transformations = response.get("input_transformations")?.as_array()?;
+    let mut counts = BTreeMap::new();
+    for transformation in transformations {
+        if transformation.get("type").and_then(Value::as_str) != Some("reasoning")
+            || transformation.get("action").and_then(Value::as_str) != Some("removed")
+        {
+            continue;
+        }
+        let reason = match transformation.get("reason").and_then(Value::as_str) {
+            Some("organization_mismatch") => ReasoningRemovalReason::OrganizationMismatch,
+            Some("end_user_mismatch") => ReasoningRemovalReason::EndUserMismatch,
+            Some("model_mismatch") => ReasoningRemovalReason::ModelMismatch,
+            Some("prefix_mismatch") => ReasoningRemovalReason::PrefixMismatch,
+            Some("turn_boundary") => ReasoningRemovalReason::TurnBoundary,
+            _ => ReasoningRemovalReason::Other,
+        };
+        *counts.entry(reason).or_default() += 1;
+    }
+    Some(counts)
+}
+
 pub fn process_responses_event(
     event: ResponsesStreamEvent,
 ) -> std::result::Result<Option<ResponseEvent>, ResponsesEventError> {
@@ -494,6 +528,7 @@ pub fn process_responses_event(
                 }
             }
             if let Some(resp_val) = event.response {
+                let reasoning_removals = reasoning_removals(&resp_val);
                 let metadata = resp_val
                     .get("usage")
                     .filter(|usage| !usage.is_null())
@@ -508,6 +543,8 @@ pub fn process_responses_event(
                             token_usage: resp.usage.map(Into::into),
                             usage_metadata: resp.usage_metadata,
                             request_duration_ms: None,
+                            generation_duration_ms: None,
+                            reasoning_removals,
                             end_turn: if interrupted {
                                 Some(false)
                             } else {
@@ -594,6 +631,7 @@ async fn process_sse_with_treatment(
     let mut stream = stream.eventsource();
     let mut response_error: Option<ApiError> = None;
     let mut last_server_model: Option<String> = None;
+    let mut generation_started_at = None;
 
     loop {
         let start = Instant::now();
@@ -648,9 +686,32 @@ async fn process_sse_with_treatment(
                 continue;
             }
         };
+        if generation_started_at.is_none() && event.is_generation_delta() {
+            generation_started_at = Some(Instant::now());
+        }
+        let completed_at = (event.kind() == "response.completed").then(Instant::now);
+        let generation_duration = generation_started_at
+            .filter(|_| event.kind() == "response.completed")
+            .map(|start| {
+                i64::try_from(
+                    completed_at
+                        .expect("completion timestamp")
+                        .duration_since(start)
+                        .as_millis(),
+                )
+                .unwrap_or(i64::MAX)
+            });
         let completed_duration_ms = request_started_at
             .filter(|_| event.kind() == "response.completed")
-            .map(|start| i64::try_from(start.elapsed().as_millis()).unwrap_or(i64::MAX));
+            .map(|start| {
+                i64::try_from(
+                    completed_at
+                        .expect("completion timestamp")
+                        .duration_since(start)
+                        .as_millis(),
+                )
+                .unwrap_or(i64::MAX)
+            });
         let safety_buffering = event.safety_buffering(&safety_buffering_treatment);
         let metadata_events = event.metadata_events(safety_buffering);
 
@@ -676,10 +737,12 @@ async fn process_sse_with_treatment(
             Ok(Some(mut event)) => {
                 if let ResponseEvent::Completed {
                     request_duration_ms,
+                    generation_duration_ms,
                     ..
                 } = &mut event
                 {
                     *request_duration_ms = completed_duration_ms;
+                    *generation_duration_ms = generation_duration;
                 }
                 let is_completed = matches!(event, ResponseEvent::Completed { .. });
                 if tx_event.send(Ok(event)).await.is_err() {
@@ -694,7 +757,14 @@ async fn process_sse_with_treatment(
                 let error = error.into_api_error();
                 if matches!(
                     error,
-                    ApiError::FlexUnavailable | ApiError::ResponseIncomplete(_)
+                    ApiError::FlexUnavailable
+                        | ApiError::ContextWindowExceeded
+                        | ApiError::InvalidRequest { .. }
+                        | ApiError::SessionBudgetExceeded
+                        | ApiError::InferenceHookDenied { .. }
+                        | ApiError::AccessProgramNotEnabled { .. }
+                        | ApiError::ContentPolicyViolation { .. }
+                        | ApiError::ResponseIncomplete(_)
                 ) {
                     let _ = tx_event.send(Err(error)).await;
                     return;
@@ -890,6 +960,8 @@ mod tests {
                 token_usage,
                 usage_metadata,
                 request_duration_ms,
+                generation_duration_ms: _,
+                reasoning_removals: _,
                 end_turn,
             }) => {
                 assert_eq!(response_id, "resp1");
@@ -1090,6 +1162,8 @@ mod tests {
                 token_usage,
                 usage_metadata,
                 request_duration_ms,
+                generation_duration_ms: _,
+                reasoning_removals: _,
                 end_turn,
             }) => {
                 assert_eq!(response_id, "resp1");
@@ -1689,8 +1763,10 @@ mod tests {
                 response_id,
                 token_usage: None,
                 usage_metadata: None,
+                reasoning_removals: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1731,8 +1807,10 @@ mod tests {
                 response_id,
                 token_usage: None,
                 usage_metadata: None,
+                reasoning_removals: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1768,8 +1846,10 @@ mod tests {
                 response_id,
                 token_usage: None,
                 usage_metadata: None,
+                reasoning_removals: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }
@@ -1805,8 +1885,10 @@ mod tests {
                 response_id,
                 token_usage: None,
                 usage_metadata: None,
+                reasoning_removals: None,
                 end_turn: None,
                 request_duration_ms: None,
+                generation_duration_ms: None,
             } if response_id == "resp-1"
         );
     }

@@ -66,8 +66,8 @@ async fn spawned_subagents_apply_configured_developer_instruction_precedence(
     case: &str,
 ) -> Result<()> {
     let fork_turns = match case {
-        "no history" | "explicit configured role" | "implicit configured default" => Some("none"),
-        _ => None,
+        "no history" | "explicit configured role" | "implicit configured default" => "none",
+        _ => "all",
     };
     let agent_type = match case {
         "configured role without instructions"
@@ -116,10 +116,11 @@ async fn spawned_subagents_apply_configured_developer_instruction_precedence(
     const SPAWN_CALL_ID: &str = "spawn-instruction-override-worker";
 
     let server = responses::start_mock_server().await;
-    let mut spawn_args = json!({"message": CHILD_PROMPT, "task_name": "worker"});
-    if let Some(fork_turns) = fork_turns {
-        spawn_args["fork_turns"] = json!(fork_turns);
-    }
+    let mut spawn_args = json!({
+        "message": CHILD_PROMPT,
+        "task_name": "worker",
+        "fork_turns": fork_turns,
+    });
     if let Some(agent_type) = agent_type {
         spawn_args["agent_type"] = json!(agent_type);
     }
@@ -266,7 +267,7 @@ async fn spawned_subagents_apply_configured_developer_instruction_precedence(
         .collect::<Vec<_>>();
     // Full forks retain the parent's instructions before appending child overrides.
     let mut expected_instruction_texts = Vec::new();
-    if fork_turns.is_none()
+    if fork_turns == "all"
         && let Some(parent) = parent
     {
         expected_instruction_texts.push(parent);
@@ -343,6 +344,7 @@ async fn compacted_full_history_fork_applies_child_developer_instructions(
                 &serde_json::to_string(&json!({
                     "message": CHILD_PROMPT,
                     "task_name": "compacted_worker",
+                    "fork_turns": "all",
                 }))?,
             ),
             responses::ev_completed("parent-spawn-after-compaction"),

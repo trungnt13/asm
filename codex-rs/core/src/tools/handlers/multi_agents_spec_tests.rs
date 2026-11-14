@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 #[test]
-fn spawn_agent_tool_v2_requires_task_name() {
+fn spawn_agent_tool_v2_requires_task_name_message_and_fork_turns() {
     let tool = create_spawn_agent_tool_v2(
         SpawnAgentToolOptions {
             agent_type_description: "role help".to_string(),
@@ -36,7 +36,7 @@ fn spawn_agent_tool_v2_requires_task_name() {
         .as_ref()
         .expect("spawn_agent should use object params");
     assert!(description.contains("Spawns an agent to work on the specified task."));
-    assert!(description.contains("The spawned agent will have the same tools as you"));
+    assert!(description.contains("Codex-runtime agents will have the same tools as you"));
     assert!(!description.contains("max_concurrent_threads_per_session"));
     assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
     assert!(properties.contains_key("task_name"));
@@ -65,7 +65,11 @@ fn spawn_agent_tool_v2_requires_task_name() {
     assert!(!properties.contains_key("service_tier"));
     assert_eq!(
         parameters.required.as_deref(),
-        Some(["task_name".to_string(), "message".to_string()].as_slice())
+        Some(
+            ["task_name", "message", "fork_turns"]
+                .map(str::to_string)
+                .as_slice()
+        )
     );
     assert_eq!(
         output_schema.expect("spawn_agent output schema").to_value()["required"],
@@ -159,78 +163,6 @@ fn spawn_agent_catalog_description_preserves_generated_context(
     };
     catalog_enabled_tool.description = default_tool.description.clone();
     assert_eq!(catalog_enabled_tool, default_tool);
-}
-
-#[test_case::test_case(true, false; "inline_catalog")]
-#[test_case::test_case(true, true; "context_catalog")]
-#[test_case::test_case(false, false; "inline_catalog_disabled")]
-#[test_case::test_case(false, true; "context_catalog_disabled")]
-fn spawn_agent_tool_v1_keeps_legacy_fork_context_field(
-    include_model_catalog_in_spawn_agent_list: bool,
-    model_catalog_in_context: bool,
-) {
-    let tool = create_spawn_agent_tool_v1(SpawnAgentToolOptions {
-        agent_type_description: "role help".to_string(),
-        expose_agent_type: true,
-        hide_agent_type_model_reasoning: false,
-        expose_spawn_agent_model_overrides: true,
-        include_model_catalog_in_spawn_agent_list,
-        model_catalog_in_context,
-        usage_hint_text: None,
-        ..Default::default()
-    });
-
-    let ToolSpec::Namespace(namespace) = tool else {
-        panic!("spawn_agent v1 should be a namespace tool");
-    };
-    assert_eq!(namespace.name, MULTI_AGENT_V1_NAMESPACE);
-    let Some(ResponsesApiNamespaceTool::Function(ResponsesApiTool {
-        description,
-        parameters,
-        ..
-    })) = namespace.tools.first()
-    else {
-        panic!("spawn_agent should be a namespace function tool");
-    };
-    assert_eq!(
-        description.contains("No picker-visible model overrides are currently loaded."),
-        include_model_catalog_in_spawn_agent_list && !model_catalog_in_context
-    );
-    assert_eq!(
-        description.contains("<model_catalog>"),
-        include_model_catalog_in_spawn_agent_list && model_catalog_in_context
-    );
-    assert!(description.contains(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE));
-    assert_eq!(
-        parameters.schema_type.clone(),
-        Some(JsonSchemaType::Single(JsonSchemaPrimitiveType::Object))
-    );
-    let properties = parameters
-        .properties
-        .as_ref()
-        .expect("spawn_agent should use object params");
-
-    assert!(properties.contains_key("fork_context"));
-    assert!(!properties.contains_key("fork_turns"));
-    assert_eq!(
-        properties.get("agent_type"),
-        Some(&JsonSchema::string(Some(format!(
-            "{SPAWN_AGENT_TYPE_OVERRIDE_DESCRIPTION_V1}\nrole help"
-        ))))
-    );
-    assert_eq!(
-        properties
-            .get("message")
-            .and_then(|schema| schema.encrypted),
-        None
-    );
-    assert_eq!(
-        properties
-            .get("model")
-            .and_then(|schema| schema.description.as_deref()),
-        Some(SPAWN_AGENT_MODEL_OVERRIDE_DESCRIPTION)
-    );
-    assert!(!properties.contains_key("service_tier"));
 }
 
 #[test_case::test_case(true, false; "inline_catalog")]

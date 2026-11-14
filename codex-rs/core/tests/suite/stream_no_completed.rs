@@ -70,6 +70,7 @@ async fn retries_on_early_close() {
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,

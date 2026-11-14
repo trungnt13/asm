@@ -101,7 +101,6 @@ use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::MultiAgentVersion;
-use codex_protocol::protocol::NetworkAccess;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol_test_support::ContentItemTestExt;
@@ -627,8 +626,7 @@ web_search = true
         cfg.tools,
         Some(ToolsToml {
             web_search: None,
-            experimental_request_user_input: None,
-            update_plan: None,
+            ..Default::default()
         })
     );
 }
@@ -647,8 +645,7 @@ web_search = false
         cfg.tools,
         Some(ToolsToml {
             web_search: None,
-            experimental_request_user_input: None,
-            update_plan: None,
+            ..Default::default()
         })
     );
 }
@@ -665,9 +662,8 @@ fn tools_experimental_request_user_input_defaults_to_enabled() {
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
-            web_search: None,
             experimental_request_user_input: Some(ExperimentalRequestUserInput { enabled: true }),
-            update_plan: None,
+            ..Default::default()
         })
     );
 }
@@ -685,9 +681,8 @@ enabled = false
     assert_eq!(
         cfg.tools,
         Some(ToolsToml {
-            web_search: None,
             experimental_request_user_input: Some(ExperimentalRequestUserInput { enabled: false }),
-            update_plan: None,
+            ..Default::default()
         })
     );
 }
@@ -703,6 +698,7 @@ async fn load_config_resolves_experimental_request_user_input_enabled() -> std::
                     enabled: false,
                 }),
                 update_plan: None,
+                ..Default::default()
             }),
             ..ConfigToml::default()
         },
@@ -804,6 +800,9 @@ async fn load_config_resolves_code_mode_config() -> std::io::Result<()> {
     let codex_home = tempdir()?;
     let config_toml: ConfigToml = toml::from_str(
         r#"
+[code_mode]
+heartbeat_interval_s = 30
+
 [features.code_mode]
 enabled = true
 default_exec_yield_time_ms = 10000
@@ -837,6 +836,7 @@ disable_in_process_fallback = true
         vec!["mcp__history".to_string(), "mcp__notes".to_string()]
     );
     assert!(config.code_mode.disable_in_process_fallback);
+    assert_eq!(config.code_mode.heartbeat_interval_s, 30);
     assert!(config.features.enabled(Feature::CodeMode));
     assert!(config.features.enabled(Feature::CodeModeHost));
     Ok(())
@@ -906,6 +906,7 @@ auto_compact_fallback_buffer_tokens = 8000
 "#,
             Some(TokenBudgetConfig {
                 use_history_notes_extension: true,
+                context_window_as_tool_output: false,
                 reminder_threshold_tokens: Some(16_000),
                 reminder_message_template: "Custom reminder: {n_remaining} tokens.".to_string(),
                 guidance_message: Some("Preserve important state before compaction.".to_string()),
@@ -1527,6 +1528,7 @@ fn config_toml_deserializes_model_availability_nux() {
     assert_eq!(
         cfg.tui.expect("tui config should deserialize"),
         Tui {
+            default_hosts: Default::default(),
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             screen_reader_detection_done: None,
@@ -1542,6 +1544,7 @@ fn config_toml_deserializes_model_availability_nux() {
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
+            sidebar_width_percent: None,
             mouse_scroll_speed: None,
             collapse_tool_calls: false,
             collapse_tool_calls_max_lines: None,
@@ -1550,6 +1553,7 @@ fn config_toml_deserializes_model_availability_nux() {
             right_click_paste: Default::default(),
             alternate_screen: AltScreenMode::default(),
             status_line: None,
+            status_line_provider: None,
             status_line_use_colors: true,
             terminal_title: None,
             theme: None,
@@ -2364,7 +2368,9 @@ respect_system_proxy = true
         codex_http_client::OutboundProxyPolicy::RespectSystemProxy
     );
     assert_eq!(
-        config.plugins_config_input().remote_plugin_service_config(),
+        config
+            .plugins_config_input()
+            .remote_plugin_service_config(/*runtime_auth*/ None),
         codex_core_plugins::remote::RemotePluginServiceConfig::new(
             config.chatgpt_base_url,
             codex_http_client::HttpClientFactory::new(
@@ -2392,6 +2398,7 @@ respect_system_proxy = true
     let disabled = Sourced::new(
         FeatureRequirementsToml {
             entries: BTreeMap::from([("respect_system_proxy".to_string(), false)]),
+            ..Default::default()
         },
         RequirementSource::Unknown,
     );
@@ -2414,6 +2421,7 @@ respect_system_proxy = true
     let enabled = Sourced::new(
         FeatureRequirementsToml {
             entries: BTreeMap::from([("respect_system_proxy".to_string(), true)]),
+            ..Default::default()
         },
         RequirementSource::Unknown,
     );
@@ -2515,6 +2523,7 @@ async fn system_proxy_fallback_honors_feature_requirements() -> std::io::Result<
         let requirements = Sourced::new(
             FeatureRequirementsToml {
                 entries: BTreeMap::from([("system_proxy_fallback".to_string(), required)]),
+                ..Default::default()
             },
             RequirementSource::Unknown,
         );
@@ -2868,7 +2877,7 @@ async fn permissions_profiles_network_disabled_by_default_does_not_start_proxy()
 }
 
 #[tokio::test]
-async fn default_permissions_profile_populates_runtime_sandbox_policy() -> std::io::Result<()> {
+async fn default_permissions_profile_populates_runtime_permissions() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
     std::fs::create_dir_all(cwd.path().join("docs"))?;
@@ -2942,15 +2951,6 @@ async fn default_permissions_profile_populates_runtime_sandbox_policy() -> std::
                 missing_path_behavior: None,
             },
         ]),
-    );
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::WorkspaceWrite {
-            writable_roots: vec![],
-            network_access: false,
-            exclude_tmpdir_env_var: true,
-            exclude_slash_tmp: true,
-        }
     );
     assert!(
         !config
@@ -3054,10 +3054,6 @@ async fn permission_profile_override_populates_runtime_permissions() -> std::io:
         permission_profile
     );
     assert_eq!(config.permissions.active_permission_profile(), None);
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::DangerFullAccess
-    );
     Ok(())
 }
 
@@ -3158,9 +3154,11 @@ extends = ":workspace"
             extends: Some(BUILT_IN_PERMISSION_PROFILE_WORKSPACE.to_string()),
         })
     );
-    assert_eq!(
-        config.legacy_sandbox_policy(),
-        SandboxPolicy::new_workspace_write_policy()
+    assert!(
+        config
+            .permissions
+            .file_system_sandbox_policy()
+            .can_write_local_path_with_cwd(cwd.path(), cwd.path())
     );
     Ok(())
 }
@@ -3365,12 +3363,6 @@ async fn permission_profile_override_preserves_managed_unrestricted_filesystem()
         config.permissions.effective_permission_profile(),
         permission_profile
     );
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::ExternalSandbox {
-            network_access: NetworkAccess::Restricted,
-        }
-    );
     Ok(())
 }
 
@@ -3388,16 +3380,16 @@ async fn managed_unrestricted_permission_profile_still_enables_network_requireme
         ConfigToml::default(),
         ConfigOverrides {
             cwd: Some(cwd.path().to_path_buf()),
-            permission_profile: Some(permission_profile),
+            permission_profile: Some(permission_profile.clone()),
             ..Default::default()
         },
         codex_home.abs(),
     )
     .await?;
+
     assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::DangerFullAccess,
-        "the legacy projection is intentionally lossy for managed unrestricted profiles"
+        config.permissions.effective_permission_profile(),
+        permission_profile
     );
 
     let layers = config
@@ -3426,8 +3418,7 @@ async fn managed_unrestricted_permission_profile_still_enables_network_requireme
 }
 
 #[tokio::test]
-async fn permission_profile_override_keeps_memories_root_out_of_legacy_projection()
--> std::io::Result<()> {
+async fn permission_profile_override_keeps_memories_root_read_only() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
     let permission_profile = PermissionProfile::from_runtime_permissions(
@@ -3467,15 +3458,6 @@ async fn permission_profile_override_keeps_memories_root_out_of_legacy_projectio
             .permissions
             .file_system_sandbox_policy()
             .can_write_local_path_with_cwd(memories_root.as_path(), cwd.path())
-    );
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::WorkspaceWrite {
-            writable_roots: vec![],
-            network_access: false,
-            exclude_tmpdir_env_var: true,
-            exclude_slash_tmp: true,
-        }
     );
     Ok(())
 }
@@ -4222,20 +4204,24 @@ async fn implicit_builtin_workspace_profile_preserves_sandbox_workspace_write_se
         "implicit :workspace cannot be faithfully re-selected when it includes \
          legacy sandbox_workspace_write settings"
     );
-    match config.legacy_sandbox_policy() {
-        SandboxPolicy::WorkspaceWrite {
-            writable_roots,
-            network_access,
-            exclude_tmpdir_env_var,
-            exclude_slash_tmp,
-        } => {
-            assert!(writable_roots.contains(&extra_root));
-            assert!(network_access);
-            assert!(exclude_tmpdir_env_var);
-            assert!(!exclude_slash_tmp);
-        }
-        sandbox_policy => panic!("expected workspace-write projection, got {sandbox_policy:?}"),
-    }
+    assert_eq!(
+        policy
+            .entries
+            .into_iter()
+            .filter(|entry| matches!(
+                &entry.path,
+                FileSystemPath::Special {
+                    value: FileSystemSpecialPath::Tmpdir | FileSystemSpecialPath::SlashTmp
+                }
+            ))
+            .collect::<Vec<_>>(),
+        vec![FileSystemSandboxEntry::new(
+            FileSystemPath::Special {
+                value: FileSystemSpecialPath::SlashTmp
+            },
+            FileSystemAccessMode::Write,
+        )]
+    );
     Ok(())
 }
 
@@ -4491,15 +4477,6 @@ async fn permissions_profiles_allow_direct_write_roots_outside_workspace_root()
             .file_system_sandbox_policy()
             .can_write_local_path_with_cwd(external_write_path.as_path(), cwd.path())
     );
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::WorkspaceWrite {
-            writable_roots: vec![external_write_path],
-            network_access: false,
-            exclude_tmpdir_env_var: true,
-            exclude_slash_tmp: true,
-        }
-    );
     Ok(())
 }
 
@@ -4607,12 +4584,6 @@ async fn permissions_profiles_allow_unknown_special_paths() -> std::io::Result<(
             missing_path_behavior: None,
         }]),
     );
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::ReadOnly {
-            network_access: false,
-        }
-    );
     assert!(
         config.startup_warnings.iter().any(|warning| warning.contains(
             "Configured filesystem path `:future_special_path` is not recognized by this version of Codex and will be ignored."
@@ -4678,12 +4649,6 @@ async fn permissions_profiles_allow_missing_filesystem_with_warning() -> std::io
     assert_eq!(
         config.permissions.file_system_sandbox_policy(),
         FileSystemSandboxPolicy::restricted(Vec::new())
-    );
-    assert_eq!(
-        &config.legacy_sandbox_policy(),
-        &SandboxPolicy::ReadOnly {
-            network_access: false,
-        }
     );
     assert!(
         config.startup_warnings.iter().any(|warning| warning.contains(
@@ -4816,7 +4781,6 @@ async fn permissions_profiles_allow_network_enablement() -> std::io::Result<()> 
         config.permissions.network_sandbox_policy().is_enabled(),
         "expected network sandbox policy to be enabled",
     );
-    assert!(config.legacy_sandbox_policy().has_full_network_access());
     Ok(())
 }
 
@@ -4914,6 +4878,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
     assert_eq!(
         tui,
         Tui {
+            default_hosts: Default::default(),
             notification_settings: TuiNotificationSettings::default(),
             animations: true,
             screen_reader_detection_done: None,
@@ -4929,6 +4894,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             question_esc_back: true,
             raw_output_mode: false,
             fullscreen_transcript: true,
+            sidebar_width_percent: None,
             mouse_scroll_speed: None,
             collapse_tool_calls: false,
             collapse_tool_calls_max_lines: None,
@@ -4937,6 +4903,7 @@ fn tui_config_missing_notifications_field_defaults_to_enabled() {
             right_click_paste: Default::default(),
             alternate_screen: AltScreenMode::Auto,
             status_line: None,
+            status_line_provider: None,
             status_line_use_colors: true,
             terminal_title: None,
             theme: None,
@@ -5391,7 +5358,10 @@ exclude_slash_tmp = true
         )
         .await?;
 
-        let sandbox_policy = config.legacy_sandbox_policy();
+        let sandbox_policy = config
+            .permissions
+            .effective_permission_profile()
+            .to_legacy_sandbox_policy(cwd.path())?;
         let file_system_policy = config.permissions.file_system_sandbox_policy();
         let network_policy = config.permissions.network_sandbox_policy();
 
@@ -6279,14 +6249,101 @@ async fn rebuild_with_session_layers_refreshes_plugin_derived_mcp_config() -> an
     assert_eq!(
         mcp_config
             .mcp_server_catalog
-            .plugin_attributions_by_server_name(),
+            .plugin_attributions_by_server(),
         HashMap::from([(
-            "sample".to_string(),
+            codex_mcp::McpServerKey::in_environment(
+                codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
+                "sample",
+            ),
             McpPluginAttribution::new("sample@test".to_string(), "sample".to_string())
                 .with_host_root(PathUri::from_host_native_path(&plugin_root)?),
         )])
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn mcp_launch_cwds_follow_the_runtime_feature() -> anyhow::Result<()> {
+    let codex_home = TempDir::new()?;
+    let plugin_root = codex_home.path().join("plugins/cache/test/sample/local");
+    std::fs::create_dir_all(plugin_root.join(".codex-plugin"))?;
+    std::fs::write(
+        plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{"name":"sample"}"#,
+    )?;
+    std::fs::write(
+        plugin_root.join(".mcp.json"),
+        r#"{"mcpServers":{"sample":{"command":"sample","enabled":false},"other":{"command":"other"}}}"#,
+    )?;
+    let user_config = toml::toml! {
+        [features]
+        plugins = true
+        mcp_connection_sharing = true
+
+        [plugins."sample@test"]
+        enabled = true
+
+        [mcp_servers.node_repl]
+        command = "test-repl"
+
+        [mcp_servers.artifact_session]
+        command = "test-repl"
+
+        [mcp_servers.other_repl]
+        command = "custom-repl"
+    };
+    std::fs::write(
+        codex_home.path().join(CONFIG_TOML_FILE),
+        toml::to_string(&user_config)?,
+    )?;
+
+    let mut config = ConfigBuilder::default()
+        .codex_home(codex_home.path().to_path_buf())
+        .build()
+        .await?;
+    config.mcp_launch_cwds = Arc::new(McpLaunchCwds {
+        plugins: HashMap::from([(
+            "sample@test".to_string(),
+            HashMap::from([("sample".to_string(), config.codex_home.clone())]),
+        )]),
+        configured: ["node_repl", "artifact_session", "other_repl"]
+            .into_iter()
+            .map(|name| {
+                (
+                    name.to_string(),
+                    ("test-repl".to_string(), config.codex_home.clone()),
+                )
+            })
+            .collect(),
+    });
+    let plugins_manager =
+        plugins_manager_for_config(&config, auth_manager_from_optional_auth(/*auth*/ None));
+    assert!(!config.features.enabled(Feature::McpSharedReplCwd));
+    for enabled in [false, true, false] {
+        let mut incoming = config.clone();
+        incoming
+            .features
+            .set_enabled(Feature::McpSharedReplCwd, enabled)?;
+        config = config.resolve_runtime_refresh(&incoming, RuntimeConfigRefresh::User)?;
+        let mcp_config = config.to_mcp_config(&plugins_manager).await;
+        let configured_servers = mcp_config.mcp_server_catalog.configured_servers();
+        for (name, command) in [
+            ("sample", "sample"),
+            ("node_repl", "test-repl"),
+            ("artifact_session", "test-repl"),
+        ] {
+            let mut expected = stdio_mcp(command);
+            expected.enabled = name != "sample";
+            let McpServerTransportConfig::Stdio { cwd, .. } = &mut expected.transport else {
+                unreachable!();
+            };
+            *cwd = enabled.then(|| LegacyAppPathString::from_abs_path(&config.codex_home));
+            assert_eq!(configured_servers[name], expected);
+        }
+        assert_eq!(configured_servers["other"], stdio_mcp("other"));
+        assert_eq!(configured_servers["other_repl"], stdio_mcp("custom-repl"));
+    }
     Ok(())
 }
 
@@ -6343,7 +6400,7 @@ enabled = true
     assert!(
         mcp_config
             .mcp_server_catalog
-            .plugin_attributions_by_server_name()
+            .plugin_attributions_by_server()
             .is_empty()
     );
 
@@ -6446,7 +6503,10 @@ url = "https://sample.example/mcp"
     assert_eq!(
         mcp_config
             .mcp_server_catalog
-            .server("unlisted")
+            .server(&codex_mcp::McpServerKey::in_environment(
+                codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
+                "unlisted",
+            ))
             .map(|server| (server.source().clone(), server.config().clone())),
         Some((
             codex_mcp::McpServerSource::SelectedPlugin(McpPluginAttribution::new(
@@ -6550,25 +6610,27 @@ async fn add_dir_override_extends_workspace_writable_roots() -> std::io::Result<
 
     let expected_backend = backend.abs();
     if cfg!(target_os = "windows") {
-        match &config.legacy_sandbox_policy() {
-            SandboxPolicy::ReadOnly { .. } => {}
-            other => panic!("expected read-only policy on Windows, got {other:?}"),
-        }
+        assert_eq!(
+            config.permissions.permission_profile(),
+            &PermissionProfile::read_only()
+        );
     } else {
-        match &config.legacy_sandbox_policy() {
-            SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
-                assert_eq!(
-                    writable_roots
-                        .iter()
-                        .filter(|root| **root == expected_backend)
-                        .count(),
-                    1,
-                    "expected single writable root entry for {}",
-                    expected_backend.display()
-                );
-            }
-            other => panic!("expected workspace-write policy, got {other:?}"),
-        }
+        assert!(
+            config
+                .permissions
+                .file_system_sandbox_policy()
+                .can_write_local_path_with_cwd(expected_backend.as_path(), config.cwd.as_path())
+        );
+        let writable_roots = config.permissions.user_visible_workspace_roots();
+        assert_eq!(
+            writable_roots
+                .iter()
+                .filter(|root| **root == expected_backend)
+                .count(),
+            1,
+            "expected single writable root entry for {}",
+            expected_backend.display()
+        );
     }
 
     Ok(())
@@ -6690,10 +6752,10 @@ async fn workspace_write_includes_configured_writable_root_once_without_memories
     .await?;
 
     if cfg!(target_os = "windows") {
-        match &config.legacy_sandbox_policy() {
-            SandboxPolicy::ReadOnly { .. } => {}
-            other => panic!("expected read-only policy on Windows, got {other:?}"),
-        }
+        assert_eq!(
+            config.permissions.permission_profile(),
+            &PermissionProfile::read_only()
+        );
     } else {
         assert!(
             !memories_root.exists(),
@@ -6701,21 +6763,23 @@ async fn workspace_write_includes_configured_writable_root_once_without_memories
             memories_root.display()
         );
         let expected_memories_root = memories_root.abs();
-        match &config.legacy_sandbox_policy() {
-            SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
-                assert!(!writable_roots.contains(&expected_memories_root));
-                assert_eq!(
-                    writable_roots
-                        .iter()
-                        .filter(|root| **root == writable_root)
-                        .count(),
-                    1,
-                    "expected single writable root entry for {}",
-                    writable_root.display()
-                );
-            }
-            other => panic!("expected workspace-write policy, got {other:?}"),
-        }
+        assert!(
+            config
+                .permissions
+                .file_system_sandbox_policy()
+                .can_write_local_path_with_cwd(writable_root.as_path(), config.cwd.as_path())
+        );
+        let writable_roots = config.permissions.user_visible_workspace_roots();
+        assert!(!writable_roots.contains(&expected_memories_root));
+        assert_eq!(
+            writable_roots
+                .iter()
+                .filter(|root| **root == writable_root)
+                .count(),
+            1,
+            "expected single writable root entry for {}",
+            writable_root.display()
+        );
     }
 
     Ok(())
@@ -6765,17 +6829,13 @@ async fn memory_tool_makes_memories_root_readable_without_creating_or_widening_w
     );
 
     if cfg!(target_os = "windows") {
-        match &config.legacy_sandbox_policy() {
-            SandboxPolicy::ReadOnly { .. } => {}
-            other => panic!("expected read-only policy on Windows, got {other:?}"),
-        }
+        assert_eq!(
+            config.permissions.permission_profile(),
+            &PermissionProfile::read_only()
+        );
     } else {
-        match &config.legacy_sandbox_policy() {
-            SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
-                assert!(!writable_roots.contains(&memories_root_abs));
-            }
-            other => panic!("expected workspace-write policy, got {other:?}"),
-        }
+        let writable_roots = config.permissions.user_visible_workspace_roots();
+        assert!(!writable_roots.contains(&memories_root_abs));
     }
 
     Ok(())
@@ -9052,29 +9112,19 @@ async fn load_config_uses_requirements_guardian_policy_config() -> std::io::Resu
 }
 
 #[test]
-fn config_toml_deserializes_auto_review_policy_and_template() {
+fn config_toml_deserializes_auto_review_policy() {
     let cfg = toml::from_str::<ConfigToml>(
         r#"
 [auto_review]
 policy = "Use the user-configured guardian policy."
-extra_policy = "Use the user-configured additional policy."
-experimental_policy_template = "Configured template: {{ tenant_policy_config }}"
 "#,
     )
     .expect("TOML deserialization should succeed");
 
     let auto_review = cfg.auto_review.as_ref().expect("auto-review config");
     assert_eq!(
-        (
-            auto_review.policy.as_deref(),
-            auto_review.extra_policy.as_deref(),
-            auto_review.experimental_policy_template.as_deref(),
-        ),
-        (
-            Some("Use the user-configured guardian policy."),
-            Some("Use the user-configured additional policy."),
-            Some("Configured template: {{ tenant_policy_config }}"),
-        )
+        auto_review.policy.as_deref(),
+        Some("Use the user-configured guardian policy.")
     );
 }
 
@@ -9084,7 +9134,7 @@ experimental_policy_template = "Configured template: {{ tenant_policy_config }}"
 #[test_case::test_case("[guardianv2]\nasync_classifier_mode = 'snapshot'", codex_protocol::TranscriptFormat::Line; "legacy_snapshot")]
 #[test_case::test_case("[guardianv2]\nasync_classifier_mode = 'conversation'", codex_protocol::TranscriptFormat::Line; "legacy_conversation")]
 #[tokio::test]
-async fn load_config_uses_auto_review_guardian_policy_config_and_template(
+async fn load_config_uses_auto_review_guardian_policy_config(
     features: &str,
     expected_mode: codex_protocol::TranscriptFormat,
 ) -> std::io::Result<()> {
@@ -9092,15 +9142,8 @@ async fn load_config_uses_auto_review_guardian_policy_config_and_template(
     let cfg = ConfigToml {
         features: Some(toml::from_str(features).unwrap()),
         auto_review: Some(AutoReviewToml {
-            timeout_ms: None,
-            circuit_break_action: None,
             policy: Some("  Use the user-configured guardian policy.  ".to_string()),
-            extra_policy: Some("  Use the user-configured additional policy.  ".to_string()),
-            experimental_policy_template: Some(
-                "  Configured template: {{ tenant_policy_config }}  ".to_string(),
-            ),
-            experimental_conversation_history_prompt: None,
-            conversation_history_max_output_tokens: None,
+            ..Default::default()
         }),
         ..Default::default()
     };
@@ -9119,14 +9162,10 @@ async fn load_config_uses_auto_review_guardian_policy_config_and_template(
         (
             config.guardian_transcript_mode,
             config.guardian_policy_config.as_deref(),
-            config.guardian_extra_policy.as_deref(),
-            config.guardian_policy_template.as_deref(),
         ),
         (
             expected_mode,
             Some("Use the user-configured guardian policy."),
-            Some("Use the user-configured additional policy."),
-            Some("Configured template: {{ tenant_policy_config }}"),
         )
     );
 
@@ -9139,16 +9178,79 @@ async fn load_config_uses_auto_review_guardian_policy_config_and_template(
     Ok(())
 }
 
+#[test_case::test_case("sync")]
+#[test_case::test_case("async")]
+#[tokio::test]
+async fn elastic_budget_is_opt_in_and_validated(target: &str) {
+    let excessive_minimum = codex_guardian_context::DEFAULT_MAX_INPUT_TOKENS + 1;
+    let minimum_mismatch = format!(
+        r#"[features.guardianv2.sync_elastic_sections.root_conversation_messages]
+min_total_section_tokens = {excessive_minimum}
+max_section_entry_tokens = 1
+"#
+    );
+    let maximum_below_minimum = r#"[features.guardianv2.sync_elastic_sections.root_conversation_messages]
+min_total_section_tokens = 1
+max_section_entry_tokens = 1
+max_total_section_tokens = 0
+"#;
+    let home = TempDir::new().unwrap();
+    for sections in [
+        r#"[features.guardianv2.sync_elastic_sections.transcript_tools]
+min_total_section_tokens = 1
+max_section_entry_tokens = 0
+"#,
+        "",
+        maximum_below_minimum,
+        minimum_mismatch.as_str(),
+        r#"[features.guardianv2.sync_elastic_sections.root_messages]
+min_total_section_tokens = 1
+max_section_entry_tokens = 1
+[features.guardianv2.sync_elastic_sections.root_conversation_messages]
+min_total_section_tokens = 1
+max_section_entry_tokens = 1
+"#,
+    ] {
+        let sections = sections.replace("sync_", &format!("{target}_"));
+        for enabled in [false, true] {
+            let result = Config::load_from_base_config_with_overrides(
+                toml::from_str(&format!(
+                    "[features.guardianv2]\nenabled = false\n{target}_elastic_budgeting = {enabled}\n{sections}"
+                ))
+                .unwrap(),
+                ConfigOverrides {
+                    cwd: Some(home.path().to_path_buf()),
+                    ..Default::default()
+                },
+                home.abs(),
+            )
+            .await;
+            assert_eq!(result.is_err(), enabled);
+        }
+    }
+}
+
+#[tokio::test]
+async fn async_elastic_opt_in_preserves_fixed_capture() {
+    let mut config = super::test_config().await;
+    config.guardian_async_elastic_budget =
+        Some(core_test_support::guardian::elastic_budget_config());
+    assert_eq!(
+        config.guardian_context_budgeting(),
+        codex_guardian_context::ContextBudgeting::Fixed,
+    );
+}
+
 #[tokio::test]
 async fn requirements_guardian_policy_beats_auto_review() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     for (managed_extra, expected_extra) in [
         (
             Some("  Use the managed additional policy.  "),
-            "Use the managed additional policy.",
+            Some("Use the managed additional policy."),
         ),
-        (Some("   "), "Use the user-configured additional policy."),
-        (None, "Use the user-configured additional policy."),
+        (Some("   "), None),
+        (None, None),
     ] {
         let config_layer_stack = ConfigLayerStack::new(
             Vec::new(),
@@ -9162,13 +9264,8 @@ async fn requirements_guardian_policy_beats_auto_review() -> std::io::Result<()>
         .map_err(std::io::Error::other)?;
         let cfg = ConfigToml {
             auto_review: Some(AutoReviewToml {
-                timeout_ms: None,
-                circuit_break_action: None,
                 policy: Some("Use the user-configured guardian policy.".to_string()),
-                extra_policy: Some("Use the user-configured additional policy.".to_string()),
-                experimental_policy_template: None,
-                experimental_conversation_history_prompt: None,
-                conversation_history_max_output_tokens: None,
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -9190,10 +9287,7 @@ async fn requirements_guardian_policy_beats_auto_review() -> std::io::Result<()>
                 config.guardian_policy_config.as_deref(),
                 config.guardian_extra_policy.as_deref(),
             ),
-            (
-                Some("Use the managed guardian policy."),
-                Some(expected_extra),
-            )
+            (Some("Use the managed guardian policy."), expected_extra,)
         );
     }
     Ok(())
@@ -9204,13 +9298,9 @@ async fn load_config_ignores_empty_auto_review_guardian_policy_config() -> std::
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
         auto_review: Some(AutoReviewToml {
-            timeout_ms: None,
-            circuit_break_action: None,
             policy: Some("   ".to_string()),
-            extra_policy: Some("   ".to_string()),
-            experimental_policy_template: None,
             experimental_conversation_history_prompt: Some(String::new()),
-            conversation_history_max_output_tokens: None,
+            ..Default::default()
         }),
         ..Default::default()
     };
@@ -10225,6 +10315,27 @@ job_max_runtime_seconds = 900
 }
 
 #[tokio::test]
+async fn legacy_multi_agent_opt_out_survives_a_session_override() -> std::io::Result<()> {
+    let home = TempDir::new()?;
+    std::fs::write(
+        home.path().join(CONFIG_TOML_FILE),
+        "[features]\nmulti_agent = false\n",
+    )?;
+    let config = ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(home.path().to_path_buf())
+        .fallback_cwd(Some(home.path().to_path_buf()))
+        .cli_overrides(vec![("features.multi_agent".to_string(), true.into())])
+        .build()
+        .await?;
+    assert!(config.features.enabled(Feature::Collab));
+    assert_eq!(
+        legacy_multi_agent_disabled_sources(&config.config_layer_stack),
+        ["user"]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_config_resolves_agent_controls() -> std::io::Result<()> {
     let codex_home = TempDir::new()?;
     let cfg = ConfigToml {
@@ -10666,6 +10777,10 @@ async fn load_config_applies_otel_trace_metadata() -> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;
     fixture.cfg = toml::from_str(
         r#"
+[otel]
+headers_helper = "company-auth telemetry-headers"
+headers_helper_refresh_interval_ms = 900000
+
 [otel.span_attributes]
 "example.trace_attr" = "enabled"
 
@@ -10686,6 +10801,18 @@ beta = "two"
     )
     .await?;
 
+    assert_eq!(
+        config.otel.headers_helper.as_deref(),
+        Some("company-auth telemetry-headers")
+    );
+    assert_eq!(
+        config
+            .otel
+            .headers_helper_refresh_interval_ms
+            .unwrap()
+            .get(),
+        900000
+    );
     assert_eq!(
         config.otel.span_attributes,
         HashMap::from([("example.trace_attr".to_string(), "enabled".to_string())])
@@ -11688,24 +11815,14 @@ async fn test_untrusted_project_gets_unless_trusted_approval_policy() -> anyhow:
         "Expected UnlessTrusted approval policy for untrusted project"
     );
 
-    // Verify that untrusted projects still get WorkspaceWrite sandbox (or ReadOnly on Windows)
-    if cfg!(target_os = "windows") {
-        assert!(
-            matches!(
-                &config.legacy_sandbox_policy(),
-                SandboxPolicy::ReadOnly { .. }
-            ),
-            "Expected ReadOnly on Windows"
-        );
-    } else {
-        assert!(
-            matches!(
-                &config.legacy_sandbox_policy(),
-                SandboxPolicy::WorkspaceWrite { .. }
-            ),
-            "Expected WorkspaceWrite sandbox for untrusted project"
-        );
-    }
+    assert_eq!(
+        config.permissions.permission_profile(),
+        &if cfg!(target_os = "windows") {
+            PermissionProfile::read_only()
+        } else {
+            PermissionProfile::workspace_write()
+        }
+    );
 
     Ok(())
 }
@@ -11757,8 +11874,8 @@ async fn requirements_disallowing_default_sandbox_falls_back_to_required_default
         .build()
         .await?;
     assert_eq!(
-        config.legacy_sandbox_policy(),
-        SandboxPolicy::new_read_only_policy()
+        config.permissions.effective_permission_profile(),
+        PermissionProfile::read_only()
     );
     Ok(())
 }
@@ -11783,8 +11900,8 @@ async fn explicit_sandbox_mode_falls_back_when_disallowed_by_requirements() -> s
         .build()
         .await?;
     assert_eq!(
-        config.legacy_sandbox_policy(),
-        SandboxPolicy::new_read_only_policy()
+        config.permissions.effective_permission_profile(),
+        PermissionProfile::read_only()
     );
     Ok(())
 }
@@ -12061,8 +12178,6 @@ async fn permission_profile_override_falls_back_when_disallowed_by_requirements(
         .build()
         .await?;
 
-    let expected_sandbox_policy = SandboxPolicy::new_read_only_policy();
-    assert_eq!(config.legacy_sandbox_policy(), expected_sandbox_policy);
     assert_eq!(
         config.permissions.effective_permission_profile(),
         PermissionProfile::read_only()
@@ -12197,10 +12312,6 @@ async fn permission_profile_override_preserves_split_write_roots() -> std::io::R
             .file_system_sandbox_policy()
             .can_write_local_path_with_cwd(outside_root.as_path(), config.cwd.as_path())
     );
-    assert!(matches!(
-        &config.legacy_sandbox_policy(),
-        SandboxPolicy::WorkspaceWrite { .. }
-    ));
     assert_eq!(
         config.permissions.network_sandbox_policy(),
         NetworkSandboxPolicy::Restricted
@@ -12537,7 +12648,6 @@ shell_tool = false
 
 #[test_case::test_case(Feature::Personality; "personality")]
 #[test_case::test_case(Feature::GuardianThreadContext; "guardian thread context")]
-#[test_case::test_case(Feature::DaemonAutoStart; "daemon auto start")]
 #[test_case::test_case(Feature::Worktrees; "worktrees")]
 #[test_case::test_case(Feature::RealtimeConversation; "realtime conversation")]
 #[test_case::test_case(Feature::ShellZshFork; "shell zsh fork")]
@@ -12557,6 +12667,7 @@ fn retired_feature_requirements_do_not_pin_configured_values(
                     (key.to_string(), required),
                     ("shell_tool".to_string(), false),
                 ]),
+                ..Default::default()
             },
             RequirementSource::EnterpriseManaged {
                 id: "enterprise-id".to_string(),
@@ -13001,8 +13112,11 @@ max_concurrent_threads_per_session = 17
     assert!(usage_hints.root.is_none() && usage_hints.subagent.is_none());
 }
 
-#[test]
-fn multi_agent_v2_model_override_exposure_preserves_configured_usage_hints() {
+#[test_case::test_case(false; "native_tools")]
+#[test_case::test_case(true; "native_tools_disabled")]
+fn multi_agent_v2_model_override_exposure_preserves_configured_usage_hints(
+    disable_native_tools: bool,
+) {
     let config_toml = toml::from_str(
         r###"[features.multi_agent_v2]
 enabled = true
@@ -13013,7 +13127,8 @@ expose_spawn_agent_model_overrides = true
     )
     .expect("multi-agent v2 config should parse");
 
-    let config = resolve_multi_agent_v2_config(&config_toml);
+    let mut config = resolve_multi_agent_v2_config(&config_toml);
+    config.disable_native_tools = disable_native_tools;
     assert!(config.expose_spawn_agent_model_overrides);
     assert_eq!(
         config.root_agent_usage_hint_text.as_deref(),
@@ -13039,6 +13154,23 @@ expose_spawn_agent_model_overrides = true
             Some("## `update_plan`\nSubagent guidance.".to_string()),
         )
     );
+}
+
+#[test]
+fn multi_agent_v2_disabled_native_tools_omit_default_roles() {
+    let mut config = resolve_multi_agent_v2_config(&ConfigToml::default());
+    config.disable_native_tools = true;
+    let mut messages = ResolvedModelMessages::bundled().multi_agent();
+    for catalog_override in [false, true] {
+        if catalog_override {
+            messages.root = ResolvedMessage::Catalog("Catalog root base.");
+            messages.subagent = ResolvedMessage::Catalog("Catalog subagent base.");
+        }
+        let usage_hints = resolve_usage_hints(
+            &config, messages, /*omit_update_plan_instructions*/ false,
+        );
+        assert_eq!((usage_hints.root, usage_hints.subagent), (None, None));
+    }
 }
 
 #[test]

@@ -12,7 +12,6 @@ use codex_config::types::MemoriesConfig;
 use codex_core::Prompt;
 use codex_core::config::Config;
 use codex_protocol::MemoryVersion;
-use codex_protocol::ResponseItemId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
@@ -300,14 +299,17 @@ mod job {
             MemoryVersion::V1 => vec![ResponseItem::Message {
                 status: None,
                 encrypted_content: None,
-                id: Some(ResponseItemId::new("msg")),
+                id: Some(context.item_id_generator()("msg")),
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText { text: input_text }],
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             }],
             MemoryVersion::V2 => crate::rollout_input::extraction_messages(&input_text),
-        };
+        }
+        .into_iter()
+        .map(std::sync::Arc::new)
+        .collect();
         prompt.base_instructions = BaseInstructions {
             text: match config.memories.version {
                 MemoryVersion::V1 => crate::stage_one::PROMPT,
@@ -320,7 +322,7 @@ mod job {
         prompt.output_schema_strict = true;
 
         let (result, token_usage) = context
-            .stream_stage_one_prompt(config, &prompt, stage_one_context)
+            .stream_stage_one_prompt(config, prompt, stage_one_context)
             .await?;
 
         let output = StageOneOutput::parse(&result, config.memories.version)?;

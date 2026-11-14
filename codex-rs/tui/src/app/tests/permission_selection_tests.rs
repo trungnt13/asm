@@ -34,7 +34,6 @@ async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
         codex_config::LoaderOverrides::without_managed_config_for_tests(),
     )
     .await?;
-    server = server.with_side_conversations(&app.config.codex_home, &app.app_server_target);
     let started = server
         .resume_thread(
             &app.local_settings,
@@ -46,18 +45,16 @@ async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    Box::pin(app.start_companion_conversation(
+    Box::pin(app.handle_event(
         &mut tui,
         &mut server,
-        thread_id,
-        CompanionKind::Parallel,
-        /*user_message*/ None,
+        AppEvent::ForkCurrentSession { name: None },
     ))
     .await?;
-    let parallel_id = app.current_displayed_thread_id().expect("saved Parallel");
-    assert_ne!(parallel_id, thread_id);
-    let parallel_permissions = app.chat_widget.config_ref().permissions.clone();
-    Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    let fork_id = app.current_displayed_thread_id().expect("saved fork");
+    assert_ne!(fork_id, thread_id);
+    let fork_permissions = app.chat_widget.config_ref().permissions.clone();
+    Box::pin(app.select_agent_thread(&mut tui, &mut server, thread_id)).await?;
     // A previously selected custom profile may have left a profile-specific proxy cached.
     let home = tempdir()?;
     std::fs::write(
@@ -165,7 +162,7 @@ proxy_url = "http://127.0.0.1:43128"
         }
         app.handle_event(&mut tui, &mut server, event).await?;
     }
-    // Clear the queued-menu fixture before checking explicit main/Parallel turns.
+    // Clear the queued-menu fixture before checking explicit main/fork turns.
     app.chat_widget.restore_thread_input_state(
         /*input_state*/ None,
         crate::chatwidget::ThreadInputStateRestoreMode {
@@ -179,15 +176,15 @@ proxy_url = "http://127.0.0.1:43128"
         /*replay_kind*/ None,
     );
     // The matching explicit choice still reaches main's next turn.
-    for (target, expected_permissions) in [(thread_id, Some(profile_id)), (parallel_id, None)] {
-        if target == parallel_id {
-            Box::pin(app.toggle_side_conversation(&mut tui, &mut server)).await?;
+    for (target, expected_permissions) in [(thread_id, Some(profile_id)), (fork_id, None)] {
+        if target == fork_id {
+            Box::pin(app.select_agent_thread(&mut tui, &mut server, fork_id)).await?;
             assert_eq!(
                 app.chat_widget
                     .config_ref()
                     .permissions
                     .permission_profile(),
-                parallel_permissions.permission_profile(),
+                fork_permissions.permission_profile(),
             );
         }
         while events.try_recv().is_ok() {}
@@ -514,6 +511,7 @@ async fn custom_permission_selection_scenario() -> Result<()> {
             app.agents_overview
                 .requested_permission_profiles
                 .get(&thread_id),
+            crate::app_server_session::SideChatStorage::Temporary,
         ),
     )
     .await?;

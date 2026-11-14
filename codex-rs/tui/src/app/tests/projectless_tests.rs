@@ -3,6 +3,7 @@
 use super::session_lifecycle_requests::HistoryCapabilities;
 use super::session_lifecycle_requests::start_recording_app_server_with_history;
 use super::*;
+use crate::app::session_lifecycle::FreshSessionStart;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -51,7 +52,7 @@ sandbox = "unelevated"
     app.start_fresh_session(
         &mut tui,
         &mut server,
-        /*session_start_source*/ None,
+        FreshSessionStart::PreserveCurrentView(None),
         /*initial_user_message*/ None,
         /*new_thread_name*/ None,
     )
@@ -71,7 +72,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             app.chat_widget.thread_id().expect("fresh task"),
-            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
+            vec![codex_context_fragments::side_conversation_boundary()],
         )
         .await?;
     let fresh_destination = tempfile::tempdir()?;
@@ -105,7 +106,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             saved.session.thread_id,
-            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
+            vec![codex_context_fragments::side_conversation_boundary()],
         )
         .await?;
     tui.pause_events();
@@ -220,7 +221,7 @@ sandbox = "unelevated"
     server
         .thread_inject_items(
             app.chat_widget.thread_id().expect("new project task"),
-            vec![App::side_boundary_prompt_item(CompanionKind::Side)],
+            vec![codex_context_fragments::side_conversation_boundary()],
         )
         .await?;
     app.change_working_directory(&mut tui, &mut server, source.path().abs())

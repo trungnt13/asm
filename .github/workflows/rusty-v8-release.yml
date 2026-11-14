@@ -168,7 +168,6 @@ jobs:
 
       - name: Build Bazel V8 release pair
         env:
-          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
           PLATFORM: ${{ matrix.platform }}
           SANDBOX: ${{ matrix.sandbox }}
           TARGET: ${{ matrix.target }}
@@ -192,7 +191,7 @@ jobs:
             --build_metadata=COMMIT_SHA=$(git rev-parse HEAD)
           )
 
-          ./.github/scripts/run_bazel_with_buildbuddy.py \
+          ./.github/scripts/run_bazel.py \
             --noexperimental_remote_repo_contents_cache \
             "${bazel_args[@]}" \
             "--config=${{ matrix.bazel_config }}"
@@ -200,7 +199,6 @@ jobs:
       - name: Stage release pair
         env:
           BAZEL_CONFIG: ${{ matrix.bazel_config }}
-          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
           PLATFORM: ${{ matrix.platform }}
           SANDBOX: ${{ matrix.sandbox }}
           TARGET: ${{ matrix.target }}

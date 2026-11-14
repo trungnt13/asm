@@ -18,12 +18,8 @@ Scenario: The admitted turn receives input retained after denial and interruptio
     <turn_aborted>
     The user interrupted the previous turn on purpose. Any running unified exec processes may still be runni...mands were aborted, they may have partially executed. [hash=8a46c957943b77f4]
     </turn_aborted>
-05:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
-        Deferred tool namespaces:
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
-        </tools>
+05:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
 06:message/user:
     <ENVIRONMENT_CONTEXT>
 07:message/user:

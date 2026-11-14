@@ -14,20 +14,50 @@ pub(super) fn apply_defaults(
     let Some(instructions) = instructions else {
         return None;
     };
-    let matches = instructions
-        .match_indices(DEVELOPER_BLOCK)
-        .any(|(offset, block)| {
-            let end = offset + block.len();
-            (offset == 0 || instructions[..offset].ends_with("\n\n"))
-                && (end == instructions.len() || instructions[end..].starts_with("\n\n"))
-        });
-    if !matches {
+    let side_block_offset =
+        instructions
+            .match_indices(DEVELOPER_BLOCK)
+            .find_map(|(offset, block)| {
+                let end = offset + block.len();
+                ((offset == 0 || instructions[..offset].ends_with("\n\n"))
+                    && (end == instructions.len() || instructions[end..].starts_with("\n\n")))
+                .then_some(offset)
+            });
+    let Some(side_block_offset) = side_block_offset else {
         return None;
+    };
+    if let Some(prompt) = config
+        .side_prompt
+        .as_deref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        let mut instructions = instructions.to_string();
+        instructions.insert_str(side_block_offset, &format!("{prompt}\n\n"));
+        config.developer_instructions = Some(instructions);
     }
     let configured = config.side_model.is_some()
         || config.side_reasoning_effort.is_some()
         || config.side_service_tier.is_some();
-    if !configured {
+    let pending_prompt = if matches!(origin, SideOrigin::Fork) {
+        config
+            .side_prompt
+            .as_deref()
+            .filter(|text| !text.trim().is_empty())
+            .map(|prompt| ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
+                id: None,
+                role: "developer".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: format!("{prompt}\n\n{DEVELOPER_BLOCK}"),
+                }],
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            })
+    } else {
+        None
+    };
+    if !configured && pending_prompt.is_none() {
         return None;
     }
     let initialization = SideSettingsInitialization {
@@ -37,8 +67,9 @@ pub(super) fn apply_defaults(
         normalize_model: config.side_model.is_some(),
         normalize_effort: config.side_reasoning_effort.is_some(),
         normalize_tier: config.side_service_tier.is_some(),
-        pending_sync: true,
-        pending_first_turn: matches!(origin, SideOrigin::Start),
+        pending_sync: configured,
+        pending_first_turn: Some(origin),
+        pending_prompt,
     };
     if let Some(model) = &config.side_model {
         config.model = Some(model.clone());
@@ -56,10 +87,12 @@ pub(super) fn apply_defaults(
     Some(initialization)
 }
 
-pub(super) fn is_boundary(items: &[ResponseItem]) -> bool {
+pub(super) fn is_desktop_side_boundary(items: &[ResponseItem]) -> bool {
     matches!(items, [ResponseItem::Message { role, content, .. }]
         if role == "user" && matches!(content.as_slice(),
-            [ContentItem::InputText { text }] if text == BOUNDARY))
+            [ContentItem::InputText { text }]
+                if text.strip_prefix(BOUNDARY).is_some_and(|tail|
+                    tail.is_empty() || tail.starts_with("\n\n"))))
 }
 
 pub(super) enum SideOrigin {
@@ -68,6 +101,7 @@ pub(super) enum SideOrigin {
 }
 
 pub(crate) struct SideSettingsInitialization {
+    pub(super) pending_prompt: Option<ResponseItem>,
     inherited_model: Option<String>,
     inherited_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
     pub(super) inherited_tier: Option<String>,
@@ -75,7 +109,7 @@ pub(crate) struct SideSettingsInitialization {
     pub(super) normalize_effort: bool,
     pub(super) normalize_tier: bool,
     pub(super) pending_sync: bool,
-    pub(super) pending_first_turn: bool,
+    pub(super) pending_first_turn: Option<SideOrigin>,
 }
 
 impl SideSettingsInitialization {
@@ -84,7 +118,7 @@ impl SideSettingsInitialization {
         params: &mut codex_app_server_protocol::TurnStartParams,
         snapshot: &codex_core::ThreadConfigSnapshot,
     ) {
-        if !self.pending_first_turn {
+        if self.pending_first_turn.is_none() {
             return;
         }
         if let Some(mode) = params.collaboration_mode.as_mut() {

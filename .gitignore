@@ -1,5 +1,8 @@
 # agents
 .agents
+!/.agents/
+/.agents/*
+!/.agents/skills/
 
 # deps
 # Node.js dependencies

@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn; Initial policy A) --
-00:additional_tools/developer (3; hash=bf2e30605ff5dc17):
-        - namespace/functions; hash=fada4a476a3754dd
+00:additional_tools/developer (3; hash=e019c949fc483f83):
+        - namespace/functions; hash=03340277aa23936f
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -89,7 +89,7 @@ Settings:
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=949a0a6b83387d51]
 05:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
 06:message/user:
@@ -132,8 +132,8 @@ Settings:
 ## Window 2 (after request 4: input diverged at item 02)
 Settings: unavailable (items only)
 -- request 5 (items; Stored replacement before next turn) --
-00:additional_tools/developer (3; hash=bf2e30605ff5dc17):
-        - namespace/functions; hash=fada4a476a3754dd
+00:additional_tools/developer (3; hash=e019c949fc483f83):
+        - namespace/functions; hash=03340277aa23936f
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -209,7 +209,7 @@ Settings: unavailable (items only)
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=949a0a6b83387d51]
 07:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
 08:message/user:
@@ -229,8 +229,8 @@ Settings: unavailable (items only)
 ## Window 3 (after request 5)
 Settings: same as window 1
 -- request 6 (turn; Unchanged policy C after compaction) --
-00:additional_tools/developer (3; hash=bf2e30605ff5dc17):
-        - namespace/functions; hash=fada4a476a3754dd
+00:additional_tools/developer (3; hash=e019c949fc483f83):
+        - namespace/functions; hash=03340277aa23936f
           - custom/exec
           - function/wait
           - function/request_user_input
@@ -306,7 +306,7 @@ Settings: same as window 1
 
     There are 4 available concurrency slots, meaning that up to 4 agents can be active at once, including you.
 
-    Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model and reasoning effort and d... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=d5928243dc643bcc]
+    Only set `model` or `reasoning_effort` when explicitly requested by the user, applicable `AGENTS.md` ins... so, set `fork_turns` to `"none"`.</multi_agent_role> [hash=949a0a6b83387d51]
 07:message/developer:
     <multi_agent_mode>Any earlier instruction enabling proactive multi-agent delegation no longer applies. D...elegation, or parallel agent work.</multi_agent_mode> [hash=2b6e037067b4390c]
 08:message/user:

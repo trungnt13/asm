@@ -3,12 +3,18 @@
 //! App-level side-thread lifecycle lives in `app::side`; this module owns the
 //! chat-surface pieces that side mode toggles, such as the composer placeholder,
 //! footer label, and inline `/side` message submission behavior.
-//!
-//! Saved parallel mode retains normal composer behavior.
 
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn side_chat_creation_state(&self) -> crate::sidebar_chooser::NewChatState {
+        if self.thread_id.is_some() && self.turn_lifecycle.has_turn_history {
+            crate::sidebar_chooser::NewChatState::Available
+        } else {
+            crate::sidebar_chooser::NewChatState::WaitingForMainMessage
+        }
+    }
+
     pub(crate) fn submit_user_message_as_plain_user_turn(
         &mut self,
         user_message: UserMessage,
@@ -18,9 +24,6 @@ impl ChatWidget {
 
     pub(crate) fn set_side_conversation_active(&mut self, active: bool) {
         self.active_side_conversation = active;
-        if active {
-            self.active_parallel_conversation = false;
-        }
         let placeholder = if active {
             self.side_placeholder_text.clone()
         } else {
@@ -35,17 +38,6 @@ impl ChatWidget {
 
     pub(crate) fn side_conversation_active(&self) -> bool {
         self.active_side_conversation
-    }
-
-    pub(crate) fn set_parallel_conversation_active(&mut self, active: bool) {
-        self.active_parallel_conversation = active;
-        if active {
-            self.set_side_conversation_active(/*active*/ false);
-        }
-    }
-
-    pub(crate) fn parallel_conversation_active(&self) -> bool {
-        self.active_parallel_conversation
     }
 
     pub(crate) fn set_composer_mode(&mut self, mode: crate::bottom_pane::ComposerMode) {

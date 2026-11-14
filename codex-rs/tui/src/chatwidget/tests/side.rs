@@ -229,6 +229,7 @@ async fn side_aliases_without_args_start_empty_side_conversations() {
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
                 user_message: None,
+                mode: crate::app_event::SideStartMode::Reuse,
             }) if emitted_parent_thread_id == parent_thread_id
         );
         assert!(
@@ -260,6 +261,7 @@ async fn side_aliases_request_forked_questions_while_task_running() {
             Ok(AppEvent::StartSide {
                 parent_thread_id: emitted_parent_thread_id,
                 user_message: Some(user_message),
+                mode: crate::app_event::SideStartMode::New,
             }) if emitted_parent_thread_id == parent_thread_id
                 && user_message
                     == UserMessage {
@@ -331,7 +333,10 @@ async fn side_context_label_shows_parent_status_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw side conversation footer");
-    assert_chatwidget_snapshot!("side_context_label_shows_parent_status", terminal.backend());
+    assert_chatwidget_snapshot!(
+        "side_context_label_shows_parent_status",
+        normalized_backend_snapshot(terminal.backend())
+    );
 }
 
 #[tokio::test]
@@ -340,7 +345,8 @@ async fn side_context_label_shows_hidden_side_snapshot() {
     chat.show_welcome_banner = false;
     chat.local_settings.tui.status_line = Some(vec!["model-name".to_string()]);
     chat.refresh_status_line();
-    chat.set_side_conversation_context_label(Some("ctrl+/ for side".to_string()));
+    let label = "ctrl+/ for side";
+    chat.set_side_conversation_context_label(Some(label.to_string()));
 
     let width = 80;
     let height = chat.desired_height(width);
@@ -348,13 +354,22 @@ async fn side_context_label_shows_hidden_side_snapshot() {
     terminal
         .draw(|f| chat.render(f.area(), f.buffer_mut()))
         .expect("draw hidden side conversation footer");
-    let hint_start = width - "ctrl+/ for side".len() as u16 - 2;
+    let hint = terminal
+        .backend()
+        .buffer()
+        .content()
+        .windows(label.len())
+        .find(|cells| {
+            cells
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                == label
+        })
+        .expect("side shortcut");
     let key_style = crate::key_hint::ctrl(KeyCode::Char('/')).spans()[0].style;
     let secondary_style = crate::style::secondary_text_style();
-    let styles = [hint_start, hint_start + 4, hint_start + 5, hint_start + 7].map(|x| {
-        let cell = &terminal.backend().buffer()[(x, height - 1)];
-        (cell.fg, cell.modifier)
-    });
+    let styles = [0, 4, 5, 7].map(|i| (hint[i].fg, hint[i].modifier));
     assert_eq!(
         styles,
         [key_style, key_style, key_style, secondary_style].map(|style| (
@@ -369,7 +384,6 @@ async fn side_context_label_shows_hidden_side_snapshot() {
 async fn temporary_side_rejects_navigation_and_mutating_commands() {
     for command in [
         SlashCommand::Btw,
-        SlashCommand::Parallel,
         SlashCommand::Rename,
         SlashCommand::New,
         SlashCommand::Clear,
@@ -381,6 +395,9 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = Some(ThreadId::new());
         chat.set_side_conversation_active(/*active*/ true);
+        chat.set_thread_rename_block_message(
+            "Side conversations are ephemeral and cannot be renamed.",
+        );
 
         chat.dispatch_command(command);
 
@@ -391,9 +408,13 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
         let name = command.command();
         assert_eq!(
             rendered,
-            format!(
-                "■ '/{name}' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
-            )
+            if command == SlashCommand::Rename {
+                "■ Side conversations are ephemeral and cannot be renamed.\n".to_string()
+            } else {
+                format!(
+                    "■ '/{name}' is unavailable in side conversations. Press Ctrl+C to return to the main thread first.\n"
+                )
+            }
         );
         assert!(rx.try_recv().is_err(), "{command:?}");
         assert!(op_rx.try_recv().is_err(), "{command:?}");
@@ -461,11 +482,12 @@ async fn temporary_side_rejects_navigation_and_mutating_commands() {
 async fn temporary_side_rejects_inline_rename() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_side_conversation_active(/*active*/ true);
+    chat.set_thread_rename_block_message("Side conversations are ephemeral and cannot be renamed.");
     chat.dispatch_command_with_args(SlashCommand::Rename, "investigate".to_string(), Vec::new());
     let errors = drain_insert_history(&mut rx);
     assert!(
         lines_to_single_string(&errors[0])
-            .contains("'/rename' is unavailable in side conversations.")
+            .contains("Side conversations are ephemeral and cannot be renamed.")
     );
     assert!(!chat.bottom_pane.has_active_view());
     assert!(op_rx.try_recv().is_err());

@@ -9,13 +9,18 @@ use codex_protocol::protocol::TokenUsage;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
+use std::time::Instant;
 
 #[derive(Default)]
 pub(super) struct MessageStream {
+    pub(super) results: Vec<Value>,
     pub(super) activity: super::activity::ActivityStream,
     pub(super) id: Option<String>,
     pub(super) text: String,
     pub(super) started: bool,
+    generation_started_at: Option<Instant>,
+    non_reasoning_tokens: Option<i64>,
+    pub(super) output_tps: Option<f64>,
     pub(super) context: Option<RequestContext>,
     /// Cursor child sessions by session ID.
     pub(super) cursor_children: HashMap<String, super::cursor::CursorChild>,
@@ -33,6 +38,56 @@ pub(super) async fn record_assistant_frame(
     frame: &Value,
     stream: &mut MessageStream,
 ) -> anyhow::Result<Option<String>> {
+    if frame["parent_tool_use_id"].is_null() && frame["type"] == "stream_event" {
+        let event = &frame["event"];
+        match event["type"].as_str() {
+            Some("message_start") => {
+                stream.generation_started_at = None;
+                stream.non_reasoning_tokens = None;
+            }
+            Some("content_block_delta") => {
+                let delta = &event["delta"];
+                let output = match delta["type"].as_str() {
+                    Some("text_delta") => delta["text"].as_str(),
+                    Some("input_json_delta") => delta["partial_json"].as_str(),
+                    _ => None,
+                };
+                if output.is_some_and(|text| !text.is_empty())
+                    && stream.generation_started_at.is_none()
+                {
+                    stream.generation_started_at = Some(Instant::now());
+                }
+            }
+            Some("message_delta") => {
+                let usage = &event["usage"];
+                stream.non_reasoning_tokens = (|| {
+                    if !matches!(
+                        event["delta"]["stop_reason"].as_str(),
+                        Some("end_turn" | "tool_use")
+                    ) {
+                        return None;
+                    }
+                    let output = usage["output_tokens"].as_i64()?;
+                    let thinking = usage["output_tokens_details"]["thinking_tokens"].as_i64()?;
+                    (thinking >= 0).then_some(())?;
+                    output.checked_sub(thinking).filter(|tokens| *tokens > 0)
+                })();
+            }
+            Some("message_stop") => {
+                if let Some((start, tokens)) = stream
+                    .generation_started_at
+                    .take()
+                    .zip(stream.non_reasoning_tokens.take())
+                {
+                    let duration = start.elapsed().as_millis();
+                    if duration > 0 {
+                        stream.output_tps = Some(tokens as f64 * 1_000.0 / duration as f64);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     stream.activity.record(session, turn, frame).await?;
     // Native Claude agents have their own streams; do not present them as this thread.
     if !frame["parent_tool_use_id"].is_null() {
@@ -154,6 +209,7 @@ pub(super) async fn complete_message(
                 content: vec![AgentMessageContent::Text { text: text.clone() }],
                 phase: None,
                 memory_citation: None,
+                moderation: None,
                 delivery: None,
                 questions: None,
             }),
@@ -171,6 +227,7 @@ pub(super) async fn emit_message_started(session: &Session, turn: &TurnContext, 
                 content: Vec::new(),
                 phase: None,
                 memory_citation: None,
+                moderation: None,
                 delivery: None,
                 questions: None,
             }),

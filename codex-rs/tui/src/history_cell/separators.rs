@@ -8,7 +8,9 @@ use chrono::Datelike;
 use chrono::Local;
 use chrono::NaiveDate;
 use codex_app_server_protocol::TokenUsageBreakdown;
+use codex_app_server_protocol::Turn;
 use codex_protocol::ThreadId;
+use std::collections::HashMap;
 
 /// Completion metadata shown after the assistant's final response.
 ///
@@ -31,6 +33,43 @@ pub struct FinalMessageSeparator {
     clock_format: ClockFormat,
 }
 impl FinalMessageSeparator {
+    /// Full-screen transcripts also use untimed separators to identify completed turns.
+    pub(crate) fn from_turn_once(
+        turn: &Turn,
+        thread_id: Option<ThreadId>,
+        rendered_completion_turn_ids: &mut HashMap<String, bool>,
+        fallback_elapsed: Option<std::time::Duration>,
+        fallback_completed_at: Option<DateTime<Local>>,
+    ) -> Option<Self> {
+        let elapsed_seconds = turn
+            .duration_ms
+            .and_then(|duration| u64::try_from(duration).ok())
+            .map(|duration| duration / 1_000)
+            .or_else(|| fallback_elapsed.map(|elapsed| elapsed.as_secs()));
+        let completed_at = turn
+            .completed_at
+            .and_then(|timestamp| DateTime::from_timestamp(timestamp, /*nsecs*/ 0))
+            .map(|timestamp| timestamp.with_timezone(&Local))
+            .or(fallback_completed_at);
+        let has_label =
+            completed_at.is_some() || elapsed_seconds.is_some() || turn.token_usage.is_some();
+        if rendered_completion_turn_ids
+            .get(&turn.id)
+            .is_some_and(|labeled| *labeled || !has_label)
+        {
+            return None;
+        }
+        rendered_completion_turn_ids.insert(turn.id.clone(), has_label);
+        let cell = Self::new(elapsed_seconds, /*runtime_metrics*/ None)
+            .with_token_usage(turn.token_usage.clone())
+            .with_session_id(thread_id)
+            .with_turn_id(turn.id.clone());
+        Some(match completed_at {
+            Some(completed_at) => cell.with_completed_at(completed_at, ClockFormat::system()),
+            None => cell,
+        })
+    }
+
     /// Creates completion metadata using the protocol turn duration when available.
     pub(crate) fn new(
         elapsed_seconds: Option<u64>,
@@ -90,6 +129,10 @@ impl FinalMessageSeparator {
         self.agent_count = agent_count;
     }
 
+    pub(crate) fn display_label(&self) -> Option<String> {
+        self.label(self.display_date)
+    }
+
     fn label(&self, today: NaiveDate) -> Option<String> {
         let mut label_parts = Vec::new();
         if let Some(elapsed_seconds) = self.elapsed_seconds {
@@ -139,7 +182,9 @@ impl FinalMessageSeparator {
         if let Some(agent_count) = self.agent_count {
             label_parts.push(format!("{agent_count}ag"));
         }
-        if let Some(session_id) = self.session_id {
+        if !label_parts.is_empty()
+            && let Some(session_id) = self.session_id
+        {
             label_parts.push(session_id.to_string());
         }
         (!label_parts.is_empty()).then(|| label_parts.join(" • "))
@@ -150,7 +195,7 @@ impl HistoryCell for FinalMessageSeparator {
         if width == 0 {
             return Vec::new();
         }
-        self.label(self.display_date)
+        self.display_label()
             .map(|label| {
                 let indent = if width > 2 { "  " } else { "" };
                 let options = textwrap::Options::new(usize::from(width))
@@ -165,7 +210,7 @@ impl HistoryCell for FinalMessageSeparator {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.label(self.display_date)
+        self.display_label()
             .map(|label| vec![Line::from(label)])
             .unwrap_or_default()
     }

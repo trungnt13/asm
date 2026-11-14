@@ -240,8 +240,10 @@ impl ThreadState {
 
     pub(crate) fn track_current_turn_event(&mut self, event_turn_id: &str, event: &EventMsg) {
         if let EventMsg::TurnStarted(payload) = event {
-            self.turn_summary.started_at = payload.started_at;
-            self.turn_summary.token_usage = None;
+            self.turn_summary = TurnSummary {
+                started_at: payload.started_at,
+                ..Default::default()
+            };
         }
         if let EventMsg::ItemCompleted(payload) = event
             && let CoreTurnItem::AgentMessage(item) = &payload.item
@@ -349,6 +351,7 @@ mod tests {
             system1_error: None,
             system1_failure_episode: 0,
             disabled_plugin_ids: Vec::new(),
+            environments: Some(Vec::new()),
             cwd: AbsolutePathBuf::from_absolute_path("/tmp").expect("absolute path"),
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: ApprovalsReviewer::User,

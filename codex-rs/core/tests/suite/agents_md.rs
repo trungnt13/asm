@@ -1168,6 +1168,14 @@ async fn thread_provider_composes_and_clears_only_its_instructions() -> Result<(
     )
     .await;
     let fixture = ThreadInstructionsFixture::new(&server).await?;
+    let warning = core_test_support::wait_for_event_match(&fixture.thread, |event| match event {
+        EventMsg::Warning(warning) if warning.message.contains("project_doc_max_bytes") => {
+            Some(warning.message.clone())
+        }
+        _ => None,
+    })
+    .await;
+    insta::assert_snapshot!(warning, @"Combined user instructions use 86 bytes, above the 20-byte `project_doc_max_bytes` setting. The total includes global and thread instructions. The limit applies only to project files.");
     let sources = vec![
         PathUri::from_abs_path(&fixture.test.config.codex_home.join(GLOBAL_AGENTS_FILENAME)),
         fixture.test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?,
@@ -2428,7 +2436,8 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
     .await;
     let spawn_args = serde_json::to_string(&json!({
         "message": SPAWN_CHILD_PROMPT,
-        "fork_context": fork_context,
+        "task_name": "worker",
+        "fork_turns": if fork_context { "all" } else { "none" },
     }))?;
     let spawn_mock = responses::mount_sse_once_match(
         &server,
@@ -2437,7 +2446,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
             responses::ev_response_created("spawn-response"),
             responses::ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                "multi_agent_v1",
+                "collaboration",
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -2449,7 +2458,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
         &server,
         |request: &wiremock::Request| {
             request_body_contains(request, SPAWN_CHILD_PROMPT)
-                && !request_body_contains(request, SPAWN_CALL_ID)
+                && request_body_contains(request, r#""recipient":"/root/worker""#)
         },
         responses::sse(vec![
             responses::ev_response_created("child-response"),
@@ -2479,7 +2488,14 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
     let mut builder = test_codex()
         .with_home(Arc::clone(&home))
         .with_config(|config| {
-            let _ = config.features.enable(Feature::Collab);
+            config
+                .features
+                .enable(Feature::Collab)
+                .expect("enable collaboration");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2");
             let _ = config.features.disable(Feature::EnableRequestCompression);
         });
     let test = builder.build(&server).await?;
@@ -2511,9 +2527,16 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
         loop {
             if let Some(request) = child_mock.requests().into_iter().find(|request| {
                 request
-                    .message_input_texts("user")
+                    .inputs_of_type("agent_message")
                     .iter()
-                    .any(|text| text == SPAWN_CHILD_PROMPT)
+                    .any(|item| {
+                        item["author"] == "/root"
+                            && item["recipient"] == "/root/worker"
+                            && item["content"] == json!([{
+                                "type": "input_text",
+                                "text": format!("Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n{SPAWN_CHILD_PROMPT}"),
+                            }])
+                    })
             }) {
                 break request;
             }
@@ -2571,12 +2594,9 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
             "fresh-context subagent should omit parent user history; observed: {child_user_texts:?}"
         );
         assert_eq!(
-            child_user_texts
-                .iter()
-                .filter(|text| text.as_str() == SPAWN_CHILD_PROMPT)
-                .count(),
+            child_request.inputs_of_type("agent_message").len(),
             1,
-            "fresh-context subagent should contain its own prompt exactly once; observed: {child_user_texts:?}"
+            "fresh-context subagent should contain its own typed task message exactly once"
         );
     }
 

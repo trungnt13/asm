@@ -70,9 +70,10 @@ impl App {
             return Ok(());
         }
         // The widget can already belong to the destination while the transcript still replays.
-        if self.chat_widget.thread_id() != Some(thread_id)
-            || self.awaiting_side_replay(tui)
-            || (tui.is_owned_screen() && !self.scrollback_has_older_history)
+        let parked = self.chat_widget.thread_id() != Some(thread_id);
+        if self.awaiting_thread_switch_replay(tui)
+            || (parked && !self.side_companions.contains_key(&thread_id))
+            || (!parked && tui.is_owned_screen() && !self.scrollback_has_older_history)
         {
             app_server.cancel_older_history_page(thread_id, cursor);
             return Ok(());
@@ -115,6 +116,20 @@ impl App {
             &cwd,
             visibility,
         );
+        if let Some(pane) = self.side_companions.get_mut(&thread_id).filter(|_| parked) {
+            let index = history_prefix_len(&pane.cells);
+            let inserted = index..index + cells.len();
+            pane.splice_older_cells(index..index, cells);
+            pane.view.history_loaded(&pane.cells, inserted);
+            pane.view.history = if app_server.has_older_history(thread_id) {
+                TranscriptHistoryState::Partial
+            } else {
+                TranscriptHistoryState::Complete
+            };
+            merge_older_turns(&mut store.lock().await.turns, turns);
+            tui.frame_requester().schedule_frame();
+            return Ok(());
+        }
         let inserted = self.prepend_older_transcript_cells(cells);
         self.transcript_view
             .history_loaded(&self.transcript_cells, inserted.clone());
@@ -178,6 +193,17 @@ impl App {
             .zip(projected_user_cells)
             .map(|((item_id, _), cell)| (item_id, cell))
             .collect();
+        if self.chat_widget.thread_id() != Some(thread_id)
+            && let Some(pane) = self.side_companions.get_mut(&thread_id)
+        {
+            for index in
+                hidden_transcript_indices(&pane.cells, persisted_user_cells, hidden_item_ids)
+            {
+                pane.splice_older_cells(index..index + 1, Vec::new());
+                pane.view.restart_search();
+            }
+            return;
+        }
         let indices = hidden_transcript_indices(
             &self.transcript_cells,
             persisted_user_cells,
@@ -221,7 +247,7 @@ impl App {
         }
     }
 
-    /// Project successful turn completion metadata after the corresponding page's final item.
+    /// Project each terminal row on the page containing the end of its turn.
     fn project_older_history_cells(
         &mut self,
         items: Vec<ThreadItemPayload>,
@@ -233,10 +259,10 @@ impl App {
     ) -> Vec<Arc<dyn HistoryCell>> {
         self.turn_agent_counts.record_native_turns(thread_id, turns);
         let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
-        for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
+        for (range, turn_end) in completion::group_turn_items(&items, turns) {
             let start = cells.len();
             if let Some(turn) = turns.iter().find(|turn| {
-                items
+                items[range.clone()]
                     .first()
                     .is_some_and(|first| turn.items.iter().any(|item| item.id() == first.id()))
             }) {
@@ -245,7 +271,7 @@ impl App {
                 )));
             }
             // Internal prompts stay invisible, but still separate adjacent tool groups.
-            for visible in items.split(|item| hidden_item_ids.contains(item.id())) {
+            for visible in items[range].split(|item| hidden_item_ids.contains(item.id())) {
                 cells.extend(thread_items_to_transcript_cells(
                     Some(thread_id),
                     cwd,
@@ -262,10 +288,27 @@ impl App {
             for end in start + 1..=cells.len() {
                 history_cell::TurnActivityBoundary::position_header(&mut cells[start..end]);
             }
-            if let Some(turn) = completed_turn
-                && let Some(mut completion) = self
-                    .chat_widget
-                    .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
+            let Some(turn) = turn_end else { continue };
+            if turn.status == TurnStatus::Interrupted && !self.side_threads.contains_key(&thread_id)
+            {
+                cells.push(Arc::new(history_cell::new_interruption_notice()));
+            }
+            if turn.status == TurnStatus::Completed
+                && let Some(mut completion) = if let Some(pane) =
+                    self.side_companions.get_mut(&thread_id)
+                    && self.chat_widget.thread_id() != Some(thread_id)
+                {
+                    history_cell::FinalMessageSeparator::from_turn_once(
+                        turn,
+                        Some(thread_id),
+                        &mut pane.display.rendered_completion_turn_ids,
+                        /*fallback_elapsed*/ None,
+                        /*fallback_completed_at*/ None,
+                    )
+                } else {
+                    self.chat_widget
+                        .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
+                }
             {
                 completion.set_agent_count(self.turn_agent_counts.count(thread_id, &turn.id));
                 cells.push(Arc::new(completion));
@@ -292,10 +335,7 @@ impl App {
         let index = if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
             overlay.prepend(cells.clone())
         } else {
-            self.transcript_cells
-                .iter()
-                .rposition(|cell| is_session_history_prefix_cell(cell.as_ref()))
-                .map_or(/*default*/ 0, |index| index.saturating_add(/*rhs*/ 1))
+            history_prefix_len(&self.transcript_cells)
         };
         let inserted = index..index + cells.len();
         self.transcript_cells.splice(index..index, cells);
@@ -413,6 +453,13 @@ fn hidden_review_item_ids(turns: &[Turn]) -> HashSet<&str> {
     hidden
 }
 
+fn history_prefix_len(cells: &[Arc<dyn HistoryCell>]) -> usize {
+    cells
+        .iter()
+        .rposition(|cell| is_session_history_prefix_cell(cell.as_ref()))
+        .map_or(/*default*/ 0, |index| index + 1)
+}
+
 /// Match repeated user messages from newest to oldest so identical visible prompts stay distinct.
 fn hidden_transcript_indices(
     cells: &[Arc<dyn HistoryCell>],
@@ -458,6 +505,9 @@ fn merge_older_turns(current_turns: &mut Vec<Turn>, mut older_turns: Vec<Turn>) 
             .into_iter()
             .filter(|item| !current.items.iter().any(|known| known.id() == item.id()))
             .collect::<Vec<_>>();
+        if current.items_view == codex_app_server_protocol::TurnItemsView::NotLoaded {
+            current.items_view = turn.items_view;
+        }
         current.items.splice(0..0, items);
         false
     });

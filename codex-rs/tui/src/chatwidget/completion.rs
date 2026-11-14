@@ -9,49 +9,16 @@ impl ChatWidget {
         turn: &Turn,
         replay_kind: Option<ReplayKind>,
     ) -> Option<history_cell::FinalMessageSeparator> {
-        if self
-            .turn_lifecycle
-            .rendered_completion_turn_ids
-            .contains(&turn.id)
-        {
-            return None;
-        }
-        let elapsed_seconds = turn
-            .duration_ms
-            .and_then(|duration| u64::try_from(duration).ok())
-            .map(|duration| duration / 1_000)
-            .or_else(|| {
-                if replay_kind.is_none() {
-                    self.bottom_pane
-                        .status_elapsed()
-                        .map(|elapsed| elapsed.as_secs())
-                } else {
-                    None
-                }
-            });
-        let completed_at = turn
-            .completed_at
-            .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, /*nsecs*/ 0))
-            .map(|timestamp| timestamp.with_timezone(&Local))
-            .or_else(|| replay_kind.is_none().then(Local::now));
-        if completed_at.is_none() && elapsed_seconds.is_none() && turn.token_usage.is_none() {
-            return None;
-        }
-        self.turn_lifecycle
-            .rendered_completion_turn_ids
-            .insert(turn.id.clone());
-        let cell = history_cell::FinalMessageSeparator::new(
-            elapsed_seconds,
-            /*runtime_metrics*/ None,
+        let live = replay_kind.is_none();
+        history_cell::FinalMessageSeparator::from_turn_once(
+            turn,
+            self.thread_id,
+            &mut self.turn_lifecycle.rendered_completion_turn_ids,
+            self.bottom_pane.status_elapsed().filter(|_| live),
+            live.then(Local::now),
         )
-        .with_token_usage(turn.token_usage.clone())
-        .with_session_id(self.thread_id)
-        .with_turn_id(turn.id.clone());
-        Some(match completed_at {
-            Some(completed_at) => {
-                cell.with_completed_at(completed_at, crate::clock_format::ClockFormat::system())
-            }
-            None => cell,
+        .filter(|cell| {
+            self.local_settings.transcript_mode.is_owned() || cell.display_label().is_some()
         })
     }
 }

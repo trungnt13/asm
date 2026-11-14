@@ -33,8 +33,10 @@ mod mcp_types;
 mod merge;
 mod model_provider_defaults;
 mod model_provider_requirements;
+mod native_runtimes;
 mod overrides;
 mod path_context;
+mod permission_config;
 pub mod permissions_toml;
 mod plugin_edit;
 pub mod profile_toml;
@@ -55,6 +57,11 @@ mod tui_keymap;
 mod tui_mouse_scroll;
 mod tui_rendering;
 pub mod types;
+
+pub use native_runtimes::ClaudeCodeConfig;
+pub use native_runtimes::NativeRuntimesConfig;
+pub use native_runtimes::PageContextPolicy;
+pub use native_runtimes::SkillVisibility;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 
@@ -212,6 +219,9 @@ pub use merge::shell_environment_filter_entry;
 pub use model_provider_defaults::apply_default_gcp_auth;
 pub use overrides::build_cli_overrides_layer;
 pub use path_context::ConfigPathContext;
+pub use permission_config::PermissionConfig;
+pub use permission_config::resolve_permission_config;
+pub use permission_config::translate_legacy_permissions;
 pub use plugin_edit::PluginConfigEdit;
 pub use plugin_edit::apply_user_plugin_config_edits;
 pub use plugin_edit::clear_user_plugin;

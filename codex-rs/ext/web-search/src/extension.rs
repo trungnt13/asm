@@ -20,7 +20,6 @@ use codex_extension_api::ToolContributor;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
 use codex_model_provider::WorkspaceRoutingContext;
-use codex_model_provider::create_model_provider;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_protocol::config_types::WebSearchContextSize;
 use codex_protocol::config_types::WebSearchMode;
@@ -37,6 +36,8 @@ struct WebSearchExtension {
 #[derive(Clone)]
 struct WebSearchExtensionConfig {
     provider_supports_search: bool,
+    separate_search_auth: bool,
+    flat_tool: bool,
     include_copyright_compliance: bool,
     http_client_factory: HttpClientFactory,
     provider: ModelProviderInfo,
@@ -45,13 +46,21 @@ struct WebSearchExtensionConfig {
 
 impl From<&Config> for WebSearchExtensionConfig {
     fn from(config: &Config) -> Self {
+        let search_provider = config
+            .model_provider
+            .standalone_web_search_provider
+            .as_ref()
+            .map(|id| &config.model_providers[id]);
+        let provider = search_provider.unwrap_or(&config.model_provider);
         Self {
-            provider_supports_search: config.model_provider.is_openai()
-                || config.model_provider.uses_openai_actor_authorization()
-                || config.model_provider.supports_standalone_web_search,
+            provider_supports_search: provider.is_openai()
+                || provider.uses_openai_actor_authorization()
+                || provider.supports_standalone_web_search,
+            separate_search_auth: search_provider.is_some(),
+            flat_tool: search_provider.is_some() && !config.model_provider.is_openai(),
             include_copyright_compliance: config.include_web_search_copyright_compliance,
             http_client_factory: config.http_client_factory(),
-            provider: config.model_provider.clone(),
+            provider: provider.clone(),
             settings: search_settings(config),
         }
     }
@@ -139,15 +148,29 @@ impl ToolContributor for WebSearchExtension {
         if !config.provider_supports_search || *mode == WebSearchMode::Disabled {
             return Vec::new();
         }
+        let auth = thread_store
+            .get::<codex_model_provider::ProviderAuthContext>()
+            .unwrap_or_else(|| {
+                Arc::new(codex_model_provider::ProviderAuthContext {
+                    credentials: Arc::clone(&self.auth_manager),
+                    runtime_auth: None,
+                })
+            });
+        let auth = if config.separate_search_auth {
+            Arc::new(codex_model_provider::ProviderAuthContext {
+                credentials: Arc::clone(&auth.credentials),
+                runtime_auth: None,
+            })
+        } else {
+            auth
+        };
 
         vec![Arc::new(WebSearchTool {
             session_id: session_store.level_id().to_string(),
+            flat_tool: config.flat_tool,
             include_copyright_compliance: config.include_copyright_compliance,
             http_client_factory: config.http_client_factory.clone(),
-            provider: create_model_provider(
-                config.provider.clone(),
-                Some(self.auth_manager.clone()),
-            ),
+            provider: auth.model_provider(config.provider.clone()),
             workspace_routing,
             settings: SearchSettings {
                 external_web_access: Some(external_web_access_for_mode(*mode)),
@@ -248,6 +271,8 @@ mod tests {
             for include_copyright_compliance in [true, false] {
                 thread_store.insert(WebSearchExtensionConfig {
                     provider_supports_search: true,
+                    separate_search_auth: false,
+                    flat_tool: false,
                     include_copyright_compliance,
                     http_client_factory: HttpClientFactory::new(
                         OutboundProxyPolicy::ReqwestDefault,

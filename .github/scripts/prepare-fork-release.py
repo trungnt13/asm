@@ -216,9 +216,16 @@ def completed_publication(run, candidate, tag, candidate_ref):
     )
     # Logs may contain ANSI bytes. Keep them in memory, never render them to a terminal.
     api_help = subprocess.check_output(["gh", "api", "--help"], text=True)
-    raw_logs = ["--allow-escape-sequences"] if "--allow-escape-sequences" in api_help else []
+    raw_logs = (
+        ["--allow-escape-sequences"] if "--allow-escape-sequences" in api_help else []
+    )
     logs = subprocess.check_output(
-        ["gh", "api", *raw_logs, f"repos/{REPOSITORY}/actions/jobs/{sync_job['id']}/logs"],
+        [
+            "gh",
+            "api",
+            *raw_logs,
+            f"repos/{REPOSITORY}/actions/jobs/{sync_job['id']}/logs",
+        ],
         text=True,
     )
     # Job environment ties both original and successful resume runs to the frozen candidate.
@@ -357,6 +364,9 @@ def validated_superseded_releases(candidates, tags, releases):
     superseded = set()
     for record in records:
         run_id, tag, source = record["run_id"], record["tag"], record["source"]
+        expected_conclusion = record.get("conclusion", "failure")
+        if expected_conclusion not in {"failure", "cancelled"}:
+            raise ValueError(f"Superseded candidate {tag} has an invalid conclusion")
         reference = f"refs/heads/agent/release-{run_id}"
         release = releases.get(tag)
         if (
@@ -371,29 +381,40 @@ def validated_superseded_releases(candidates, tags, releases):
             or [
                 {key: asset.get(key) for key in ("id", "name", "digest")}
                 for asset in release.get("assets", [])
-            ] != [record["installer"]]
+            ]
+            != [record["installer"]]
         ):
             raise ValueError(f"Superseded candidate {tag} no longer matches its record")
         run = api(f"repos/{REPOSITORY}/actions/runs/{run_id}")
         if (
             run["status"] != "completed"
-            or run["conclusion"] != "failure"
+            or run["conclusion"] != expected_conclusion
             or run["event"] != "workflow_dispatch"
             or run["head_branch"] != "main"
             or run["path"] != ".github/workflows/fork-rust-release.yml"
         ):
-            raise ValueError(f"Superseded candidate {tag} is not a failed release run")
+            raise ValueError(
+                f"Superseded candidate {tag} does not match its recorded release run"
+            )
         jobs = api(
             f"repos/{REPOSITORY}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"
         )["jobs"]
-        failed_builds = {
-            job["name"] for job in jobs if job["conclusion"] == "failure"
+        stopped_builds = {
+            job["name"]
+            for job in jobs
+            if job["conclusion"] == expected_conclusion
+            and not (expected_conclusion == "cancelled" and not job.get("steps"))
         }
-        if failed_builds != {
+        if stopped_builds != {
             "Build x86_64-unknown-linux-gnu (jobs 0)",
             "Build aarch64-apple-darwin (jobs 0)",
         } or any(
             job["conclusion"] != "skipped"
+            and not (
+                expected_conclusion == "cancelled"
+                and job["conclusion"] == "cancelled"
+                and not job.get("steps")
+            )
             for job in jobs
             if job["name"].startswith(
                 (
@@ -404,7 +425,9 @@ def validated_superseded_releases(candidates, tags, releases):
                 )
             )
         ):
-            raise ValueError(f"Superseded candidate {tag} has unexpected publication state")
+            raise ValueError(
+                f"Superseded candidate {tag} has unexpected publication state"
+            )
         print(f"Preserving superseded candidate {tag}: {record['reason']}")
         superseded.add(tag)
     return superseded

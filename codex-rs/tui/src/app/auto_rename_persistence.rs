@@ -2,10 +2,12 @@
 
 use super::App;
 use super::thread_events::ThreadBufferedEvent;
-use crate::side_conversations::app_server_scope;
+use crate::AppServerTarget;
+use crate::RemoteAppServerEndpoint;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_protocol::ThreadId;
+use sha2::Digest;
 use std::io::Read;
 use std::path::PathBuf;
 
@@ -139,6 +141,25 @@ impl App {
                 error.kind(),
                 format!("Could not save manual-name protection: {error}"),
             )),
+        }
+    }
+}
+
+/// Namespace client metadata without including server authentication.
+fn app_server_scope(target: &AppServerTarget) -> String {
+    match target {
+        // The implicit local daemon uses this invocation's CODEX_HOME. Explicit daemon
+        // endpoints are Remote targets, so unrelated servers never share this namespace.
+        AppServerTarget::Embedded | AppServerTarget::LocalDaemon { .. } => "local".into(),
+        AppServerTarget::Cloud => "cloud".into(),
+        AppServerTarget::Remote { endpoint } => {
+            let endpoint = match endpoint {
+                RemoteAppServerEndpoint::WebSocket { websocket_url, .. } => websocket_url.clone(),
+                RemoteAppServerEndpoint::UnixSocket { socket_path } => {
+                    format!("unix:{}", socket_path.display())
+                }
+            };
+            format!("{:x}", sha2::Sha256::digest(endpoint.as_bytes()))
         }
     }
 }

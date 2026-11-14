@@ -59,6 +59,7 @@ mod guardian_v2;
 mod reasoning_effort;
 
 pub use access_programs::ModelAccessPrograms;
+pub use access_programs::SavedDaybreakChoice;
 pub use guardian_v2::AsyncClassifierMode;
 pub use guardian_v2::GuardianV2ModelConfig;
 pub use guardian_v2::GuardianV2TranscriptModelConfig;
@@ -348,6 +349,14 @@ pub enum WebSearchToolType {
     TextAndImage,
 }
 
+/// Provider preference selected by the resolved model catalog entry.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchProvider {
+    Standalone,
+    SearchMcp,
+}
+
 /// Server-provided truncation policy metadata for a model.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -460,6 +469,8 @@ pub struct ModelInfo {
     pub apply_patch_tool_type: Option<ApplyPatchToolType>,
     #[serde(default)]
     pub web_search_tool_type: WebSearchToolType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search_provider: Option<WebSearchProvider>,
     pub truncation_policy: TruncationPolicyConfig,
     #[serde(default)]
     pub supports_image_detail_original: bool,
@@ -585,7 +596,7 @@ impl ModelInfo {
 /// retained for model catalog compatibility.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ModelMessages {
-    /// Optional model-owned Apps wording, transported without runtime interpretation.
+    /// Model-owned Apps usage guidance, subject to existing Apps availability and authorization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apps: Option<AppsMessages>,
     /// Model-owned plugin wording; runtime capability facts and eligibility remain client-owned.
@@ -616,11 +627,11 @@ pub struct ModelMessages {
     pub confirmation_policies: Option<ConfirmationPolicies>,
 }
 
-/// Optional Apps wording from the model catalog, preserved for future runtime consumption.
+/// Literal model-owned Apps guidance inside the existing developer fragment markers.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct AppsMessages {
-    /// Missing and null deserialize as `None`; all strings preserve their exact bytes.
-    /// Rendering, size limits, and empty-string behavior are defined by consumers.
+    /// Missing/null uses bundled guidance; empty clears it. Whitespace-only or more than
+    /// 800 UTF-8 bytes falls back to bundled guidance. Other values preserve exact bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_instructions: Option<String>,
 }
@@ -1255,6 +1266,7 @@ mod tests {
             default_verbosity: None,
             apply_patch_tool_type: None,
             web_search_tool_type: WebSearchToolType::Text,
+            web_search_provider: None,
             truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
             supports_image_detail_original: false,
             context_window: None,

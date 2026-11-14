@@ -41,6 +41,7 @@ pub use capabilities::ModelProviderCapabilities;
 pub use capabilities::RemoteCompactionSupport;
 pub use gateway_oauth::GatewayOAuthConfig;
 pub use gateway_oauth::GatewayOAuthDelivery;
+pub use gateway_oauth::GatewayOAuthSettings;
 pub use oauth_session::OAuthCredentialsStore;
 pub use oauth_session::OAuthSessionConfig;
 
@@ -72,7 +73,7 @@ pub fn read_managed_residency_requirement() -> Option<ResidencyRequirement> {
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;
 const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
-const DEFAULT_AWS_CREDENTIAL_EXPORT_TIMEOUT_MS: u64 = 30_000;
+const DEFAULT_CREDENTIAL_EXPORT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_AWS_AUTH_REFRESH_TIMEOUT_MS: u64 = 300_000;
 pub const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS: u64 = 15_000;
 /// Hard cap for user-configured `stream_max_retries`.
@@ -176,7 +177,7 @@ pub struct ModelProviderInfo {
     pub experimental_bearer_token: Option<RedactedString>,
     /// Command-backed bearer-token configuration for this provider.
     pub auth: Option<ModelProviderAuthInfo>,
-    /// Secondary OAuth credentials required by the provider's gateway.
+    /// Gateway access token from OAuth or a credential export command.
     pub gateway_oauth: Option<GatewayOAuthConfig>,
     /// AWS SigV4 auth configuration for this provider.
     pub aws: Option<ModelProviderAwsAuthInfo>,
@@ -228,6 +229,9 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the standalone web-search endpoint.
     #[serde(default)]
     pub supports_standalone_web_search: bool,
+    /// Use a separately authenticated OpenAI provider for standalone search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standalone_web_search_provider: Option<String>,
     /// Runtime-only opt-in for internal metadata, independent of the destination check.
     /// This cannot be loaded from or written to serialized provider configuration.
     #[serde(skip)]
@@ -249,30 +253,48 @@ pub struct ModelProviderAwsAuthInfo {
     pub auth_refresh: Option<AwsAuthRefreshConfig>,
 }
 
-/// Command used to export AWS signing credentials for a model provider.
+/// Command used to export credentials for a model provider.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct AwsCredentialExportConfig {
+pub struct CredentialExportConfig {
     /// Executable to invoke directly, without a shell.
     pub command: String,
     /// Arguments passed to the credential export command.
     #[serde(default)]
     pub args: Vec<RedactedString>,
     /// Maximum time to wait for the credential export command to complete.
-    #[serde(default = "default_aws_credential_export_timeout_ms")]
+    #[serde(default = "default_credential_export_timeout_ms")]
     pub timeout_ms: NonZeroU64,
 }
 
-impl AwsCredentialExportConfig {
+pub type AwsCredentialExportConfig = CredentialExportConfig;
+
+impl CredentialExportConfig {
+    pub fn validate(&self, field: &str) -> Result<(), String> {
+        if self.command.trim().is_empty() {
+            return Err(format!("provider {field}.command must not be empty"));
+        }
+        let path = Path::new(&self.command);
+        let mut components = path.components();
+        let bare = matches!((components.next(), components.next()),
+            (Some(Component::Normal(name)), None) if name == path.as_os_str());
+        if !path.is_absolute() && !bare {
+            return Err(format!(
+                "provider {field}.command must be an absolute path or a bare executable name"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn timeout(&self) -> Duration {
         Duration::from_millis(self.timeout_ms.get())
     }
 }
 
-fn default_aws_credential_export_timeout_ms() -> NonZeroU64 {
-    match NonZeroU64::new(DEFAULT_AWS_CREDENTIAL_EXPORT_TIMEOUT_MS) {
+fn default_credential_export_timeout_ms() -> NonZeroU64 {
+    match NonZeroU64::new(DEFAULT_CREDENTIAL_EXPORT_TIMEOUT_MS) {
         Some(timeout_ms) => timeout_ms,
-        None => panic!("AWS credential export timeout must be non-zero"),
+        None => panic!("credential export timeout must be non-zero"),
     }
 }
 
@@ -312,12 +334,13 @@ impl ModelProviderInfo {
             auth: None,
             aws: None,
             http_headers: None,
+            standalone_web_search_provider: None,
             ..self.clone()
         };
         if unsupported_fields != Self::default() {
             return Err("only supports changing \
 `base_url`, `auth`, `http_headers`, `aws.profile`, `aws.region`, `aws.credential_export`, \
-and `aws.auth_refresh`; \
+`aws.auth_refresh`, and `standalone_web_search_provider`; \
 other non-default provider fields are not supported"
                 .to_string());
         }
@@ -377,23 +400,7 @@ other non-default provider fields are not supported"
                             .to_string(),
                     );
                 }
-                if credential_export.command.trim().is_empty() {
-                    return Err(
-                        "provider aws.credential_export.command must not be empty".to_string()
-                    );
-                }
-                let command = Path::new(&credential_export.command);
-                let mut components = command.components();
-                let is_bare_command = matches!(
-                    (components.next(), components.next()),
-                    (Some(Component::Normal(name)), None) if name == command.as_os_str()
-                );
-                if !command.is_absolute() && !is_bare_command {
-                    return Err(
-                        "provider aws.credential_export.command must be an absolute path or a bare executable name"
-                            .to_string(),
-                    );
-                }
+                credential_export.validate("aws.credential_export")?;
             }
 
             if let Some(auth_refresh) = aws.auth_refresh.as_ref() {
@@ -606,6 +613,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: true,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            standalone_web_search_provider: None,
             capabilities: None,
             project_id: None,
             location: None,
@@ -649,6 +657,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             capabilities: None,
             project_id: None,
             location: None,
@@ -689,6 +698,7 @@ other non-default provider fields are not supported"
             requires_openai_auth: false,
             supports_websockets: false,
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             project_id: None,
             location: None,
             credential_file: None,
@@ -797,6 +807,7 @@ pub fn merge_configured_model_providers(
     configured_model_providers: HashMap<String, ModelProviderInfo>,
 ) -> Result<HashMap<String, ModelProviderInfo>, String> {
     for (key, mut provider) in configured_model_providers {
+        let search_provider = provider.standalone_web_search_provider.take();
         if key == "openai" {
             // Keep the built-in identity, inference routing, and authentication.
             // Only catalog routing is configurable through this provider entry.
@@ -844,7 +855,12 @@ pub fn merge_configured_model_providers(
         } else if key == GCP_PROVIDER_ID {
             merge_gcp_provider_overrides(model_providers.get_mut(&key), provider)?;
         } else {
-            model_providers.entry(key).or_insert(provider);
+            model_providers.entry(key.clone()).or_insert(provider);
+        }
+        if let Some(search_provider) = search_provider
+            && let Some(provider) = model_providers.get_mut(&key)
+        {
+            provider.standalone_web_search_provider = Some(search_provider);
         }
     }
 
@@ -934,6 +950,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         requires_openai_auth: false,
         supports_websockets: false,
         supports_standalone_web_search: false,
+        standalone_web_search_provider: None,
         capabilities: None,
         project_id: None,
         location: None,

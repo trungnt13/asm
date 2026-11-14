@@ -161,8 +161,12 @@ impl ConfigManager {
 
         let json_value = serde_json::to_value(&effective_config_toml)
             .map_err(|err| ConfigManagerError::json("failed to serialize configuration", err))?;
-        let config: ApiConfig = serde_json::from_value(json_value)
+        let mut config: ApiConfig = serde_json::from_value(json_value)
             .map_err(|err| ConfigManagerError::json("failed to deserialize configuration", err))?;
+        config.client_search_provider = effective_config_toml
+            .tools
+            .as_ref()
+            .and_then(|tools| tools.client_search_provider);
 
         let mut origins = layers.origins_with_path_filter(|segments| {
             layers
@@ -343,13 +347,24 @@ impl ConfigManager {
             ));
         }
 
+        self.persist_user_edits(&layers, &user_layer, provided_path, edits)
+            .await
+    }
+
+    async fn persist_user_edits(
+        &self,
+        layers: &ConfigLayerStack,
+        user_layer: &ConfigLayerEntry,
+        provided_path: AbsolutePathBuf,
+        edits: Vec<(String, JsonValue, MergeStrategy)>,
+    ) -> Result<ConfigWriteResponse, ConfigManagerError> {
         let mut user_config = user_layer.config.clone();
         let mut credential_provider_edits = CredentialProviderEdits::new(&user_config);
         let mut parsed_segments = Vec::new();
         let mut config_edits = Vec::new();
 
         for (key_path, value, strategy) in edits.into_iter() {
-            let mut segments = writable_key_path(&layers, &key_path)?;
+            let mut segments = writable_key_path(layers, &key_path)?;
             if (value.is_null() || matches!(strategy, MergeStrategy::Upsert))
                 && let Some(pattern) = shell_environment_filter_entry(&user_config, &segments)
                     .map(|(pattern, _)| pattern.clone())

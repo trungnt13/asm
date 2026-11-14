@@ -126,6 +126,7 @@ async fn v2_nested_spawn_checks_shared_active_execution_capacity() -> Result<()>
     let first_args = serde_json::to_string(&json!({
         "message": FIRST_TASK,
         "task_name": "first",
+        "fork_turns": "all",
     }))?;
     mount_sse_once_match(
         &server,
@@ -145,6 +146,7 @@ async fn v2_nested_spawn_checks_shared_active_execution_capacity() -> Result<()>
     let second_args = serde_json::to_string(&json!({
         "message": SECOND_TASK,
         "task_name": "second",
+        "fork_turns": "all",
     }))?;
     mount_sse_once_match(
         &server,
@@ -758,6 +760,9 @@ async fn v2_residency_reload_preserves_inherited_environment_and_tools(
 
 #[path = "agent_eviction_tests.rs"]
 mod eviction_tests;
+
+#[path = "agent_permission_reload_tests.rs"]
+mod permission_reload_tests;
 
 /// Tree shutdown waits for all admitted members, even after registry removal, without crossing
 /// into another root's tree.

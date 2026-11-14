@@ -60,6 +60,36 @@ impl WorktreeManager {
     }
 
     pub fn create(&self, request: &CreateWorktree) -> Result<ManagedWorktree> {
+        self.create_named(request, /*name*/ None)
+    }
+
+    /// Creates a checkout using an optional directory label inside its managed bucket.
+    pub fn create_named(
+        &self,
+        request: &CreateWorktree,
+        name: Option<&str>,
+    ) -> Result<ManagedWorktree> {
+        if let Some(name) = name {
+            let reserved = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+            let windows_device = matches!(reserved.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+                || ["COM", "LPT"].iter().any(|prefix| {
+                    reserved.strip_prefix(prefix).is_some_and(|suffix| {
+                        matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+                    })
+                });
+            if name.is_empty()
+                || name.len() > 64
+                || windows_device
+                || !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                || (name.len() >= 4 && name.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            {
+                bail!(
+                    "name must be a portable lowercase label of 1 to 64 bytes, not hexadecimal or a device name"
+                );
+            }
+        }
         if !self.settings.root.is_absolute() {
             bail!("managed worktree root must be an absolute path");
         }
@@ -83,7 +113,10 @@ impl WorktreeManager {
                 revision.as_str(),
             ],
         )?;
-        let root = allocate_worktree_root(&self.settings.root, repository_name)?;
+        let root = allocate_worktree_root(
+            &self.settings.root,
+            name.map_or(repository_name, OsStr::new),
+        )?;
 
         let result = git_output(
             &source_root,

@@ -156,7 +156,7 @@ impl WriteStdinHandler {
             } else {
                 WaitReminder::Returned
             };
-            response.wait_reminder = reason.reminder(outcome);
+            response.wait_reminder = Some(reason.reminder("write_stdin", outcome));
         }
         Ok(boxed_tool_output(response))
     }

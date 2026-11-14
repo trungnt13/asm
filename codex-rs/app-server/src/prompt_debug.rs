@@ -63,7 +63,6 @@ pub async fn build_prompt_request(
     let installation_id = codex_core::resolve_installation_id(&config.codex_home).await?;
     let executor_skill_provider = Arc::new(
         codex_skills_extension::ExecutorSkillProvider::new_with_restriction_product(
-            Arc::clone(&environment_manager),
             SessionSource::Exec.restriction_product(),
         ),
     );
@@ -71,8 +70,14 @@ pub async fn build_prompt_request(
     let thread_manager = Arc::new_cyclic(|thread_manager| {
         ThreadManager::new(
             &config,
-            auth_manager.clone(),
-            codex_core::build_models_manager(&config, auth_manager.clone()),
+            codex_core::build_startup_models(
+                &config,
+                auth_manager.clone(),
+                installation_id,
+                Arc::new(codex_models_manager::manager::ModelCatalogSettings::disk(
+                    config.codex_home.to_path_buf(),
+                )),
+            ),
             codex_core::CodexAppsToolsCache::default(),
             SessionSource::Exec,
             Arc::clone(&environment_manager),
@@ -106,7 +111,6 @@ pub async fn build_prompt_request(
             codex_core::passthrough_image_store(),
             thread_store,
             codex_core::local_agent_graph_store_from_state_db(state_db.as_ref()),
-            installation_id,
             /*attestation_provider*/ None,
             /*external_time_provider*/ None,
         )

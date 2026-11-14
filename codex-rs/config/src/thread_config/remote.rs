@@ -20,6 +20,7 @@ use super::ThreadConfigSource;
 use super::UserThreadConfig;
 use proto::thread_config_loader_client::ThreadConfigLoaderClient;
 
+#[allow(clippy::double_must_use)] // Emitted by async_trait in the generated tonic service.
 #[path = "proto/codex.thread_config.v1.rs"]
 mod proto;
 
@@ -195,6 +196,7 @@ fn model_provider_from_proto(
         requires_openai_auth: provider.requires_openai_auth,
         supports_websockets: provider.supports_websockets,
         supports_standalone_web_search: provider.supports_standalone_web_search,
+        standalone_web_search_provider: None,
         capabilities: provider
             .capabilities
             .map(|capabilities| ModelProviderCapabilities {
@@ -237,6 +239,7 @@ fn model_provider_to_proto(
         requires_openai_auth,
         supports_websockets,
         supports_standalone_web_search,
+        standalone_web_search_provider: _,
         include_internal_metadata: _,
         credential_file,
         capabilities,
@@ -494,6 +497,7 @@ mod tests {
     fn model_provider_proto_defaults_standalone_web_search_to_false() {
         let expected = ModelProviderInfo {
             supports_standalone_web_search: false,
+            standalone_web_search_provider: None,
             ..expected_provider()
         };
         let proto = model_provider_to_proto("local", expected.clone());
@@ -622,6 +626,7 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: true,
             supports_standalone_web_search: true,
+            standalone_web_search_provider: None,
             gateway_oauth: None,
             aws: None,
             capabilities: Some(ModelProviderCapabilities {
