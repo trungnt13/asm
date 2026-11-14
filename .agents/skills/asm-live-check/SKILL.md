@@ -17,5 +17,3 @@ Follow this procedure and the guide’s gates. Skill use does not expand task sc
 - Unless behavior needs a specific checkout, use a temporary working directory. Use `--no-daemon`; for daemon/remote checks, use an isolated server, never the personal shared daemon.
 - Record session IDs, commands, binary/source identity, and expected/actual results. Before cleanup, retain private rollouts, output, and diagnostics. Never report or commit credentials.
 - Keep failed homes until triage ends. Remove only task-owned state after retaining evidence. Titles do not make personal sessions disposable.
-
-After an authorized PR merge, apply the guide’s [post-merge cleanup](../../../docs/porting-from-codex.md#post-merge-cleanup). Remove disposable private homes and duplicate outputs only after retaining required evidence; record failed homes still awaiting triage and their cleanup owner.
