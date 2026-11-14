@@ -330,7 +330,7 @@ async fn run_compact_task_inner_impl(
             fallback_instructions.clone()
         };
         let prompt = Prompt {
-            input: turn_input,
+            input: turn_input.into_iter().map(Arc::new).collect(),
             base_instructions,
             prompt_cache_ttl: turn_context.prompt_cache_ttl,
             cyber_access_program: turn_context.cyber_access_program,

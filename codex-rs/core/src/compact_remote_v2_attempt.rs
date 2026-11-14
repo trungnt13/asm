@@ -178,7 +178,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
             .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
     let mut prompt = Arc::new(Prompt {
-        input,
+        input: input.into_iter().map(Arc::new).collect(),
         tools: if tools_in_history {
             tool_router
                 .model_visible_specs()
@@ -210,7 +210,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     // The file may disappear after the availability check, or the store may
     // defer validation to Responses. Retry only an unambiguously rejected ID.
     let mut submitted_audio = rejected_audio::SubmittedFileAudio::from_request(
-        &prompt.input,
+        prompt.input.iter().map(Arc::as_ref),
         /*accepted*/ None,
         prompt
             .input
@@ -227,7 +227,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
     } = loop {
         Arc::make_mut(&mut prompt)
             .input
-            .push(ResponseItem::CompactionTrigger {});
+            .push(Arc::new(ResponseItem::CompactionTrigger {}));
         // A retry can edit its input while the worker still holds this attempt's snapshot.
         let trace_prompt = Arc::clone(&prompt);
         let trace_model = model_info.slug.clone();
@@ -261,9 +261,17 @@ pub(super) async fn run_remote_compact_v2_attempt(
                 .ok_or(error)?,
         };
         unavailable.insert(rejected_id);
-        let input = &mut Arc::make_mut(&mut prompt).input;
+        let mut input = std::mem::take(&mut Arc::make_mut(&mut prompt).input)
+            .into_iter()
+            .map(Arc::unwrap_or_clone)
+            .collect::<Vec<_>>();
         input.pop();
-        rejected_audio::project_compaction_audio(input, &mut prompt_input_metadata, &unavailable);
+        rejected_audio::project_compaction_audio(
+            &mut input,
+            &mut prompt_input_metadata,
+            &unavailable,
+        );
+        Arc::make_mut(&mut prompt).input = input.into_iter().map(Arc::new).collect();
     };
     let mut prompt_input = Arc::unwrap_or_clone(prompt).input;
     prompt_input.pop(); // Exclude the request-only trigger from checkpoint history.
@@ -271,7 +279,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
         rejected_audio_file_ids: unavailable,
         input_goal_ids,
         trace_input_history,
-        prompt_input,
+        prompt_input: prompt_input.into_iter().map(Arc::unwrap_or_clone).collect(),
         prompt_input_metadata,
         compaction_output,
         compaction_response_id: response_id,
