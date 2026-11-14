@@ -25,7 +25,6 @@ Paste an image with `Ctrl+V` to attach it to your next message.
 You can resume a previous conversation by running `asm resume`
 Use **/copy** or press {key:global.copy} to copy the latest agent response as Markdown.
 Use **/vim** to toggle Vim editing in the composer.
-Moving from Claude Code? Use **/import** to bring over your setup, project, and recent chats.
 Use **/hooks** to view and manage lifecycle hooks.
 Use **/archive** to archive the current session.
 When worktree support is available, use **/worktree** to start or continue a conversation in a separate Git worktree.

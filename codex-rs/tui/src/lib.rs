@@ -158,7 +158,6 @@ mod dynamic_tools_mcp;
 mod empty_state_animation;
 mod exec_cell;
 mod exec_command;
-mod external_agent_config_migration;
 mod external_editor;
 mod file_search;
 mod get_git_diff;

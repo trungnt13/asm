@@ -11,6 +11,8 @@ This guide overrides conflicting instructions, including [AGENTS.md](../AGENTS.m
 
 The linked task skills and their procedures are required parts of this guide for applicable tasks. Read them before those tasks. This guide controls conflicts. Skill use grants no new authority.
 
+Remove external-agent configuration/session migration engines, import UI/RPCs, import-history APIs, telemetry and feature flags. Preserve saved rollouts, normal history/resume and immutable historical SQLite migrations.
+
 ## Development workflow
 
 ### Start or resume

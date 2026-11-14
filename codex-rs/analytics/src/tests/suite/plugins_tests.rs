@@ -406,7 +406,7 @@ async fn reducer_ingests_plugin_install_failed_fact() {
             AnalyticsFact::Custom(CustomAnalyticsFact::PluginInstallFailed(
                 PluginInstallFailedInput {
                     plugin: sample_plugin_metadata(),
-                    source: PluginInstallSource::ExternalAgentMigration,
+                    source: PluginInstallSource::Manual,
                     error_type: "invalid_plugin".to_string(),
                     sub_error_type: Some("failed_to_copy_plugin_file".to_string()),
                 },
@@ -429,7 +429,7 @@ async fn reducer_ingests_plugin_install_failed_fact() {
                 "mcp_server_count": 2,
                 "connector_ids": ["calendar", "drive"],
                 "product_client_id": originator().value,
-                "source": "external_agent_migration",
+                "source": "manual",
                 "error_type": "invalid_plugin",
                 "sub_error_type": "failed_to_copy_plugin_file"
             }

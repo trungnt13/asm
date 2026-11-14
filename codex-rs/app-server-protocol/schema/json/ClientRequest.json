@@ -516,17 +516,6 @@
       ],
       "type": "object"
     },
-    "CommandMigration": {
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
     "ConfigBatchWriteParams": {
       "properties": {
         "edits": {
@@ -975,264 +964,6 @@
         }
       },
       "type": "object"
-    },
-    "ExternalAgentConfigDetectParams": {
-      "properties": {
-        "cwds": {
-          "description": "Zero or more working directories to include for repo-scoped detection.",
-          "items": {
-            "type": "string"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
-        "includeHome": {
-          "description": "If true, include detection under the user's home directory.",
-          "type": "boolean"
-        },
-        "maxSessionAgeDays": {
-          "description": "Maximum age in days for detected sessions. Missing values use the default limit.",
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "maxSessions": {
-          "description": "Maximum number of sessions to detect. Missing values use the default limit.",
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "migrationSource": {
-          "description": "Optional migration-source selector. Missing or unrecognized values use the default source.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "source": {
-          "description": "Deprecated field retained for compatibility. This field is ignored; use `migrationSource` to select the migration source.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
-    "ExternalAgentConfigImportHistoryRecordParams": {
-      "properties": {
-        "itemTypeResults": {
-          "description": "Completed results grouped by imported item type.",
-          "items": {
-            "$ref": "#/definitions/ExternalAgentConfigImportHistoryRecordTypeResultParams"
-          },
-          "type": "array"
-        },
-        "providerId": {
-          "description": "Opaque provider identifier for the externally completed import.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "itemTypeResults",
-        "providerId"
-      ],
-      "type": "object"
-    },
-    "ExternalAgentConfigImportHistoryRecordSuccessParams": {
-      "properties": {
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "itemType": {
-          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
-        },
-        "source": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "target": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "title": {
-          "default": null,
-          "description": "Original title for an imported session, when available.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "itemType"
-      ],
-      "type": "object"
-    },
-    "ExternalAgentConfigImportHistoryRecordTypeResultParams": {
-      "properties": {
-        "failures": {
-          "items": {
-            "$ref": "#/definitions/ExternalAgentConfigImportItemTypeFailure"
-          },
-          "type": "array"
-        },
-        "itemType": {
-          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
-        },
-        "successes": {
-          "items": {
-            "$ref": "#/definitions/ExternalAgentConfigImportHistoryRecordSuccessParams"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "failures",
-        "itemType",
-        "successes"
-      ],
-      "type": "object"
-    },
-    "ExternalAgentConfigImportItemTypeFailure": {
-      "properties": {
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "errorType": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "failureStage": {
-          "type": "string"
-        },
-        "itemType": {
-          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
-        },
-        "message": {
-          "type": "string"
-        },
-        "source": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "subErrorType": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "failureStage",
-        "itemType",
-        "message"
-      ],
-      "type": "object"
-    },
-    "ExternalAgentConfigImportParams": {
-      "properties": {
-        "migrationItems": {
-          "items": {
-            "$ref": "#/definitions/ExternalAgentConfigMigrationItem"
-          },
-          "type": "array"
-        },
-        "migrationSource": {
-          "description": "Migration-source selector used to produce the migration items. Pass the same value to detection and import; missing or unrecognized values use the default source.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "providerId": {
-          "description": "Opaque provider identifier supplied by the caller for analytics attribution and import history display. This does not select the migration source.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "source": {
-          "description": "Optional identifier for the product that initiated the import.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "migrationItems"
-      ],
-      "type": "object"
-    },
-    "ExternalAgentConfigMigrationItem": {
-      "properties": {
-        "cwd": {
-          "description": "Null or empty means home-scoped migration; non-empty means repo-scoped migration.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "description": {
-          "type": "string"
-        },
-        "details": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/MigrationDetails"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "itemType": {
-          "$ref": "#/definitions/ExternalAgentConfigMigrationItemType"
-        }
-      },
-      "required": [
-        "description",
-        "itemType"
-      ],
-      "type": "object"
-    },
-    "ExternalAgentConfigMigrationItemType": {
-      "enum": [
-        "AGENTS_MD",
-        "CONFIG",
-        "SKILLS",
-        "PLUGINS",
-        "MCP_SERVER_CONFIG",
-        "SUBAGENTS",
-        "HOOKS",
-        "COMMANDS",
-        "MEMORY",
-        "SESSIONS"
-      ],
-      "type": "string"
     },
     "FeedbackSaveParams": {
       "properties": {
@@ -1772,17 +1503,6 @@
       },
       "type": "object"
     },
-    "HookMigration": {
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
     "HooksListParams": {
       "properties": {
         "cwds": {
@@ -2310,17 +2030,6 @@
       ],
       "type": "object"
     },
-    "McpServerMigration": {
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
     "McpServerOauthClientRegistration": {
       "enum": [
         "auto",
@@ -2447,66 +2156,6 @@
           "type": "string"
         }
       ]
-    },
-    "MigrationDetails": {
-      "properties": {
-        "commands": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/CommandMigration"
-          },
-          "type": "array"
-        },
-        "hooks": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/HookMigration"
-          },
-          "type": "array"
-        },
-        "mcpServers": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/McpServerMigration"
-          },
-          "type": "array"
-        },
-        "memory": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "plugins": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/PluginsMigration"
-          },
-          "type": "array"
-        },
-        "sessions": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/SessionMigration"
-          },
-          "type": "array"
-        },
-        "skills": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/SkillMigration"
-          },
-          "type": "array"
-        },
-        "subagents": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/SubagentMigration"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
     },
     "ModeKind": {
       "description": "Initial collaboration mode to use when the TUI starts.",
@@ -2955,24 +2604,6 @@
       },
       "required": [
         "pluginId"
-      ],
-      "type": "object"
-    },
-    "PluginsMigration": {
-      "properties": {
-        "marketplaceName": {
-          "type": "string"
-        },
-        "pluginNames": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "marketplaceName",
-        "pluginNames"
       ],
       "type": "object"
     },
@@ -4503,27 +4134,6 @@
       ],
       "type": "object"
     },
-    "SessionMigration": {
-      "properties": {
-        "cwd": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        },
-        "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "cwd",
-        "path"
-      ],
-      "type": "object"
-    },
     "Settings": {
       "description": "Settings for a collaboration mode.",
       "properties": {
@@ -4549,17 +4159,6 @@
       },
       "required": [
         "model"
-      ],
-      "type": "object"
-    },
-    "SkillMigration": {
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
       ],
       "type": "object"
     },
@@ -4628,17 +4227,6 @@
         "desc"
       ],
       "type": "string"
-    },
-    "SubagentMigration": {
-      "properties": {
-        "name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
     },
     "TextElement": {
       "properties": {
@@ -9140,101 +8728,6 @@
         "params"
       ],
       "title": "Config/readRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "externalAgentConfig/detect"
-          ],
-          "title": "ExternalAgentConfig/detectRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/ExternalAgentConfigDetectParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "ExternalAgentConfig/detectRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "externalAgentConfig/import"
-          ],
-          "title": "ExternalAgentConfig/importRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/ExternalAgentConfigImportParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "ExternalAgentConfig/importRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "externalAgentConfig/import/recordHistory"
-          ],
-          "title": "ExternalAgentConfig/import/recordHistoryRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "$ref": "#/definitions/ExternalAgentConfigImportHistoryRecordParams"
-        }
-      },
-      "required": [
-        "id",
-        "method",
-        "params"
-      ],
-      "title": "ExternalAgentConfig/import/recordHistoryRequest",
-      "type": "object"
-    },
-    {
-      "properties": {
-        "id": {
-          "$ref": "#/definitions/RequestId"
-        },
-        "method": {
-          "enum": [
-            "externalAgentConfig/import/readHistories"
-          ],
-          "title": "ExternalAgentConfig/import/readHistoriesRequestMethod",
-          "type": "string"
-        },
-        "params": {
-          "type": "null"
-        }
-      },
-      "required": [
-        "id",
-        "method"
-      ],
-      "title": "ExternalAgentConfig/import/readHistoriesRequest",
       "type": "object"
     },
     {
