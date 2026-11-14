@@ -603,6 +603,11 @@ impl LocalAgentControl {
         } else {
             None
         };
+        let request_country = if let Some(parent) = &inherited_parent {
+            parent.config_snapshot().await.request_country
+        } else {
+            codex_protocol::RequestCountry::UNKNOWN
+        };
         let prompt_cache_key = inherited_parent.as_ref().map(|parent| {
             parent
                 .session
@@ -660,6 +665,7 @@ impl LocalAgentControl {
         match state
             .resume_thread_with_history_with_source(ResumeThreadWithHistoryOptions {
                 config,
+                request_country,
                 prompt_cache_key,
                 initial_history,
                 agent_control: self.clone(),
@@ -836,6 +842,7 @@ impl LocalAgentControl {
         // Capture child defaults once. Copying conversation history must not change
         // the capabilities of the turn which requested the spawn.
         let mut start_options = StartThreadOptions {
+            request_country: options.request_country.clone(),
             session_source: session_source.clone(),
             thread_source: session_source.as_ref().map(|_| ThreadSource::Subagent),
             environments: options

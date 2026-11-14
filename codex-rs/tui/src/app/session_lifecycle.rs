@@ -402,6 +402,13 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> Result<bool> {
+        if self
+            .thread_event_channels
+            .get(&thread_id)
+            .is_some_and(|channel| channel.archived)
+        {
+            return Ok(false);
+        }
         if !self.should_attach_live_thread_for_selection(thread_id) {
             return Ok(true);
         }
@@ -485,7 +492,12 @@ impl App {
                 (session, thread.turns, false)
             }
         };
-        let live_attached = live_attached && !closed;
+        let live_attached = live_attached
+            && !closed
+            && !self
+                .thread_event_channels
+                .get(&thread_id)
+                .is_some_and(|channel| channel.archived);
         if self.side_threads.contains_key(&thread_id) {
             session.forked_from_id = None;
             session.fork_parent_title = None;
@@ -915,7 +927,10 @@ impl App {
             && self
                 .thread_event_channels
                 .get(&thread_id)
-                .is_none_or(|channel| channel.attachment() != ThreadEventAttachment::ExternalWriter)
+                .is_none_or(|channel| {
+                    !channel.archived
+                        && channel.attachment() != ThreadEventAttachment::ExternalWriter
+                })
         {
             self.chat_widget.pause_unavailable_thread();
             let message = if attached_replay_only {
@@ -971,13 +986,7 @@ impl App {
             .set_task_mentions_enabled(app_server.task_tools_available(thread_id));
         self.chat_widget
             .note_rendered_width(tui.terminal.last_known_screen_size.width);
-        let external_writer = self
-            .thread_event_channels
-            .get(&thread_id)
-            .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::ExternalWriter);
-        if external_writer {
-            self.chat_widget.show_external_writer_thread();
-        }
+        archived_thread::show_cached_read_only_thread(self, thread_id);
         if self.agent_navigation.is_parent_owned(thread_id) {
             self.chat_widget.set_parent_owned_thread();
         }
@@ -1013,9 +1022,7 @@ impl App {
         {
             self.adopt_server_permissions();
         }
-        if external_writer {
-            self.chat_widget.show_external_writer_thread();
-        }
+        archived_thread::show_cached_read_only_thread(self, thread_id);
         if tui.is_owned_screen() {
             // Hold drawing and input through the history events emitted by replay.
             self.chat_widget

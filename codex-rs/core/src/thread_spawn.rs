@@ -222,6 +222,7 @@ pub(crate) async fn prepare(
             source: spawn_source,
             options: SpawnAgentOptions {
                 spawn_arguments: None,
+                request_country: step_context.settings.request_country().clone(),
                 fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.to_string()),
                 fork_mode,
                 parent_thread_id: Some(session.thread_id),

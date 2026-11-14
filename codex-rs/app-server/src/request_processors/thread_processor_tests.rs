@@ -738,6 +738,7 @@ mod thread_processor_behavior_tests {
             system1_revision: 0,
             system1_error: None,
             system1_failure_episode: 0,
+            request_country: Default::default(),
             turn_extension_init: Default::default(),
             disabled_plugin_ids: Vec::new(),
             model: "gpt-5".to_string(),
