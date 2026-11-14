@@ -151,7 +151,7 @@ impl RollbackPlanner {
         };
         let paired_delivery_boundary = match (&self.pending_delivery_boundary, &line.item) {
             (Some(boundary), RolloutItem::ResponseItem(response))
-                if matches!(&response.item, ResponseItem::AgentMessage { .. }) =>
+                if matches!(response.item.as_ref(), ResponseItem::AgentMessage { .. }) =>
             {
                 Some(*boundary)
             }
@@ -165,8 +165,8 @@ impl RollbackPlanner {
                 self.record_boundaries[index] = None
             }
             RolloutItem::ResponseItem(response) => {
-                if matches!(&response.item, ResponseItem::Message { role, .. } if role == "assistant")
-                    || matches!(&response.item, ResponseItem::FunctionCall { .. })
+                if matches!(response.item.as_ref(), ResponseItem::Message { role, .. } if role == "assistant")
+                    || matches!(response.item.as_ref(), ResponseItem::FunctionCall { .. })
                 {
                     self.retained_fact_sources.push(RetainedFactSource {
                         record_index: index,
@@ -182,13 +182,13 @@ impl RollbackPlanner {
                     self.record_boundaries[index] = Some(boundary);
                     self.boundaries[boundary].message_id = response.id().cloned();
                     self.boundaries[boundary].input_source = response.metadata.as_ref().into();
-                } else if rollback::counts_as_boundary(&response.item) {
+                } else if rollback::counts_as_boundary(response.item.as_ref()) {
                     let boundary = self.start_boundary(index);
                     self.boundaries[boundary].message_id = response.id().cloned();
                     self.boundaries[boundary].input_source = response.metadata.as_ref().into();
                     self.boundaries[boundary].is_communication =
-                        matches!(response.item, ResponseItem::AgentMessage { .. });
-                    if let ResponseItem::Message { role, content, .. } = &response.item
+                        matches!(response.item.as_ref(), ResponseItem::AgentMessage { .. });
+                    if let ResponseItem::Message { role, content, .. } = response.item.as_ref()
                         && role == "user"
                     {
                         self.pending_user_response = Some(PendingUserResponse {
@@ -196,13 +196,13 @@ impl RollbackPlanner {
                             content: content.clone(),
                         });
                     }
-                } else if rollback::is_pre_turn_context_update(&response.item) {
+                } else if rollback::is_pre_turn_context_update(response.item.as_ref()) {
                     // Until another user boundary arrives, this is trailing context for the
                     // previous turn. Keep that fallback owner so rollback drops it when there is
                     // no later turn to attach it to.
                     self.pending_context_records.push(index);
                 }
-                if let ResponseItem::FunctionCall { call_id, .. } = &response.item
+                if let ResponseItem::FunctionCall { call_id, .. } = response.item.as_ref()
                     && let Some(turn_id) = response.turn_id().or(self.active_turn_id.as_deref())
                 {
                     self.call_boundaries.insert(

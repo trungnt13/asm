@@ -96,7 +96,7 @@ async fn direct_mcp_review_without_dispatch() -> Result<()> {
         .items
         .into_iter()
         .filter_map(|entry| match entry {
-            RolloutItem::ResponseItem(item) => match &item.item {
+            RolloutItem::ResponseItem(item) => match item.item.as_ref() {
                 ResponseItem::Message { role, content, .. }
                     if role == "user" && content == &[input_text(prompt)] =>
                 {

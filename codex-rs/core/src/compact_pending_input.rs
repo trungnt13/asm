@@ -13,13 +13,13 @@ pub(crate) fn pending_mail_sequence(history: &[ResponseItemEnvelope]) -> Option<
     let sampled_through = sampled_through(history);
     history
         .iter()
-        .filter(|envelope| matches!(envelope.item, ResponseItem::AgentMessage { .. }))
+        .filter(|envelope| matches!(envelope.item.as_ref(), ResponseItem::AgentMessage { .. }))
         .filter_map(|envelope| envelope.metadata.as_ref()?.history_sequence)
         .find(|sequence| *sequence > sampled_through)
 }
 
 pub(crate) fn is_retained_pending_mail(envelope: &ResponseItemEnvelope, first: u64) -> bool {
-    matches!(envelope.item, ResponseItem::AgentMessage { .. })
+    matches!(envelope.item.as_ref(), ResponseItem::AgentMessage { .. })
         && envelope
             .metadata
             .as_ref()

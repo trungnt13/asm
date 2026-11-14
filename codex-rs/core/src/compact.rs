@@ -333,7 +333,7 @@ async fn run_compact_task_inner_impl(
             fallback_instructions.clone()
         };
         let prompt = Prompt {
-            input: turn_input.into_iter().map(Arc::new).collect(),
+            input: turn_input,
             base_instructions,
             prompt_cache_ttl: turn_context.prompt_cache_ttl,
             cyber_access_program: turn_context.cyber_access_program,
@@ -714,7 +714,7 @@ pub(crate) fn insert_initial_context_before_last_real_user_or_summary(
         .rev()
         .find_map(|(i, item)| {
             matches!(
-                &item.item,
+                item.item.as_ref(),
                 ResponseItem::Compaction { .. } | ResponseItem::ContextCompaction { .. }
             )
             .then_some(i)
@@ -841,7 +841,7 @@ fn build_compacted_history_with_limit(
             selected.insert(
                 position,
                 ResponseItemEnvelope {
-                    item,
+                    item: item.into(),
                     metadata: harness_metadata,
                 },
             );
@@ -941,7 +941,7 @@ async fn drain_to_completed(
                             turn_context,
                             turn_context.model_info(),
                             vec![ResponseItemEnvelope {
-                                item,
+                                item: item.into(),
                                 metadata: Some(CodexHarnessMetadata {
                                     compaction_output: true,
                                     ..Default::default()

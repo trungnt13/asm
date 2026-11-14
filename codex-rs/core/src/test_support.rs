@@ -100,13 +100,20 @@ pub async fn history_with_tool_call_metadata(
     thread: &crate::CodexThread,
 ) -> Vec<codex_protocol::models::ResponseItem> {
     let history = thread.conversation_history_snapshot().await;
-    let mut items = history.items().cloned().collect::<Vec<_>>();
+    let mut items = history
+        .items()
+        .cloned()
+        .map(std::sync::Arc::new)
+        .collect::<Vec<_>>();
     thread
         .session
         .services
         .executed_tool_calls
         .attach_to_prompt(&mut items, &mut Default::default());
     items
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect()
 }
 
 /// Returns the recorder state used by the next session metadata snapshot.

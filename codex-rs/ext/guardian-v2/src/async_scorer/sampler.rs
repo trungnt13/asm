@@ -87,7 +87,7 @@ pub struct LunaSamplingRequest {
     pub instructions: RenderedFragment,
     /// Composed evidence messages, with roles, annotations and content order intact.
     #[cfg(test)]
-    pub input: Vec<ResponseItem>,
+    pub input: Vec<Arc<ResponseItem>>,
     /// Opaque parent compaction to reuse only for compatible model configurations.
     pub parent_compaction: Option<ResponseItem>,
     /// Reasoning budget explicitly selected for this request.
@@ -221,13 +221,13 @@ impl LunaSampler {
     fn execution(
         &self,
         request: &LunaSamplingRequest,
-        input: Vec<ResponseItem>,
+        input: Vec<Arc<ResponseItem>>,
         auth_owner: Option<AuthOwner>,
     ) -> execution::SamplingExecution {
         let api_request = ResponsesApiRequest {
             request_country: Default::default(),
             model: MODEL.to_owned(),
-            input: input.into_iter().map(Arc::new).collect(),
+            input,
             tools: None,
             tool_choice: "none".to_owned(),
             parallel_tool_calls: false,
@@ -315,10 +315,7 @@ impl LunaSampler {
                 .input
                 .into_iter()
                 .zip(metadata.into_iter().chain(std::iter::repeat(None)))
-                .map(|(item, metadata)| ResponseItemEnvelope {
-                    item: Arc::unwrap_or_clone(item),
-                    metadata,
-                })
+                .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
                 .collect(),
         )
     }

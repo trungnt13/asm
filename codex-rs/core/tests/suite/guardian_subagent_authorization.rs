@@ -1478,7 +1478,7 @@ async fn run_guardian_subagent_review(
         let answer_position = original_history
             .iter()
             .position(|envelope| {
-                matches!(&envelope.item,
+                matches!(envelope.item.as_ref(),
                 ResponseItem::FunctionCallOutput { call_id, .. }
                     if call_id.as_deref() == Some(ASK_CALL_ID))
             })
@@ -1486,7 +1486,7 @@ async fn run_guardian_subagent_review(
         let queued_position = original_history
             .iter()
             .position(|envelope| {
-                matches!(&envelope.item,
+                matches!(envelope.item.as_ref(),
                 ResponseItem::Message { role, content, .. }
                     if role == "user" && matches!(content.as_slice(),
                         [ContentItem::InputText { text }] if text == QUEUED_APPROVAL))
@@ -1610,11 +1610,11 @@ async fn run_guardian_subagent_review(
                 MissingCheckpointSource::None => {}
                 MissingCheckpointSource::VerifiedAnswer => {
                     replacement_history.retain(|envelope| {
-                        !matches!(&envelope.item,
+                        !matches!(envelope.item.as_ref(),
                         ResponseItem::FunctionCallOutput { call_id, .. }
                             if call_id.as_deref() == Some(ASK_CALL_ID))
                             && !matches!(
-                                &envelope.item,
+                                envelope.item.as_ref(),
                                 ResponseItem::Message {
                                     phase: Some(MessagePhase::Commentary),
                                     ..
@@ -1636,7 +1636,7 @@ async fn run_guardian_subagent_review(
                 MissingCheckpointSource::RootInstruction => {
                     // The restriction is absent from both the retained family and live history.
                     replacement_history.retain(|envelope| {
-                        !matches!(&envelope.item,
+                        !matches!(envelope.item.as_ref(),
                         ResponseItem::Message { role, content, .. }
                             if role == "user" && matches!(content.as_slice(),
                                 [ContentItem::InputText { text }] if text == INITIAL_PROMPT))

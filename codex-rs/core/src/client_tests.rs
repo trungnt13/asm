@@ -577,7 +577,15 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
         outputs.push(item);
     }
     let persisted_outputs = outputs.clone();
-    recorder.attach_to_prompt(&mut outputs, &mut Default::default());
+    let mut shared_outputs = outputs
+        .into_iter()
+        .map(std::sync::Arc::new)
+        .collect::<Vec<_>>();
+    recorder.attach_to_prompt(&mut shared_outputs, &mut Default::default());
+    let outputs = shared_outputs
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
     let restored = serde_json::to_value(&outputs)?;
     assert_eq!(
         restored[1]["internal_chat_message_metadata_passthrough"]["executed_tool_calls"][0]["tool_result_metadata"],
@@ -846,11 +854,19 @@ fn responses_request_preserves_result_metadata_above_previous_aggregate_budget()
         ..Default::default()
     };
     // Follow the sampling path: budget the request copy before client serialization.
-    let mut input = std::mem::take(&mut prompt.input)
+    let input = std::mem::take(&mut prompt.input)
         .into_iter()
         .map(Arc::unwrap_or_clone)
         .collect::<Vec<_>>();
-    recorder.attach_to_prompt(&mut input, &mut Default::default());
+    let mut shared_input = input
+        .into_iter()
+        .map(std::sync::Arc::new)
+        .collect::<Vec<_>>();
+    recorder.attach_to_prompt(&mut shared_input, &mut Default::default());
+    let input = shared_input
+        .into_iter()
+        .map(std::sync::Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
     prompt.input = input.into_iter().map(Arc::new).collect();
     let provider =
         ModelProviderInfo::create_openai_provider(Some("https://api.openai.com/v1".to_string()));

@@ -108,7 +108,7 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
     let input_images = |input: &[ResponseItemEnvelope]| {
         input
             .iter()
-            .flat_map(|item| match &item.item {
+            .flat_map(|item| match item.item.as_ref() {
                 ResponseItem::Message { content, .. } => content.as_slice(),
                 _ => &[],
             })
@@ -203,7 +203,7 @@ fn preparation_preserves_committed_prefix_and_selects_only_new_entries_and_image
     let delta = serde_json::to_string(
         &second.input[committed.len()..]
             .iter()
-            .map(|item| &item.item)
+            .map(|item| item.item.as_ref())
             .collect::<Vec<_>>(),
     )
     .unwrap();

@@ -64,7 +64,7 @@ pub(super) fn truncate_message_to_token_budget(
     image_budget: RetainedImageBudget,
     audio_durations: &FileAudioDurations,
 ) -> Option<ResponseItemEnvelope> {
-    let mut content = to_annotated_content(&mut envelope.item)?;
+    let mut content = to_annotated_content(std::sync::Arc::make_mut(&mut envelope.item))?;
     let mut remaining = max_tokens;
     let mut retained = Vec::with_capacity(content.len());
     while remaining > 0 && !content.is_empty() {
@@ -99,7 +99,7 @@ pub(super) fn truncate_message_to_token_budget(
         return None;
     }
     retained.reverse();
-    set_annotated_content(&mut envelope.item, retained)?;
+    set_annotated_content(std::sync::Arc::make_mut(&mut envelope.item), retained)?;
     if let Some(metadata) = &mut envelope.metadata {
         metadata.mark_retained_sources_incomplete();
     }

@@ -58,17 +58,18 @@ async fn recorded_questions_share_queued_input_order_across_resume() {
             turn.model_info(),
             vec![
                 ResponseItemEnvelope {
-                    item: user_message("Yes."),
+                    item: user_message("Yes.").into(),
                     metadata: Some(codex_history::CodexHarnessMetadata {
                         user_input_order: Some(reply_order),
                         ..Default::default()
                     }),
                 },
                 ResponseItemEnvelope {
-                    item: serde_json::from_value(json!({
+                    item: serde_json::from_value::<codex_protocol::models::ResponseItem>(json!({
                         "type": "function_call_output", "call_id": "first", "output": "Sent."
                     }))
-                    .unwrap(),
+                    .unwrap()
+                    .into(),
                     metadata: Some(codex_history::CodexHarnessMetadata {
                         delivered_assistant_message: Some("Continue?".to_owned()),
                         ..Default::default()
@@ -149,7 +150,8 @@ async fn sender_context_follows_its_delivery_through_checkpoint_and_rollback() {
                     "type": "function_call_output", "id": snapshot.receiver_message_id,
                     "name": "send_message_to_thread", "namespace": "codex_app", "output": "Inspect."
                 }))
-                .unwrap(),
+                .unwrap()
+                .into(),
                 metadata: Some(codex_history::CodexHarnessMetadata {
                     user_input_order: acceptance_order,
                     sender_user_messages: Some(Box::new(snapshot.clone())),
@@ -157,7 +159,7 @@ async fn sender_context_follows_its_delivery_through_checkpoint_and_rollback() {
                 }),
             },
             ResponseItemEnvelope {
-                item: user_message("Later user steer B."),
+                item: user_message("Later user steer B.").into(),
                 metadata: Some(codex_history::CodexHarnessMetadata {
                     user_input_order: steer_order,
                     ..Default::default()
@@ -241,7 +243,7 @@ fn annotated(items: Vec<ResponseItem>) -> Vec<ResponseItemEnvelope> {
         .into_iter()
         .enumerate()
         .map(|(index, item)| ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(codex_history::CodexHarnessMetadata {
                 history_sequence: Some(index as u64 + 1),
                 sampled_through_sequence: Some(0),
@@ -1715,7 +1717,7 @@ async fn bounded_replay_matches_full_replay_after_empty_turn_compactions(
         Some(&codex_history::GuardianHistoryCheckpoint(vec![
             user_message("original task").into(),
             ResponseItemEnvelope {
-                item: assistant_message("continued working"),
+                item: assistant_message("continued working").into(),
                 metadata: Some(codex_history::CodexHarnessMetadata {
                     history_sequence: Some(2),
                     sampled_through_sequence: Some(0),

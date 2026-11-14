@@ -1740,9 +1740,9 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             ]
             .into_iter()
             .map(|item| {
-                let item = serde_json::from_value(item).expect("parent step fixture");
+                let item: codex_protocol::models::ResponseItem = serde_json::from_value(item).expect("parent step fixture");
                 RolloutItem::ResponseItem(ResponseItemEnvelope {
-                    item,
+                    item: item.into(),
                     metadata: Some(CodexHarnessMetadata {
                         harness_authored_configuration: true,
                         ..Default::default()

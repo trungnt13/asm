@@ -789,7 +789,7 @@ pub(crate) async fn record_pending_input(
                 namespace,
                 output,
                 ..
-            } = item.item
+            } = std::sync::Arc::unwrap_or_clone(item.item)
             {
                 let item = TurnItem::FunctionCallOutput(FunctionCallOutputItem {
                     id: id.to_string(),

@@ -1803,7 +1803,7 @@ async fn tool_output_retention_is_submission_metadata() -> anyhow::Result<()> {
                 return None;
             };
             let codex_protocol::models::ResponseItem::FunctionCallOutput { name, .. } =
-                &envelope.item
+                envelope.item.as_ref()
             else {
                 return None;
             };

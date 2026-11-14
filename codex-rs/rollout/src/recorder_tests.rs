@@ -364,7 +364,7 @@ async fn load_rollout_items_defaults_legacy_session_id() -> std::io::Result<()> 
     assert!(matches!(
         items[1],
         RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: ResponseItem::Message { .. },
+            item: ResponseItem::Message { .. }.into(),
             ..
         })
     ));
@@ -598,7 +598,7 @@ async fn load_rollout_items_filters_legacy_ghost_snapshots_from_compaction_histo
     assert!(matches!(
         &replacement_history[0],
         ResponseItemEnvelope {
-            item: ResponseItem::Message { .. },
+            item: ResponseItem::Message { .. }.into(),
             ..
         }
     ));

@@ -101,7 +101,7 @@ pub(crate) async fn record_completed_response_item_with_finalized_facts(
         turn_context,
         &step_context.settings.model_info,
         vec![ResponseItemEnvelope {
-            item: item.clone(),
+            item: item.clone().into(),
             metadata: step_context
                 .sampled_through_sequence
                 .map(|sequence| CodexHarnessMetadata {

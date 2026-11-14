@@ -186,7 +186,7 @@ pub(super) fn validate_pending_prompt(
                 session.response_item_from_user_input(content.clone())
             }
             TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) => {
-                envelope.item.clone()
+                envelope.item.as_ref().clone()
             }
             TurnInput::InterAgentCommunication(message) => message.to_model_input_item(),
         })

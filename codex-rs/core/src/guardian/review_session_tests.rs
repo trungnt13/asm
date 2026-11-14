@@ -520,7 +520,7 @@ async fn encrypted_parent_compaction_requires_original_item_id(mode: GuardianCon
 
     let mut history = ContextManager::default();
     history.replace_annotated(vec![ResponseItemEnvelope {
-        item: item.clone(),
+        item: item.clone().into(),
         metadata: Some(CodexHarnessMetadata {
             compaction_model_hash: Some("compatible".to_owned()),
             ..Default::default()
