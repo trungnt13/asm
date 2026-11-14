@@ -146,13 +146,17 @@ Upstream adds canonical realtime records `Frame`, `TurnInputAccepted` and `Sessi
 
 The owner accepted this separate upstream compatibility boundary for PR #190 through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. It does not establish actual Desktop voice behavior or exact voice handoff, does not apply to later upstream commits, and does not waive ordinary text-history checks or other validation failures.
 
+#### Opt-in per-environment context
+
+Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
+
 ### Live backend model catalog
 
 Every upstream rebase/sync must fetch the live authenticated backend catalog. Source, cached, and bundled catalogs cannot establish current availability; backend models can change without source changes.
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `05229d1874d4e04bc746a9954c71931a1ab852c6`, 2026-11-14. Subject: Add snapshot pagination for persisted realtime history (#61480).
+Last incorporated commit: `65a5410f72dac1f4b40862c34ef0a8b71b12834a`, 2026-11-14. Subject: Add trusted request-country metadata to Responses requests (#61535).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
