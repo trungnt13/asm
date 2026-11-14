@@ -423,6 +423,7 @@ impl App {
                 if let Some(params) = AppLinkViewParams::from_url_app_server_request(
                     thread_id,
                     &params.server_name,
+                    params.environment_id.as_deref(),
                     request_id.clone(),
                     &params.request,
                 ) {
@@ -445,6 +446,7 @@ impl App {
                                 thread_id,
                                 thread_label,
                                 server_name: params.server_name.clone(),
+                                environment_id: params.environment_id.clone(),
                                 request_id: request_id.clone(),
                                 message: message.clone(),
                             }),
@@ -456,6 +458,7 @@ impl App {
                             request: crate::bottom_pane::user_verification::UserVerificationRequest {
                                 thread_label,
                                 server_name: params.server_name.clone(),
+                                environment_id: params.environment_id.clone(),
                                 request_id: request_id.clone(),
                                 title: title.clone(),
                                 description: description.clone(),
@@ -943,10 +946,7 @@ impl App {
                 let tx = self.app_event_tx.clone();
                 tokio::spawn(async move {
                     let create = async {
-                        let voices = Self::realtime_voices(&server).await?;
-                        let voice = Self::effective_realtime_voice(&server, &cwd, &voices)
-                            .await?
-                            .unwrap_or(voices.default_v1);
+                        let voice = Self::effective_realtime_voice(&server, &cwd).await?;
                         let thread = server
                             .thread_read(thread_id, /*include_turns*/ false)
                             .await?;
@@ -997,6 +997,15 @@ impl App {
                 Ok(true)
             }
             AppCommand::RunUserShellCommand { command } => {
+                if app_server.thread_params_mode()
+                    == crate::app_server_session::ThreadParamsMode::Cloud
+                {
+                    self.chat_widget.reject_user_shell_command(
+                        "Shell commands starting with ! are unavailable in Cloud conversations."
+                            .into(),
+                    );
+                    return Ok(true);
+                }
                 app_server
                     .thread_shell_command(thread_id, command.to_string())
                     .await?;
@@ -1501,15 +1510,30 @@ impl App {
             None
         };
         let mut session = parent_session.or_else(|| self.primary_session_configured.clone())?;
+        session.thread_settings_confirmed = false;
+        session.primary_environment_cwd = crate::session_state::primary_environment_cwd(
+            notification
+                .thread
+                .environments
+                .as_deref()
+                .unwrap_or_default(),
+        );
         session.thread_id = thread_id;
         session.system1_enabled = false;
         session.system1_revision = 0;
         session.system1_error = None;
         session.system1_failure_episode = 0;
+        session.read_only_history = false;
+        session.set_fork_parent(notification.thread.forked_from_id.as_deref());
         session.daybreak_enabled = notification.thread.daybreak_enabled.unwrap_or(false);
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),
         );
+        // A parent’s collaboration mode can override the child’s reported model and effort.
+        session.collaboration_mode = None;
+        session
+            .reasoning_effort
+            .clone_from(&notification.thread.reasoning_effort);
         session.thread_name = notification.thread.name.clone();
         session.model_provider_id = notification.thread.model_provider.clone();
         session
@@ -1701,7 +1725,8 @@ impl App {
             ThreadAttachPresentation::Fresh
             | ThreadAttachPresentation::FreshAfterClear
             | ThreadAttachPresentation::FreshWithDraft
-            | ThreadAttachPresentation::SessionLineage => {
+            | ThreadAttachPresentation::SessionLineage
+            | ThreadAttachPresentation::SessionLineageAfterClear => {
                 if self.side_threads.contains_key(&thread_id) {
                     self.chat_widget.handle_side_thread_session(session);
                 } else {
@@ -2163,6 +2188,7 @@ impl App {
                 AppLinkViewParams::from_url_app_server_request(
                     thread_id,
                     &params.server_name,
+                    params.environment_id.as_deref(),
                     request_id.clone(),
                     request,
                 )

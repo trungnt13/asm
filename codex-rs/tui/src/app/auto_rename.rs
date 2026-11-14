@@ -405,8 +405,11 @@ impl App {
             self.persist_automatic_thread_title(thread_id, &title).await;
             return;
         }
-        if let Err(error) = app_server.thread_set_name(thread_id, title.clone()).await {
-            tracing::debug!(%error, "failed to apply generated thread title");
+        let writer = app_server.automatic_thread_name_writer(thread_id, request.expected_name);
+        if !writer
+            .save(title.clone(), &tokio_util::sync::CancellationToken::new())
+            .await
+        {
             return;
         }
         self.persist_automatic_thread_title(thread_id, &title).await;

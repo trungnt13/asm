@@ -184,6 +184,10 @@ pub(crate) async fn handle_mcp_tool_call(
 
     let invocation = McpInvocation {
         server: server.clone(),
+        environment_id: advertised_tool
+            .server_key()
+            .scoped_environment_id()
+            .map(str::to_owned),
         tool: tool_name.clone(),
         arguments: arguments_value.clone(),
     };
@@ -973,7 +977,7 @@ async fn maybe_request_codex_apps_auth_elicitation(
     let response = sess
         .request_mcp_server_elicitation(
             turn_context,
-            CODEX_APPS_MCP_SERVER_NAME.to_string(),
+            McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
             request_id,
             request,
         )
@@ -1150,12 +1154,14 @@ async fn notify_mcp_tool_call_started(
 ) {
     let McpInvocation {
         server,
+        environment_id,
         tool,
         arguments,
     } = invocation;
     let item = TurnItem::McpToolCall(McpToolCallItem {
         id: call_id.to_string(),
         server,
+        environment_id,
         tool,
         arguments: arguments.unwrap_or(JsonValue::Null),
         connector_id: item_metadata.connector_id,
@@ -1196,12 +1202,14 @@ async fn notify_mcp_tool_call_completed(
     };
     let McpInvocation {
         server,
+        environment_id,
         tool,
         arguments,
     } = invocation;
     let item = TurnItem::McpToolCall(McpToolCallItem {
         id: call_id.to_string(),
         server,
+        environment_id,
         tool,
         arguments: arguments.unwrap_or(JsonValue::Null),
         connector_id: item_metadata.connector_id,
@@ -1940,7 +1948,7 @@ pub(crate) async fn request_mcp_tool_user_approval(
                 prompt_options,
             });
         let response = sess
-            .request_mcp_server_elicitation(turn_context, server.clone(), request_id, request)
+            .request_mcp_server_elicitation(turn_context, server_key.clone(), request_id, request)
             .await;
         // Missing replies are interruptions. A received Cancel needs provenance
         // from its source; RPC success alone does not establish a user action.

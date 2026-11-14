@@ -32,6 +32,7 @@ use core_test_support::responses;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
+use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 use tokio::sync::mpsc::unbounded_channel;
@@ -160,10 +161,12 @@ async fn cloud_conversations_skip_tui_generated_titles() {
 #[tokio::test]
 async fn automatic_thread_title_respects_origin_metadata_after_switching() -> color_eyre::Result<()>
 {
-    for (switch_threads, manual_name) in [
-        (true, None),
-        (true, Some("Manual title")),
-        (false, Some("Manual title")),
+    for (switch_threads, fork_name, manual_name) in [
+        (true, None, None),
+        (true, Some("Release plan"), None),
+        (true, Some("Release plan"), Some("Manual title")),
+        (true, None, Some("Manual title")),
+        (false, None, Some("Manual title")),
     ] {
         let mut app = make_test_app().await;
         let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
@@ -183,6 +186,11 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
         );
 
         let mut tui = crate::tui::test_support::make_test_tui()?;
+        if let Some(name) = fork_name {
+            app_server
+                .thread_set_name(thread_id, name.to_owned())
+                .await?;
+        }
         if switch_threads {
             let second = app_server.start_thread(&app.config).await?;
             let second_id = second.session.thread_id;
@@ -215,7 +223,12 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             },
         )
         .await?;
-        let expected_name = Some(manual_name.unwrap_or("Generated title").to_string());
+        let expected_name = Some(
+            manual_name
+                .or(fork_name)
+                .unwrap_or("Generated title")
+                .to_string(),
+        );
         assert_eq!(
             app_server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -701,6 +714,11 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
     app.pending_thread_titles
         .insert((thread_id, destination), cancellation.clone());
 
+    let writer = app_server.automatic_thread_name_writer(thread_id, /*expected_name*/ None);
+    let token = cancellation.clone();
+    let mut automatic = std::pin::pin!(writer.save("Stale title".into(), &token));
+    assert!(automatic.as_mut().now_or_never().is_none());
+
     app.try_submit_active_thread_op_via_app_server(
         &mut app_server,
         thread_id,
@@ -756,6 +774,59 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         Some("Keep this title".to_string()),
     );
     app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn manual_rename_waits_for_an_in_flight_automatic_write() -> color_eyre::Result<()> {
+    let thread_id = ThreadId::new();
+    let (client, mut requests, _events) =
+        codex_app_server_client::CloudClient::channel(/*capacity*/ 1);
+    let mut session = crate::app_server_session::AppServerSession::new(
+        crate::backend_id::BackendId::new(),
+        codex_app_server_client::AppServerClient::Cloud(client),
+        crate::app_server_session::ThreadParamsMode::Remote,
+    );
+    let writer = session.automatic_thread_name_writer(thread_id, /*expected_name*/ None);
+    let token = CancellationToken::new();
+    let mut automatic = std::pin::pin!(writer.save("Generated".into(), &token));
+    assert!(automatic.as_mut().now_or_never().is_none());
+    let mut thread = crate::app::agents_overview::tests::overview_thread(
+        thread_id,
+        /*parent_thread_id*/ None,
+        "",
+        codex_app_server_protocol::ThreadStatus::Idle,
+    );
+    thread.name = None;
+    requests
+        .try_recv()?
+        .response
+        .send(Ok(Ok(serde_json::json!({"thread": thread}))))
+        .unwrap();
+    assert!(automatic.as_mut().now_or_never().is_none());
+    let write = requests.try_recv()?;
+
+    let mut manual = std::pin::pin!(session.thread_set_name(thread_id, "Manual".into()));
+    assert!(manual.as_mut().now_or_never().is_none());
+    assert!(
+        requests.try_recv().is_err(),
+        "manual rename raced the automatic write"
+    );
+    let acknowledge = |request: codex_app_server_client::CloudCommand| {
+        request
+            .response
+            .send(Ok(Ok(serde_json::json!({}))))
+            .unwrap();
+    };
+    acknowledge(write);
+    assert!(
+        automatic
+            .now_or_never()
+            .expect("automatic write acknowledged")
+    );
+    assert!(manual.as_mut().now_or_never().is_none());
+    acknowledge(requests.try_recv()?);
+    manual.await?;
     Ok(())
 }
 

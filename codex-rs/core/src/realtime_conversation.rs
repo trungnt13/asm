@@ -114,7 +114,7 @@ const HANDOFF_STREAM_TRUNCATION_MARKER: &str = "\n…output truncated…\n";
 const AGENT_FINAL_MESSAGE_PREFIX: &str = "\"Agent Final Message\":\n\n";
 const STANDALONE_HANDOFF_ID: &str = "codex";
 const DEFAULT_REALTIME_MODEL: &str = "gpt-realtime-1.5";
-const DEFAULT_FRAMELESS_REALTIME_MODEL: &str = "gpt-live-1-codex";
+const DEFAULT_FRAMELESS_REALTIME_MODEL: &str = "gpt-live-1.1-codex";
 pub(crate) const REALTIME_USER_TEXT_PREFIX: &str = "[USER] ";
 pub(crate) const REALTIME_BACKEND_TEXT_PREFIX: &str = "[BACKEND] ";
 const REALTIME_V2_HANDOFF_COMPLETE_ACKNOWLEDGEMENT: &str =
@@ -367,14 +367,14 @@ impl RealtimeStreamedItem {
             if self.buffered_text.is_empty() {
                 return None;
             }
-            let text = self.buffered_text.drain(..).collect::<String>();
+            let text = std::mem::take(&mut self.buffered_text);
             let text = format!("{prefix}{text}");
             self.sent_bytes += text.len();
             return Some(text);
         }
 
-        let head = self.buffered_text.drain(..).collect::<String>();
-        let tail = self.tail_text.drain(..).collect::<String>();
+        let head = std::mem::take(&mut self.buffered_text);
+        let tail = std::mem::take(&mut self.tail_text);
         let text = format!("{prefix}{head}{HANDOFF_STREAM_TRUNCATION_MARKER}{tail}");
         self.sent_bytes += text.len();
         Some(text)
@@ -1575,11 +1575,8 @@ async fn prepare_realtime_start(
             ConfiguredRealtimeVoice::Use
         }
     };
-    let mut session_config =
+    let session_config =
         build_realtime_session_config(sess, &params, version, configured_voice).await?;
-    if matches!(&transport, ConversationStartTransport::ExistingCall { .. }) {
-        session_config.session_id = params.realtime_session_id.clone();
-    }
     let requested_realtime_session_id = session_config.session_id.clone();
     let event_parser = session_config.event_parser;
     let originator = sess.originator().await;
@@ -1795,35 +1792,30 @@ pub(crate) async fn build_realtime_session_config(
         ConfiguredRealtimeVoice::Use => config.realtime.voice,
         ConfiguredRealtimeVoice::Ignore => None,
     };
-    let voice = params
-        .voice
-        .or(config_voice)
-        .unwrap_or_else(|| default_realtime_voice(version));
-    validate_realtime_voice(version, voice)?;
+    let voice = params.voice.unwrap_or(config_voice);
+    if let Some(voice) = voice {
+        validate_realtime_voice(version, voice)?;
+    }
     Ok(RealtimeSessionConfig {
         instructions: prompt,
         initial_items: params.initial_items.clone(),
         delegation_ack_filler: params.delegation_ack_filler,
         model,
-        session_id: Some(
-            params
-                .realtime_session_id
-                .clone()
-                .unwrap_or_else(|| sess.thread_id.to_string()),
-        ),
+        session_id: Some(params.realtime_session_id.clone().unwrap_or_else(|| {
+            match &params.transport {
+                Some(ConversationStartTransport::ExistingCall { call_id, .. }) => call_id.clone(),
+                Some(
+                    ConversationStartTransport::Webrtc { .. }
+                    | ConversationStartTransport::Websocket,
+                )
+                | None => uuid::Uuid::now_v7().to_string(),
+            }
+        })),
         event_parser,
         session_mode,
         output_modality: params.output_modality,
         voice,
     })
-}
-
-fn default_realtime_voice(version: RealtimeWsVersion) -> RealtimeVoice {
-    let voices = RealtimeVoicesList::builtin();
-    match version {
-        RealtimeWsVersion::V1 | RealtimeWsVersion::V3 => voices.default_v1,
-        RealtimeWsVersion::V2 => voices.default_v2,
-    }
 }
 
 fn prefix_realtime_text(text: String, prefix: &str, session_kind: RealtimeSessionKind) -> String {
@@ -1902,6 +1894,9 @@ async fn handle_start_inner(
         session_config,
         transport,
     } = prepared_start;
+    sess.initialize_realtime_history()
+        .or_cancel(&attachment_control.token)
+        .await??;
     info!("starting realtime conversation");
     let (sdp, existing_call_id) = match transport {
         ConversationStartTransport::Websocket => (None, None),

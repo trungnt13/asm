@@ -26,7 +26,7 @@ pub(crate) async fn connect(target: &AppServerTarget) -> color_eyre::Result<AppS
             color_eyre::eyre::bail!("Reopen ASM to reconnect the cloud backend.");
         }
         AppServerTarget::Embedded => {
-            color_eyre::eyre::bail!("embedded sessions have no remote connection")
+            color_eyre::eyre::bail!("embedded sessions have no remote connection");
         }
         #[cfg(windows)]
         AppServerTarget::LocalDaemon {
@@ -73,7 +73,7 @@ pub(crate) async fn enable_asm_transcript(
     match response {
         Ok(response) if response.version == 1 => Ok(()),
         Ok(response) => {
-            color_eyre::eyre::bail!("unsupported ASM transcript version: {}", response.version)
+            color_eyre::eyre::bail!("unsupported ASM transcript version: {}", response.version);
         }
         Err(TypedRequestError::Server { source, .. })
             if source.code == -32601

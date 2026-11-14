@@ -194,6 +194,7 @@ async fn turn_start_failure_is_shown_without_exiting() -> Result<()> {
         .handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(op))
         .await?;
 
+    assert!(app.pending_thread_titles.is_empty());
     assert!(matches!(control, AppRunControl::Continue));
     let error_cell = std::iter::from_fn(|| app_event_rx.try_recv().ok())
         .find_map(|event| match event {
