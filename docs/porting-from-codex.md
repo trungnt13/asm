@@ -153,6 +153,8 @@ The owner accepted this separate upstream compatibility boundary for PR #190 thr
 
 For PR #200, the owner accepted this unchanged older-stock voice-reader boundary through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Keep the upstream records unchanged. This acceptance does not establish exact voice handoff or actual Desktop voice behavior, waive text-history checks, or cover later commits.
 
+For PR #207, the owner accepted both the unchanged ordinary stock cold-history limitation and the older-stock voice-reader boundary through `81b995a6c9a4c978f399775cfa5ce50702368749` only. Fresh ASM cold reads pass; stock alpha.11 needs resume before exact saved history is readable. Keep upstream voice records unchanged. Neither limitation is fixed, and this acceptance does not cover later commits, establish actual Desktop voice behavior, or waive other checks.
+
 #### Opt-in per-environment context
 
 Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
@@ -163,7 +165,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `65a5410f72dac1f4b40862c34ef0a8b71b12834a`, 2026-11-14. Subject: Add trusted request-country metadata to Responses requests (#61535).
+Last incorporated commit: `81b995a6c9a4c978f399775cfa5ce50702368749`, 2026-11-14. Subject: Unify model request hook lifecycles across sampling and compaction (#61562).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
