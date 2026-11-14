@@ -100,6 +100,8 @@ pub(crate) struct Session {
     pub(super) multi_agent_version: OnceLock<MultiAgentVersion>,
     /// Owns invalidation and serializes refreshes without blocking captured calls.
     pub(super) mcp_refresh: McpRefresh,
+    /// Serializes cloud publication with capture of a step's plugin and skill snapshots.
+    pub(super) cloud_catalog_preparation: super::cloud_plugins::CloudCatalogPreparation,
     /// Non-owning lookup for approval data retained by running MCP invocations.
     pub(crate) mcp_tool_approval_metadata: std::sync::Mutex<McpToolApprovalMetadataMap>,
     pub(super) mcp_elicitation_reviewer_handle: OnceLock<codex_mcp::ElicitationReviewerHandle>,
@@ -1095,6 +1097,7 @@ impl Session {
         thread_extension_init.insert(codex_extension_api::ThreadOriginator(
             session_configuration.originator.clone(),
         ));
+        thread_extension_init.insert(Arc::clone(&models_manager));
         // Publish the already resolved model before extensions make startup decisions.
         // Turn construction refreshes this attachment when the selected model changes.
         thread_extension_init.insert(Arc::unwrap_or_clone(model_info.model));
@@ -1322,7 +1325,8 @@ impl Session {
                 error!("failed to initialize thread persistence: {e:#}");
                 e
             })?;
-        let session_result: anyhow::Result<Arc<Self>> = async {
+        // Keep the large initialization future out of callers' stack frames.
+        let session_result: anyhow::Result<Arc<Self>> = Box::pin(async {
             if let InitialHistory::Resumed(resumed) = &mut initial_history
                 && let Some(history) = resume_context
             {
@@ -2025,6 +2029,7 @@ impl Session {
                 windows_sandbox_proxy_settings_mode,
                 multi_agent_version,
                 mcp_refresh: McpRefresh::new(),
+                cloud_catalog_preparation: Default::default(),
                 mcp_tool_approval_metadata: Default::default(),
                 mcp_elicitation_reviewer_handle: OnceLock::new(),
                 mcp_elicitation_lifecycle_handle: OnceLock::new(),
@@ -2035,7 +2040,7 @@ impl Session {
                 realtime_history: (session_configuration.history_mode
                     == ThreadHistoryMode::Paginated
                     && services.live_thread.is_some())
-                .then(|| Mutex::new(Default::default())),
+                .then(|| Mutex::new(crate::realtime_history::RealtimeHistoryState::default())),
                 external_runtime: Default::default(),
                 active_turn: Mutex::new(None),
                 async_hook_results,
@@ -2209,7 +2214,7 @@ impl Session {
                 state.queue_pending_session_start_source(session_start_source);
             }
             Ok(sess)
-        }
+        })
         .await;
         match session_result {
             Ok(sess) => {

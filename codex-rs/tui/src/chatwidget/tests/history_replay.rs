@@ -2,8 +2,6 @@ use super::helpers::drain_insert_history_transcript;
 use super::*;
 use crate::app_event::HistoryLookupResponse;
 use codex_app_server_protocol::ImageReference;
-use codex_app_server_protocol::NetworkAccess;
-use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::ThreadItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ManagedFileSystemPermissions;
@@ -29,6 +27,8 @@ async fn resumed_initial_messages_render_history() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: true,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -198,6 +198,8 @@ async fn restored_conversation_ultra_remains_selected_after_switching_to_plan() 
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -530,6 +532,8 @@ async fn replayed_user_message_preserves_text_elements_and_local_images() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -610,6 +614,8 @@ async fn replayed_user_message_preserves_remote_image_urls() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -712,10 +718,6 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         },
     };
     let expected_permission_profile = expected_app_server_permission_profile.clone();
-    let expected_core_sandbox = expected_permission_profile
-        .to_legacy_sandbox_policy(expected_cwd.as_path())
-        .expect("permission profile should project to legacy sandbox policy");
-    let expected_sandbox = SandboxPolicy::from(expected_core_sandbox);
     let configured = crate::session_state::ThreadSessionState {
         system1_enabled: false,
         system1_revision: 0,
@@ -724,6 +726,8 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -753,8 +757,6 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         AskForApproval::from(chat.config_ref().permissions.approval_policy.value()),
         AskForApproval::Never
     );
-    let actual_sandbox = SandboxPolicy::from(chat.config_ref().legacy_sandbox_policy());
-    assert_eq!(&actual_sandbox, &expected_sandbox);
     assert_eq!(
         chat.config_ref().permissions.effective_permission_profile(),
         expected_app_server_permission_profile
@@ -812,6 +814,8 @@ async fn session_configured_preserves_profile_workspace_roots() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -856,9 +860,6 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
         network: NetworkSandboxPolicy::Restricted,
     };
     let expected_permission_profile = expected_app_server_permission_profile.clone();
-    let expected_sandbox = SandboxPolicy::ExternalSandbox {
-        network_access: NetworkAccess::Restricted,
-    };
     let configured = crate::session_state::ThreadSessionState {
         system1_enabled: false,
         system1_revision: 0,
@@ -867,6 +868,8 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -892,8 +895,6 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
 
     chat.handle_thread_session(configured);
 
-    let actual_sandbox = SandboxPolicy::from(chat.config_ref().legacy_sandbox_policy());
-    assert_eq!(&actual_sandbox, &expected_sandbox);
     assert_eq!(
         chat.config_ref().permissions.effective_permission_profile(),
         expected_app_server_permission_profile
@@ -916,6 +917,8 @@ async fn replayed_user_message_with_only_remote_images_renders_history_cell() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -984,6 +987,8 @@ async fn replayed_user_message_with_only_local_images_renders_history_cell() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1350,6 +1355,8 @@ async fn replayed_reasoning_item_preserves_summary_parts_and_hides_raw_reasoning
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -1409,6 +1416,8 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
         agent_role: None,
         thread_source: None,
         read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),

@@ -811,7 +811,6 @@ impl App {
             &request,
             ServerRequest::DynamicToolCall { .. }
                 | ServerRequest::AttestationGenerate { .. }
-                | ServerRequest::CurrentTimeRead { .. }
                 | ServerRequest::ApplyPatchApproval { .. }
                 | ServerRequest::ExecCommandApproval { .. }
         );

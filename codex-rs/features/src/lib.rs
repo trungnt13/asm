@@ -290,6 +290,8 @@ pub enum Feature {
     McpToolListChanged,
     /// Discover and share eligible local stdio connections across chats.
     McpConnectionSharing,
+    /// Use the app server's fixed launch directories for shared REPL servers.
+    McpSharedReplCwd,
     /// Defer optional stdio server startup in regular chats with a warm tool catalog.
     McpLazyStdioStartup,
     /// Keep same-named HTTP servers discovered on different executors separate.
@@ -402,6 +404,8 @@ pub enum Feature {
     ImageGenerationAnimation,
     /// Omit inline image and audio content from app-server item notifications.
     OmitAppServerNotificationMedia,
+    /// Allow this host's attachment store to prepare fresh tool audio before persistence.
+    FileBackedToolAudio,
     /// Tell the model when a prompt image was resized and include its dimensions.
     ImageResizeNotice,
     /// Normalize prompt images with the reviewed image sanitizer.
@@ -1767,6 +1771,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
+        id: Feature::McpSharedReplCwd,
+        key: "mcp_shared_repl_cwd",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
         id: Feature::McpLazyStdioStartup,
         key: "mcp_lazy_stdio_startup",
         stage: Stage::UnderDevelopment,
@@ -1842,7 +1852,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::IncrementalToolsLegacy,
         key: "incremental_tools_legacy",
         stage: Stage::Stable,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::IncrementalToolsLegacyGcp,
@@ -2033,6 +2043,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::OmitAppServerNotificationMedia,
         key: "omit_app_server_notification_media",
+        stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::FileBackedToolAudio,
+        key: "file_backed_tool_audio",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },

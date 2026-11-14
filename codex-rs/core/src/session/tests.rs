@@ -2617,92 +2617,8 @@ async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
     assert_eq!(messages, vec![message]);
 }
 
-#[tokio::test]
-async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
-    let (mut session, turn_context) = make_session_and_context().await;
-    let rollout_path = attach_thread_persistence(&mut session).await;
-    let communication = InterAgentCommunication::new(
-        AgentPath::root().join("worker").expect("worker path"),
-        AgentPath::root(),
-        Vec::new(),
-        "child done".to_string(),
-        /*trigger_turn*/ false,
-    );
-    let mut expected_item = communication.to_model_input_item();
-    let mut expected = serde_json::to_value(&expected_item).unwrap();
-    expected["internal_chat_message_metadata_passthrough"] = json!({
-        "content_item_metadata": [{"harness_injected": true, "source_tool_namespace": "collaboration"}],
-    });
-    expected_item = serde_json::from_value(expected).unwrap();
-    expected_item.set_turn_id_if_missing(&turn_context.sub_id);
-
-    session
-        .record_inter_agent_communication(&turn_context, turn_context.model_info(), communication)
-        .await;
-
-    let recorded_history = session.clone_history().await;
-    let recorded_items = raw_history_items(&recorded_history);
-    let create_time = recorded_items[0]
-        .executed_tool_call_metadata()
-        .and_then(|metadata| metadata.create_time.clone())
-        .expect("locally authored agent message should receive a creation timestamp");
-    assert!(create_time.as_f64().is_some_and(|seconds| seconds > 0.0));
-    expected_item.set_create_time_if_missing(create_time);
-
-    assert_eq!(
-        strip_response_item_ids(&recorded_items),
-        strip_response_item_ids(std::slice::from_ref(&expected_item))
-    );
-
-    session.flush_rollout().await.expect("rollout should flush");
-    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
-        .await
-        .expect("read rollout history")
-    else {
-        panic!("expected resumed rollout history");
-    };
-    let persisted_items = resumed
-        .history
-        .iter()
-        .filter(|item| {
-            matches!(
-                item,
-                RolloutItem::ResponseItem(_)
-                    | RolloutItem::InterAgentCommunication(_)
-                    | RolloutItem::InterAgentCommunicationMetadata { .. }
-            )
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let expected_persisted_items = vec![
-        RolloutItem::InterAgentCommunicationMetadata {
-            trigger_turn: false,
-        },
-        RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: expected_item.clone(),
-            metadata: Some(CodexHarnessMetadata {
-                user_input_order: Some(0),
-                history_sequence: Some(1),
-                sampled_through_sequence: Some(0),
-                ..Default::default()
-            }),
-        }),
-    ];
-    assert_eq!(
-        strip_response_item_ids_from_json(serde_json::to_value(persisted_items).unwrap()),
-        strip_response_item_ids_from_json(serde_json::to_value(expected_persisted_items).unwrap())
-    );
-
-    let (resumed_session, _resumed_turn_context) = make_session_and_context().await;
-    resumed_session
-        .record_initial_history(InitialHistory::Resumed(resumed))
-        .await;
-    assert_eq!(
-        strip_response_item_ids(&raw_history_items(&resumed_session.clone_history().await)),
-        strip_response_item_ids(std::slice::from_ref(&expected_item))
-    );
-    assert_eq!(resumed_session.reserve_user_input_order().await, 1);
-}
+#[path = "mail_publication_tests.rs"]
+mod mail_publication_tests;
 
 #[tokio::test]
 async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resume() {
@@ -6190,7 +6106,7 @@ async fn standalone_settings_invalidate_continuation_before_delivering_acceptanc
     let (reply, mut accepted) = tokio::sync::oneshot::channel();
     let (tx_sub, rx_sub) = async_channel::bounded(1);
     tx_sub
-        .send(Submission {
+        .send(Box::new(Submission {
             id: "settings".into(),
             turn_extension_init: None,
             op: Op::ThreadSettings {
@@ -6202,7 +6118,7 @@ async fn standalone_settings_invalidate_continuation_before_delivering_acceptanc
             root_turn_id: None,
             residency_guard: None,
             message_delivery: None,
-        })
+        }))
         .await
         .expect("submit settings");
     let mut submissions = Box::pin(tokio::task::unconstrained(submission_loop(
@@ -6266,6 +6182,7 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
             thread_id: session.thread_id(),
             tools: Vec::new(),
         })),
+        observation_clock_floor_ms: None,
         multi_agent_version: Some(MultiAgentVersion::V2),
         last_started_turn_id: Some(turn_context.sub_id.clone()),
         turn_attribution: Some(codex_history::TurnAttribution {
@@ -7083,6 +7000,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
         multi_agent_version: OnceLock::from(config.multi_agent_version_from_features()),
         mcp_refresh: McpRefresh::new(),
+        cloud_catalog_preparation: Default::default(),
         mcp_tool_approval_metadata: Default::default(),
         mcp_elicitation_reviewer_handle: OnceLock::new(),
         mcp_elicitation_lifecycle_handle: OnceLock::new(),
@@ -9078,7 +8996,7 @@ async fn submission_loop_channel_close_aborts_active_turn_before_thread_stop_lif
 #[tokio::test]
 async fn shutdown_and_wait_allows_multiple_waiters() {
     let (_session, _turn_context) = make_session_and_context().await;
-    let (tx_sub, rx_sub) = async_channel::bounded::<Submission>(4);
+    let (tx_sub, rx_sub) = async_channel::bounded::<Box<Submission>>(4);
     let (_tx_event, rx_event) = async_channel::unbounded();
     let session_loop_handle = tokio::spawn(async move {
         let shutdown = rx_sub.recv().await.expect("shutdown submission");
@@ -9434,6 +9352,7 @@ where
             codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile,
         multi_agent_version: OnceLock::from(config.multi_agent_version_from_features()),
         mcp_refresh: McpRefresh::new(),
+        cloud_catalog_preparation: Default::default(),
         mcp_tool_approval_metadata: Default::default(),
         mcp_elicitation_reviewer_handle: OnceLock::new(),
         mcp_elicitation_lifecycle_handle: OnceLock::new(),
@@ -9537,7 +9456,7 @@ pub(super) async fn make_thread_for_session(
     turn_context: &TurnContext,
     rx_event: async_channel::Receiver<Event>,
     session_source: SessionSource,
-) -> (crate::CodexThread, async_channel::Receiver<Submission>) {
+) -> (crate::CodexThread, async_channel::Receiver<Box<Submission>>) {
     let rollout_path = session.current_rollout_path().await.expect("rollout path");
     let event = SessionConfiguredEvent {
         session_id: session.session_id(),

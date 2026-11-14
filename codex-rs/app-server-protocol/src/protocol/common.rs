@@ -1181,6 +1181,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadTimelineListResponse,
     },
+    #[experimental("thread/realtime/list")]
+    ThreadRealtimeList => "thread/realtime/list" {
+        params: v2::ThreadRealtimeListParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRealtimeListResponse,
+    },
     #[experimental("thread/realtime/listVoices")]
     ThreadRealtimeListVoices => "thread/realtime/listVoices" {
         params: v2::ThreadRealtimeListVoicesParams,
@@ -1222,6 +1228,12 @@ client_request_definitions! {
         params: v2::ModelProviderConfigWriteParams,
         serialization: global("config"),
         response: v2::ModelProviderConfigWriteResponse,
+    },
+    ModelProviderDefaultSet => "modelProvider/default/set" {
+        params: v2::ModelProviderDefaultSetParams,
+        serialization: global("config"),
+        manual_payload_conversion: manual,
+        response: v2::ConfigWriteResponse,
     },
     ModelProviderCapabilitiesRead => "modelProvider/capabilities/read" {
         params: v2::ModelProviderCapabilitiesReadParams,
@@ -1952,13 +1964,6 @@ server_request_definitions! {
     AttestationGenerate => "attestation/generate" {
         params: v2::AttestationGenerateParams,
         response: v2::AttestationGenerateResponse,
-    },
-
-    #[experimental("currentTime/read")]
-    /// Read the current time from an external clock owned by the client.
-    CurrentTimeRead => "currentTime/read" {
-        params: v2::CurrentTimeReadParams,
-        response: v2::CurrentTimeReadResponse,
     },
 
     /// DEPRECATED APIs below
@@ -3142,32 +3147,6 @@ mod tests {
         let payload = ServerRequestPayload::AttestationGenerate(params);
         assert_eq!(request.id(), &RequestId::Integer(9));
         assert_eq!(payload.request_with_id(RequestId::Integer(9)), request);
-        Ok(())
-    }
-
-    #[test]
-    fn serialize_current_time_read_request() -> Result<()> {
-        let params = v2::CurrentTimeReadParams {
-            thread_id: "thread-123".to_string(),
-        };
-        let request = ServerRequest::CurrentTimeRead {
-            request_id: RequestId::Integer(10),
-            params: params.clone(),
-        };
-        assert_eq!(
-            json!({
-                "method": "currentTime/read",
-                "id": 10,
-                "params": {
-                    "threadId": "thread-123"
-                }
-            }),
-            serde_json::to_value(&request)?,
-        );
-
-        let payload = ServerRequestPayload::CurrentTimeRead(params);
-        assert_eq!(request.id(), &RequestId::Integer(10));
-        assert_eq!(payload.request_with_id(RequestId::Integer(10)), request);
         Ok(())
     }
 

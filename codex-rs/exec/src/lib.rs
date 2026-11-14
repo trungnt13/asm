@@ -2034,6 +2034,7 @@ async fn resolve_resume_thread_id(
                     params: ThreadListParams {
                         include_attached_threads: false,
                         current_account_only: true,
+                        included_thread_ids: None,
                         excluded_thread_ids: None,
                         attached_to_thread_id: None,
                         originators: None,
@@ -2124,6 +2125,7 @@ async fn resolve_resume_thread_id(
                 params: ThreadListParams {
                     include_attached_threads: false,
                     current_account_only: false,
+                    included_thread_ids: None,
                     excluded_thread_ids: None,
                     attached_to_thread_id: None,
                     originators: None,
@@ -2337,15 +2339,6 @@ async fn handle_server_request(
                 request_id,
                 &method,
                 "attestation generation is not supported in exec mode".to_string(),
-            )
-            .await
-        }
-        ServerRequest::CurrentTimeRead { request_id, .. } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                "external current time is not supported in exec mode".to_string(),
             )
             .await
         }

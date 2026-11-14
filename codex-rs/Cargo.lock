@@ -5146,7 +5146,6 @@ name = "codex-tcp-tunnel"
 version = "0.169.1-alpha.9"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "bytes",
  "clap",
  "h3",

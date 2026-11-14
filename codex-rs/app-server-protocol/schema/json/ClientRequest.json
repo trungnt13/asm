@@ -2566,6 +2566,18 @@
       ],
       "type": "object"
     },
+    "ModelProviderDefaultSetParams": {
+      "properties": {
+        "providerId": {
+          "description": "Configured provider to use by default for new threads and unscoped model lists.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "providerId"
+      ],
+      "type": "object"
+    },
     "ModelProviderListParams": {
       "type": "object"
     },
@@ -5191,6 +5203,16 @@
             "null"
           ]
         },
+        "includedThreadIds": {
+          "description": "Restrict results to up to 100 thread IDs before pagination. Omit or send null for unrestricted results. An empty list matches nothing. Exclusions still apply. Repeat the same IDs on each page. The local store uses indexed metadata for this filter.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "limit": {
           "description": "Optional page size; defaults to a reasonable server-side value.",
           "format": "uint32",
@@ -5267,7 +5289,7 @@
           ]
         },
         "useStateDbOnly": {
-          "description": "If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.",
+          "description": "If true, the local store returns indexed metadata without scanning JSONL rollouts for repairs. Requests with `includedThreadIds` always use indexed metadata.",
           "type": "boolean"
         }
       },
@@ -5453,6 +5475,24 @@
         "text"
       ],
       "type": "object"
+    },
+    "ThreadRealtimeOrder": {
+      "oneOf": [
+        {
+          "description": "Sort by canonical observation time, then committed position.",
+          "enum": [
+            "observedAt"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Sort by committed position, including events sealed after older snapshots.",
+          "enum": [
+            "position"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ThreadRealtimeStartTransport": {
       "description": "EXPERIMENTAL - transport used by thread realtime.",
@@ -8417,6 +8457,30 @@
         "params"
       ],
       "title": "ModelProvider/config/writeRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "modelProvider/default/set"
+          ],
+          "title": "ModelProvider/default/setRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ModelProviderDefaultSetParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "ModelProvider/default/setRequest",
       "type": "object"
     },
     {

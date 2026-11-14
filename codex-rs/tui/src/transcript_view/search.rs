@@ -123,6 +123,7 @@ impl TranscriptView {
             mode.search_origin = Some(SelectSearchOrigin {
                 mark: mode.mark,
                 preferred_column: mode.preferred_column,
+                table_caret: mode.table_caret.take(),
                 start: selection.start,
                 end: selection.end,
             });
@@ -322,7 +323,7 @@ impl TranscriptView {
         self.move_select_cursor_to_search_match(anchor, &layout, cells);
     }
 
-    pub(super) fn restore_select_search_origin(&mut self) {
+    pub(super) fn restore_select_search_origin(&mut self, cells: &[Arc<dyn HistoryCell>]) {
         let (Some(mode), Some(selection)) = (&mut self.select_mode, &mut self.selection) else {
             return;
         };
@@ -330,8 +331,12 @@ impl TranscriptView {
             return;
         };
         mode.mark = origin.mark;
+        mode.table_caret = origin.table_caret;
         mode.preferred_column = origin.preferred_column;
         selection.set_keyboard_range(origin.start, origin.end);
+        if self.table_mark().is_some() {
+            self.sync_select_range(cells);
+        }
     }
 
     pub(super) fn cancel_pending_select_search(&mut self) {

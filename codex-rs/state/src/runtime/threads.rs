@@ -460,6 +460,7 @@ ON CONFLICT(child_thread_id) DO NOTHING
         push_thread_filters(
             &mut builder,
             ThreadFilterOptions {
+                included_thread_ids: None,
                 archived_only,
                 allowed_sources,
                 model_providers,
@@ -587,6 +588,7 @@ ON CONFLICT(child_thread_id) DO NOTHING
         push_thread_filters(
             &mut builder,
             ThreadFilterOptions {
+                included_thread_ids: None,
                 archived_only,
                 allowed_sources,
                 model_providers,
@@ -1365,7 +1367,17 @@ fn push_list_threads_query(
     relation_filter: Option<crate::ThreadRelationFilter>,
     limit: usize,
 ) {
-    if let Some(crate::ThreadRelationFilter::DescendantsOf(ancestor_thread_id)) = relation_filter {
+    if let Some(ids) = filters.included_thread_ids {
+        // Materialize only the requested primary keys before SQLite considers a scope or sort index.
+        builder.push("WITH threads AS MATERIALIZED (SELECT * FROM main.threads WHERE id IN (");
+        let mut separated = builder.separated(", ");
+        for id in ids {
+            separated.push_bind(id.to_string());
+        }
+        builder.push(")) ");
+    } else if let Some(crate::ThreadRelationFilter::DescendantsOf(ancestor_thread_id)) =
+        relation_filter
+    {
         builder.push(
             r#"
 WITH RECURSIVE subtree(child_thread_id, parent_thread_id) AS (
@@ -1386,9 +1398,12 @@ WITH RECURSIVE subtree(child_thread_id, parent_thread_id) AS (
         );
     }
     push_thread_select_columns(builder);
-    // SQLite may otherwise reorder these joins and scan the global timestamp index before
-    // checking the relationship. CROSS JOIN keeps the selective edge/subtree traversal first.
+    // CROSS JOIN keeps the requested IDs, direct children, or subtree first in the query plan.
     match relation_filter {
+        Some(crate::ThreadRelationFilter::DirectChildrenOf(_) | crate::ThreadRelationFilter::DescendantsOf(_))
+            if filters.included_thread_ids.is_some() => builder.push(
+            ", listed_edge.parent_thread_id AS parent_thread_id\nFROM threads\nCROSS JOIN thread_spawn_edges AS listed_edge ON listed_edge.child_thread_id = threads.id",
+        ),
         Some(crate::ThreadRelationFilter::DirectChildrenOf(_)) => builder.push(
             ", listed_edge.parent_thread_id AS parent_thread_id\nFROM thread_spawn_edges AS listed_edge\nCROSS JOIN threads ON threads.id = listed_edge.child_thread_id",
         ),
@@ -1421,7 +1436,18 @@ WITH RECURSIVE subtree(child_thread_id, parent_thread_id) AS (
             builder.push_bind(parent_thread_id.to_string());
         }
         Some(crate::ThreadRelationFilter::DescendantsOf(ancestor_thread_id)) => {
-            builder.push(" AND subtree.child_thread_id != ");
+            if filters.included_thread_ids.is_some() {
+                builder.push(
+                    " AND EXISTS (WITH RECURSIVE ancestors(id) AS (
+                        SELECT listed_edge.parent_thread_id
+                        UNION
+                        SELECT edge.parent_thread_id FROM ancestors
+                        JOIN thread_spawn_edges AS edge ON edge.child_thread_id = ancestors.id
+                    ) SELECT 1 FROM ancestors WHERE id = ",
+                );
+                builder.push_bind(ancestor_thread_id.to_string()).push(")");
+            }
+            builder.push(" AND threads.id != ");
             builder.push_bind(ancestor_thread_id.to_string());
         }
         Some(crate::ThreadRelationFilter::AttachedThreadsOf(parent)) => {
@@ -1532,6 +1558,7 @@ fn thread_spawn_parent_thread_id_from_source_str(source: &str) -> Option<ThreadI
 
 #[derive(Clone, Copy)]
 pub struct ThreadFilterOptions<'a> {
+    pub included_thread_ids: Option<&'a [ThreadId]>,
     pub archived_only: bool,
     pub allowed_sources: &'a [String],
     pub model_providers: Option<&'a [String]>,
@@ -1564,6 +1591,7 @@ fn push_thread_filters_with_preview<'a>(
     relation_filter: Option<crate::ThreadRelationFilter>,
 ) {
     let ThreadFilterOptions {
+        included_thread_ids: _,
         archived_only,
         allowed_sources,
         model_providers,
@@ -1875,6 +1903,7 @@ mod tests {
         runtime.upsert_thread(&parent_metadata).await?;
         assert!(runtime.insert_thread_if_absent(&child_metadata).await?);
         let filters = ThreadFilterOptions {
+            included_thread_ids: None,
             archived_only: false,
             allowed_sources: &[],
             model_providers: None,
@@ -1946,6 +1975,7 @@ mod tests {
         metadata.first_user_message = None;
         runtime.upsert_thread(&metadata).await.unwrap();
         let filters = |archived_only| ThreadFilterOptions {
+            included_thread_ids: None,
             archived_only,
             allowed_sources: &[],
             model_providers: None,
@@ -2032,6 +2062,7 @@ mod tests {
         }
 
         let filters = |anchor, section| ThreadFilterOptions {
+            included_thread_ids: None,
             archived_only: false,
             allowed_sources: &[],
             model_providers: None,
@@ -2165,6 +2196,7 @@ mod tests {
         }
 
         let filters = |anchor| ThreadFilterOptions {
+            included_thread_ids: None,
             archived_only: false,
             allowed_sources: &[],
             model_providers: None,
@@ -2444,6 +2476,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: Some(&model_providers),
@@ -2474,6 +2507,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: Some(&model_providers),
@@ -2534,6 +2568,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,
@@ -2568,6 +2603,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,
@@ -2595,6 +2631,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 10,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,
@@ -2629,6 +2666,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,
@@ -2648,6 +2686,64 @@ mod tests {
             vec![first_id]
         );
         assert_eq!(page.next_anchor, None);
+    }
+
+    #[tokio::test]
+    async fn included_thread_ids_use_primary_key_lookups_across_scopes() -> Result<()> {
+        let home = unique_temp_dir();
+        let runtime = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(home.as_path().abs()),
+            "test-provider".into(),
+        )
+        .await?;
+        let ids: Vec<_> = (0..100).map(|_| ThreadId::new()).collect();
+        for relation in [
+            None,
+            Some(crate::ThreadRelationFilter::DescendantsOf(ids[0])),
+        ] {
+            let mut builder = QueryBuilder::<Sqlite>::new("EXPLAIN QUERY PLAN ");
+            push_list_threads_query(
+                &mut builder,
+                ThreadFilterOptions {
+                    included_thread_ids: Some(&ids),
+                    archived_only: false,
+                    allowed_sources: &[],
+                    model_providers: None,
+                    cwd_filters: Some(std::slice::from_ref(&home)),
+                    section: Some(Some(CUSTOM_THREAD_SECTION_ID)),
+                    project_id: Some(Some("project")),
+                    anchor: None,
+                    sort_key: SortKey::SectionPosition,
+                    sort_direction: SortDirection::Asc,
+                    search_term: None,
+                },
+                relation,
+                /*limit*/ 2,
+            );
+            let plan: Vec<String> = builder
+                .build()
+                .fetch_all(runtime.pool.as_ref())
+                .await?
+                .iter()
+                .map(|row| row.get("detail"))
+                .collect();
+            assert!(
+                plan.iter()
+                    .any(|step| step.contains("SEARCH main.threads") && step.contains("(id=?)")),
+                "{plan:?}"
+            );
+            if relation.is_some() {
+                for edge in ["listed_edge", "edge"] {
+                    assert!(
+                        plan.iter()
+                            .any(|step| step.starts_with(&format!("SEARCH {edge} "))
+                                && step.contains("child_thread_id=?")),
+                        "{plan:?}"
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     #[tokio::test]
@@ -2702,6 +2798,7 @@ mod tests {
                 push_list_threads_query(
                     &mut builder,
                     ThreadFilterOptions {
+                        included_thread_ids: None,
                         archived_only: false,
                         allowed_sources: &[],
                         model_providers: Some(&model_providers),
@@ -2791,6 +2888,7 @@ mod tests {
                     push_list_threads_query(
                         &mut builder,
                         ThreadFilterOptions {
+                            included_thread_ids: None,
                             archived_only: true,
                             allowed_sources: &[],
                             model_providers: None,
@@ -2888,6 +2986,7 @@ mod tests {
         push_list_threads_query(
             &mut builder,
             ThreadFilterOptions {
+                included_thread_ids: None,
                 archived_only: false,
                 allowed_sources: &[],
                 model_providers: None,
@@ -2918,6 +3017,7 @@ mod tests {
         );
 
         let filters = |anchor| ThreadFilterOptions {
+            included_thread_ids: None,
             archived_only: false,
             allowed_sources: &[],
             model_providers: None,
@@ -3713,6 +3813,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,
@@ -3747,6 +3848,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,
@@ -3781,6 +3883,7 @@ mod tests {
             .list_threads(
                 /*page_size*/ 1,
                 ThreadFilterOptions {
+                    included_thread_ids: None,
                     archived_only: false,
                     allowed_sources: &[],
                     model_providers: None,

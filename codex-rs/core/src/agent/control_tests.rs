@@ -2864,6 +2864,7 @@ async fn spawn_agent_fork_sanitizes_inherited_compaction_metadata() {
         next_item_ordinal: None,
         rejected_audio_file_ids: Default::default(),
         dynamic_tools: None,
+        observation_clock_floor_ms: None,
         multi_agent_version: Some(MultiAgentVersion::V2),
         last_started_turn_id: Some("parent-turn".to_string()),
         turn_attribution: Some(codex_history::TurnAttribution {
@@ -4030,6 +4031,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                     next_item_ordinal: None,
                     rejected_audio_file_ids: Default::default(),
                     dynamic_tools: None,
+                    observation_clock_floor_ms: None,
                     multi_agent_version: Some(MultiAgentVersion::V2),
                     last_started_turn_id: None,
                     turn_attribution: None,
@@ -4167,6 +4169,7 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                 next_item_ordinal: None,
                 rejected_audio_file_ids: Default::default(),
                 dynamic_tools: None,
+                observation_clock_floor_ms: None,
                 multi_agent_version: Some(MultiAgentVersion::V2),
                 last_started_turn_id: None,
                 turn_attribution: None,

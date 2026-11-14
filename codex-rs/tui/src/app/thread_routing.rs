@@ -1510,6 +1510,14 @@ impl App {
             None
         };
         let mut session = parent_session.or_else(|| self.primary_session_configured.clone())?;
+        session.thread_settings_confirmed = false;
+        session.primary_environment_cwd = crate::session_state::primary_environment_cwd(
+            notification
+                .thread
+                .environments
+                .as_deref()
+                .unwrap_or_default(),
+        );
         session.thread_id = thread_id;
         session.system1_enabled = false;
         session.system1_revision = 0;
@@ -1521,6 +1529,11 @@ impl App {
         session.windows_sandbox_host = crate::windows_sandbox::host_from_environments(
             notification.thread.environments.as_deref(),
         );
+        // A parent’s collaboration mode can override the child’s reported model and effort.
+        session.collaboration_mode = None;
+        session
+            .reasoning_effort
+            .clone_from(&notification.thread.reasoning_effort);
         session.thread_name = notification.thread.name.clone();
         session.model_provider_id = notification.thread.model_provider.clone();
         session

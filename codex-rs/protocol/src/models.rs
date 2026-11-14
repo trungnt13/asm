@@ -2532,6 +2532,14 @@ impl Default for FunctionCallOutputBody {
 }
 
 impl FunctionCallOutputPayload {
+    pub fn contains_audio(&self) -> bool {
+        self.content_items().is_some_and(|parts| {
+            parts
+                .iter()
+                .any(|part| matches!(part, FunctionCallOutputContentItem::InputAudio { .. }))
+        })
+    }
+
     pub fn from_text(content: String) -> Self {
         Self {
             body: FunctionCallOutputBody::Text(content),
@@ -4141,9 +4149,9 @@ mod tests {
             let parsed: ResponseItem = serde_json::from_str(json_literal)?;
             let expected = ResponseItem::WebSearchCall {
                 encrypted_content: None,
-                id: expected_id.clone(),
-                status: expected_status.clone(),
-                action: expected_action.clone(),
+                id: expected_id,
+                status: expected_status,
+                action: expected_action,
                 internal_chat_message_metadata_passthrough: None,
             };
             assert_eq!(parsed, expected);

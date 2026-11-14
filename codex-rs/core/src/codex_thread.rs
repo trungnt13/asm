@@ -25,6 +25,7 @@ use codex_extension_api::ConversationHistorySnapshot;
 use codex_extension_api::ThreadIdleCause;
 use codex_features::Feature;
 use codex_history::RolloutItem;
+use codex_models_manager::ModelsManagerConfig;
 use codex_otel::SessionTelemetry;
 use codex_otel::current_span_w3c_trace_context;
 use codex_protocol::ThreadId;
@@ -41,6 +42,7 @@ use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::models::ProfileWorkspaceRoot;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::CatalogModel;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
@@ -284,12 +286,11 @@ impl CodexThread {
     }
 
     /// Reads this thread's configured clock.
-    pub async fn current_time(&self) -> CodexResult<DateTime<Utc>> {
+    pub fn current_time(&self) -> CodexResult<DateTime<Utc>> {
         self.session
             .services
             .time_provider
             .current_time(self.session.thread_id)
-            .await
             .map_err(|error| CodexErr::Io(std::io::Error::other(error)))
     }
 
@@ -689,7 +690,7 @@ impl CodexThread {
         let (reply, result) = oneshot::channel();
         self.io
             .tx_sub
-            .send(Submission {
+            .send(Box::new(Submission {
                 id: new_submission_id(),
                 op: Op::SuspendTurnAndShutdown { reply },
                 turn_extension_init: None,
@@ -698,7 +699,7 @@ impl CodexThread {
                 root_turn_id: None,
                 residency_guard: None,
                 message_delivery: None,
-            })
+            }))
             .await
             .map_err(|_| CodexErr::Fatal("thread session has stopped".to_string()))?;
         let outcome = result
@@ -1259,6 +1260,15 @@ impl CodexThread {
         self.session.selected_model_info().await
     }
 
+    /// Looks up a named model in the catalog selected for this thread's provider and credentials.
+    pub async fn model_info(&self, model: &str, config: &ModelsManagerConfig) -> CatalogModel {
+        self.session
+            .services
+            .models_manager
+            .get_model_info(model, config)
+            .await
+    }
+
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
         self.session.thread_config_snapshot().await
     }
@@ -1441,6 +1451,13 @@ impl CodexThread {
         &self,
     ) -> anyhow::Result<codex_mcp::CodexAppsToolSnapshot> {
         self.session.refresh_codex_apps_tools().await
+    }
+
+    /// Refreshes cloud plugin and skill catalogs before input admission, without starting a turn.
+    /// Serializes publication with step preparation and marks MCP dirty for later reconciliation.
+    /// Accepts complete or partial catalogs; failed discovery remains retryable.
+    pub async fn refresh_cloud_plugins(&self) -> anyhow::Result<()> {
+        self.session.refresh_cloud_plugins().await
     }
 
     /// Returns the environments configured for future turns.
