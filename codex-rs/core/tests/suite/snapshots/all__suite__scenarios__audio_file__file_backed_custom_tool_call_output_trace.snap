@@ -16,8 +16,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=3299611bc98d0784):
-        - namespace/functions; hash=1976557bc4879146
+00:additional_tools/developer (1; hash=c0d6af946edd3e15):
+        - namespace/functions; hash=dbdeddf308fce319
           - custom/exec
           - function/wait
           - function/exec_command
@@ -26,15 +26,10 @@ Settings:
           - custom/apply_patch
           - function/view_image
           - function/recording
-        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=b573ed69c0b0e6c7
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
-        Deferred tool namespaces:
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
-        </tools>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:
@@ -49,8 +44,8 @@ Settings:
 ## Window 2 (after request 2: input diverged at item 06)
 Settings: same as window 1
 -- request 3 (turn) --
-00:additional_tools/developer (2; hash=3299611bc98d0784):
-        - namespace/functions; hash=1976557bc4879146
+00:additional_tools/developer (1; hash=c0d6af946edd3e15):
+        - namespace/functions; hash=dbdeddf308fce319
           - custom/exec
           - function/wait
           - function/exec_command
@@ -59,15 +54,10 @@ Settings: same as window 1
           - custom/apply_patch
           - function/view_image
           - function/recording
-        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=b573ed69c0b0e6c7
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
-        Deferred tool namespaces:
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
-        </tools>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:
@@ -92,8 +82,8 @@ Settings: same as window 1
 ## Window 3 (after request 4: input diverged at item 06)
 Settings: same as window 1
 -- request 5 (turn) --
-00:additional_tools/developer (2; hash=3299611bc98d0784):
-        - namespace/functions; hash=1976557bc4879146
+00:additional_tools/developer (1; hash=c0d6af946edd3e15):
+        - namespace/functions; hash=dbdeddf308fce319
           - custom/exec
           - function/wait
           - function/exec_command
@@ -102,15 +92,10 @@ Settings: same as window 1
           - custom/apply_patch
           - function/view_image
           - function/recording
-        - tool_search: # Tool discovery  Searches over deferred tool metadata with BM25 and exposes matching tools for t...; args=[limit, query]; hash=b573ed69c0b0e6c7
 01:message/developer:
     <MODEL_INSTRUCTIONS>
-02:message/developer[2]:
-    [01] <PERMISSIONS_INSTRUCTIONS>
-    [02] <tools>
-        Deferred tool namespaces:
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
-        </tools>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
 03:message/user:
     <ENVIRONMENT_CONTEXT>
 04:message/user:

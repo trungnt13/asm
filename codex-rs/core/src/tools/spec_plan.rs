@@ -1,5 +1,3 @@
-use crate::agent::exceeds_thread_spawn_depth_limit;
-use crate::agent::next_thread_spawn_depth;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::image_preparation::unified_image_budget_enabled;
 use crate::session::session::Session;
@@ -32,15 +30,6 @@ use crate::tools::handlers::ViewImageHandler;
 use crate::tools::handlers::WaitForEnvironmentHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::extension_tools::ExtensionToolAdapter;
-use crate::tools::handlers::multi_agents::CloseAgentHandler;
-use crate::tools::handlers::multi_agents::ResumeAgentHandler;
-use crate::tools::handlers::multi_agents::SendInputHandler;
-use crate::tools::handlers::multi_agents::SpawnAgentHandler;
-use crate::tools::handlers::multi_agents::WaitAgentHandler;
-use crate::tools::handlers::multi_agents_common::DEFAULT_WAIT_TIMEOUT_MS;
-use crate::tools::handlers::multi_agents_common::MAX_WAIT_TIMEOUT_MS;
-use crate::tools::handlers::multi_agents_common::MIN_WAIT_TIMEOUT_MS;
-use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
 use crate::tools::handlers::multi_agents_v2::FollowupTaskHandler as FollowupTaskHandlerV2;
@@ -114,7 +103,6 @@ struct CoreToolPlanContext<'a> {
     tool_suggest_candidates: Option<&'a crate::tools::router::ToolSuggestCandidates>,
     wait_for_environment_tool_config: Option<&'a Arc<crate::WaitForEnvironmentToolConfig>>,
     default_agent_type_description: &'a str,
-    wait_agent_timeouts: WaitAgentTimeoutOptions,
 }
 
 #[instrument(level = "trace", skip_all)]
@@ -145,7 +133,6 @@ pub(crate) fn build_tool_router(
         tool_suggest_candidates,
         wait_for_environment_tool_config: wait_for_environment_tool_config.as_ref(),
         default_agent_type_description: &default_agent_type_description,
-        wait_agent_timeouts: wait_agent_timeout_options(turn_context),
     };
     let mut registry = ToolRegistry::with_tool_policy(Arc::clone(&session.tool_policy));
     add_core_tool_sources(&context, &mut registry);
@@ -344,7 +331,6 @@ pub(crate) fn build_core_tool_registry(
         tool_suggest_candidates,
         wait_for_environment_tool_config,
         default_agent_type_description: &default_agent_type_description,
-        wait_agent_timeouts: wait_agent_timeout_options(turn_context),
     };
     let mut registry = ToolRegistry::default();
     add_core_tool_sources(&context, &mut registry);
@@ -772,11 +758,7 @@ fn multi_agent_v2_enabled(turn_context: &TurnContext) -> bool {
 
 fn collab_tools_enabled(turn_context: &TurnContext, model_info: &ModelInfo) -> bool {
     match turn_context.multi_agent_version {
-        MultiAgentVersion::Disabled => false,
-        MultiAgentVersion::V1 => !exceeds_thread_spawn_depth_limit(
-            next_thread_spawn_depth(&turn_context.session_source),
-            turn_context.config.agent_max_depth,
-        ),
+        MultiAgentVersion::Disabled | MultiAgentVersion::V1 => false,
         MultiAgentVersion::V2 => {
             !turn_context.config.multi_agent_v2.disable_native_tools
                 && (turn_context.session_source.get_agent_path().is_none()
@@ -794,11 +776,7 @@ fn required_child_management_tool_names(
     }
 
     let (namespace, names): (_, &[&str]) = match turn_context.multi_agent_version {
-        MultiAgentVersion::Disabled => return Vec::new(),
-        MultiAgentVersion::V1 => (
-            Some(MULTI_AGENT_V1_NAMESPACE),
-            &["send_input", "wait_agent", "resume_agent", "close_agent"],
-        ),
+        MultiAgentVersion::Disabled | MultiAgentVersion::V1 => return Vec::new(),
         MultiAgentVersion::V2 => (
             turn_context.config.multi_agent_v2.tool_namespace.as_deref(),
             if turn_context.config.multi_agent_v2.disable_direct_message {
@@ -859,22 +837,6 @@ fn image_generation_available(turn_context: &TurnContext, model_info: &ModelInfo
                 .auth_manager
                 .as_deref()
                 .is_some_and(AuthManager::current_auth_uses_codex_backend))
-}
-
-fn wait_agent_timeout_options(turn_context: &TurnContext) -> WaitAgentTimeoutOptions {
-    if multi_agent_v2_enabled(turn_context) {
-        return WaitAgentTimeoutOptions {
-            default_timeout_ms: turn_context.config.multi_agent_v2.default_wait_timeout_ms,
-            min_timeout_ms: turn_context.config.multi_agent_v2.min_wait_timeout_ms,
-            max_timeout_ms: turn_context.config.multi_agent_v2.max_wait_timeout_ms,
-        };
-    }
-
-    WaitAgentTimeoutOptions {
-        default_timeout_ms: DEFAULT_WAIT_TIMEOUT_MS,
-        min_timeout_ms: MIN_WAIT_TIMEOUT_MS,
-        max_timeout_ms: MAX_WAIT_TIMEOUT_MS,
-    }
 }
 
 fn agent_type_description(
@@ -1657,40 +1619,6 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                 exposure,
                 registry,
             );
-        } else {
-            let agent_type_description =
-                agent_type_description(turn_context, context.default_agent_type_description);
-            let exposure = if context.model_info.supports_search_tool {
-                ToolExposure::Deferred
-            } else {
-                ToolExposure::Direct
-            };
-            registry.add_with_exposure(
-                SpawnAgentHandler::new(SpawnAgentToolOptions {
-                    available_models: turn_context.available_models.clone(),
-                    subagent_model_list: None,
-                    external_model_aliases,
-                    multi_agent_version: turn_context.multi_agent_version,
-                    include_model_catalog_in_spawn_agent_list: turn_context
-                        .config
-                        .include_model_catalog_in_spawn_agent_list,
-                    model_catalog_in_context: turn_context
-                        .config
-                        .features
-                        .enabled(Feature::ModelCatalogInContext),
-                    agent_type_description,
-                    expose_agent_type: !turn_context.config.agent_roles.is_empty(),
-                    hide_agent_type_model_reasoning: false,
-                    expose_spawn_agent_model_overrides: true,
-                    usage_hint_text: turn_context.config.multi_agent_v2.usage_hint_text.clone(),
-                }),
-                exposure,
-            );
-            registry.add_with_exposure(SendInputHandler, exposure);
-            registry.add_with_exposure(ResumeAgentHandler, exposure);
-            registry
-                .add_with_exposure(WaitAgentHandler::new(context.wait_agent_timeouts), exposure);
-            registry.add_with_exposure(CloseAgentHandler, exposure);
         }
     }
 }
@@ -1739,7 +1667,11 @@ pub(crate) fn register_multi_agent_v2_communication_tools(
     if turn_context.config.multi_agent_v2.wait_agent_enabled {
         registry.register_trusted_with_exposure(
             multi_agent_v2_handler(
-                WaitAgentHandlerV2::new(wait_agent_timeout_options(turn_context)),
+                WaitAgentHandlerV2::new(WaitAgentTimeoutOptions {
+                    default_timeout_ms: turn_context.config.multi_agent_v2.default_wait_timeout_ms,
+                    min_timeout_ms: turn_context.config.multi_agent_v2.min_wait_timeout_ms,
+                    max_timeout_ms: turn_context.config.multi_agent_v2.max_wait_timeout_ms,
+                }),
                 tool_namespace,
                 model_messages.multi_agent_tool_description_override("wait_agent"),
                 model_messages.multi_agent_tool_parameters_override("wait_agent"),

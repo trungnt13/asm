@@ -27,7 +27,6 @@ use crate::context::world_state::ToolsState;
 use crate::context::world_state::TopLevelToolsState;
 use crate::context::world_state::WorldState;
 use crate::context::world_state::format_agent_paths;
-use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use codex_connectors::AppToolPolicyEvaluator;
 use codex_extension_api::WorldStateContributionInput;
 use codex_features::Feature;
@@ -446,11 +445,7 @@ impl Session {
         }
         world_state.add_section(multi_agent_mode);
         let spawn_tool = match turn_context.multi_agent_version {
-            MultiAgentVersion::Disabled => None,
-            MultiAgentVersion::V1 => Some(ToolName::new(
-                Some(MULTI_AGENT_V1_NAMESPACE.to_string()),
-                "spawn_agent",
-            )),
+            MultiAgentVersion::Disabled | MultiAgentVersion::V1 => None,
             MultiAgentVersion::V2 => turn_context
                 .config
                 .multi_agent_v2

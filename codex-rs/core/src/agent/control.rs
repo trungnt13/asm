@@ -48,7 +48,6 @@ use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::ReadThreadParams;
 use futures::StreamExt;
-use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Weak;
 use tracing::warn;
@@ -59,7 +58,6 @@ pub(crate) use self::runtime::AgentTreeMembership;
 pub(crate) use self::runtime::AgentTreeShutdownState;
 pub(crate) use self::runtime::AgentTreeTeardownGuard;
 pub(crate) use self::runtime::LocalAgentRuntime;
-pub(crate) use self::watch::StatusSubscription;
 pub(in crate::agent) use spawn::effective_spawn_config;
 pub(in crate::agent) use spawn::fresh_child_history_and_tools;
 pub(in crate::agent) use spawn::inherited_dynamic_tools;
@@ -73,11 +71,9 @@ mod delivery;
 mod execution;
 mod inspection;
 mod interrupt;
-mod legacy;
 mod mailbox;
 mod residency;
 pub use residency::ThreadEvictionOutcome;
-mod resume;
 mod root_handoff;
 mod runtime;
 mod runtime_context;
@@ -86,6 +82,7 @@ mod service_tier;
 mod spawn;
 mod spawn_guard;
 mod spawn_telemetry;
+mod suspended;
 mod target;
 mod user_authorization;
 mod watch;
@@ -727,36 +724,6 @@ fn agent_matches_prefix(agent_path: Option<&AgentPath>, prefix: &AgentPath) -> b
                 .strip_prefix(prefix.as_str())
                 .is_some_and(|suffix| suffix.starts_with('/'))
     })
-}
-
-pub(crate) fn render_input_preview(input: &[UserInput]) -> String {
-    input
-        .iter()
-        .map(|item| match item {
-            UserInput::Text { text, .. } => text.clone(),
-            UserInput::Image { .. } => "[image]".to_string(),
-            UserInput::LocalImage { path, .. } => {
-                format!("[local_image:{}]", path.display())
-            }
-            UserInput::Audio { .. } => "[audio]".to_string(),
-            UserInput::LocalAudio { path } => {
-                format!("[local_audio:{}]", path.display())
-            }
-            UserInput::Skill { name, path, .. } => {
-                format!("[skill:${name}]({})", path.display())
-            }
-            UserInput::Mention { name, path, .. } => format!("[mention:${name}]({path})"),
-            _ => "[input]".to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
-    match session_source {
-        SessionSource::SubAgent(SubAgentSource::ThreadSpawn { depth, .. }) => Some(*depth),
-        _ => None,
-    }
 }
 
 /// Share loaded-recipient submission while callers retain residency and failure handling.

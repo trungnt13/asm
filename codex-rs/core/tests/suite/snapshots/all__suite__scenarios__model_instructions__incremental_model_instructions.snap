@@ -15,18 +15,12 @@ Settings:
   stream: true
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=5a23a3a6916c921c):
-        - namespace/functions; hash=655231c8e01324d2
+00:additional_tools/developer (1; hash=b20d4b76d8271fc4):
+        - namespace/functions; hash=ff7c40228ab05382
           - function/exec_command
           - function/write_stdin
           - function/request_user_input
           - function/view_image
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=862c8bf6e02cc5af
-          - function/close_agent
-          - function/resume_agent
-          - function/send_input
-          - function/spawn_agent
-          - function/wait_agent
 01:message/developer:
     Help the user complete their task.
 02:message/developer:
@@ -62,18 +56,12 @@ Settings:
 ## Window 2 (after request 4: input diverged at item 01)
 Settings: same as window 1
 -- request 5 (turn) --
-00:additional_tools/developer (2; hash=5a23a3a6916c921c):
-        - namespace/functions; hash=655231c8e01324d2
+00:additional_tools/developer (1; hash=b20d4b76d8271fc4):
+        - namespace/functions; hash=ff7c40228ab05382
           - function/exec_command
           - function/write_stdin
           - function/request_user_input
           - function/view_image
-        - namespace/multi_agent_v1: Tools for spawning and managing sub-agents.; hash=862c8bf6e02cc5af
-          - function/close_agent
-          - function/resume_agent
-          - function/send_input
-          - function/spawn_agent
-          - function/wait_agent
 01:message/developer:
     Check your work before responding.
 02:message/user:

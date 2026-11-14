@@ -50,10 +50,9 @@ fn permissions_texts(request: &ResponsesRequest) -> Vec<String> {
 }
 
 fn permissions_annotations(
-    request: &ResponsesRequest,
+    items: Vec<serde_json::Value>,
 ) -> Vec<(serde_json::Value, serde_json::Value, serde_json::Value)> {
-    request
-        .input()
+    items
         .into_iter()
         .flat_map(|item| {
             item["content"]
@@ -257,7 +256,10 @@ async fn catalog_approval_instruction_parts_are_sent_in_initial_permissions(
         json!({"provenance": {"type": "harness", "hook": false}}),
     );
     assert_eq!(permissions_texts(&request), vec![first.clone()]);
-    assert_eq!(permissions_annotations(&request), vec![annotation.clone()]);
+    assert_eq!(
+        permissions_annotations(request.input()),
+        vec![annotation.clone()]
+    );
 
     if matches!(case, ApprovalInstructionCase::Present) {
         let next = mount_sse_once(
@@ -279,7 +281,7 @@ async fn catalog_approval_instruction_parts_are_sent_in_initial_permissions(
             format!("<permissions instructions>\n{bundled_approval}\n</permissions instructions>");
         assert!(next.input().starts_with(&request.input()));
         assert_eq!(permissions_texts(&next), vec![first, fallback]);
-        assert_eq!(permissions_annotations(&next), vec![annotation; 2]);
+        assert_eq!(permissions_annotations(next.input()), vec![annotation; 2]);
     }
     Ok(())
 }
@@ -1057,7 +1059,7 @@ async fn permissions_message_includes_writable_roots(
     );
     assert_eq!(permissions_texts(&request), vec![expected]);
     assert_eq!(
-        permissions_annotations(&request),
+        permissions_annotations(request.input()),
         vec![(
             json!("developer"),
             json!("permissions.instructions"),
@@ -1245,17 +1247,33 @@ pub(super) async fn catalog_permission_paths_model_change_requests(
     );
     for (request, count) in requests.iter().zip([1, 2, 2]) {
         assert_eq!(
-            permissions_annotations(request),
+            permissions_annotations(request.input()),
             vec![
                 (
                     json!("developer"),
                     json!("permissions.instructions"),
-                    json!({"provenance": {"type": "harness", "hook": false}}),
+                    serde_json::Value::Null,
                 );
                 count
             ],
         );
     }
+    let history = test.codex.conversation_history_snapshot().await;
+    let local_items = history
+        .items()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(
+        permissions_annotations(local_items),
+        vec![
+            (
+                json!("developer"),
+                json!("permissions.instructions"),
+                json!({"provenance": {"type": "harness", "hook": false}}),
+            );
+            2
+        ],
+    );
     for pair in requests.windows(2) {
         assert!(pair[1].input().starts_with(&pair[0].input()));
     }

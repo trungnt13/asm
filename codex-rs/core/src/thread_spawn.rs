@@ -5,7 +5,6 @@
 use crate::agent::api::AgentInput;
 use crate::agent::api::SpawnRequest;
 use crate::agent::child_config::SpawnConfigOptions;
-use crate::agent::child_config::SpawnConfigVersion;
 use crate::agent::child_config::prepare_agent_spawn_config;
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::helper_daybreak::turn::explicit_program_for_spawn;
@@ -170,7 +169,6 @@ pub(crate) async fn prepare(
         session,
         step_context,
         SpawnConfigOptions {
-            version: SpawnConfigVersion::V2,
             full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
             role_name,
             model: model.as_deref(),
