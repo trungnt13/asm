@@ -18,7 +18,7 @@ The linked task skills and their procedures are required parts of this guide for
 - Before edits or after resume, refresh Git status, branches, and worktrees. Before syncs or pushes, inspect remotes and fork history. For overlaps or unexplained changes, inspect relevant repo sessions. Recover context from Git and sessions, not owner memory or task diaries.
 - Before edits or syncs, create a named `codex/` task branch. Use separate worktrees for concurrent tasks. Coordinate shared files; assign one staging/commit owner per checkout. Worktrees are not deliverables.
 - Prefer reusable checkouts: `python3 scripts/dev-worktree.py acquire codex/<task>`. Keep the path through builds and validation. Each slot has an exclusive owner/branch lease. The owner defaults to `CODEX_THREAD_ID`; if unset, use `--owner <id>`. Use `--slot <name>` for parallel tasks.
-- While the PR is pending, keep its checkout and lease. After approved integration includes its branch tip in clean local `main`, run `python3 scripts/dev-worktree.py release codex/<task>`. Keep the detached checkout for reuse. Never clear another owner's lease or discard work. Inspect and coordinate abandoned leases.
+- While the PR is pending, keep its checkout and lease. After merge, complete [post-merge cleanup](#post-merge-cleanup), including checkout release. Never clear another owner's lease or discard work. Inspect and coordinate abandoned leases.
 - Preserve existing work. If blocked, use another worktree. Get permission before committing or stashing unrelated work. Keep authorized stashes until restoration is verified. Never overwrite others' work to clean a checkout.
 
 ### Build the binary first
@@ -85,9 +85,21 @@ Use PRs against `main` for implementation, documentation, and syncs. The lead al
 
 - Stage only finished task changes, tests, generated files, and intent. Inspect the staged diff.
 - Use `Trung Ngo <1390402+trungnt13@users.noreply.github.com>`. Verify `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`; fix local config if needed. Ask before attribution-only published-history rewrites.
+- All internal and external models, runtimes, and engines must never add or mention AI attribution in commits, PR/MR titles or descriptions, or other authored deliverables. This includes co-author trailers, generated-by lines, session links, and assistant, tool, model, runtime, or engine credits. Apply this rule to root agents, subagents, native tools, and automatic runtime post-processing, regardless of provider defaults. Disable automatic attribution and verify the final commit message and published PR/MR text; configuration alone is not proof. This instruction records policy; it does not enforce native-runtime behavior. Discuss attribution only when the user explicitly asks to investigate or change it. Preserve required third-party copyright and license notices.
 - Before branch updates, recheck the PR base. Resolve mechanical conflicts without new approval when they preserve this guide. Verify affected behavior against base, fork, and upstream. For unsafe changes, ambiguous intent, or owner decisions, inspect all exposed conflicts; ask one question with recommendations. Later commits can expose more conflicts.
 - Reconcile task-owned duplicate edits without losing others' work. If validation/push/PR creation is blocked, commit finished work and report the blocker. Identify unfinished work separately.
 - Report changes, exact check results, skipped checks, uncertainty, commit, branch, PR URL, and push status. State ready, blocked, or merged. Keep one evidence record; reference unchanged results in later handoffs/integration reports. Refresh changed results/status. Readiness does not authorize merge.
+
+### Post-merge cleanup
+
+The PR owner must complete cleanup after an authorized merge, before reporting integration done. Merge authorization includes safe removal of disposable artifacts owned solely by that PR; it does not authorize unrelated cleanup or override retention and deployment rules. This is a required workflow step, not automatic deletion by CI.
+
+1. Verify the PR is merged and its changes are integrated into local `main`. Inspect status, worktrees, leases, and active processes before changing anything. A closed-but-unmerged PR is not eligible. For squash/rebase merges, verify the merged changes rather than assuming branch-tip ancestry.
+2. Inventory task-owned artifacts, including delegated work: temporary build outputs/caches, copied test binaries, private test homes, scratch files, temporary servers, worktrees, and branches. Check actual paths, ownership, consumers, and dependencies; names or age alone do not establish that an artifact is disposable. Do not sweep `.agents`, `/tmp`, shared targets, or other tasks by glob.
+3. Retain one private evidence record with commands, checks, source/binary identity, and necessary rollouts/logs before removing duplicate scratch data. Preserve failed-run diagnostics until triage ends, requested forensic evidence, and binaries still needed for a handoff, rollback, release, or running backend. Record retained paths, reasons, and the owner/condition for later cleanup. Never commit credentials or personal history.
+4. Stop only verified task-owned temporary processes, then remove disposable PR-only files and private homes after evidence retention. Apply the existing path, lock, process, and platform checks to build-cache cleanup; do not run blanket `cargo clean`. Preserve shared/warm caches, personal state, installed packages, reusable SSH accounts/configuration, and active or uncertain resources. Account removal, deployment, and shared-server restart still require their existing authorization.
+5. Once integration includes the branch tip in clean local `main`, release each owned reusable checkout with `python3 scripts/dev-worktree.py release codex/<task>` (and its original slot/owner options). Keep detached reusable checkouts. If a squash/rebase merge prevents the release check, report the blocker; do not bypass it or discard the branch. Archive app-managed worktrees with the app's archive tool when no longer needed. Remove other task-owned worktrees only after confirming they contain no uncommitted, untracked, ignored, or retained files. Delete PR-only local/remote branches only after verifying integration and no remaining owner, consumer, or unique work; never force deletion to bypass uncertainty.
+6. Verify removals and lease/worktree/branch state. Report removed and retained artifacts and any blocked cleanup in the integration report. Do not claim cleanup complete when required actions remain blocked; preserve uncertain resources and ask for the specific decision needed.
 
 ### Push permissions
 
@@ -129,11 +141,19 @@ The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #17
 
 For PR #190, the owner accepted the unchanged ordinary stock cold-history limitation through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. Source inspection confirms that the ordinary stock timeline, turn and item readers still lack catch-up; this is not a stock runtime build of that commit. New realtime readers do materialize their cache and are not covered by this ordinary cold-read finding. Keep the cold-stock result unresolved and resume-assisted recovery separate. This exception does not waive fresh-writer validation or other failures.
 
+For PR #200, the owner accepted the unchanged ordinary stock cold-history limitation through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Fresh canonical history passes ASM cold reads; stock alpha.11 still needs resume before exact saved items are readable. This exception does not waive other checks or cover later commits.
+
 #### Upstream voice-history reader boundary
 
 Upstream adds canonical realtime records `Frame`, `TurnInputAccepted` and `SessionEndInputSaved`. The checked published stock readers (`rust-v0.169.0` and `rust-v0.171.0-alpha.5`) do not recognize these variants and can skip them while loading history. Successful resume therefore does not prove exact voice-history handoff. Exact interchange needs an independent stock reader containing upstream `5943d7acdf` or later. Keep the upstream format; do not rewrite saved records for older readers.
 
 The owner accepted this separate upstream compatibility boundary for PR #190 through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. It does not establish actual Desktop voice behavior or exact voice handoff, does not apply to later upstream commits, and does not waive ordinary text-history checks or other validation failures.
+
+For PR #200, the owner accepted this unchanged older-stock voice-reader boundary through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Keep the upstream records unchanged. This acceptance does not establish exact voice handoff or actual Desktop voice behavior, waive text-history checks, or cover later commits.
+
+#### Opt-in per-environment context
+
+Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
 
 ### Live backend model catalog
 
@@ -141,7 +161,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `05229d1874d4e04bc746a9954c71931a1ab852c6`, 2026-11-14. Subject: Add snapshot pagination for persisted realtime history (#61480).
+Last incorporated commit: `65a5410f72dac1f4b40862c34ef0a8b71b12834a`, 2026-11-14. Subject: Add trusted request-country metadata to Responses requests (#61535).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

@@ -28,6 +28,7 @@ use codex_history::RolloutItem;
 use codex_models_manager::ModelsManagerConfig;
 use codex_otel::SessionTelemetry;
 use codex_otel::current_span_w3c_trace_context;
+use codex_protocol::RequestCountry;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationMode;
@@ -106,6 +107,8 @@ pub struct ThreadConfigSnapshot {
     pub system1_revision: u64,
     pub system1_error: Option<codex_protocol::protocol::System1Error>,
     pub system1_failure_episode: u64,
+    /// Trusted host country inherited by future turns.
+    pub request_country: RequestCountry,
     /// Host data inherited by future turns; not included in persisted settings.
     pub turn_extension_init: codex_extension_api::ExtensionDataInit,
     pub model: String,
@@ -166,6 +169,8 @@ impl ThreadConfigSnapshot {
 /// Thread settings overrides that app-server validates before starting a turn.
 #[derive(Clone, Default)]
 pub struct CodexThreadSettingsOverrides {
+    /// Omission preserves the runtime country.
+    pub request_country: Option<RequestCountry>,
     /// Replaces the data captured by future turns. Omission preserves it.
     pub turn_extension_init: Option<codex_extension_api::ExtensionDataInit>,
     pub environments: Option<TurnEnvironmentRequests>,
@@ -915,6 +920,7 @@ impl CodexThread {
         overrides: CodexThreadSettingsOverrides,
     ) -> SessionSettingsUpdate {
         let CodexThreadSettingsOverrides {
+            request_country,
             turn_extension_init,
             environments: environment_requests,
             runtime_workspace_roots,
@@ -938,6 +944,7 @@ impl CodexThread {
             requested_approvals_reviewer,
             turn_extension_init,
             step_settings: StepSettingsUpdate {
+                request_country,
                 model,
                 effort,
                 collaboration_mode,

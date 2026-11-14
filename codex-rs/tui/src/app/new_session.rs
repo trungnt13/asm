@@ -75,7 +75,8 @@ impl App {
             selected_model,
             /*cloud_switch*/ None,
         )
-        .await
+        .await?
+        .ok_or_else(|| color_eyre::eyre::eyre!("Only a Cloud switch can be canceled"))
     }
 
     pub(super) async fn load_new_session_config_from(
@@ -85,7 +86,7 @@ impl App {
         cwd: PathBuf,
         selected_model: Option<&str>,
         mut cloud_switch: Option<&mut tui::Tui>,
-    ) -> Result<(Config, crate::local_settings::LocalSettings)> {
+    ) -> Result<Option<(Config, crate::local_settings::LocalSettings)>> {
         let defaults_cwd = match app_server.thread_params_mode() {
             crate::app_server_session::ThreadParamsMode::Embedded => cwd.as_path(),
             crate::app_server_session::ThreadParamsMode::Remote
@@ -112,7 +113,7 @@ impl App {
             .await?;
             Ok::<_, color_eyre::eyre::Report>((defaults, refresh.await))
         };
-        let (defaults, refreshed_config) = if let Some(tui) = cloud_switch.as_deref_mut() {
+        let Some((defaults, refreshed_config)) = if let Some(tui) = cloud_switch.as_deref_mut() {
             let events = tui.event_stream();
             super::cloud_switch_wait::wait_for_cloud_switch(
                 self,
@@ -123,8 +124,11 @@ impl App {
             )
             .await
         } else {
-            load.await
-        }?;
+            load.await.map(Some)
+        }?
+        else {
+            return Ok(None);
+        };
         // Stage local preferences and permission carryover without changing the active task.
         let (mut config, local_settings) = match refreshed_config {
             Ok(config) => {
@@ -152,7 +156,12 @@ impl App {
         ) {
             if let Some(tui) = cloud_switch {
                 let events = tui.event_stream();
-                super::cloud_switch_wait::finish_failed_cloud_switch(self, tui, events).await;
+                if super::cloud_switch_wait::finish_failed_cloud_switch(self, tui, events)
+                    .await
+                    .is_break()
+                {
+                    return Ok(None);
+                }
             }
             return Err(error);
         }
@@ -170,6 +179,6 @@ impl App {
             &self.cli_kv_overrides,
             &self.harness_overrides,
         );
-        Ok((config, local_settings))
+        Ok(Some((config, local_settings)))
     }
 }
