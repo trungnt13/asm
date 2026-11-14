@@ -91,7 +91,6 @@
 //codex-rs/config:config-unit-tests	75
 //codex-rs/connectors:connectors-unit-tests	39
 //codex-rs/context-fragments:context-fragments-unit-tests	59
-//codex-rs/core-api:core-api-unit-tests	1
 //codex-rs/core-plugins:core-plugins-unit-tests	20
 //codex-rs/core/tests/common:common-unit-tests	48
 //codex-rs/core:core-all-test-windows-cross	3162
@@ -128,8 +127,6 @@
 //codex-rs/exec:exec-unit-tests	47
 //codex-rs/message-board:message-board-local_board-test-windows-cross	46
 //codex-rs/ext/agent-message-board:agent-message-board-unit-tests	30
-//codex-rs/ext/agent:agent-agent_service-test-windows-cross	3
-//codex-rs/ext/agent:agent-unit-tests	1
 //codex-rs/ext/connectors:connectors-unit-tests	47
 //codex-rs/ext/extension-api:extension-api-capabilities-test-windows-cross	14
 //codex-rs/ext/extension-api:extension-api-registry-test-windows-cross	31
@@ -221,7 +218,6 @@
 //codex-rs/skills:skills-unit-tests	59
 //codex-rs/state:state-unit-tests	242
 //codex-rs/test-binary-support:test-binary-support-unit-tests	48
-//codex-rs/thread-manager-sample:codex-thread-manager-sample-bin-unit-tests	47
 //codex-rs/thread-store:thread-store-unit-tests	95
 //codex-rs/tools:tools-json_schema_policy_fixtures-test-windows-cross	34
 //codex-rs/tools:tools-unit-tests	37

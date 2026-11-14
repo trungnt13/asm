@@ -1899,18 +1899,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-agent-extension"
-version = "0.169.1-alpha.9"
-dependencies = [
- "anyhow",
- "codex-core",
- "codex-protocol",
- "core_test_support",
- "pretty_assertions",
- "tokio",
-]
-
-[[package]]
 name = "codex-agent-graph-store"
 version = "0.169.1-alpha.9"
 dependencies = [
@@ -3171,30 +3159,6 @@ dependencies = [
  "windows-sys 0.61.2",
  "wiremock",
  "zstd",
-]
-
-[[package]]
-name = "codex-core-api"
-version = "0.169.1-alpha.9"
-dependencies = [
- "codex-analytics",
- "codex-app-server-protocol",
- "codex-arg0",
- "codex-config",
- "codex-core",
- "codex-exec-server",
- "codex-extension-api",
- "codex-features",
- "codex-history",
- "codex-home",
- "codex-image-generation-extension",
- "codex-login",
- "codex-model-provider",
- "codex-model-provider-info",
- "codex-models-manager",
- "codex-protocol",
- "codex-state",
- "codex-utils-absolute-path",
 ]
 
 [[package]]
@@ -5179,17 +5143,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "codex-thread-manager-sample"
-version = "0.169.1-alpha.9"
-dependencies = [
- "anyhow",
- "clap",
- "codex-core-api",
- "serde_json",
- "tracing",
-]
-
-[[package]]
 name = "codex-thread-store"
 version = "0.169.1-alpha.9"
 dependencies = [
@@ -5651,16 +5604,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "winapi",
-]
-
-[[package]]
-name = "codex-utils-readiness"
-version = "0.169.1-alpha.9"
-dependencies = [
- "assert_matches",
- "thiserror 2.0.18",
- "time",
- "tokio",
 ]
 
 [[package]]
