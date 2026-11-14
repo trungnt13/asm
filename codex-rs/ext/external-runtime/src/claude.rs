@@ -592,10 +592,9 @@ impl ClaudeRuntime {
                         .any(|task| task.get("ambient").and_then(Value::as_bool) != Some(true));
                 }
                 if subtype == Some("session_state_changed") {
-                    // Idle with live background work is not final: its notification starts
-                    // another native turn. Interrupts keep their separate idle confirmation.
-                    idle = frame.get("state").and_then(Value::as_str) == Some("idle")
-                        && (interrupt_id.is_some() || !self.background_work);
+                    // Native idle already accounts for blocking tasks. The task snapshot also
+                    // includes background shells, which must not veto this completion boundary.
+                    idle = frame.get("state").and_then(Value::as_str) == Some("idle");
                 }
             }
             if pending_failure.is_some()
