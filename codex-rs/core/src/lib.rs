@@ -275,6 +275,7 @@ mod tasks;
 mod user_shell_command;
 pub mod util;
 
+pub(crate) use agent::control::review as protected_reviewer;
 pub use attestation::AttestationContext;
 pub use attestation::AttestationProvider;
 pub use attestation::GenerateAttestationFuture;
@@ -297,6 +298,7 @@ pub use exec_policy::ExecPolicyError;
 pub use exec_policy::check_execpolicy_for_warnings;
 pub use exec_policy::format_exec_policy_error_with_source;
 pub use exec_policy::load_exec_policy;
+pub use protected_reviewer::is_protected as is_protected_review_source;
 pub mod compact;
 mod memory_usage;
 pub mod otel_init;

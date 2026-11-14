@@ -73,6 +73,7 @@ mod inspection;
 mod interrupt;
 mod mailbox;
 mod residency;
+pub(crate) mod review;
 pub use residency::ThreadEvictionOutcome;
 mod root_handoff;
 mod runtime;
