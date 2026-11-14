@@ -353,7 +353,8 @@ fn restored_input_order_accounts_for_surviving_local_sources() {
                 }],
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
-            },
+            }
+            .into(),
             metadata: Some(CodexHarnessMetadata {
                 user_input_order,
                 inherited_user_message,

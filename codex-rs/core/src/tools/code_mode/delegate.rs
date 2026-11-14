@@ -479,7 +479,8 @@ impl CoreTurnHost {
                     name: Some(PUBLIC_TOOL_NAME.to_string()),
                     output: FunctionCallOutputPayload::from_text(text),
                     internal_chat_message_metadata_passthrough: None,
-                },
+                }
+                .into(),
                 metadata: Some(CodexHarnessMetadata {
                     history_truncation_token_limit: Some(output_token_limit),
                     ..Default::default()

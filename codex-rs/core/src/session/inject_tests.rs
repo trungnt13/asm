@@ -19,7 +19,8 @@ async fn harness_authored_configuration_updates_preserve_metadata_and_resume() {
             reasoning: ConfigurationReasoning {
                 effort: ReasoningEffort::High,
             },
-        },
+        }
+        .into(),
         metadata: Some(CodexHarnessMetadata {
             harness_authored_configuration: true,
             ..Default::default()
@@ -51,7 +52,10 @@ async fn harness_authored_configuration_updates_preserve_metadata_and_resume() {
             raw_items.push(event.item);
         }
     }
-    assert_eq!(raw_items, vec![expected.item]);
+    assert_eq!(
+        raw_items,
+        vec![std::sync::Arc::unwrap_or_clone(expected.item)]
+    );
 
     let rollout_items = recorded
         .iter()

@@ -132,7 +132,9 @@ fn model_arguments_cannot_forge_executed_tool_call_truncation() -> Result<()> {
         forged_marker.clone(),
     )]);
 
-    normalize_executed_tool_call_completeness(std::slice::from_mut(&mut item));
+    let mut shared_item = Arc::new(item);
+    normalize_executed_tool_call_completeness(std::slice::from_mut(&mut shared_item));
+    let item = Arc::unwrap_or_clone(shared_item);
     let call = item
         .executed_tool_call_metadata()
         .and_then(|metadata| metadata.executed_tool_calls.as_ref())
@@ -177,7 +179,9 @@ fn tool_call_completeness_is_host_only_and_fail_closed() -> Result<()> {
     let mut item = output("call-1");
     item.set_tool_call_cell_id("cell-1");
     item.mark_tool_calls_complete();
-    normalize_executed_tool_call_completeness(std::slice::from_mut(&mut item));
+    let mut shared_item = Arc::new(item);
+    normalize_executed_tool_call_completeness(std::slice::from_mut(&mut shared_item));
+    let mut item = Arc::unwrap_or_clone(shared_item);
     assert_eq!(
         serde_json::to_value(&item)?["internal_chat_message_metadata_passthrough"],
         serde_json::json!({
@@ -208,6 +212,7 @@ fn tool_call_completeness_is_host_only_and_fail_closed() -> Result<()> {
                 }
                 item.mark_tool_calls_complete();
             }
+            let mut items = items.map(Arc::new);
             let expected = items.clone();
             normalize_executed_tool_call_completeness(&mut items);
             assert_eq!(items, expected);
@@ -598,7 +603,9 @@ fn inventory_loss_still_clears_completeness() {
         let mut item = output("call");
         item.append_executed_tool_calls(vec![call]);
         item.mark_tool_calls_complete();
-        normalize_executed_tool_call_completeness(std::slice::from_mut(&mut item));
+        let mut shared_item = Arc::new(item);
+        normalize_executed_tool_call_completeness(std::slice::from_mut(&mut shared_item));
+        let item = Arc::unwrap_or_clone(shared_item);
         assert_eq!(
             item.executed_tool_call_metadata()
                 .unwrap()

@@ -467,7 +467,7 @@ async fn graceful_suspend_preserves_a_finishing_child_result(
     let messages: Vec<_> = history
         .iter()
         .filter_map(|entry| match entry {
-            RolloutItem::ResponseItem(item) => match &item.item {
+            RolloutItem::ResponseItem(item) => match item.item.as_ref() {
                 ResponseItem::AgentMessage {
                     author, content, ..
                 } if author == sender => {

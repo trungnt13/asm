@@ -185,7 +185,7 @@ async fn configured_reset_limit_rebuilds_history_without_rejecting_fresh_evidenc
                     serde_json::from_value(request.body_json()["input"].clone()).unwrap();
                 let tokens = input
                     .iter()
-                    .map(codex_guardian_context::estimate_input_tokens)
+                    .map(|item| codex_guardian_context::estimate_input_tokens(item))
                     .sum();
                 RecordedMetric::Histogram(
                     codex_guardian_context::REQUEST_TOKENS_METRIC.to_owned(),

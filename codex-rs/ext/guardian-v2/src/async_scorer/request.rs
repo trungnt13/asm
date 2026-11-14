@@ -52,10 +52,13 @@ impl LunaSamplingRequest {
         if evidence.elastic.is_none() {
             context.retain_new_instructions(history);
         }
-        context.retain_new_images(history.iter().map(|item| &item.item), |image, detail| {
-            *detail = None;
-            Some(Cow::Borrowed(image))
-        });
+        context.retain_new_images(
+            history.iter().map(|item| item.item.as_ref()),
+            |image, detail| {
+                *detail = None;
+                Some(Cow::Borrowed(image))
+            },
+        );
         let existing_context_tokens = history
             .iter()
             .map(|item| estimate_input_tokens(&item.item))

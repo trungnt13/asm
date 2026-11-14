@@ -544,11 +544,11 @@ async fn tool_result_history_keeps_originating_model_across_switch_and_replay() 
             .iter()
             .filter_map(|item| match item {
                 RolloutItem::ResponseItem(envelope)
-                    if matches!(&envelope.item, ResponseItem::FunctionCallOutput { call_id, .. }
+                    if matches!(envelope.item.as_ref(), ResponseItem::FunctionCallOutput { call_id, .. }
                         if matches!(call_id.as_deref(), Some("call-a") | Some("call-b"))) =>
                 {
                     Some((
-                        serde_json::to_value(&envelope.item).expect("saved output"),
+                        serde_json::to_value(envelope.item.as_ref()).expect("saved output"),
                         envelope
                             .metadata
                             .as_ref()
@@ -687,7 +687,7 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
         .iter()
         .find_map(|item| match item {
             RolloutItem::ResponseItem(envelope)
-                if matches!(&envelope.item, ResponseItem::CustomToolCallOutput { call_id, .. } if call_id == "call-custom") =>
+                if matches!(envelope.item.as_ref(), ResponseItem::CustomToolCallOutput { call_id, .. } if call_id == "call-custom") =>
             {
                 Some(envelope)
             }

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -87,26 +88,38 @@ impl InternalChatMessageMetadataPassthrough {
 
 /// Clears completion across a cell when recorded calls or tool names were lost.
 /// Argument truncation preserves inventory completeness; arguments and outputs are unchanged.
-pub fn normalize_executed_tool_call_completeness(items: &mut [ResponseItem]) {
-    let mut damaged_cells = HashSet::new();
+pub fn normalize_executed_tool_call_completeness(items: &mut [Arc<ResponseItem>]) {
+    let damaged_cells = items
+        .iter()
+        .filter_map(|item| {
+            let metadata = item.executed_tool_call_metadata()?;
+            metadata
+                .executed_tool_calls
+                .iter()
+                .flatten()
+                .any(|call| !call.has_complete_inventory())
+                .then_some(metadata.cell_id.as_ref())
+                .flatten()
+                .cloned()
+        })
+        .collect::<HashSet<_>>();
     for item in items.iter_mut() {
-        let Some(metadata) = item
-            .internal_chat_message_metadata_passthrough_mut()
-            .and_then(Option::as_mut)
-        else {
-            continue;
-        };
-        if metadata
-            .executed_tool_calls
-            .iter()
-            .flatten()
-            .any(|call| !call.has_complete_inventory())
-        {
-            metadata.tool_calls_complete = None;
-            damaged_cells.extend(metadata.cell_id.clone());
+        let damaged = item.executed_tool_call_metadata().is_some_and(|metadata| {
+            metadata.tool_calls_complete.is_some()
+                && (metadata
+                    .executed_tool_calls
+                    .iter()
+                    .flatten()
+                    .any(|call| !call.has_complete_inventory())
+                    || metadata
+                        .cell_id
+                        .as_ref()
+                        .is_some_and(|id| damaged_cells.contains(id)))
+        });
+        if damaged {
+            Arc::make_mut(item).clear_tool_calls_complete();
         }
     }
-    clear_damaged_cell_completeness(items, &damaged_cells);
 }
 
 /// Bounds optional observations to the space left in the actual outgoing message.

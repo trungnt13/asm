@@ -38,7 +38,7 @@ fn direct_request_uses_live_window_after_persisted_budget_is_exhausted() {
     };
     let old = make_output("old-window");
     let mut first = vec![old.clone()];
-    recorder.attach_to_prompt(&mut first, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut first, &mut HashMap::new());
     let current = make_output("new-window");
     assert!(current.executed_tool_call_metadata().is_none());
     let serialized = serde_json::to_string(&codex_history::RolloutItem::ResponseItem(
@@ -49,7 +49,7 @@ fn direct_request_uses_live_window_after_persisted_budget_is_exhausted() {
 
     // The input to the next window no longer contains the old output.
     let mut next = vec![current.clone()];
-    recorder.attach_to_prompt(&mut next, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut next, &mut HashMap::new());
     for item in [&first[0], &next[0]] {
         let encoded = serde_json::to_value(item).unwrap();
         assert_eq!(encoded["output"], "tool result");
@@ -59,14 +59,14 @@ fn direct_request_uses_live_window_after_persisted_budget_is_exhausted() {
         );
     }
     let mut pruned = vec![old];
-    recorder.attach_to_compaction_prompt(&mut pruned);
+    recorder.attach_owned_compaction(&mut pruned);
     assert!(pruned[0].executed_tool_call_metadata().is_none());
 
     // Capture toggles must not revive a previous recorder's live-only metadata.
     recorder.refresh(&Features::default());
     recorder.refresh(&features);
     let mut after_refresh = vec![current];
-    recorder.attach_to_prompt(&mut after_refresh, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut after_refresh, &mut HashMap::new());
     assert!(after_refresh[0].executed_tool_call_metadata().is_none());
 }
 
@@ -117,7 +117,7 @@ fn direct_metadata_follows_output_ids_with_reused_call_ids_and_reverse_completio
             if reversed {
                 request.reverse();
             }
-            recorder.attach_to_prompt(&mut request, &mut HashMap::new());
+            recorder.attach_owned_prompt(&mut request, &mut HashMap::new());
             for item in &request {
                 let index = usize::from(item.id() == Some(&ids[1]));
                 let encoded = serde_json::to_value(item).unwrap();

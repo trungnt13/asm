@@ -69,7 +69,7 @@ pub(crate) async fn read_recent_rollout_items(path: &Path) -> anyhow::Result<Vec
                 let Some(sanitized) = sanitize_response_item_for_memories(&item.item) else {
                     continue;
                 };
-                item.item = sanitized;
+                item.item = sanitized.into();
             }
             let Some(next_remaining) = remaining.checked_sub(serde_json::to_vec(&line.item)?.len())
             else {

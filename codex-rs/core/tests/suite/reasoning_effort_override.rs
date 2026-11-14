@@ -442,10 +442,11 @@ async fn worker_reasoning_overrides_follow_effective_client_policy(
             .items
             .into_iter()
             .filter_map(|item| match item {
-                RolloutItem::ResponseItem(ResponseItemEnvelope {
-                    item: item @ ResponseItem::ConfigurationUpdate { .. },
-                    ..
-                }) => Some(serde_json::to_value(item).expect("serialize saved update")),
+                RolloutItem::ResponseItem(ResponseItemEnvelope { item, .. })
+                    if matches!(item.as_ref(), ResponseItem::ConfigurationUpdate { .. }) =>
+                {
+                    Some(serde_json::to_value(item.as_ref()).expect("serialize saved update"))
+                }
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -666,10 +667,11 @@ async fn reasoning_effort_override_capacity_retry_keeps_latest_adjacent_update()
         .items
         .into_iter()
         .filter_map(|item| match item {
-            RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: item @ ResponseItem::ConfigurationUpdate { .. },
-                ..
-            }) => Some(serde_json::to_value(item).expect("serialize saved update")),
+            RolloutItem::ResponseItem(ResponseItemEnvelope { item, .. })
+                if matches!(item.as_ref(), ResponseItem::ConfigurationUpdate { .. }) =>
+            {
+                Some(serde_json::to_value(item.as_ref()).expect("serialize saved update"))
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1364,10 +1366,11 @@ async fn reasoning_effort_override_unavailable_recovers_saved_history(
         .items
         .into_iter()
         .filter_map(|item| match item {
-            RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: item @ ResponseItem::ConfigurationUpdate { .. },
-                ..
-            }) => Some(serde_json::to_value(item).expect("serialize saved update")),
+            RolloutItem::ResponseItem(ResponseItemEnvelope { item, .. })
+                if matches!(item.as_ref(), ResponseItem::ConfigurationUpdate { .. }) =>
+            {
+                Some(serde_json::to_value(item.as_ref()).expect("serialize saved update"))
+            }
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1601,10 +1604,11 @@ async fn reasoning_effort_override_unsupported_model_round_trip() -> anyhow::Res
         .items
         .into_iter()
         .filter_map(|item| match item {
-            RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: item @ ResponseItem::ConfigurationUpdate { .. },
-                ..
-            }) => Some(serde_json::to_value(item).expect("serialize saved update")),
+            RolloutItem::ResponseItem(ResponseItemEnvelope { item, .. })
+                if matches!(item.as_ref(), ResponseItem::ConfigurationUpdate { .. }) =>
+            {
+                Some(serde_json::to_value(item.as_ref()).expect("serialize saved update"))
+            }
             _ => None,
         })
         .collect::<Vec<_>>();

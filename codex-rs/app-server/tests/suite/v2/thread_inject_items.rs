@@ -155,7 +155,7 @@ async fn thread_inject_items_adds_raw_response_items_to_thread_history(
         .iter()
         .filter_map(|item| match item {
             RolloutItem::ResponseItem(envelope) => Some((
-                strip_response_item_id(responses::strip_metadata(envelope.item.clone())),
+                strip_response_item_id(responses::strip_metadata(envelope.item.as_ref().clone())),
                 envelope
                     .metadata
                     .as_ref()
@@ -232,7 +232,7 @@ async fn thread_inject_items_adds_raw_response_items_to_thread_history(
         .iter()
         .filter_map(|item| match item {
             RolloutItem::ResponseItem(envelope) => {
-                let context_kind = match &envelope.item {
+                let context_kind = match envelope.item.as_ref() {
                     ResponseItem::Message { role, content, .. } => {
                         content.iter().find_map(|item| {
                             let ContentItem::InputText { text } = item else {
@@ -626,8 +626,9 @@ async fn thread_inject_items_adds_raw_response_items_after_a_turn() -> Result<()
         .iter()
         .find_map(|item| match item {
             RolloutItem::ResponseItem(envelope)
-                if strip_response_item_id(responses::strip_metadata(envelope.item.clone()))
-                    == injected_item =>
+                if strip_response_item_id(responses::strip_metadata(
+                    envelope.item.as_ref().clone(),
+                )) == injected_item =>
             {
                 Some(envelope)
             }
@@ -764,7 +765,10 @@ async fn turn_tool_output_retention_preserves_sender_metadata() -> Result<()> {
         .iter()
         .find_map(|item| match item {
             RolloutItem::ResponseItem(envelope)
-                if matches!(envelope.item, ResponseItem::FunctionCallOutput { .. }) =>
+                if matches!(
+                    envelope.item.as_ref(),
+                    ResponseItem::FunctionCallOutput { .. }
+                ) =>
             {
                 Some(envelope)
             }

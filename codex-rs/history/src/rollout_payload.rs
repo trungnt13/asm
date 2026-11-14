@@ -190,7 +190,7 @@ impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
                 },
             },
             RolloutItem::ResponseItem(envelope) => Self::ResponseItem {
-                payload: (&envelope.item).into(),
+                payload: envelope.item.as_ref().into(),
                 metadata: envelope.metadata.as_ref().map(Cow::Borrowed),
             },
             RolloutItem::InterAgentCommunication(payload) => Self::InterAgentCommunication {
@@ -330,7 +330,7 @@ impl From<RolloutItemWire<'_>> for RolloutItem {
                     );
                 }
                 Self::ResponseItem(ResponseItemEnvelope {
-                    item: payload.into(),
+                    item: ResponseItem::from(payload).into(),
                     metadata: metadata.map(Cow::into_owned),
                 })
             }
@@ -422,7 +422,7 @@ impl<'a> From<&'a CompactedItem> for CompactedItemWire<'a> {
             replacement_history: item.replacement_history.as_ref().map(|items| {
                 items
                     .iter()
-                    .map(|envelope| (&envelope.item).into())
+                    .map(|envelope| envelope.item.as_ref().into())
                     .collect()
             }),
             replacement_history_metadata,
@@ -464,7 +464,7 @@ impl TryFrom<CompactedItemWire<'_>> for CompactedItem {
                         .into_iter()
                         .zip(metadata)
                         .map(|(item, metadata)| ResponseItemEnvelope {
-                            item: item.into(),
+                            item: ResponseItem::from(item).into(),
                             metadata: Some(metadata.into_owned()),
                         })
                         .collect(),

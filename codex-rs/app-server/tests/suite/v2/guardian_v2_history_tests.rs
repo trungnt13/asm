@@ -717,7 +717,7 @@ async fn guardians_retain_evidence_after_compaction_and_resume(
         if let RolloutItem::Compacted(checkpoint) = &line.item {
             for envelope in checkpoint.replacement_history.iter().flatten() {
                 if matches!(
-                    envelope.item,
+                    envelope.item.as_ref(),
                     codex_protocol::models::ResponseItem::Compaction { .. }
                 ) {
                     assert_eq!(

@@ -167,7 +167,7 @@ async fn yielded_notifications_keep_originating_budgets_after_model_switch() -> 
             let RolloutItem::ResponseItem(envelope) = item else {
                 return None;
             };
-            let item = serde_json::to_value(&envelope.item).expect("saved item");
+            let item = serde_json::to_value(envelope.item.as_ref()).expect("saved item");
             is_notification(&item).then(|| {
                 (
                     item,

@@ -1282,7 +1282,10 @@ async fn migration_rolls_back_inter_agent_metadata_with_its_delivery() {
     assert!(!read_rollout(&path).iter().any(|line| match &line.item {
         RolloutItem::InterAgentCommunicationMetadata { .. } => true,
         RolloutItem::ResponseItem(response_item) => {
-            matches!(&response_item.item, ResponseItem::AgentMessage { .. })
+            matches!(
+                response_item.item.as_ref(),
+                ResponseItem::AgentMessage { .. }
+            )
         }
         _ => false,
     }));
@@ -1699,7 +1702,7 @@ async fn migration_keeps_downgraded_delivery_before_later_same_turn_steer() {
     .await;
     assert!(migrated.into_iter().any(|item| matches!(item,
         RolloutItem::ResponseItem(envelope)
-            if matches!(&envelope.item, ResponseItem::Message { role, content, .. }
+            if matches!(envelope.item.as_ref(), ResponseItem::Message { role, content, .. }
                 if role == "assistant"
                     && matches!(content.as_slice(), [ContentItem::OutputText { text , .. }]
                         if text == "May I publish?"))
@@ -1845,12 +1848,13 @@ async fn assert_migrated_evidence_order(steer_order: Option<u64>) {
             user_message(INITIAL),
             RolloutItem::RetainedContext(answers[0].clone()),
             RolloutItem::ResponseItem(codex_rollout::ResponseItemEnvelope {
-                item: serde_json::from_value(json!({
+                item: serde_json::from_value::<ResponseItem>(json!({
                     "type": "message", "id": "late-assistant", "role": "assistant",
                     "content": [{"type": "output_text", "text": "Late assistant question?"}],
                     "internal_chat_message_metadata_passthrough": {"turn_id": "shared-turn"}
                 }))
-                .expect("assistant message"),
+                .expect("assistant message")
+                .into(),
                 metadata: Some(
                     serde_json::from_value(json!({"user_input_order": 2}))
                         .expect("assistant order"),
@@ -1858,7 +1862,7 @@ async fn assert_migrated_evidence_order(steer_order: Option<u64>) {
             }),
             RolloutItem::Compacted(before_steer),
             RolloutItem::ResponseItem(codex_rollout::ResponseItemEnvelope {
-                item: steer,
+                item: steer.into(),
                 metadata: steer_order.map(|order| {
                     serde_json::from_value(json!({
                         "user_input_order": order

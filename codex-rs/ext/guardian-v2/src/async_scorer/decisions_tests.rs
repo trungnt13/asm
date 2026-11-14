@@ -248,7 +248,7 @@ async fn http_contract_and_untrusted_response_validation() {
         .unwrap(),
     );
     request.input.extend(
-        serde_json::from_value::<Vec<ResponseItem>>(json!([
+        serde_json::from_value::<Vec<std::sync::Arc<ResponseItem>>>(json!([
             {"type":"message", "role":"system", "content":[{"type":"input_text", "text":"System guidance"}]},
             {"type":"compaction", "encrypted_content":"retained compaction"},
             {"type":"message", "role":"assistant", "phase":"commentary", "content":[{"type":"output_text", "text":"Prior assessment"}]},
@@ -294,7 +294,10 @@ async fn http_contract_and_untrusted_response_validation() {
             .input
             .iter()
             .cloned()
-            .map(ResponseItemEnvelope::new)
+            .map(|item| ResponseItemEnvelope {
+                item,
+                metadata: None,
+            })
             .collect(),
     );
     let task = sampler.start_conversation_comparison(&retained);
@@ -354,7 +357,10 @@ async fn decisions_admits_newest_request_by_cancelling_oldest() {
             .input
             .iter()
             .cloned()
-            .map(ResponseItemEnvelope::new)
+            .map(|item| ResponseItemEnvelope {
+                item,
+                metadata: None,
+            })
             .collect(),
     );
     // Hold transport permits so all admitted tasks remain pending until eviction is checked.
@@ -402,10 +408,10 @@ fn adapter_preserves_inline_images_and_bounds_image_bytes() {
             {"type":"input_image", "image_url":"data:image/png;base64,AA==", "detail":"high"}
         ]}))
         .unwrap();
-    request.input = vec![image];
+    request.input = vec![image.into()];
     let body = request_body(
         request.instructions.annotated_content().content(),
-        &request.input,
+        request.input.iter().map(std::sync::Arc::as_ref),
     )
     .unwrap();
     assert_eq!(
@@ -424,7 +430,7 @@ fn adapter_preserves_inline_images_and_bounds_image_bytes() {
     assert_eq!(
         request_body(
             request.instructions.annotated_content().content(),
-            &request.input,
+            request.input.iter().map(std::sync::Arc::as_ref),
         ),
         Err(DecisionsError::InputTooLarge)
     );
@@ -463,7 +469,10 @@ async fn cancelling_a_decisions_request_releases_thread_capacity() {
             .input
             .iter()
             .cloned()
-            .map(ResponseItemEnvelope::new)
+            .map(|item| ResponseItemEnvelope {
+                item,
+                metadata: None,
+            })
             .collect(),
     );
     let task = sampler.start_conversation_comparison(&input);

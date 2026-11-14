@@ -55,6 +55,7 @@ pub(super) async fn prepare_new_items(
     default_token_limit: usize,
 ) {
     for ResponseItemEnvelope { item, metadata } in items {
+        let item = std::sync::Arc::make_mut(item);
         let (ResponseItem::FunctionCallOutput { output, .. }
         | ResponseItem::CustomToolCallOutput { output, .. }) = item
         else {

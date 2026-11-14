@@ -232,7 +232,7 @@ fn rollback_discards_assistant_sources_without_ordering_in_old_backups() {
         "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Deploy?"}]
     })).unwrap());
     let boundary = ResponseItemEnvelope {
-        item: message("Queued input"),
+        item: message("Queued input").into(),
         metadata: Some(codex_history::CodexHarnessMetadata {
             user_input_order: Some(1),
             ..Default::default()
@@ -241,7 +241,10 @@ fn rollback_discards_assistant_sources_without_ordering_in_old_backups() {
     let mut history = TranscriptHistory::default();
     history.reset([&original, &assistant, &boundary]);
     history.truncate_before(&boundary);
-    assert_eq!(history.items().collect::<Vec<_>>(), vec![&original.item]);
+    assert_eq!(
+        history.items().collect::<Vec<_>>(),
+        vec![original.item.as_ref()]
+    );
 }
 
 #[test]

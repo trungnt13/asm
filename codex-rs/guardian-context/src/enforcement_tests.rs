@@ -151,7 +151,9 @@ fn native_agent_admission_uses_current_history_and_preserves_identity() {
     let SectionDelivery::Message(message) = &mut conflicting.sections[1].delivery else {
         panic!("native message")
     };
-    let ResponseItem::AgentMessage { content, .. } = &mut message.content.item else {
+    let ResponseItem::AgentMessage { content, .. } =
+        std::sync::Arc::make_mut(&mut message.content.item)
+    else {
         panic!("agent message")
     };
     *content = vec![
@@ -472,7 +474,7 @@ fn budget_reserves_existing_context_and_preserves_required_messages() {
                 text("latest tool evidence"),
                 image.clone()
             ]),
-            trusted.item.clone(),
+            trusted.item.as_ref().clone(),
             user_message(vec![text("exact action"), text("evidence omitted")]),
         ]
     );
@@ -490,7 +492,7 @@ fn budget_reserves_existing_context_and_preserves_required_messages() {
         without_image.into_messages(),
         vec![
             user_message(vec![text("user restriction"), text("latest tool evidence")]),
-            trusted.item.clone(),
+            trusted.item.as_ref().clone(),
             user_message(vec![text("exact action"), text("evidence omitted")]),
         ]
     );

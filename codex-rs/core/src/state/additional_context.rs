@@ -63,7 +63,7 @@ impl StoredAdditionalContext {
     fn envelope(&self, key: &str) -> ResponseItemEnvelope {
         match self {
             Self::ToolOutput(output) => ResponseItemEnvelope {
-                item: output.clone().into(),
+                item: std::sync::Arc::new(output.clone().into()),
                 metadata: Some(CodexHarnessMetadata {
                     additional_context_tool_output: true,
                     ..Default::default()

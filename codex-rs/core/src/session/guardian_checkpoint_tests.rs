@@ -92,7 +92,7 @@ async fn guardian_checkpoint_preserves_live_context_without_storage(
                 .unwrap()
                 .0
                 .iter()
-                .any(|entry| entry.item == instruction)
+                .any(|entry| entry.item.as_ref() == &instruction)
         );
     }
     let items = session.guardian_fork_history().await;

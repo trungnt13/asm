@@ -183,7 +183,7 @@ pub(crate) async fn prepare_response_items(
             analytics: &mut image_preparations,
             history: &mut envelope.metadata,
         };
-        let item = &mut envelope.item;
+        let item = std::sync::Arc::make_mut(&mut envelope.item);
         let mut annotated_content = to_annotated_content(item);
         let resize_notice = match item {
             ResponseItem::Message { role, .. } => {

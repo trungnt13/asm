@@ -474,7 +474,8 @@ fn replace_attribution_fragment_with_legacy(
         .map(|line| {
             let mut line = codex_rollout::parse_rollout_line(line)?;
             if let RolloutItem::ResponseItem(response_item) = &mut line.item
-                && let ResponseItem::Message { role, content, .. } = &mut response_item.item
+                && let ResponseItem::Message { role, content, .. } =
+                    std::sync::Arc::make_mut(&mut response_item.item)
                 && role == "developer"
             {
                 for item in content {

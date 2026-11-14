@@ -45,7 +45,7 @@ async fn reconstruct_history_uses_replacement_history_verbatim() {
     };
     let mut replacement_history = vec![
         ResponseItemEnvelope {
-            item: summary_item.clone(),
+            item: summary_item.clone().into(),
             metadata: Some(CodexHarnessMetadata::default()),
         },
         ResponseItemEnvelope::new(ResponseItem::Message {

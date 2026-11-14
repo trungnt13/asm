@@ -3,11 +3,13 @@ use codex_context_fragments::to_annotated_content;
 use codex_history::ResponseItemEnvelope;
 use codex_protocol::ResponseItemId;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::ContentItemMetadata;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::InputModality;
 use std::collections::HashSet;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::context::ContextualUserFragment;
@@ -48,7 +50,7 @@ pub(crate) fn missing_call_outputs(
     let mut tool_search_output_ids = HashSet::new();
     let mut custom_tool_output_ids = HashSet::new();
     for envelope in items.iter() {
-        match &envelope.item {
+        match envelope.item.as_ref() {
             ResponseItem::FunctionCallOutput {
                 call_id: Some(call_id),
                 ..
@@ -74,7 +76,7 @@ pub(crate) fn missing_call_outputs(
     let mut missing_outputs_to_insert: Vec<(usize, ResponseItemEnvelope)> = Vec::new();
 
     for (idx, envelope) in items.iter().enumerate() {
-        match &envelope.item {
+        match envelope.item.as_ref() {
             ResponseItem::FunctionCall { id, call_id, .. }
                 if !function_output_ids.contains(call_id.as_str()) =>
             {
@@ -183,7 +185,7 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
     let mut tool_search_call_ids = HashSet::new();
     let mut custom_tool_call_ids = HashSet::new();
     for envelope in items.iter() {
-        match &envelope.item {
+        match envelope.item.as_ref() {
             ResponseItem::FunctionCall { call_id, .. }
             | ResponseItem::LocalShellCall {
                 call_id: Some(call_id),
@@ -206,7 +208,7 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItemEnvelope>) {
 
     let mut orphan_positions = Vec::new();
     for (position, envelope) in items.iter().enumerate() {
-        match &envelope.item {
+        match envelope.item.as_ref() {
             ResponseItem::FunctionCallOutput {
                 call_id: Some(call_id),
                 ..
@@ -268,11 +270,11 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItemEnvelope>, it
             ..
         } => {
             if let Some(pos) = items.iter().position(|envelope| {
-                matches!(&envelope.item, ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id)
+                matches!(envelope.item.as_ref(), ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id)
             }) {
                 items.remove(pos);
             } else if let Some(pos) = items.iter().position(|envelope| {
-                matches!(&envelope.item, ResponseItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id)
+                matches!(envelope.item.as_ref(), ResponseItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id)
             }) {
                 items.remove(pos);
             }
@@ -363,9 +365,31 @@ pub(crate) fn strip_images_when_unsupported(
     }
 
     for envelope in items.iter_mut() {
-        match &mut envelope.item {
+        let changes = match envelope.item.as_ref() {
+            ResponseItem::Message { content, .. } => {
+                message_annotations_need_normalizing(envelope.item.as_ref())
+                    || content
+                        .iter()
+                        .any(|part| matches!(part, ContentItem::InputImage { .. }))
+            }
+            ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } => {
+                output.content_items().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        matches!(part, FunctionCallOutputContentItem::InputImage { .. })
+                    })
+                })
+            }
+            ResponseItem::ImageGenerationCall { result, .. } => !result.is_empty(),
+            _ => false,
+        };
+        if !changes {
+            continue;
+        }
+        match Arc::make_mut(&mut envelope.item) {
             ResponseItem::Message { .. } => {
-                let Some(mut content) = to_annotated_content(&mut envelope.item) else {
+                let Some(mut content) = to_annotated_content(Arc::make_mut(&mut envelope.item))
+                else {
                     continue;
                 };
                 for content_item in &mut content {
@@ -373,7 +397,7 @@ pub(crate) fn strip_images_when_unsupported(
                         *content_item = UnsupportedMedia::IMAGE.render_fragment().into_parts().1;
                     }
                 }
-                let _ = set_annotated_content(&mut envelope.item, content);
+                let _ = set_annotated_content(Arc::make_mut(&mut envelope.item), content);
             }
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
@@ -410,9 +434,30 @@ pub(crate) fn strip_audio_when_unsupported(
     }
 
     for envelope in items.iter_mut() {
-        match &mut envelope.item {
+        let changes = match envelope.item.as_ref() {
+            ResponseItem::Message { content, .. } => {
+                message_annotations_need_normalizing(envelope.item.as_ref())
+                    || content
+                        .iter()
+                        .any(|part| matches!(part, ContentItem::InputAudio { .. }))
+            }
+            ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } => {
+                output.content_items().is_some_and(|content| {
+                    content.iter().any(|part| {
+                        matches!(part, FunctionCallOutputContentItem::InputAudio { .. })
+                    })
+                })
+            }
+            _ => false,
+        };
+        if !changes {
+            continue;
+        }
+        match Arc::make_mut(&mut envelope.item) {
             ResponseItem::Message { .. } => {
-                let Some(mut content) = to_annotated_content(&mut envelope.item) else {
+                let Some(mut content) = to_annotated_content(Arc::make_mut(&mut envelope.item))
+                else {
                     continue;
                 };
                 for content_item in &mut content {
@@ -420,7 +465,7 @@ pub(crate) fn strip_audio_when_unsupported(
                         *content_item = UnsupportedMedia::AUDIO.render_fragment().into_parts().1;
                     }
                 }
-                let _ = set_annotated_content(&mut envelope.item, content);
+                let _ = set_annotated_content(Arc::make_mut(&mut envelope.item), content);
             }
             ResponseItem::FunctionCallOutput { output, .. }
             | ResponseItem::CustomToolCallOutput { output, .. } => {
@@ -438,4 +483,30 @@ pub(crate) fn strip_audio_when_unsupported(
             _ => {}
         }
     }
+}
+
+fn message_annotations_need_normalizing(item: &ResponseItem) -> bool {
+    let ResponseItem::Message {
+        content,
+        internal_chat_message_metadata_passthrough: metadata,
+        ..
+    } = item
+    else {
+        return false;
+    };
+    let Some(metadata) = metadata else {
+        return true;
+    };
+    if metadata.content_item_kinds.as_ref().map(Vec::len) != Some(content.len()) {
+        return true;
+    }
+    metadata
+        .content_item_metadata
+        .as_ref()
+        .is_some_and(|values| {
+            values.len() != content.len()
+                || values
+                    .iter()
+                    .all(|value| *value == ContentItemMetadata::default())
+        })
 }

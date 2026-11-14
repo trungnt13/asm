@@ -1512,7 +1512,7 @@ async fn read_head_for_summary_omits_harness_metadata() {
         timestamp: "2025-04-03T10:30:00Z".to_string(),
         ordinal: None,
         item: RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: response_item.clone(),
+            item: response_item.clone().into(),
             metadata: Some(CodexHarnessMetadata::default()),
         }),
     };

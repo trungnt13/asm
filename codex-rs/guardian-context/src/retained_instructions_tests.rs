@@ -401,7 +401,7 @@ fn delivery_uses_source_revision_and_complete_host_metadata() {
     ] {
         let mut next = original.clone();
         next.retain_new_instructions(&[ResponseItemEnvelope {
-            item: delivered[0].item.clone(),
+            item: delivered[0].item.clone().into(),
             metadata,
         }]);
         assert_eq!(next.into_annotated_messages(), delivered);
@@ -468,7 +468,7 @@ impl crate::SectionHistory for RetainedTranscript {
         Some(&self.retained)
     }
     fn items(&self) -> Box<dyn Iterator<Item = &codex_protocol::models::ResponseItem> + Send + '_> {
-        Box::new(self.messages.iter().map(|envelope| &envelope.item))
+        Box::new(self.messages.iter().map(|envelope| envelope.item.as_ref()))
     }
     fn items_with_sources(
         &self,
@@ -483,7 +483,7 @@ impl crate::SectionHistory for RetainedTranscript {
     > {
         Box::new(self.messages.iter().map(|envelope| {
             (
-                &envelope.item,
+                envelope.item.as_ref(),
                 envelope
                     .metadata
                     .as_ref()
@@ -590,7 +590,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
     let mut history = RetainedTranscript {
         retained,
         messages: vec![ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(codex_history::CodexHarnessMetadata {
                 retained_source: Some(source),
                 ..Default::default()
@@ -721,7 +721,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
     history.messages.insert(
         /*index*/ 0,
         ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(codex_history::CodexHarnessMetadata {
                 retained_source: Some(source),
                 ..Default::default()
@@ -754,7 +754,7 @@ fn transcript_original_requires_complete_source_proof_and_survives_budgeting() {
         "newer".to_owned(),
     )));
     history.messages.push(ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: Some(codex_history::CodexHarnessMetadata {
             retained_source: Some(source),
             ..Default::default()

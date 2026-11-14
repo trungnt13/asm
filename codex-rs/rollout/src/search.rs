@@ -17,7 +17,6 @@ use tokio::process::Command;
 use super::ARCHIVED_SESSIONS_SUBDIR;
 use super::SESSIONS_SUBDIR;
 use super::compression;
-use crate::ResponseItemEnvelope;
 use crate::RolloutItem;
 
 const MATCH_CONTEXT_BEFORE_CHARS: usize = 48;
@@ -320,10 +319,10 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
                 Some(agent.message.trim().to_string())
             }
         }
-        RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: ResponseItem::Message { role, content, .. },
-            ..
-        }) => {
+        RolloutItem::ResponseItem(envelope) => {
+            let ResponseItem::Message { role, content, .. } = envelope.item.as_ref() else {
+                return None;
+            };
             let text = content
                 .iter()
                 .filter_map(content_item_text)
@@ -339,7 +338,6 @@ fn conversation_text_from_item(item: &RolloutItem) -> Option<String> {
         | RolloutItem::SessionMeta(_)
         | RolloutItem::TurnContext(_)
         | RolloutItem::EventMsg(_)
-        | RolloutItem::ResponseItem(_)
         | RolloutItem::InterAgentCommunication(_)
         | RolloutItem::InterAgentCommunicationMetadata { .. }
         | RolloutItem::Compacted(_)

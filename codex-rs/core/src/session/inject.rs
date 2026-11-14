@@ -159,7 +159,7 @@ impl Session {
         mut envelope: ResponseItemEnvelope,
     ) -> ResponseItemEnvelope {
         if self.enabled(Feature::RetainClientDeveloperMessages)
-            && matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "developer")
+            && matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "developer")
         {
             envelope
                 .metadata

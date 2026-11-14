@@ -321,7 +321,7 @@ fn turn_item_type(item: &TurnItem) -> &'static str {
 }
 
 fn response_item_type(item: &ResponseItemEnvelope) -> &'static str {
-    match &item.item {
+    match item.item.as_ref() {
         ResponseItem::Message { .. } => "response.message",
         ResponseItem::AdditionalTools { .. } => "response.additional_tools",
         ResponseItem::AgentMessage { .. } => "response.agent_message",

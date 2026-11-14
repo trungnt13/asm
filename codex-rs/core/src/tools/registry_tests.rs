@@ -642,7 +642,8 @@ fn post_tool_use_feedback_output_preserves_fallback_token_limit_override(
             item: ResponseItem::from(ResponseInputItem::FunctionCallOutput {
                 call_id: "call-1".to_string(),
                 output: FunctionCallOutputPayload::from_text("hook feedback".to_string()),
-            }),
+            })
+            .into(),
             metadata: Some(CodexHarnessMetadata {
                 history_truncation_token_limit: Some(expected_token_limit),
                 ..Default::default()

@@ -205,13 +205,13 @@ impl DecisionsSampler {
                 return Err(DecisionsError::UnexpectedRequestSetup);
             };
             if !matches!(
-                &tools.item,
+                tools.item.as_ref(),
                 ResponseItem::AdditionalTools { role, tools, .. }
                     if role == "developer" && tools.is_empty()
             ) {
                 return Err(DecisionsError::UnexpectedRequestSetup);
             }
-            let ResponseItem::Message { role, content, .. } = &instructions.item else {
+            let ResponseItem::Message { role, content, .. } = instructions.item.as_ref() else {
                 return Err(DecisionsError::UnexpectedRequestSetup);
             };
             let [rubric] = content.as_slice() else {
@@ -220,7 +220,7 @@ impl DecisionsSampler {
             if role != "developer" {
                 return Err(DecisionsError::UnexpectedRequestSetup);
             }
-            request_body(rubric, evidence.iter().map(|item| &item.item))
+            request_body(rubric, evidence.iter().map(|item| item.item.as_ref()))
         })();
         self.spawn_request(body, started, source_generation)
     }

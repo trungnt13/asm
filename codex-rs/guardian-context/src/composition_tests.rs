@@ -44,7 +44,7 @@ fn delivery_preserves_arbitrary_message_boundaries_and_rejects_them_for_sync() {
                     text: "second".into()
                 }
             ]),
-            message.item.clone(),
+            message.item.as_ref().clone(),
             user_message(vec![ContentItem::InputText {
                 text: "third".into()
             }]),

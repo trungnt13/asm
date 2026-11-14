@@ -67,7 +67,7 @@ impl System1Evidence {
                 }) {
                     continue;
                 }
-                if let ResponseItem::Message { role, content, .. } = &envelope.item
+                if let ResponseItem::Message { role, content, .. } = envelope.item.as_ref()
                     && role == "user"
                 {
                     for item in content.iter().take(part_limit) {
@@ -121,7 +121,7 @@ fn append_item(
     limit: usize,
     part_limit: usize,
 ) {
-    match &envelope.item {
+    match envelope.item.as_ref() {
         ResponseItem::Message { role, content, .. }
             if role == "assistant"
                 || (role == "user"
