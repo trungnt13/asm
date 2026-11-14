@@ -194,14 +194,28 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                 ));
             }
 
-            app.local_settings.tui.collapse_turn_details = true;
+            app.local_settings.tui.collapse_tool_calls = true;
             for id in 1..=6 {
-                app.transcript_cells
-                    .push(Arc::new(crate::history_cell::new_web_search_call(
-                        format!("lookup-{id}"),
-                        format!("field note {id}"),
-                        codex_app_server_protocol::WebSearchAction::Other,
-                    )));
+                let call_id = format!("lookup-{id}");
+                let command = vec!["echo".to_string(), format!("field note {id}")];
+                let parsed = codex_shell_command::parse_command::parse_command(&command);
+                let mut call = crate::exec_cell::new_active_exec_command(
+                    call_id.clone(),
+                    command,
+                    parsed,
+                    codex_app_server_protocol::CommandExecutionSource::Agent,
+                    /*interaction_input*/ None,
+                    /*animations_enabled*/ false,
+                );
+                assert!(call.complete_call(
+                    &call_id,
+                    crate::exec_cell::CommandOutput::new(
+                        /*exit_code*/ 0,
+                        format!("field note {id}")
+                    ),
+                    std::time::Duration::ZERO,
+                ));
+                app.transcript_cells.push(Arc::new(call));
             }
             let size = Size::new(/*width*/ 80, /*height*/ 16);
             tui.screen_size_for_event(&TuiEvent::Resize(size))?;

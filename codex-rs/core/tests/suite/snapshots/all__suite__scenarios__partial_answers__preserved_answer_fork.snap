@@ -6,12 +6,13 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=5ee4a5e9300ae5eb):
-        - namespace/functions; hash=fc7bba98b6836100
+00:additional_tools/developer (2; hash=24217f0a3de8cdfa):
+        - namespace/functions; hash=9b055ef7c21df124
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+          - function/new_context
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=32e5b109270bfa57
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -59,12 +60,13 @@ Scenario: A worker inherits the parent prefix, then receives its own window hint
 
 ## Window 2 (after request 3: input diverged at item 13)
 -- request 4 (turn) --
-00:additional_tools/developer (2; hash=5ee4a5e9300ae5eb):
-        - namespace/functions; hash=fc7bba98b6836100
+00:additional_tools/developer (2; hash=24217f0a3de8cdfa):
+        - namespace/functions; hash=9b055ef7c21df124
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+          - function/new_context
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=32e5b109270bfa57
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

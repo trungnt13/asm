@@ -109,7 +109,7 @@ async fn temporary_side_chat_sends_policy_on_its_first_request() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn saved_side_chat_title_uses_only_its_first_direct_input() -> Result<()> {
+async fn saved_side_chat_preserves_inherited_title_after_direct_input() -> Result<()> {
     let question = "Why is CI failing on Windows?";
     let pixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     let image = crate::chatwidget::UserMessage {
@@ -139,7 +139,7 @@ async fn saved_side_chat_title_uses_only_its_first_direct_input() -> Result<()> 
         let mut tui = crate::tui::test_support::make_test_tui()?;
         tui.set_owned_screen(/*owned*/ true)?;
         let title_prompt = crate::app::thread_title::thread_title_prompt(question);
-        responses::mount_response_handler(&model, move |request| {
+        let direct_turn = responses::mount_response_handler(&model, move |request| {
             let answer = if request.message_input_texts("user").contains(&title_prompt) {
                 r#"{"title":"Windows CI failure"}"#
             } else {
@@ -151,7 +151,7 @@ async fn saved_side_chat_title_uses_only_its_first_direct_input() -> Result<()> 
             ]))
         })
         .await;
-        Box::pin(app.handle_start_side(
+        Box::pin(app.start_companion_conversation(
             &mut tui,
             &mut server,
             parent,
@@ -188,14 +188,19 @@ async fn saved_side_chat_title_uses_only_its_first_direct_input() -> Result<()> 
         let [child] = saved.as_slice() else {
             panic!("expected one saved side chat")
         };
-        assert!(!server.side_chat_fork_names.contains_key(&child.id));
+        assert!(app.pending_thread_titles.is_empty());
+        assert_eq!(direct_turn.requests().len(), 1);
+        let child_thread = server
+            .thread_read(child.id, /*include_turns*/ false)
+            .await?;
+        assert_eq!(child_thread.name.as_deref(), Some("Release plan"));
         labels.push(side_chat_label(child).unwrap().to_owned());
         let parent = server.thread_read(parent, /*include_turns*/ false).await?;
         assert_eq!(parent.name.as_deref(), Some("Release plan"));
         server.shutdown().await?;
     }
     insta::assert_snapshot!(labels.join("\n"), @r"
-    Windows CI failure
+    Why is CI failing on Windows?
     [Image]
     ");
     Ok(())
