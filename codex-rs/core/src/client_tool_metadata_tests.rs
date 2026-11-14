@@ -44,7 +44,7 @@ fn request_with_metadata_and_source(
     output.mark_tool_calls_complete();
     ResponsesApiRequest {
         model: "test".to_string(),
-        input: vec![output],
+        input: vec![output].into_iter().map(Arc::new).collect(),
         tools: None,
         tool_choice: "auto".to_string(),
         parallel_tool_calls: true,
@@ -74,7 +74,9 @@ fn http_message_budget_preserves_resources_until_the_message_still_exceeds_limit
         let padding = "x".repeat(target_bytes - serialized_json_bytes(&request).unwrap() + 1);
         set_padding(&mut request, padding);
         assert_eq!(serialized_json_bytes(&request).unwrap(), target_bytes);
-        assert!(metadata_metrics::metadata_bytes(&request.input) < 32 * 1024);
+        assert!(
+            metadata_metrics::metadata_bytes(request.input.iter().map(Arc::as_ref)) < 32 * 1024
+        );
         let original_input = request.input.clone();
         let bounded = bounded_input(&request, &request.input);
         if overage == 0 {
@@ -98,8 +100,9 @@ fn http_message_budget_preserves_resources_until_the_message_still_exceeds_limit
                 /*with_source*/ false,
             )
             .input;
-            let first_reduction = metadata_metrics::metadata_bytes(&original_input)
-                - metadata_metrics::metadata_bytes(&resource_only);
+            let first_reduction =
+                metadata_metrics::metadata_bytes(original_input.iter().map(Arc::as_ref))
+                    - metadata_metrics::metadata_bytes(resource_only.iter().map(Arc::as_ref));
             assert_eq!(
                 metadata,
                 &json!(format!(
@@ -123,6 +126,7 @@ fn http_message_budget_preserves_resources_until_the_message_still_exceeds_limit
         let mut bounded_ordinary = bounded.clone();
         for items in [&mut ordinary, &mut bounded_ordinary] {
             for item in items {
+                let item = Arc::make_mut(item);
                 if overage == 40 * 1024 {
                     item.clear_executed_tool_calls();
                 } else {
@@ -154,7 +158,7 @@ fn message_budget_removes_residual_values_and_markers_when_ordinary_input_fits()
         for websocket in [false, true] {
             let mut request = request_with_metadata(&metadata);
             let mut ordinary = request.clone();
-            ordinary.input[0].clear_tool_result_metadata();
+            Arc::make_mut(&mut ordinary.input[0]).clear_tool_result_metadata();
             let ordinary_bytes = if websocket {
                 serialized_json_bytes(&ResponsesWsRequest::ResponseCreate(
                     ResponseCreateWsRequest::from(&ordinary),
@@ -237,10 +241,10 @@ fn residual_marker_removal_preserves_earlier_resources_and_stops_when_message_fi
         )));
         output.append_executed_tool_calls(vec![call]);
         output.mark_tool_calls_complete();
-        request.input.push(output);
+        request.input.push(Arc::new(output));
     }
     let mut expected = request.clone();
-    expected.input[1].clear_tool_result_metadata();
+    Arc::make_mut(&mut expected.input[1]).clear_tool_result_metadata();
     let padding =
         "x".repeat(MAX_RESPONSE_MESSAGE_BYTES - serialized_json_bytes(&expected).unwrap() + 1);
     set_padding(&mut expected, padding.clone());
@@ -269,7 +273,7 @@ fn websocket_budget_uses_the_actual_delta_and_does_not_mutate_logical_history() 
         call_id: "old".to_string(),
         output: FunctionCallOutputPayload::from_text("x".repeat(MAX_RESPONSE_MESSAGE_BYTES)),
     });
-    request.input.insert(0, old_output);
+    request.input.insert(0, Arc::new(old_output));
     let delta = &request.input[1..];
     let delta_message = ResponsesWsRequest::ResponseCreate(ResponseCreateWsRequest {
         previous_response_id: Some("previous-response".to_string()),
@@ -287,8 +291,8 @@ fn websocket_budget_uses_the_actual_delta_and_does_not_mutate_logical_history() 
     assert_eq!(bounded[0], request.input[0]);
     let mut ordinary = request.input[1].clone();
     let mut bounded_ordinary = bounded[1].clone();
-    ordinary.clear_executed_tool_calls();
-    bounded_ordinary.clear_executed_tool_calls();
+    Arc::make_mut(&mut ordinary).clear_executed_tool_calls();
+    Arc::make_mut(&mut bounded_ordinary).clear_executed_tool_calls();
     assert_eq!(bounded_ordinary, ordinary);
     assert_eq!(request.input[1], self::request().input[0]);
     assert_eq!(bounded_input(&full, &bounded), None);
@@ -298,10 +302,10 @@ fn websocket_budget_uses_the_actual_delta_and_does_not_mutate_logical_history() 
 fn inventory_only_message_budget_counts_the_complete_encoded_envelope() {
     for websocket in [false, true] {
         let mut request = request();
-        request.input[0].clear_tool_result_metadata();
+        Arc::make_mut(&mut request.input[0]).clear_tool_result_metadata();
         let original_input = request.input.clone();
         let mut ordinary = request.clone();
-        ordinary.input[0].clear_executed_tool_calls();
+        Arc::make_mut(&mut ordinary.input[0]).clear_executed_tool_calls();
         let ordinary_bytes = if websocket {
             serialized_json_bytes(&ResponsesWsRequest::ResponseCreate(
                 ResponseCreateWsRequest::from(&ordinary),

@@ -400,7 +400,14 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
             session.services.image_store.as_ref(),
         )
         .await;
-    assert_eq!(prompt.input, persisted);
+    assert_eq!(
+        prompt
+            .input
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>(),
+        persisted.iter().collect::<Vec<_>>()
+    );
     assert!(
         persisted
             .iter()
@@ -414,5 +421,12 @@ async fn compacted_review_restores_originals_once_and_persists_the_request_prefi
     super::super::request_budget::prepare_prompt(&session, &mut prompt, &step, &metadata)
         .await
         .unwrap();
-    assert_eq!(prompt.input, persisted);
+    assert_eq!(
+        prompt
+            .input
+            .iter()
+            .map(std::sync::Arc::as_ref)
+            .collect::<Vec<_>>(),
+        persisted.iter().collect::<Vec<_>>()
+    );
 }

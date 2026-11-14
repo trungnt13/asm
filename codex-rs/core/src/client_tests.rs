@@ -640,7 +640,10 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
         }],
     };
     let prompt = Prompt {
-        input: vec![attributed_output.clone(), omitted_output.clone()],
+        input: vec![attributed_output.clone(), omitted_output.clone()]
+            .into_iter()
+            .map(Arc::new)
+            .collect(),
         ..Default::default()
     };
     let mut responses_metadata = test_responses_metadata_for_client(
@@ -693,7 +696,12 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
                 ]
             };
             assert!(
-                request.input.ends_with(&expected_input),
+                request
+                    .input
+                    .iter()
+                    .map(Arc::as_ref)
+                    .collect::<Vec<_>>()
+                    .ends_with(&expected_input.iter().collect::<Vec<_>>()),
                 "resolved endpoint: {base_url}, responses_lite: {responses_lite}",
             );
             let expected_wire_input = serde_json::to_value(&request.input)?;
@@ -733,8 +741,8 @@ async fn responses_request_includes_internal_metadata_for_provider_grant_or_firs
                     .is_none()
             );
             assert_eq!(
-                prompt.input,
-                vec![attributed_output.clone(), omitted_output.clone()]
+                prompt.input.iter().map(Arc::as_ref).collect::<Vec<_>>(),
+                vec![&attributed_output, &omitted_output]
             );
         }
     }
@@ -830,7 +838,7 @@ fn responses_request_preserves_result_metadata_above_previous_aggregate_budget()
     let recorder =
         crate::tools::ExecutedToolCalls::new(&features, &codex_history::InitialHistory::New);
     let mut prompt = Prompt {
-        input: history.clone(),
+        input: history.clone().into_iter().map(Arc::new).collect(),
         base_instructions: BaseInstructions {
             text: String::new(),
             ..Default::default()
@@ -838,7 +846,12 @@ fn responses_request_preserves_result_metadata_above_previous_aggregate_budget()
         ..Default::default()
     };
     // Follow the sampling path: budget the request copy before client serialization.
-    recorder.attach_to_prompt(&mut prompt.input, &mut Default::default());
+    let mut input = std::mem::take(&mut prompt.input)
+        .into_iter()
+        .map(Arc::unwrap_or_clone)
+        .collect::<Vec<_>>();
+    recorder.attach_to_prompt(&mut input, &mut Default::default());
+    prompt.input = input.into_iter().map(Arc::new).collect();
     let provider =
         ModelProviderInfo::create_openai_provider(Some("https://api.openai.com/v1".to_string()));
     let api_provider = provider.to_api_provider(/*auth_mode*/ None)?;
@@ -963,7 +976,7 @@ fn websocket_incremental_reuse_tracks_raw_result_metadata() -> anyhow::Result<()
             .include_internal_metadata(&api_provider);
         let previous = client.build_responses_request(
             &Prompt {
-                input: vec![previous_output],
+                input: vec![previous_output].into_iter().map(Arc::new).collect(),
                 ..Default::default()
             },
             &test_model_info(),
@@ -979,7 +992,10 @@ fn websocket_incremental_reuse_tracks_raw_result_metadata() -> anyhow::Result<()
         });
         let current = client.build_responses_request(
             &Prompt {
-                input: vec![current_output, follow_up.clone()],
+                input: vec![current_output, follow_up.clone()]
+                    .into_iter()
+                    .map(Arc::new)
+                    .collect(),
                 ..Default::default()
             },
             &test_model_info(),
@@ -1008,7 +1024,11 @@ fn websocket_incremental_reuse_tracks_raw_result_metadata() -> anyhow::Result<()
                 continuation.from_untraced_warmup,
             )),
             if expect_incremental {
-                Ok(("previous-response".to_string(), vec![follow_up], false))
+                Ok((
+                    "previous-response".to_string(),
+                    vec![Arc::new(follow_up)],
+                    false,
+                ))
             } else {
                 Err(NonIncrementalReason::InputMismatch {
                     previous: "custom_tool_call_output",
@@ -1107,7 +1127,7 @@ async fn responses_http_preserves_raw_tool_metadata_for_openai_custom_endpoint()
         "private": "raw-result-metadata",
     })));
     let prompt = Arc::new(Prompt {
-        input: vec![output.clone()],
+        input: vec![Arc::new(output.clone())],
         base_instructions: BaseInstructions {
             text: String::new(),
             ..Default::default()
@@ -1146,7 +1166,7 @@ async fn responses_http_preserves_raw_tool_metadata_for_openai_custom_endpoint()
     assert_eq!(requests.len(), 1);
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body)?;
     assert_eq!(body["input"], serde_json::to_value(vec![output.clone()])?);
-    assert_eq!(prompt.input, vec![output]);
+    assert_eq!(prompt.input, vec![Arc::new(output)]);
     Ok(())
 }
 

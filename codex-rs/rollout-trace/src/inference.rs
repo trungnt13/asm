@@ -331,11 +331,12 @@ impl InferenceTraceAttempt {
 /// Serializes Core history or received response items for replay, preserving
 /// readable reasoning that the outbound request serializer can omit.
 pub fn serialize_trace_items<S: Serializer>(
-    items: &[ResponseItem],
+    items: &[impl std::borrow::Borrow<ResponseItem>],
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     let mut sequence = serializer.serialize_seq(Some(items.len()))?;
     for item in items {
+        let item = item.borrow();
         if let ResponseItem::Reasoning {
             content: Some(content),
             ..

@@ -333,7 +333,8 @@ pub struct ResponsesApiRequest {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
-    pub input: Vec<ResponseItem>,
+    /// Request copies share items until an edit needs an owned copy.
+    pub input: Vec<Arc<ResponseItem>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<ResponsesApiTools>,
     pub tool_choice: String,
@@ -390,7 +391,7 @@ pub struct ResponseCreateWsRequest<'a> {
     pub service_tier: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub previous_response_id: Option<String>,
-    pub input: &'a [ResponseItem],
+    pub input: &'a [Arc<ResponseItem>],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<&'a RawValue>,
     pub tool_choice: &'a str,

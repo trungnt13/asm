@@ -21,15 +21,14 @@ use futures::stream;
 #[derive(Clone)]
 pub(crate) struct RejectedAudioFileIds(pub(crate) Vec<String>);
 
-pub(crate) fn pending_audio_confirmation(
+pub(crate) fn pending_audio_confirmation<'a>(
     previous: Option<&AcceptedFileAudio>,
     turn_id: &str,
     model: &str,
     provider: &str,
-    items: &[ResponseItem],
+    items: impl Iterator<Item = &'a ResponseItem> + Clone,
 ) -> Option<AcceptedFileAudio> {
     let ids = items
-        .iter()
         .filter_map(|item| match item {
             ResponseItem::Message { content, .. } => Some(content.iter()),
             _ => None,
@@ -151,7 +150,7 @@ pub(crate) struct SubmittedFileAudio {
 
 impl SubmittedFileAudio {
     pub(crate) fn from_request<'a>(
-        items: &[ResponseItem],
+        items: impl Iterator<Item = &'a ResponseItem> + Clone,
         accepted: Option<&AcceptedFileAudio>,
         clear_checkpoints: impl Iterator<Item = &'a str> + Clone,
     ) -> Option<Self> {

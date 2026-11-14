@@ -321,17 +321,17 @@ impl ExecutedToolCalls {
 
     /// A later wait cannot claim a complete inventory if an earlier wire copy
     /// lost recorded calls or tool names from the same Code Mode cell.
-    pub(crate) fn invalidate_wire_inventory_loss(
+    pub(crate) fn invalidate_wire_inventory_loss<'a>(
         &self,
-        original: &[ResponseItem],
-        bounded: &[ResponseItem],
+        original: impl IntoIterator<Item = &'a ResponseItem>,
+        bounded: impl IntoIterator<Item = &'a ResponseItem>,
     ) {
         let mut state = self.lock_state();
         let Some(state) = state.as_mut() else {
             return;
         };
         // Request bounding clones the same items in the same order; it only edits metadata.
-        for (original, bounded) in original.iter().zip(bounded) {
+        for (original, bounded) in original.into_iter().zip(bounded) {
             let Some(metadata) = original.executed_tool_call_metadata() else {
                 continue;
             };

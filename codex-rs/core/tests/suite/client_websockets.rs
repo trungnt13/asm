@@ -268,7 +268,7 @@ async fn responses_websocket_preserves_raw_tool_metadata_for_openai_custom_endpo
     let body = connection.first().expect("missing request").body_json();
     assert_eq!(body["type"], "response.create");
     assert_eq!(body["input"], json!([expected]));
-    assert_eq!(prompt.input, vec![output]);
+    assert_eq!(prompt.input, vec![Arc::new(output)]);
     server.shutdown().await;
 }
 
@@ -2844,7 +2844,7 @@ fn prompt_with_input(input: Vec<ResponseItem>) -> Arc<Prompt> {
 
 fn prompt_with_input_and_instructions(input: Vec<ResponseItem>, instructions: &str) -> Arc<Prompt> {
     let mut prompt = Prompt::default();
-    prompt.input = input;
+    prompt.input = input.into_iter().map(Arc::new).collect();
     prompt.base_instructions = BaseInstructions {
         text: instructions.to_string(),
         provenance: None,
