@@ -1167,7 +1167,7 @@ async fn compaction_initial_context_preserves_separate_guardian_developer_messag
 
     let developer_messages = refreshed
         .iter()
-        .map(|item| &item.item)
+        .map(|item| item.item.as_ref())
         .filter_map(|item| match item {
             ResponseItem::Message { role, content, .. } if role == "developer" => {
                 crate::content_items_to_text(content).map(|text| {

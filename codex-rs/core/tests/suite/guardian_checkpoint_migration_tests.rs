@@ -123,10 +123,10 @@ async fn independent_history_resume_filters_rolled_back_sources(compaction: &str
         ("assistant", "Deploy staging?", 2),
         ("user", "Also run tests.", 1),
     ].map(|(role, text, order)| Ok(RolloutItem::ResponseItem(ResponseItemEnvelope {
-        item: serde_json::from_value(json!({
+        item: serde_json::from_value::<codex_protocol::models::ResponseItem>(json!({
             "type": "message", "id": format!("msg_{order}"), "role": role,
             "content": [{"type": if role == "user" { "input_text" } else { "output_text" }, "text": text}]
-        }))?,
+        }))?.into(),
         metadata: Some(CodexHarnessMetadata { user_input_order: Some(order), ..Default::default() }),
     }))).into_iter().collect::<Result<Vec<_>>>()?;
     let RolloutItem::ResponseItem(original) = &history[0] else {
@@ -170,7 +170,7 @@ async fn independent_history_resume_filters_rolled_back_sources(compaction: &str
     let snapshot = thread.conversation_history_snapshot().await;
     assert_eq!(
         snapshot.review_items().cloned().collect::<Vec<_>>(),
-        vec![original]
+        vec![std::sync::Arc::unwrap_or_clone(original)]
     );
     thread.shutdown_and_wait().await?;
     Ok(())

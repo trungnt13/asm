@@ -115,7 +115,7 @@ pub(crate) async fn prepare_prompt(
             })?;
         let mut messages = context.into_annotated_messages();
         for envelope in &mut messages {
-            let message = &mut envelope.item;
+            let message = std::sync::Arc::make_mut(&mut envelope.item);
             let ResponseItem::Message { content, .. } = message else {
                 return Err(CodexErr::InvalidRequest(
                     "expected restored Guardian text".to_owned(),
@@ -151,11 +151,9 @@ pub(crate) async fn prepare_prompt(
             .prepare_conversation_items_for_history(step.turn.as_ref(), model, messages)
             .await
             .0;
-        prompt.input.extend(
-            restored
-                .iter()
-                .map(|envelope| std::sync::Arc::new(envelope.item.clone())),
-        );
+        prompt
+            .input
+            .extend(restored.iter().map(|envelope| envelope.item.clone()));
     }
     let request = session.services.model_client.build_responses_request(
         prompt,

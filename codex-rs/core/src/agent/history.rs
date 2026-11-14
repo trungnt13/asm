@@ -87,7 +87,7 @@ impl LocalAgentRuntime {
 fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool) -> bool {
     match item {
         RolloutItem::ResponseItem(envelope) if envelope.is_always_retained() => true,
-        RolloutItem::ResponseItem(envelope) => match &envelope.item {
+        RolloutItem::ResponseItem(envelope) => match envelope.item.as_ref() {
             ResponseItem::Message { role, phase, .. } => match role.as_str() {
                 "system" | "developer" | "user" => true,
                 "assistant" => matches!(
@@ -306,7 +306,7 @@ pub(super) async fn prepare_forked_history(
         if explicitly_retained
             || (multi_agent_version == MultiAgentVersion::V2
                 && (preserve_fork_prefix
-                    || matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "user" || role == "assistant")))
+                    || matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "user" || role == "assistant")))
         {
             // Resume must not recapture copied parent messages as local authorization.
             envelope
@@ -316,7 +316,7 @@ pub(super) async fn prepare_forked_history(
         }
         if let Some(metadata) = &mut envelope.metadata
             && (metadata.sender_user_messages.take().is_some()
-                || !matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "user"))
+                || !matches!(envelope.item.as_ref(), ResponseItem::Message { role, .. } if role == "user"))
         {
             // Assistant and tool positions belong to the parent counter, not the child.
             metadata.user_input_order = None;
@@ -324,7 +324,7 @@ pub(super) async fn prepare_forked_history(
         if preserve_fork_prefix || explicitly_retained {
             return true;
         }
-        let response_item = &mut envelope.item;
+        let response_item = std::sync::Arc::make_mut(&mut envelope.item);
         // Tool declarations and their comparison baseline must survive or be rebuilt together.
         // Apply this to both standalone items and compaction replacement histories.
         if matches!(response_item, ResponseItem::AdditionalTools { .. }) {

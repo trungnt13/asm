@@ -425,7 +425,7 @@ impl ComposedContext {
                         }
                         SectionContent::Other(item) => cost.add_content(item),
                     }),
-                SectionDelivery::Message(message) => match &message.content.item {
+                SectionDelivery::Message(message) => match message.content.item.as_ref() {
                     ResponseItem::Message { content, .. } => content
                         .iter()
                         .fold(SectionCost::default(), SectionCost::add_content),

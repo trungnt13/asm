@@ -11,6 +11,28 @@ use serde_json::json;
 use super::*;
 
 impl ExecutedToolCalls {
+    pub(in crate::tools::executed_tool_calls) fn attach_owned_prompt(
+        &self,
+        items: &mut [ResponseItem],
+        cache: &mut ExecutedToolCallCache,
+    ) {
+        let mut shared = items.iter().cloned().map(Arc::new).collect::<Vec<_>>();
+        self.attach_to_prompt(&mut shared, cache);
+        for (item, shared) in items.iter_mut().zip(shared) {
+            *item = Arc::unwrap_or_clone(shared);
+        }
+    }
+    pub(in crate::tools::executed_tool_calls) fn attach_owned_compaction(
+        &self,
+        items: &mut [ResponseItem],
+    ) {
+        let mut shared = items.iter().cloned().map(Arc::new).collect::<Vec<_>>();
+        self.attach_to_compaction_prompt(&mut shared);
+        for (item, shared) in items.iter_mut().zip(shared) {
+            *item = Arc::unwrap_or_clone(shared);
+        }
+    }
+
     fn attach_pending_to_prompt(
         &self,
         items: &mut [ResponseItem],
@@ -20,7 +42,17 @@ impl ExecutedToolCalls {
         let Some(state) = state.as_mut() else {
             return false;
         };
-        Self::attach_pending_to_prompt_with_state(state, items, retry_cache, RequestKind::Sampling)
+        let mut shared = items.iter().cloned().map(Arc::new).collect::<Vec<_>>();
+        let attached = Self::attach_pending_to_prompt_with_state(
+            state,
+            &mut shared,
+            retry_cache,
+            RequestKind::Sampling,
+        );
+        for (item, shared) in items.iter_mut().zip(shared) {
+            *item = Arc::unwrap_or_clone(shared);
+        }
+        attached
     }
 }
 
@@ -115,7 +147,7 @@ fn selected_exec_result_uses_only_the_retained_wrapper_inventory() {
     let tools = ["normalized_alias__lookup".to_owned()];
     assert!(!recorder.exec_output_matches(&exec, &tools));
     let mut prompt = vec![exec_input("exec"), exec.clone()];
-    recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
 
     assert!(recorder.exec_output_matches(&exec, &tools));
     assert!(recorder.exec_output_matches(&exec, &["normalized-alias__lookup".to_owned()]));
@@ -143,7 +175,7 @@ fn compaction_attaches_pending_and_retained_code_mode_metadata() {
         let history = vec![exec_input("exec"), exec_output("exec")];
         if previously_sampled {
             let mut sampled = history.clone();
-            recorder.attach_to_prompt(&mut sampled, &mut HashMap::new());
+            recorder.attach_owned_prompt(&mut sampled, &mut HashMap::new());
             assert_eq!(tool_calls_complete(&sampled[1]), Some(true));
         }
         let result_metadata = json!({"id": "latest"});
@@ -155,14 +187,14 @@ fn compaction_attaches_pending_and_retained_code_mode_metadata() {
         expected[1].mark_tool_calls_complete();
 
         let mut compact = history.clone();
-        recorder.attach_to_compaction_prompt(&mut compact);
+        recorder.attach_owned_compaction(&mut compact);
         assert_eq!(compact, expected);
         let mut retry = history.clone();
-        recorder.attach_to_compaction_prompt(&mut retry);
+        recorder.attach_owned_compaction(&mut retry);
         assert_eq!(retry, expected);
         // A failed compaction must leave the same observations available to sampling.
         let mut sampled = history;
-        recorder.attach_to_prompt(&mut sampled, &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut sampled, &mut HashMap::new());
         assert_eq!(sampled, expected);
     }
 }
@@ -204,7 +236,7 @@ fn large_direct_and_code_mode_metadata_survive_sampling_and_compaction() {
     let history = vec![direct, exec_input("exec"), ordinary_code.clone()];
 
     let mut compact = history.clone();
-    recorder.attach_to_compaction_prompt(&mut compact);
+    recorder.attach_owned_compaction(&mut compact);
     assert!(
         compact
             .iter()
@@ -233,12 +265,12 @@ fn large_direct_and_code_mode_metadata_survive_sampling_and_compaction() {
     assert_eq!(tool_calls_complete(&compact[2]), Some(true));
 
     let mut sampled = history.clone();
-    recorder.attach_to_prompt(&mut sampled, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut sampled, &mut HashMap::new());
     assert_eq!(sampled, compact);
 
     // A smaller window still has the full Code Mode result and its completion marker.
     let mut next = history[1..].to_vec();
-    recorder.attach_to_prompt(&mut next, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut next, &mut HashMap::new());
     assert_eq!(next[1], compact[2]);
 }
 
@@ -266,7 +298,7 @@ fn failed_compaction_preserves_observations_absent_from_trimmed_retries() {
         history.extend([exec_input(origin), exec_output(origin)]);
     }
     let mut full_attempt = history.clone();
-    recorder.attach_to_compaction_prompt(&mut full_attempt);
+    recorder.attach_owned_compaction(&mut full_attempt);
     assert_eq!(tool_calls_complete(&full_attempt[0]), Some(true));
     assert_eq!(tool_calls_complete(&full_attempt[2]), Some(true));
 
@@ -277,7 +309,7 @@ fn failed_compaction_preserves_observations_absent_from_trimmed_retries() {
     let large_metadata = json!({"provider": "x".repeat(2100 * 1024)});
     assert!(recorder.record_tool_result_metadata(&source, "nested", &large_metadata));
     let mut trimmed_attempt = history[3..].to_vec();
-    recorder.attach_to_compaction_prompt(&mut trimmed_attempt);
+    recorder.attach_owned_compaction(&mut trimmed_attempt);
     assert_eq!(tool_calls_complete(&trimmed_attempt[1]), Some(true));
     let encoded = serde_json::to_value(&trimmed_attempt[1]).unwrap();
     assert_eq!(
@@ -289,13 +321,13 @@ fn failed_compaction_preserves_observations_absent_from_trimmed_retries() {
     let mut expected = full_attempt;
     expected[3..].clone_from_slice(&trimmed_attempt);
     let mut resumed = history.clone();
-    recorder.attach_to_prompt(&mut resumed, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut resumed, &mut HashMap::new());
     assert_eq!(resumed, expected);
 
     // Normal sampling in the smaller window can prune the old observation.
-    recorder.attach_to_prompt(&mut history[3..], &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut history[3..], &mut HashMap::new());
     let mut old = vec![direct.clone(), exec_input("old"), exec_output("old")];
-    recorder.attach_to_prompt(&mut old, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut old, &mut HashMap::new());
     assert_eq!(old, vec![direct, exec_input("old"), exec_output("old")]);
 }
 
@@ -313,7 +345,7 @@ fn compaction_keeps_direct_outputs_in_code_mode_binding_validation() {
         &codex_protocol_test_support::uuid_v7_item_id_generator_for_test(),
     );
     let mut compact = vec![exec_input("exec"), exec_output("exec"), direct.clone()];
-    recorder.attach_to_compaction_prompt(&mut compact);
+    recorder.attach_owned_compaction(&mut compact);
     let mut expected = exec_output("exec");
     expected.append_executed_tool_calls(vec![call]);
     expected.set_tool_call_cell_id("exec");
@@ -611,7 +643,7 @@ async fn recorder_refreshes_without_changing_execution_features_or_claiming_miss
         }
         calls.finish_cell_recording(&cell);
         let mut prompt = vec![exec_input(&origin), exec_output(&origin)];
-        calls.attach_to_prompt(&mut prompt, &mut retry_cache);
+        calls.attach_owned_prompt(&mut prompt, &mut retry_cache);
         assert_eq!(tool_calls_complete(&prompt[1]), None);
         assert_eq!(
             prompt[1]
@@ -806,7 +838,7 @@ fn empty_inventory_revalidates_history_on_retry() {
         recorder.finish_cell_recording(&cell);
         let mut retry_cache = HashMap::new();
         let mut prompt = vec![exec_input("exec"), exec_output("exec")];
-        recorder.attach_to_prompt(&mut prompt, &mut retry_cache);
+        recorder.attach_owned_prompt(&mut prompt, &mut retry_cache);
         assert_eq!(tool_calls_complete(&prompt[1]), Some(true));
         match scenario {
             "wrong_input" => prompt[0] = wait_input("exec", &cell),
@@ -816,7 +848,7 @@ fn empty_inventory_revalidates_history_on_retry() {
             }
             _ => unreachable!(),
         }
-        recorder.attach_to_prompt(&mut prompt, &mut retry_cache);
+        recorder.attach_owned_prompt(&mut prompt, &mut retry_cache);
         assert_eq!(tool_calls_complete(&prompt[1]), None, "{scenario}");
     }
 }
@@ -834,7 +866,7 @@ fn empty_inventory_wait_requires_a_fresh_session() {
         recorder.start_cell(&cell, "exec");
         let mut prompt = vec![exec_input("exec"), exec_output("exec")];
         let mut retry_cache = HashMap::new();
-        recorder.attach_to_prompt(&mut prompt, &mut retry_cache);
+        recorder.attach_owned_prompt(&mut prompt, &mut retry_cache);
         assert!(prompt[1].executed_tool_call_metadata().is_none());
         if pending_pressure {
             // Model a finished empty cell whose original output mapping was consumed.
@@ -863,12 +895,12 @@ fn empty_inventory_wait_requires_a_fresh_session() {
                 wait_input("busy-wait", &busy_cell),
                 output("busy-wait"),
             ];
-            recorder.attach_to_prompt(&mut busy_prompt, &mut HashMap::new());
+            recorder.attach_owned_prompt(&mut busy_prompt, &mut HashMap::new());
         }
         recorder.register_cell(&cell, "wait");
         recorder.finish_cell_recording(&cell);
         prompt.extend([wait_input("wait", &cell), output("wait")]);
-        recorder.attach_to_prompt(&mut prompt, &mut retry_cache);
+        recorder.attach_owned_prompt(&mut prompt, &mut retry_cache);
         assert!(!has_direct_call_metadata(&prompt[3]));
         assert_eq!(
             tool_calls_complete(&prompt[3]),
@@ -1031,7 +1063,7 @@ fn paginated_history_allows_fresh_origins_but_rejects_known_ids() {
 
         // The old call is only in inherited history, so duplicate prompt IDs cannot reject it.
         let mut prompt = [exec_input(origin), exec_output(origin)];
-        recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
         assert_eq!(
             tool_calls_complete(&prompt[1]),
             (origin == "fresh-exec").then_some(true),
@@ -1046,7 +1078,7 @@ fn paginated_history_allows_fresh_origins_but_rejects_known_ids() {
 
         // Compaction may drop the input after the output has already been authenticated.
         let mut retry = [exec_output(origin)];
-        recorder.attach_to_prompt(&mut retry, &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut retry, &mut HashMap::new());
         assert_eq!(retry[0], prompt[1]);
     }
 }
@@ -1063,14 +1095,14 @@ fn forked_wait_keeps_calls_without_completion() {
     recorder.finish_cell_recording(&cell);
 
     let mut prompt = [wait_input("wait", &cell), output("wait")];
-    recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
     let mut expected = output("wait");
     expected.append_executed_tool_calls(vec![call]);
     expected.set_tool_call_cell_id("new-exec");
     assert_eq!(prompt[1], expected);
 
     let mut compacted = [output("wait")];
-    recorder.attach_to_prompt(&mut compacted, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut compacted, &mut HashMap::new());
     assert_eq!(compacted[0], expected);
 }
 
@@ -1099,7 +1131,7 @@ fn wrapper_mismatch_cannot_become_complete_on_a_later_wait() {
             // An exec custom call cannot authenticate a function output with the same ID.
             _ => vec![exec_input("exec"), output("exec")],
         };
-        recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
         assert_eq!(
             prompt
                 .last()
@@ -1112,13 +1144,13 @@ fn wrapper_mismatch_cannot_become_complete_on_a_later_wait() {
         if scenario == "changed_exec" {
             // Invalidate already-retained evidence while its cell is still active.
             prompt[0] = wait_input("exec", &cell);
-            recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+            recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
         }
 
         recorder.register_cell(&cell, "last-wait");
         recorder.finish_cell_recording(&cell);
         let mut last = [wait_input("last-wait", &cell), output("last-wait")];
-        recorder.attach_to_prompt(&mut last, &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut last, &mut HashMap::new());
         assert_eq!(tool_calls_complete(&last[1]), None);
     }
 }
@@ -1140,7 +1172,7 @@ fn completeness_rejects_reused_origin() {
     record_nested_call(&recorder, &second, "nested-second");
     recorder.finish_cell_recording(&second);
     let mut prompt = [exec_input("reused-exec"), exec_output("reused-exec")];
-    recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
     assert_eq!(tool_calls_complete(&prompt[1]), None);
 }
 
@@ -1159,7 +1191,7 @@ fn malformed_search_id_cannot_prove_a_later_exec_complete() {
     record_nested_call(&recorder, &cell, "nested");
     recorder.finish_cell_recording(&cell);
     let mut prompt = [exec_input("reused"), exec_output("reused")];
-    recorder.attach_to_prompt(&mut prompt, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut prompt, &mut HashMap::new());
     assert_eq!(tool_calls_complete(&prompt[1]), None);
     assert!(prompt[1].executed_tool_call_metadata().is_some());
 }
@@ -1185,7 +1217,7 @@ fn completeness_rejects_direct_id_collision_and_late_calls() {
     record_nested_call(&recorder, &cell, "nested");
     recorder.finish_cell_recording(&cell);
     let mut collision = [exec_input("exec-collision"), exec_output("exec-collision")];
-    recorder.attach_to_prompt(&mut collision, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut collision, &mut HashMap::new());
     assert_eq!(tool_calls_complete(&collision[1]), None);
 
     let recorder = new_recorder(InitialHistory::New);
@@ -1194,11 +1226,11 @@ fn completeness_rejects_direct_id_collision_and_late_calls() {
     record_nested_call(&recorder, &cell, "nested-first");
     recorder.finish_cell_recording(&cell);
     let mut first = [exec_input("exec-late"), exec_output("exec-late")];
-    recorder.attach_to_prompt(&mut first, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut first, &mut HashMap::new());
     assert_eq!(tool_calls_complete(&first[1]), Some(true));
     record_nested_call(&recorder, &cell, "nested-late");
     let mut late = [exec_input("exec-late"), exec_output("exec-late")];
-    recorder.attach_to_prompt(&mut late, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut late, &mut HashMap::new());
     assert_eq!(tool_calls_complete(&late[1]), None);
 }
 
@@ -1222,7 +1254,7 @@ fn large_wrapped_arguments_preserve_later_wait_completeness() {
     });
     recorder.record_nested_tool_call(cell.clone(), "nested".to_string(), call, original_bytes);
     let mut initial = [exec_input("exec"), exec_output("exec")];
-    recorder.attach_to_prompt(&mut initial, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut initial, &mut HashMap::new());
     assert_eq!(
         initial[1]
             .executed_tool_call_metadata()
@@ -1235,7 +1267,7 @@ fn large_wrapped_arguments_preserve_later_wait_completeness() {
     recorder.register_cell(&cell, "wait");
     recorder.finish_cell_recording(&cell);
     let mut wait = [wait_input("wait", &cell), output("wait")];
-    recorder.attach_to_prompt(&mut wait, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut wait, &mut HashMap::new());
     assert_eq!(tool_calls_complete(&wait[1]), Some(true));
 }
 
@@ -1337,7 +1369,7 @@ fn late_result_metadata_survives_truncated_arguments() {
         assert_eq!(tool_calls_complete(&retry[1]), None);
     }
     let mut compact = history;
-    recorder.attach_to_compaction_prompt(&mut compact);
+    recorder.attach_owned_compaction(&mut compact);
     assert_eq!(compact, expected);
 }
 
@@ -1605,7 +1637,7 @@ fn late_raw_metadata_is_not_attached_after_duplicate_outputs() {
     recorder.start_cell(&cell, "exec");
     record_nested_call(&recorder, &cell, "nested");
     let mut duplicate = [exec_input("exec"), exec_output("exec"), exec_output("exec")];
-    recorder.attach_to_prompt(&mut duplicate, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut duplicate, &mut HashMap::new());
 
     let source = ToolCallSource::CodeMode {
         cell_id: cell.as_str().to_string(),
@@ -1617,7 +1649,7 @@ fn late_raw_metadata_is_not_attached_after_duplicate_outputs() {
         &json!({"openai/resource_access": {"resources": ["result"]}}),
     ));
     let mut retry = [exec_input("exec"), exec_output("exec")];
-    recorder.attach_to_prompt(&mut retry, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut retry, &mut HashMap::new());
     assert!(!retry[1].has_tool_result_metadata());
     assert_eq!(tool_calls_complete(&retry[1]), None);
 }
@@ -1758,7 +1790,7 @@ fn mapping_pressure_preserves_existing_cells_and_late_partial_records() {
             expected[index].mark_tool_calls_complete();
         }
     }
-    recorder.attach_to_prompt(&mut items, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut items, &mut HashMap::new());
     assert_eq!(items, expected);
     assert_eq!(
         recorder.lock_state().as_ref().unwrap().pending_nested_calls,

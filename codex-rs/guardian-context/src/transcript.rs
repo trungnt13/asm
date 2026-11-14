@@ -45,7 +45,7 @@ pub fn is_inherited_manual_approval(envelope: &codex_history::ResponseItemEnvelo
         .metadata
         .as_ref()
         .is_some_and(|metadata| metadata.inherited_user_message)
-        && matches!(&envelope.item, ResponseItem::Message { role, content, .. }
+        && matches!(envelope.item.as_ref(), ResponseItem::Message { role, content, .. }
             if role == "developer" && content.iter().any(|part|
                 matches!(part, ContentItem::InputText { text } | ContentItem::OutputText { text , .. }
                     if text.starts_with(MANUAL_APPROVAL_DEVELOPER_PREFIX))))

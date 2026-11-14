@@ -77,15 +77,15 @@ struct SearchResult {
     tools: Vec<ToolName>,
 }
 
-pub(crate) fn specs_for_history(
+pub(crate) fn specs_for_history<T: std::borrow::Borrow<ResponseItem>>(
     router: &ToolRouter,
-    input: &[ResponseItem],
+    input: &[T],
     model: &ModelInfo,
 ) -> Arc<[ToolSpec]> {
     let mut search_calls = HashSet::new();
     let mut discovered = BTreeSet::new();
     for item in input {
-        match item {
+        match item.borrow() {
             ResponseItem::FunctionCall {
                 name,
                 namespace,

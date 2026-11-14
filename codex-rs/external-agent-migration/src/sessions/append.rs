@@ -266,7 +266,9 @@ fn history_model_items(items: &[RolloutItem]) -> Option<Vec<&ResponseItem>> {
             | RolloutItem::RetainedContext(_)
             | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::SecurityRiskScore(_) => {}
-            RolloutItem::ResponseItem(response_item) => model_items.push(&response_item.item),
+            RolloutItem::ResponseItem(response_item) => {
+                model_items.push(response_item.item.as_ref())
+            }
             RolloutItem::EventMsg(
                 EventMsg::ContextCompacted(_) | EventMsg::ThreadRolledBack(_),
             )

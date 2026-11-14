@@ -691,7 +691,7 @@ fn delivered_message(
     metadata: CodexHarnessMetadata,
 ) -> ResponseItemEnvelope {
     ResponseItemEnvelope {
-        item: user_message(content),
+        item: user_message(content).into(),
         metadata: (!metadata.guardian_sources.is_empty()
             || metadata.guardian_source_order_guidance)
             .then_some(metadata),

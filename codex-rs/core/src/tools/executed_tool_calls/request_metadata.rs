@@ -9,13 +9,13 @@ enum RequestKind {
 }
 
 impl ExecutedToolCalls {
-    pub(crate) fn attach_to_compaction_prompt(&self, items: &mut [ResponseItem]) {
+    pub(crate) fn attach_to_compaction_prompt(&self, items: &mut [Arc<ResponseItem>]) {
         self.attach_to_request(items, &mut HashMap::new(), RequestKind::Compaction);
     }
 
     pub(crate) fn attach_to_prompt(
         &self,
-        items: &mut [ResponseItem],
+        items: &mut [Arc<ResponseItem>],
         retry_cache: &mut ExecutedToolCallCache,
     ) {
         self.attach_to_request(items, retry_cache, RequestKind::Sampling);
@@ -23,7 +23,7 @@ impl ExecutedToolCalls {
 
     fn attach_to_request(
         &self,
-        items: &mut [ResponseItem],
+        items: &mut [Arc<ResponseItem>],
         retry_cache: &mut ExecutedToolCallCache,
         request_kind: RequestKind,
     ) {
@@ -36,6 +36,7 @@ impl ExecutedToolCalls {
             };
             for item in items.iter_mut() {
                 if let Some(call) = item.id().and_then(|id| state.direct_calls.get(id)) {
+                    let item = Arc::make_mut(item);
                     item.clear_executed_tool_calls();
                     item.append_executed_tool_calls(vec![call.clone()]);
                     if call.has_complete_inventory() {
@@ -48,7 +49,7 @@ impl ExecutedToolCalls {
             if request_kind == RequestKind::Sampling && !state.direct_calls.is_empty() {
                 let output_ids = items
                     .iter()
-                    .filter_map(ResponseItem::id)
+                    .filter_map(|item| item.id())
                     .collect::<HashSet<_>>();
                 state.direct_calls.retain(|id, _| output_ids.contains(id));
             }
@@ -57,12 +58,42 @@ impl ExecutedToolCalls {
 
         // Argument truncation preserves inventory completeness; omitted calls or
         // names still invalidate completion across the cell's outputs.
-        normalize_executed_tool_call_completeness(items);
+        let damaged_cells = items
+            .iter()
+            .filter_map(|item| {
+                let metadata = item.executed_tool_call_metadata()?;
+                metadata
+                    .executed_tool_calls
+                    .iter()
+                    .flatten()
+                    .any(|call| !call.has_complete_inventory())
+                    .then_some(metadata.cell_id.as_ref())
+                    .flatten()
+                    .cloned()
+            })
+            .collect::<HashSet<_>>();
+        for item in items.iter_mut() {
+            let damaged = item.executed_tool_call_metadata().is_some_and(|metadata| {
+                metadata.tool_calls_complete.is_some()
+                    && (metadata
+                        .executed_tool_calls
+                        .iter()
+                        .flatten()
+                        .any(|call| !call.has_complete_inventory())
+                        || metadata
+                            .cell_id
+                            .as_ref()
+                            .is_some_and(|id| damaged_cells.contains(id)))
+            });
+            if damaged {
+                Arc::make_mut(item).clear_tool_calls_complete();
+            }
+        }
     }
 
     fn attach_pending_to_prompt_with_state(
         state: &mut ExecutedToolCallRecorderState,
-        items: &mut [ResponseItem],
+        items: &mut [Arc<ResponseItem>],
         retry_cache: &mut ExecutedToolCallCache,
         request_kind: RequestKind,
     ) -> bool {
@@ -110,7 +141,7 @@ impl ExecutedToolCalls {
                 let Some(call_id) = output_call_id(item) else {
                     continue;
                 };
-                let key = (std::mem::discriminant(item), call_id.to_string());
+                let key = (std::mem::discriminant(item.as_ref()), call_id.to_string());
                 let retained = state.retained_calls.get(&key);
                 let binding = retained
                     .and_then(|retained| {
@@ -203,7 +234,7 @@ impl ExecutedToolCalls {
             let Some(call_id) = output_call_id(item) else {
                 continue;
             };
-            let key = (std::mem::discriminant(item), call_id.to_string());
+            let key = (std::mem::discriminant(item.as_ref()), call_id.to_string());
             let retained = state.retained_calls.get(&key);
             let mut complete = retained.is_some_and(|retained| retained.complete);
             let mut cell_id = retained.and_then(|retained| retained.cell_id.clone());
@@ -260,7 +291,7 @@ impl ExecutedToolCalls {
                     }
                     complete = cell.completion == CellCompletion::Complete
                         && (state.can_prove_wait_completion
-                            || matches!(item, ResponseItem::CustomToolCallOutput { .. }));
+                            || matches!(item.as_ref(), ResponseItem::CustomToolCallOutput { .. }));
                     let has_retained_truncated_calls =
                         state.retained_calls.values().any(|retained| {
                             retained.runtime_cell_id.as_ref() == Some(&output_cell_id)
@@ -305,7 +336,7 @@ impl ExecutedToolCalls {
                 );
                 calls
             };
-            let item = &mut items[index];
+            let item = Arc::make_mut(&mut items[index]);
             item.append_executed_tool_calls(calls);
             if let Some(cell_id) = cell_id {
                 item.set_tool_call_cell_id(&cell_id);
@@ -333,7 +364,7 @@ impl ExecutedToolCalls {
             let Some(call_id) = output_call_id(item) else {
                 continue;
             };
-            let key = (std::mem::discriminant(item), call_id.to_string());
+            let key = (std::mem::discriminant(item.as_ref()), call_id.to_string());
             let Some(retained) = state.retained_calls.get_mut(&key) else {
                 continue;
             };
@@ -392,14 +423,14 @@ impl ExecutedToolCalls {
             let Some(call_id) = output_call_id(item) else {
                 continue;
             };
-            let key = (std::mem::discriminant(&*item), call_id.to_string());
+            let key = (std::mem::discriminant(item.as_ref()), call_id.to_string());
             let Some(retained) = state.retained_calls.get(&key) else {
                 continue;
             };
             if retained.complete {
-                item.mark_tool_calls_complete();
+                Arc::make_mut(item).mark_tool_calls_complete();
             } else {
-                item.clear_tool_calls_complete();
+                Arc::make_mut(item).clear_tool_calls_complete();
             }
         }
 
@@ -408,12 +439,12 @@ impl ExecutedToolCalls {
 }
 
 // Direct records already belong to their output; never rebuild them from the Code Mode cache.
-fn clear_direct_call_metadata(items: &mut [ResponseItem]) {
+fn clear_direct_call_metadata(items: &mut [Arc<ResponseItem>]) {
     for item in items
         .iter_mut()
         .filter(|item| has_direct_call_metadata(item))
     {
-        item.clear_executed_tool_calls();
+        Arc::make_mut(item).clear_executed_tool_calls();
     }
 }
 

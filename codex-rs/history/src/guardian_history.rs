@@ -36,7 +36,7 @@ struct Entry<'a> {
 impl Serialize for GuardianHistoryCheckpoint {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(self.0.iter().map(|entry| Entry {
-            item: (&entry.item).into(),
+            item: entry.item.as_ref().into(),
             guardian_metadata: entry.metadata.as_ref().map(Cow::Borrowed),
         }))
     }
@@ -48,7 +48,7 @@ impl<'de> Deserialize<'de> for GuardianHistoryCheckpoint {
             Vec::<Entry<'_>>::deserialize(deserializer)?
                 .into_iter()
                 .map(|entry| ResponseItemEnvelope {
-                    item: entry.item.into(),
+                    item: ResponseItem::from(entry.item).into(),
                     metadata: entry.guardian_metadata.map(Cow::into_owned),
                 })
                 .collect(),

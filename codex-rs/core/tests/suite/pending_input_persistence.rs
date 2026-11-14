@@ -650,7 +650,7 @@ async fn local_preparation_is_durable_before_first_input_and_survives_restart(
         .filter_map(|item| match item {
             RolloutItem::ResponseItem(envelope) if envelope.item.id() == prepared.id() => {
                 // Core preserves this ID and adds runtime turn/creation-time metadata.
-                Some(responses::strip_metadata(envelope.item))
+                Some(responses::strip_metadata(envelope.into_item()))
             }
             _ => None,
         })

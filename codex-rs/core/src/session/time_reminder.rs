@@ -46,8 +46,12 @@ pub(crate) struct CurrentTimeReminderState {
 }
 
 impl CurrentTimeReminderState {
-    pub(super) fn note_recorded_items(&mut self, items: &[ResponseItem]) {
+    pub(super) fn note_recorded_items<T: std::borrow::Borrow<ResponseItem>>(
+        &mut self,
+        items: &[T],
+    ) {
         if items.iter().any(|item| {
+            let item = item.borrow();
             is_user_turn_boundary(item)
                 || matches!(
                     item,

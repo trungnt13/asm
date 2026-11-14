@@ -33,7 +33,7 @@ pub(super) fn handoff_boundaries(
         }) {
             preceding_order = Some(RetainedContextOrder::Local(order));
         }
-        let direct = match &envelope.item {
+        let direct = match envelope.item.as_ref() {
             ResponseItem::FunctionCall {
                 name,
                 namespace,

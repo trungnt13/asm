@@ -200,7 +200,7 @@ async fn generated_image_ui_item_is_file_backed_in_rollout() -> Result<()> {
     assert_eq!(image, &live_image);
 
     let output_image = rollout.iter().find_map(|item| match item {
-        RolloutItem::ResponseItem(envelope) => match &envelope.item {
+        RolloutItem::ResponseItem(envelope) => match envelope.item.as_ref() {
             ResponseItem::FunctionCallOutput {
                 call_id: Some(call_id),
                 output,

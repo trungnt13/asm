@@ -1183,7 +1183,10 @@ async fn pending_turn_input(
             {
                 metadata.get_or_insert_default().retain_across_windows = Some(true);
             }
-            TurnInput::FunctionCallOutput(ResponseItemEnvelope { item, metadata })
+            TurnInput::FunctionCallOutput(ResponseItemEnvelope {
+                item: item.into(),
+                metadata,
+            })
         }
         SubmittedTurnInput::ResponseItem(item)
         | SubmittedTurnInput::AnnotatedResponseItem(AnnotatedResponseItem { item, .. }) => {

@@ -217,7 +217,7 @@ fn selected(envelope: &ResponseItemEnvelope) -> anyhow::Result<bool> {
             return Ok(false);
         }
     }
-    Ok(match &envelope.item {
+    Ok(match envelope.item.as_ref() {
         ResponseItem::Message {
             role,
             content,

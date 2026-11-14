@@ -98,21 +98,23 @@ impl TurnInput {
     fn is_queue_only_mail(&self) -> bool {
         match self {
             Self::InterAgentCommunication(communication) => !communication.trigger_turn,
-            Self::ResponseItem(ResponseItemEnvelope {
-                item: ResponseItem::AgentMessage { .. },
-                ..
-            }) => true,
+            Self::ResponseItem(envelope)
+                if matches!(envelope.item.as_ref(), ResponseItem::AgentMessage { .. }) =>
+            {
+                true
+            }
             Self::UserInput { .. } | Self::FunctionCallOutput(_) | Self::ResponseItem(_) => false,
         }
     }
 
     fn wait_activity(&self) -> InputQueueActivity {
         match self {
-            Self::InterAgentCommunication(_)
-            | Self::ResponseItem(ResponseItemEnvelope {
-                item: ResponseItem::AgentMessage { .. },
-                ..
-            }) => InputQueueActivity::Mailbox,
+            Self::InterAgentCommunication(_) => InputQueueActivity::Mailbox,
+            Self::ResponseItem(envelope)
+                if matches!(envelope.item.as_ref(), ResponseItem::AgentMessage { .. }) =>
+            {
+                InputQueueActivity::Mailbox
+            }
             Self::UserInput { .. } | Self::FunctionCallOutput(_) | Self::ResponseItem(_) => {
                 InputQueueActivity::Steer
             }
@@ -249,10 +251,7 @@ impl InputQueue {
             && turn_state.pending_input.items.iter().any(|input| {
                 matches!(
                     input,
-                    TurnInput::ResponseItem(ResponseItemEnvelope {
-                        item: ResponseItem::AgentMessage { .. },
-                        ..
-                    })
+                    TurnInput::ResponseItem(envelope) if matches!(envelope.item.as_ref(), ResponseItem::AgentMessage { .. })
                 )
             })
     }
@@ -631,7 +630,7 @@ mod tests {
         assert_eq!(serde_json::from_value::<TurnInput>(value).unwrap(), input);
 
         let annotated = wrap(ResponseItemEnvelope {
-            item: ResponseItem::Other,
+            item: ResponseItem::Other.into(),
             metadata: Some(CodexHarnessMetadata {
                 client_authored: true,
                 ..Default::default()

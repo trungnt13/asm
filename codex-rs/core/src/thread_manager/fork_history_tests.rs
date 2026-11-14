@@ -65,7 +65,9 @@ async fn interrupted_snapshot_closes_only_child_pending_calls(kind: &str) {
             .into(),
         ),
         RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: serde_json::from_value(call).expect("pending call"),
+            item: serde_json::from_value::<codex_protocol::models::ResponseItem>(call)
+                .expect("pending call")
+                .into(),
             metadata: Some(CodexHarnessMetadata {
                 client_authored: true,
                 user_input_order: Some(7),

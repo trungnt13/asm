@@ -95,7 +95,7 @@ impl Session {
         Self::stamp_response_item_for_history(&mut item, &context.sub_id);
         self.assign_missing_response_item_id(&mut item);
         let mut item = ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: Some(CodexHarnessMetadata {
                 user_input_order: Some(user_input_order),
                 ..Default::default()

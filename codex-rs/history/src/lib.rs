@@ -60,7 +60,7 @@ use serde::de::Error as _;
 /// Persistence keeps the response item intact and stores its metadata separately.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResponseItemEnvelope {
-    pub item: ResponseItem,
+    pub item: Arc<ResponseItem>,
     pub metadata: Option<CodexHarnessMetadata>,
 }
 
@@ -244,14 +244,14 @@ impl ResponseItemEnvelope {
     /// Wraps a raw Responses API item for persisted history.
     pub fn new(item: ResponseItem) -> Self {
         Self {
-            item,
+            item: Arc::new(item),
             metadata: None,
         }
     }
 
     /// Unwraps the raw Responses API item.
     pub fn into_item(self) -> ResponseItem {
-        self.item
+        Arc::unwrap_or_clone(self.item)
     }
 }
 
@@ -284,7 +284,7 @@ impl Deref for ResponseItemEnvelope {
 
 impl DerefMut for ResponseItemEnvelope {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.item
+        Arc::make_mut(&mut self.item)
     }
 }
 

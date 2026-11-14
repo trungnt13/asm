@@ -1882,7 +1882,7 @@ pub(super) fn collect_explicit_app_ids_from_skill_items(
 
 #[instrument(level = "trace", skip_all)]
 pub(crate) fn build_prompt(
-    input: Vec<ResponseItem>,
+    input: Vec<Arc<ResponseItem>>,
     step_context: &StepContext,
     base_instructions: BaseInstructions,
     incremental_tools: bool,
@@ -1910,7 +1910,7 @@ pub(crate) fn build_prompt(
         step_context.tool_router.model_visible_specs()
     };
     Prompt {
-        input: input.into_iter().map(Arc::new).collect(),
+        input,
         tools,
         parallel_tool_calls: true,
         base_instructions: if incremental_tools {
@@ -2048,7 +2048,7 @@ async fn run_sampling_request(
                 prompt.input.iter().map(Arc::as_ref),
             );
             let clear_checkpoints = history.annotated_items().iter().filter_map(|envelope| {
-                rejected_audio::clear_checkpoint(&envelope.item, envelope.metadata.as_ref())
+                rejected_audio::clear_checkpoint(envelope.item.as_ref(), envelope.metadata.as_ref())
             });
             let submitted = rejected_audio::SubmittedFileAudio::from_request(
                 prompt.input.iter().map(Arc::as_ref),
@@ -2909,7 +2909,7 @@ async fn drain_in_flight(
                 mark_thread_memory_mode_polluted_if_external_context(
                     sess.as_ref(),
                     turn_context.as_ref(),
-                    &envelope.item,
+                    envelope.item.as_ref(),
                 )
                 .await;
                 sess.record_annotated_conversation_items(
