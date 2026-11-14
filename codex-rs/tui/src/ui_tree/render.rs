@@ -57,10 +57,9 @@ impl PreparedUiTree {
         ))
     }
 
-    pub(crate) fn measure_natural(&self) -> Size {
-        self.0.as_ref().map_or_else(Size::default, |node| {
-            let width = u16::try_from(node.widths.preferred).unwrap_or(u16::MAX);
-            self.measure(Size::new(width, u16::MAX))
+    pub(crate) fn preferred_width(&self) -> u16 {
+        self.0.as_ref().map_or(0, |node| {
+            u16::try_from(node.widths.preferred).unwrap_or(u16::MAX)
         })
     }
 

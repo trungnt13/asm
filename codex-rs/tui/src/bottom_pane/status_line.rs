@@ -106,7 +106,7 @@ impl StatusLine {
     pub(crate) fn with_extension_suffix(&self, suffix: &str, separator: &str) -> Self {
         match &self.0 {
             StatusContent::Extension(extension) => {
-                let separator = if extension.content.measure_natural().width > 0 {
+                let separator = if extension.content.preferred_width() > 0 {
                     separator
                 } else {
                     ""
