@@ -141,11 +141,15 @@ The owner accepted this limitation for the sync through `05cf8eeb14`, for PR #17
 
 For PR #190, the owner accepted the unchanged ordinary stock cold-history limitation through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. Source inspection confirms that the ordinary stock timeline, turn and item readers still lack catch-up; this is not a stock runtime build of that commit. New realtime readers do materialize their cache and are not covered by this ordinary cold-read finding. Keep the cold-stock result unresolved and resume-assisted recovery separate. This exception does not waive fresh-writer validation or other failures.
 
+For PR #200, the owner accepted the unchanged ordinary stock cold-history limitation through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Fresh canonical history passes ASM cold reads; stock alpha.11 still needs resume before exact saved items are readable. This exception does not waive other checks or cover later commits.
+
 #### Upstream voice-history reader boundary
 
 Upstream adds canonical realtime records `Frame`, `TurnInputAccepted` and `SessionEndInputSaved`. The checked published stock readers (`rust-v0.169.0` and `rust-v0.171.0-alpha.5`) do not recognize these variants and can skip them while loading history. Successful resume therefore does not prove exact voice-history handoff. Exact interchange needs an independent stock reader containing upstream `5943d7acdf` or later. Keep the upstream format; do not rewrite saved records for older readers.
 
 The owner accepted this separate upstream compatibility boundary for PR #190 through `05229d1874d4e04bc746a9954c71931a1ab852c6` only. It does not establish actual Desktop voice behavior or exact voice handoff, does not apply to later upstream commits, and does not waive ordinary text-history checks or other validation failures.
+
+For PR #200, the owner accepted this unchanged older-stock voice-reader boundary through `65a5410f72dac1f4b40862c34ef0a8b71b12834a` only. Keep the upstream records unchanged. This acceptance does not establish exact voice handoff or actual Desktop voice behavior, waive text-history checks, or cover later commits.
 
 #### Opt-in per-environment context
 
