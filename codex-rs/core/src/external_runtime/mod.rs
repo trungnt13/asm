@@ -489,7 +489,7 @@ async fn run_conversation(
             }
             let bridge = if messaging {
                 let step = session
-                    .capture_speculative_step_context(Arc::clone(turn), cancellation)
+                    .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
                     .await?;
                 let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
                 let bridge = ExternalMessageBridge::start(std::time::Duration::from_millis(
@@ -648,7 +648,7 @@ async fn run_conversation(
         }
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = session
-                .capture_speculative_step_context(Arc::clone(turn), cancellation)
+                .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
                 .await?;
             bridge
                 .set_turn(Arc::clone(session), step, cancellation.clone())

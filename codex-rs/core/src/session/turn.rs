@@ -2170,6 +2170,12 @@ impl PreparedToolRecommendations {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum StepToolRouting {
+    ResponsesApi,
+    NativeMessaging,
+}
+
 #[allow(clippy::too_many_arguments)]
 #[instrument(level = "trace",
     skip_all,
@@ -2187,6 +2193,7 @@ pub(super) async fn built_tools(
     mcp: &Arc<codex_mcp::McpBinding>,
     step_store: &ExtensionData,
     prepared_recommendations: Option<PreparedToolRecommendations>,
+    routing: StepToolRouting,
     dynamic_tools: &[codex_protocol::dynamic_tools::DynamicToolSpec],
 ) -> CodexResult<Arc<ToolRouter>> {
     let apps_enabled = turn_context.apps_enabled();
@@ -2233,17 +2240,29 @@ pub(super) async fn built_tools(
         }
         Some(PreparedToolRecommendations::Legacy(_)) | None => None,
     };
-    let router = build_tool_router(
-        sess,
-        turn_context,
-        model_info,
-        environments,
-        mcp,
-        apps_enabled,
-        step_store,
-        tool_suggest_candidates.as_ref(),
-        dynamic_tools,
-    )?;
+    let router = match routing {
+        StepToolRouting::ResponsesApi => build_tool_router(
+            sess,
+            turn_context,
+            model_info,
+            environments,
+            mcp,
+            apps_enabled,
+            step_store,
+            tool_suggest_candidates.as_ref(),
+            dynamic_tools,
+        )?,
+        // Native bridges replace this router before dispatch. Keep discovery above.
+        StepToolRouting::NativeMessaging => ToolRouter::from_parts(
+            crate::tools::registry::ToolRegistry::with_tool_policy(Arc::clone(&sess.tool_policy)),
+            Vec::new(),
+            codex_protocol::openai_models::ToolMode::Direct,
+            Default::default(),
+            /*exec_definitions*/ None,
+            /*tool_namespaces_info*/ None,
+            &[],
+        ),
+    };
     if let Some(candidates) = tool_suggest_candidates
         && candidates.presentation == ToolSuggestPresentation::RecommendationContext
     {
