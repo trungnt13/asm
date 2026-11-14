@@ -5,7 +5,7 @@
       "alias": "claude/fable-5.2",
       "tool_mode": "direct",
       "display_name": "Fable 5.2 · CC",
-      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "description": "Most capable for your hardest and longest-running tasks",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
         {
@@ -60,7 +60,7 @@
       "alias": "claude/sonnet-5.5",
       "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · CC",
-      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "description": "Efficient for routine tasks",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
@@ -109,7 +109,7 @@
       "alias": "claude/opus-5.5",
       "tool_mode": "direct",
       "display_name": "Opus 5.5 · CC",
-      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "description": "Best for everyday, complex tasks",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
