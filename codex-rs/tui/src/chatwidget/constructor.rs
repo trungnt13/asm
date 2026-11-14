@@ -269,6 +269,7 @@ impl ChatWidget {
             blocks_direct_input: false,
             show_interagent_communication: false,
             external_writer_view: false,
+            read_only_thread: None,
             read_only_history: false,
             thread_settings_confirmed: false,
             provider_error: None,

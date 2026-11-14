@@ -500,6 +500,7 @@ impl NonIncrementalReason {
 // This is intentionally not a `PartialEq` implementation: request equality includes `input` and
 // `client_metadata`, while websocket reuse compares input and late tool-result metadata separately.
 // Access programs are authorized per response, including continuations, without replaying input.
+// Request country is also per response and travels on every continuation.
 // Keep the destructuring exhaustive so new request fields require an explicit reuse decision.
 fn responses_request_properties_mismatch(
     previous: &ResponsesApiRequest,
@@ -522,6 +523,7 @@ fn responses_request_properties_mismatch(
         text: previous_text,
         client_metadata: _,
         access_programs: _,
+        request_country: _,
     } = previous;
     let ResponsesApiRequest {
         model: current_model,
@@ -540,6 +542,7 @@ fn responses_request_properties_mismatch(
         text: current_text,
         client_metadata: _,
         access_programs: _,
+        request_country: _,
     } = current;
 
     // Stream options control delivery for this response, not the context
@@ -1453,6 +1456,7 @@ impl ModelClient {
             text,
             client_metadata: Some(client_metadata),
             access_programs: None,
+            request_country: Default::default(),
         };
         Ok(request)
     }
@@ -2199,6 +2203,9 @@ impl ResponsesHttpExecutor<'_> {
                 responses_metadata,
                 include_internal,
             )?;
+            if self.client.uses_codex_backend(client_setup.auth.as_ref()) {
+                request.request_country = responses_metadata.request_country.clone();
+            }
             self.client.set_guardian_metadata(
                 &mut request.client_metadata,
                 responses_metadata.parent_response_id.as_deref(),
@@ -2405,6 +2412,9 @@ impl ModelClientSession {
                 responses_metadata,
                 include_internal,
             )?;
+            if self.client.uses_codex_backend(client_setup.auth.as_ref()) {
+                request.request_country = responses_metadata.request_country.clone();
+            }
             if is_guardian_reviewer(&responses_headers) {
                 request.service_tier = None;
             }

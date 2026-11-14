@@ -2,9 +2,13 @@ use crate::McpRefreshReason;
 use crate::agent::LocalAgentControl;
 use codex_mcp::McpServerKey;
 use codex_protocol::ContextWindowId;
+use codex_protocol::RequestCountry;
 use codex_thread_store::ThreadPersistenceMetadata;
 #[path = "compaction_replay_tests.rs"]
 mod compaction_replay_tests;
+
+#[path = "mailbox_prewarm_tests.rs"]
+mod mailbox_prewarm_tests;
 
 #[path = "network_policy_tests.rs"]
 mod network_policy_tests;
@@ -4330,6 +4334,7 @@ async fn set_rate_limits_retains_previous_credits() {
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
         environments: Vec::new(),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
@@ -4454,6 +4459,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
         environments: Vec::new(),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
@@ -5081,6 +5087,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         provider: create_model_provider(config.model_provider.clone(), /*auth_manager*/ None),
         environments: Vec::new(),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
@@ -6676,7 +6683,7 @@ async fn response_metadata_builders_capture_fresh_mcp_attribution() {
         .await;
     let compaction = session
         .compaction_responses_metadata(
-            &turn_context,
+            &step_context,
             CompactionTurnMetadata::new(
                 CompactionTrigger::Auto,
                 CompactionReason::ContextLimit,
@@ -6783,6 +6790,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             Some(Arc::clone(&auth_manager)),
         ),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
@@ -7123,6 +7131,7 @@ async fn make_session_with_config_and_rx(
             Some(Arc::clone(&auth_manager)),
         ),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
@@ -7262,6 +7271,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
             Some(Arc::clone(&auth_manager)),
         ),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
@@ -9136,6 +9146,7 @@ where
             Some(Arc::clone(&auth_manager)),
         ),
         step_settings: Arc::new(StepSettings {
+            request_country: RequestCountry::default(),
             collaboration_mode,
             reasoning_summary: config.model_reasoning_summary,
             service_tier: None,
