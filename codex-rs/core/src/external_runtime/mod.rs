@@ -586,6 +586,8 @@ async fn run_conversation(
                 usage_baseline,
             });
         }
+        // Release the shared history vector before recording input to avoid a deep copy.
+        drop(original_history);
         let runtime = lease
             .runtime
             .as_mut()
@@ -607,6 +609,7 @@ async fn run_conversation(
                 RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
             },
         )?;
+        drop(messages);
         if runtime.checkpoint.effort != effort {
             match &mut runtime.runtime {
                 RuntimeProcess::Claude(process) => {
@@ -637,6 +640,7 @@ async fn run_conversation(
         }
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items())?;
+        drop(history);
         let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
         let mut prompt = prompt_content(&pending_messages)?;
         if matches!(&prompt, codex_external_runtime::Prompt::Text(text) if text.trim().is_empty()) {
@@ -646,6 +650,7 @@ async fn run_conversation(
             pending_messages.insert(/*index*/ 0, Value::String(boundary.to_owned()));
             prompt = prompt_content(&pending_messages)?;
         }
+        drop(pending_messages);
         if needs_binding && let Some(bridge) = &runtime.bridge {
             let step = session
                 .capture_speculative_step_context(Arc::clone(turn), cancellation)
@@ -656,6 +661,7 @@ async fn run_conversation(
         }
         runtime.checkpoint.input_count = messages.len();
         runtime.checkpoint.input_prefix = input_prefix(&messages)?;
+        drop(messages);
         runtime.foreground_idle = false;
         runtime.checkpoint.in_flight = true;
         runtime.checkpoint.fork_point = None;
