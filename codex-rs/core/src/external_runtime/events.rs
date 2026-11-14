@@ -13,6 +13,7 @@ use std::time::Instant;
 
 #[derive(Default)]
 pub(super) struct MessageStream {
+    pub(super) results: Vec<Value>,
     pub(super) activity: super::activity::ActivityStream,
     pub(super) id: Option<String>,
     pub(super) text: String,

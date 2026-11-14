@@ -393,6 +393,16 @@ async fn start_or_steer(
     ) {
         return agent::submit(session, request, submission_id).await;
     }
+    let Ok(_native_admission) = session
+        .external_runtime
+        .continuation_admission
+        .acquire()
+        .await
+    else {
+        return Ok(TurnInputSubmission::NotSubmitted {
+            reason: NotSubmittedReason::ServerDraining,
+        });
+    };
     let WithTurnExtensionData {
         request,
         turn_extension_init,
@@ -866,6 +876,7 @@ impl Session {
                 .permits_mode(configuration.step_settings.collaboration_mode.mode)
         {
             *active = None;
+            self.external_runtime.turn_finished.notify_waiters();
             return None;
         }
         Some(configuration.clone())
@@ -937,13 +948,17 @@ impl Session {
         Ok(())
     }
 
-    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
+    pub(crate) async fn clear_reserved_idle_turn(
+        &self,
+        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
+    ) {
         let mut active_turn_guard = self.active_turn.lock().await;
         if let Some(active_turn) = active_turn_guard.as_ref()
             && active_turn.task.is_none()
             && Arc::ptr_eq(&active_turn.turn_state, turn_state)
         {
             *active_turn_guard = None;
+            self.external_runtime.turn_finished.notify_waiters();
         }
     }
 

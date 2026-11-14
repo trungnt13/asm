@@ -287,15 +287,32 @@ impl Session {
         self.start_task(turn_context, input, task).await;
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "record the started turn atomically with task registration"
-    )]
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
+    ) {
+        let start: BoxFuture<'_, ()> = Box::pin(self.start_task_with_reservation(
+            turn_context,
+            input,
+            task,
+            /*reservation*/ None,
+        ));
+        start.await;
+    }
+
+    #[tracing::instrument(skip_all)]
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "task registration remains atomic with admission"
+    )]
+    pub(crate) async fn start_task_with_reservation<T: SessionTask>(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        task: T,
+        reservation: Option<Arc<Mutex<crate::state::TurnState>>>,
     ) {
         // Replace the cache; in-flight acquisitions retain their previous Arc.
         self.services
@@ -336,10 +353,16 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
-        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
             if self.outcome_handoffs_closed() {
+                return;
+            }
+            if let Some(reservation) = &reservation
+                && active.as_ref().is_none_or(|turn| {
+                    turn.task.is_some() || !Arc::ptr_eq(&turn.turn_state, reservation)
+                })
+            {
                 return;
             }
             let turn = active.get_or_insert_with(ActiveTurn::default);
@@ -348,9 +371,6 @@ impl Session {
             Arc::clone(&turn.turn_state)
         };
         turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
-        self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-            .await;
         self.emit_turn_start_lifecycle(
             turn_context.as_ref(),
             Some(&token_usage_at_turn_start),
@@ -368,8 +388,16 @@ impl Session {
         } else {
             None
         };
-        let turn = active.get_or_insert_with(ActiveTurn::default);
-        debug_assert!(turn.task.is_none());
+        let Some(turn) = active
+            .as_mut()
+            .filter(|turn| turn.task.is_none() && Arc::ptr_eq(&turn.turn_state, &turn_state))
+        else {
+            return;
+        };
+        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
+        self.input_queue
+            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
+            .await;
         // Record lineage only when the task starts: settings changes can invalidate a reservation.
         self.record_started_turn(
             &turn_context.sub_id,
@@ -1002,6 +1030,7 @@ impl Session {
         }
         drop(outcome_handoff);
         if cleared_active_turn {
+            self.external_runtime.turn_finished.notify_waiters();
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }
         // Private reviewers already flushed the terminal event before delivering it.
@@ -1030,7 +1059,9 @@ impl Session {
             // persisted, so capacity eviction cannot close their rollout writer.
             self.mark_interrupted();
         }
-        active.take()
+        let turn = active.take();
+        self.external_runtime.turn_finished.notify_waiters();
+        turn
     }
 
     pub(crate) async fn close_unified_exec_processes(&self) {
