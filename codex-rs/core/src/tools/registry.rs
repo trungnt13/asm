@@ -341,7 +341,7 @@ impl AnyToolResult {
             && matches!(&item, ResponseItem::FunctionCallOutput { output, .. }
                  | ResponseItem::CustomToolCallOutput { output, .. } if output.contains_audio());
         ResponseItemEnvelope {
-            item,
+            item: item.into(),
             metadata: (producer_bounded_tool_audio || history_truncation_token_limit.is_some())
                 .then_some(CodexHarnessMetadata {
                     producer_bounded_tool_audio,

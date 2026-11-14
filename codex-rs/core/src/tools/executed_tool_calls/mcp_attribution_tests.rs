@@ -27,7 +27,8 @@ fn envelope(attribution: Option<McpAttribution>) -> ResponseItemEnvelope {
             content: Vec::new(),
             phase: None,
             internal_chat_message_metadata_passthrough: None,
-        },
+        }
+        .into(),
         metadata: attribution.map(|mcp_attribution| CodexHarnessMetadata {
             mcp_attribution: Some(mcp_attribution),
             ..Default::default()

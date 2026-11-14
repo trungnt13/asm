@@ -94,7 +94,7 @@ fn seed_first_checkpoint_harness_metadata(path: &Path, retained_text: &str) -> R
         .context("first compacted checkpoint missing replacement history")?;
     replacement_history
         .iter()
-        .find(|envelope| response_message_contains_text(&envelope.item, retained_text))
+        .find(|envelope| response_message_contains_text(envelope.item.as_ref(), retained_text))
         .context("retained user message missing from first compacted checkpoint")?;
     for envelope in replacement_history {
         envelope.metadata = Some(CodexHarnessMetadata::default());
@@ -127,7 +127,7 @@ fn assert_latest_checkpoint_retains_harness_metadata(
         .context("latest compacted checkpoint missing replacement history")?;
     assert!(
         replacement_history.iter().any(|envelope| {
-            response_message_contains_text(&envelope.item, retained_text)
+            response_message_contains_text(envelope.item.as_ref(), retained_text)
                 && envelope.metadata.is_some()
         }),
         "latest compacted checkpoint should retain aligned harness metadata on {retained_text:?}"

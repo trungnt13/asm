@@ -432,7 +432,7 @@ fn collect_annotated_user_messages_extracts_user_text_only(
     }
     let items = vec![
         ResponseItemEnvelope {
-            item: item.clone(),
+            item: item.clone().into(),
             metadata: Some(metadata.clone()),
         },
         ResponseItemEnvelope::new(ResponseItem::Other),
@@ -457,7 +457,7 @@ fn collect_annotated_user_messages_extracts_user_text_only(
         }
     }
     let expected = ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: Some(metadata),
     };
     assert_eq!(
@@ -573,7 +573,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
         content,
         internal_chat_message_metadata_passthrough,
         ..
-    } = &mut original.item
+    } = std::sync::Arc::make_mut(&mut original.item)
     {
         *content = vec![ContentItem::InputText { text: big.clone() }; content_parts];
         *internal_chat_message_metadata_passthrough =
@@ -582,9 +582,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
                 ..Default::default()
             });
     }
-    original
-        .item
-        .set_id(Some(ResponseItemId::with_suffix("msg", "long-user")));
+    Arc::make_mut(&mut original.item).set_id(Some(ResponseItemId::with_suffix("msg", "long-user")));
     original.metadata = Some(CodexHarnessMetadata::default());
     let history = super::build_compacted_history_with_limit(
         std::slice::from_ref(&original),
@@ -597,7 +595,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
     let truncated_message = &history[0].item;
     let summary_message = &history[1].item;
 
-    let truncated_text = match truncated_message {
+    let truncated_text = match truncated_message.as_ref() {
         ResponseItem::Message {
             role,
             content,
@@ -650,7 +648,7 @@ fn build_token_limited_compacted_history_truncates_overlong_user_messages(
         "truncated user message should not include the full oversized user text"
     );
 
-    let summary_text = match summary_message {
+    let summary_text = match summary_message.as_ref() {
         ResponseItem::Message { role, content, .. } if role == "user" => {
             content_items_to_text(content).unwrap_or_default()
         }
@@ -674,7 +672,7 @@ fn build_token_limited_compacted_history_appends_summary_message() {
     );
 
     let last = history.last().expect("history should have a summary entry");
-    let summary = match &last.item {
+    let summary = match last.item.as_ref() {
         ResponseItem::Message { role, content, .. } if role == "user" => {
             content_items_to_text(content).unwrap_or_default()
         }
@@ -686,7 +684,7 @@ fn build_token_limited_compacted_history_appends_summary_message() {
 #[test_case(false; "legacy")]
 #[test_case(true; "attributed text with discarded media")]
 fn build_compacted_history_preserves_user_message_passthrough_metadata(attributed: bool) {
-    let original = serde_json::from_value(json!({
+    let original: ResponseItem = serde_json::from_value(json!({
         "type": "message", "role": "user",
         "id": ResponseItemId::with_suffix("msg", "user"),
         "content": [
@@ -710,7 +708,7 @@ fn build_compacted_history_preserves_user_message_passthrough_metadata(attribute
     }))
     .unwrap();
     let original = ResponseItemEnvelope {
-        item: original,
+        item: original.into(),
         metadata: Some(CodexHarnessMetadata::default()),
     };
     let history = compact_items(std::slice::from_ref(&original), "summary text");
@@ -739,7 +737,8 @@ fn build_compacted_history_preserves_user_message_passthrough_metadata(attribute
                             ..Default::default()
                         },
                     ),
-                },
+                }
+                .into(),
                 metadata: Some(CodexHarnessMetadata::default()),
             },
             ResponseItemEnvelope::new(ContextualUserFragment::into(CompactionSummary::new(

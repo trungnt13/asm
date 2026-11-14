@@ -66,7 +66,7 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
             trigger_turn: false,
         },
         RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: expected_item.clone(),
+            item: expected_item.clone().into(),
             metadata: Some(CodexHarnessMetadata {
                 user_input_order: Some(0),
                 history_sequence: Some(1),

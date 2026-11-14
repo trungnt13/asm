@@ -369,7 +369,7 @@ async fn suspend_and_check_recoverable_prompt(
             let RolloutItem::ResponseItem(item) = entry else {
                 return false;
             };
-            matches!(&item.item, ResponseItem::Message { role, content, .. }
+            matches!(item.item.as_ref(), ResponseItem::Message { role, content, .. }
             if role == "user" && content == &expected_content)
         })
         .count();

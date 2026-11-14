@@ -269,7 +269,10 @@ fn response_item_rollout_line_preserves_shape() -> Result<()> {
     let RolloutItem::ResponseItem(envelope) = &line.item else {
         panic!("expected response item");
     };
-    assert!(matches!(&envelope.item, ResponseItem::Message { .. }));
+    assert!(matches!(
+        envelope.item.as_ref(),
+        ResponseItem::Message { .. }
+    ));
     assert_eq!(envelope.metadata, None);
     assert_eq!(serde_json::to_value(line)?, legacy_line);
     Ok(())
@@ -461,7 +464,7 @@ fn response_item_envelope_stores_metadata_beside_rollout_payload() -> Result<()>
         timestamp: "2025-01-03T12:00:00.000Z".to_string(),
         ordinal: Some(7),
         item: RolloutItem::ResponseItem(ResponseItemEnvelope {
-            item: response_item.clone(),
+            item: response_item.clone().into(),
             metadata: Some(CodexHarnessMetadata {
                 history_sequence: Some(9),
                 sampled_through_sequence: Some(7),
@@ -522,7 +525,7 @@ fn response_item_envelope_preserves_harness_authored_configuration_provenance() 
         ..Default::default()
     };
     let rollout_item = RolloutItem::ResponseItem(ResponseItemEnvelope {
-        item: response_item.clone(),
+        item: response_item.clone().into(),
         metadata: Some(metadata.clone()),
     });
 
@@ -549,7 +552,7 @@ fn response_item_envelope_preserves_harness_authored_configuration_provenance() 
     assert_eq!(
         envelope,
         ResponseItemEnvelope {
-            item: response_item,
+            item: response_item.into(),
             metadata: Some(metadata),
         }
     );
@@ -614,7 +617,7 @@ fn response_item_replacement_history_accepts_legacy_shape() -> Result<()> {
         .as_ref()
         .expect("replacement history");
     assert!(matches!(
-        &replacement_history[0].item,
+        replacement_history[0].item.as_ref(),
         ResponseItem::Message { .. }
     ));
     assert_eq!(replacement_history[0].metadata, None);
@@ -638,7 +641,7 @@ fn compacted_replacement_history_stores_metadata_in_an_aligned_sidecar() -> Resu
         message: "summary".to_string(),
         replacement_history: Some(vec![
             ResponseItemEnvelope {
-                item: developer_message.clone(),
+                item: developer_message.clone().into(),
                 metadata: Some(CodexHarnessMetadata {
                     client_authored: true,
                     ..Default::default()
@@ -678,14 +681,14 @@ fn compacted_replacement_history_stores_metadata_in_an_aligned_sidecar() -> Resu
         restored.replacement_history,
         Some(vec![
             ResponseItemEnvelope {
-                item: developer_message,
+                item: developer_message.into(),
                 metadata: Some(CodexHarnessMetadata {
                     client_authored: true,
                     ..Default::default()
                 }),
             },
             ResponseItemEnvelope {
-                item: compaction_item,
+                item: compaction_item.into(),
                 metadata: Some(CodexHarnessMetadata::default()),
             },
         ])
@@ -773,7 +776,7 @@ fn compacted_metadata_remains_compatible_with_legacy_response_item_readers() -> 
 
     let response_item = response_message("developer");
     let envelope = ResponseItemEnvelope {
-        item: response_item.clone(),
+        item: response_item.clone().into(),
         metadata: Some(CodexHarnessMetadata {
             client_authored: true,
             ..Default::default()

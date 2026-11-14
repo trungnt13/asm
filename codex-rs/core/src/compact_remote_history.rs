@@ -83,7 +83,7 @@ pub(crate) fn newest_history_item_groups(
 }
 
 fn is_attached_notice(source: &ResponseItemEnvelope, notice: &ResponseItemEnvelope) -> bool {
-    let can_have_resize_notice = match &source.item {
+    let can_have_resize_notice = match source.item.as_ref() {
         ResponseItem::Message { role, .. } => role == "user",
         ResponseItem::FunctionCallOutput { .. } | ResponseItem::CustomToolCallOutput { .. } => true,
         _ => false,
@@ -97,7 +97,7 @@ fn is_attached_notice(source: &ResponseItemEnvelope, notice: &ResponseItemEnvelo
         return false;
     }
     matches!(
-        &notice.item,
+        notice.item.as_ref(),
         ResponseItem::Message { role, content, .. }
             if role == "developer"
                 && matches!(
@@ -168,7 +168,7 @@ pub(crate) fn trim_function_call_history_to_fit_context_window(
 fn rewritten_output_for_context_window(
     envelope: &ResponseItemEnvelope,
 ) -> Option<ResponseItemEnvelope> {
-    let item = match &envelope.item {
+    let item = match envelope.item.as_ref() {
         ResponseItem::FunctionCallOutput {
             id,
             call_id,
@@ -215,7 +215,7 @@ fn rewritten_output_for_context_window(
         _ => return None,
     };
     Some(ResponseItemEnvelope {
-        item,
+        item: item.into(),
         metadata: envelope.metadata.clone(),
     })
 }

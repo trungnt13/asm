@@ -65,7 +65,7 @@ pub(crate) async fn prepare_temporary_fork(
         ));
     }
     let messages = input_messages(history.iter().filter_map(|item| match item {
-        RolloutItem::ResponseItem(envelope) => Some(&envelope.item),
+        RolloutItem::ResponseItem(envelope) => Some(envelope.item.as_ref()),
         _ => None,
     }))
     .map_err(|error| refuse(&error.to_string()))?;

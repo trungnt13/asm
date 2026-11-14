@@ -507,7 +507,10 @@ fn build_v2_compacted_history(
     let prompt_input = prompt_input
         .into_iter()
         .zip(prompt_input_metadata)
-        .map(|(item, metadata)| ResponseItemEnvelope { item, metadata })
+        .map(|(item, metadata)| ResponseItemEnvelope {
+            item: item.into(),
+            metadata,
+        })
         .collect::<Vec<_>>();
     let no_file_error_sources =
         crate::context_manager::rejected_audio::checkpoint_input_has_no_file_error_sources(
@@ -560,7 +563,7 @@ pub(crate) fn is_client_authored_developer_message(item: &ResponseItemEnvelope) 
     item.metadata
         .as_ref()
         .is_some_and(|metadata| metadata.client_authored)
-        && matches!(&item.item, ResponseItem::Message { role, .. } if role == "developer")
+        && matches!(item.item.as_ref(), ResponseItem::Message { role, .. } if role == "developer")
 }
 
 pub(crate) fn should_retain_client_item(item: &ResponseItemEnvelope, features: &Features) -> bool {
@@ -579,7 +582,7 @@ fn is_retained_for_remote_compaction_v2(
     if should_retain_client_item(envelope, features) {
         return true;
     }
-    let item = &envelope.item;
+    let item = envelope.item.as_ref();
     if let ResponseItem::AgentMessage {
         author,
         recipient,
@@ -689,7 +692,7 @@ fn select_retained_items(
         };
         let has_budgeted_image = image_budget == RetainedImageBudget::Enabled
             && retained_input_image_count(&group.source.item) > 0;
-        let has_file_audio = matches!(&group.source.item, ResponseItem::Message { content, .. }
+        let has_file_audio = matches!(group.source.item.as_ref(), ResponseItem::Message { content, .. }
         if content.iter().any(|part| matches!(part, ContentItem::InputAudio {
             audio: AudioReference::File { .. }
         })));
@@ -726,7 +729,7 @@ fn select_retained_items(
             group.source.clone()
         } else if is_retained_tool_output(group.source)
             || (group.source.is_always_retained()
-                && !matches!(group.source.item, ResponseItem::Message { .. }))
+                && !matches!(group.source.item.as_ref(), ResponseItem::Message { .. }))
         {
             // Structured items such as tool results must stay whole.
             break;
@@ -822,7 +825,7 @@ fn truncate_message_text_to_token_budget(
     mut envelope: ResponseItemEnvelope,
     max_tokens: usize,
 ) -> Option<ResponseItemEnvelope> {
-    let content = to_annotated_content(&mut envelope.item)?;
+    let content = to_annotated_content(Arc::make_mut(&mut envelope.item))?;
 
     let mut remaining = max_tokens;
     let mut truncated_content = Vec::with_capacity(content.len());
@@ -854,7 +857,7 @@ fn truncate_message_text_to_token_budget(
         return None;
     }
 
-    set_annotated_content(&mut envelope.item, truncated_content)?;
+    set_annotated_content(Arc::make_mut(&mut envelope.item), truncated_content)?;
     if let Some(metadata) = &mut envelope.metadata {
         metadata.mark_retained_sources_incomplete();
     }
@@ -1071,12 +1074,12 @@ mod tests {
             );
             let mut expected = vec![
                 ResponseItemEnvelope {
-                    item: retained.clone(),
+                    item: retained.clone().into(),
                     metadata: Some(CodexHarnessMetadata::default()),
                 },
                 ResponseItemEnvelope::new(generated_notice.clone()),
                 ResponseItemEnvelope {
-                    item: output.clone(),
+                    item: output.clone().into(),
                     metadata: Some(CodexHarnessMetadata {
                         compaction_without_file_error_sources: true,
                         ..Default::default()
@@ -1087,7 +1090,7 @@ mod tests {
                 expected.insert(
                     0,
                     ResponseItemEnvelope {
-                        item: client.clone(),
+                        item: client.clone().into(),
                         metadata: Some(CodexHarnessMetadata {
                             client_authored: true,
                             ..Default::default()
@@ -1102,7 +1105,7 @@ mod tests {
     #[test]
     fn retained_history_truncation_preserves_metadata() {
         let item = ResponseItemEnvelope {
-            item: message("user", "word ".repeat(200).as_str(), /*phase*/ None),
+            item: message("user", "word ".repeat(200).as_str(), /*phase*/ None).into(),
             metadata: Some(CodexHarnessMetadata::default()),
         };
 
@@ -1280,7 +1283,7 @@ mod tests {
         };
         let truncated = truncate_message_text_to_token_budget(
             ResponseItemEnvelope {
-                item,
+                item: item.into(),
                 metadata: Some(metadata.clone()),
             },
             /*max_tokens*/ 3,
@@ -1288,7 +1291,7 @@ mod tests {
         .unwrap();
         metadata.mark_retained_sources_incomplete();
         assert_eq!(truncated.metadata, Some(metadata));
-        let truncated = vec![truncated.item];
+        let truncated = vec![Arc::unwrap_or_clone(truncated.item)];
 
         assert_eq!(
             truncated,

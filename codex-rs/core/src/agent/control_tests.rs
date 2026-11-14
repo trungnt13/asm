@@ -2773,7 +2773,7 @@ async fn spawn_agent_fork_from_paginated_parent_uses_model_context_prefix(
     assert!(
         child_history
             .raw_items()
-            .any(|item| item == &copied_idless_context.item),
+            .any(|item| item == copied_idless_context.item.as_ref()),
         "the child should see the same backfilled item that was persisted"
     );
     let copied_parent_context_count = lines
@@ -3314,7 +3314,7 @@ async fn spawn_agent_can_fork_parent_thread_history_with_sanitized_items() {
     let history_items = history.raw_items().cloned().collect::<Vec<_>>();
     let assistant_position = |history: &crate::context_manager::ContextManager| {
         history.annotated_items().iter().find(|item| {
-            matches!(&item.item, ResponseItem::Message { role, phase: Some(MessagePhase::FinalAnswer), .. } if role == "assistant")
+            matches!(item.item.as_ref(), ResponseItem::Message { role, phase: Some(MessagePhase::FinalAnswer), .. } if role == "assistant")
         }).expect("recorded final answer").metadata.as_ref().and_then(|metadata| metadata.user_input_order)
     };
     assert!(assistant_position(&parent_thread.session.clone_history().await).is_some());
@@ -3621,11 +3621,12 @@ async fn spawn_agent_fork_strips_parent_usage_hints_from_compacted_history(marke
         "questions": [{"question": "Parent-local action?", "answer": "Parent only."}]
     })).expect("verified answer fixture");
     let delivery = codex_history::ResponseItemEnvelope {
-        item: serde_json::from_value(serde_json::json!({
+        item: serde_json::from_value::<codex_protocol::models::ResponseItem>(serde_json::json!({
             "type": "function_call_output", "id": "parent-delivery",
             "name": "send_message_to_thread", "output": "Parent delivery"
         }))
-        .unwrap(),
+        .unwrap()
+        .into(),
         metadata: Some(codex_history::CodexHarnessMetadata {
             user_input_order: Some(7),
             sender_user_messages: Some(Box::new(codex_history::SenderUserMessages {
@@ -4203,12 +4204,12 @@ async fn spawn_agent_full_fork_legacy_compaction_rebuilds_child_instructions_onc
                 .iter()
                 .filter_map(|item| match item {
                     RolloutItem::ResponseItem(envelope)
-                        if matches!(&envelope.item, ResponseItem::Message {
+                        if matches!(envelope.item.as_ref(), ResponseItem::Message {
                             internal_chat_message_metadata_passthrough: Some(metadata), ..
                         } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
                             kinds.iter().any(|kind| kind.as_str() == IncrementalToolsUpdate::KIND)
                         })) =>
-                        Some(envelope.item.clone()),
+                        Some(envelope.item.as_ref().clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>(),

@@ -2188,7 +2188,7 @@ async fn interrupt_during_mcp_startup_preserves_user_input_in_history(
                 item,
                 RolloutItem::ResponseItem(envelope)
                     if matches!(
-                        &envelope.item,
+                        envelope.item.as_ref(),
                         ResponseItem::Message { role, content, .. }
                             if role == "user"
                                 && content.iter().any(|item| {
@@ -2210,7 +2210,7 @@ async fn interrupt_during_mcp_startup_preserves_user_input_in_history(
     let RolloutItem::ResponseItem(envelope) = &history.items[user_prompt_index] else {
         unreachable!("found the user prompt");
     };
-    let ResponseItem::Message { content, .. } = &envelope.item else {
+    let ResponseItem::Message { content, .. } = envelope.item.as_ref() else {
         unreachable!("found the user message");
     };
     assert!(
@@ -2230,7 +2230,7 @@ async fn interrupt_during_mcp_startup_preserves_user_input_in_history(
                 item,
                 RolloutItem::ResponseItem(envelope)
                     if matches!(
-                        &envelope.item,
+                        envelope.item.as_ref(),
                         ResponseItem::Message { content, .. }
                             if content.iter().any(|item| {
                                 matches!(item, ContentItem::InputText { text } if text.contains("<turn_aborted>"))
