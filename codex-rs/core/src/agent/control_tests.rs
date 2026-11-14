@@ -41,7 +41,6 @@ use crate::thread_manager::StartThreadOptions;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
-use crate::tools::handlers::multi_agents_common::thread_spawn_source;
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler;
 use crate::tools::registry::ToolExecutor;
 use assert_matches::assert_matches;
