@@ -4,7 +4,7 @@ use crate::agent::types::SpawnAgentForkMode;
 use crate::codex_thread::ThreadConfigSnapshot;
 use crate::thread_spawn::ThreadSpawnError;
 use crate::thread_spawn::ThreadSpawnRequest;
-use crate::tools::handlers::multi_agents::collab_tool_call_status;
+use crate::tools::handlers::multi_agents_common::collab_tool_call_status;
 use crate::tools::handlers::multi_agents_spec::SpawnAgentToolOptions;
 use crate::tools::handlers::multi_agents_spec::create_spawn_agent_tool_v2;
 use crate::tools::handlers::multi_agents_v2::message_tool::message_content;

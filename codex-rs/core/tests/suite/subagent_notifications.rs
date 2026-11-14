@@ -58,7 +58,6 @@ use core_test_support::responses::ev_completed_with_tokens;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
-use core_test_support::responses::ev_tool_search_call;
 use core_test_support::responses::mount_response_once_match;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
@@ -108,7 +107,6 @@ mod guardian_subagent_notification_tests;
 mod code_mode_agent_message_tests;
 
 const SPAWN_CALL_ID: &str = "spawn-call-1";
-const MULTI_AGENT_V1_NAMESPACE: &str = "multi_agent_v1";
 const MULTI_AGENT_V2_NAMESPACE: &str = "collaboration";
 const TURN_0_FORK_PROMPT: &str = "seed fork context";
 const TURN_1_PROMPT: &str = "spawn a child and continue";
@@ -437,29 +435,10 @@ async fn wait_for_request_with_model(
     }
 }
 
-async fn setup_turn_one_with_spawned_child(
-    server: &MockServer,
-    child_response_delay: Option<Duration>,
-) -> Result<(TestCodex, String)> {
-    let (test, spawned_id, _child_request_log) = setup_turn_one_with_custom_spawned_child(
-        server,
-        json!({
-            "message": CHILD_PROMPT,
-        }),
-        child_response_delay,
-        /*wait_for_parent_notification*/ true,
-        INHERITED_REASONING_EFFORT,
-        |builder| builder,
-    )
-    .await?;
-    Ok((test, spawned_id))
-}
-
 async fn setup_turn_one_with_custom_spawned_child(
     server: &MockServer,
     spawn_args: serde_json::Value,
     child_response_delay: Option<Duration>,
-    wait_for_parent_notification: bool,
     turn_reasoning_effort: ReasoningEffort,
     configure_test: impl FnOnce(
         core_test_support::test_codex::TestCodexBuilder,
@@ -469,6 +448,10 @@ async fn setup_turn_one_with_custom_spawned_child(
     String,
     core_test_support::responses::ResponseMock,
 )> {
+    let mut spawn_args = spawn_args;
+    let arguments = spawn_args.as_object_mut().expect("spawn arguments object");
+    arguments.entry("task_name").or_insert(json!("child"));
+    arguments.entry("fork_turns").or_insert(json!("none"));
     let spawn_args = serde_json::to_string(&spawn_args)?;
 
     mount_sse_once_match(
@@ -478,7 +461,7 @@ async fn setup_turn_one_with_custom_spawned_child(
             ev_response_created("resp-turn1-1"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
+                MULTI_AGENT_V2_NAMESPACE,
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -529,6 +512,10 @@ async fn setup_turn_one_with_custom_spawned_child(
             .features
             .enable(Feature::Collab)
             .expect("test config should allow feature update");
+        config
+            .features
+            .enable(Feature::MultiAgentV2)
+            .expect("enable V2 spawn");
         config.model = Some(INHERITED_MODEL.to_string());
         config.model_reasoning_effort = Some(configured_reasoning_effort);
     }));
@@ -549,28 +536,6 @@ async fn setup_turn_one_with_custom_spawned_child(
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
-    if child_response_delay.is_none() && wait_for_parent_notification {
-        let _ = wait_for_requests(&child_request_log).await?;
-        let rollout_path = test
-            .codex
-            .rollout_path()
-            .ok_or_else(|| anyhow::anyhow!("expected parent rollout path"))?;
-        let deadline = Instant::now() + Duration::from_secs(6);
-        loop {
-            let has_notification = tokio::fs::read_to_string(&rollout_path)
-                .await
-                .is_ok_and(|rollout| rollout.contains("<subagent_notification>"));
-            if has_notification {
-                break;
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "timed out waiting for parent rollout to include subagent notification"
-                );
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-    }
     let spawned_id = wait_for_spawned_thread_id(&test).await?;
 
     Ok((test, spawned_id, child_request_log))
@@ -587,7 +552,6 @@ async fn spawn_child_and_capture_snapshot(
         server,
         spawn_args,
         /*child_response_delay*/ None,
-        /*wait_for_parent_notification*/ false,
         INHERITED_REASONING_EFFORT,
         configure_test,
     )
@@ -623,7 +587,6 @@ async fn spawned_agent_uses_multi_agent_reasoning_effort_for_requests(
         &server,
         json!({ "message": CHILD_PROMPT }),
         /*child_response_delay*/ None,
-        /*wait_for_parent_notification*/ false,
         selected_reasoning_effort,
         std::convert::identity,
     )
@@ -657,7 +620,7 @@ async fn subagent_start_replaces_session_start_and_injects_context(
         "message": CHILD_PROMPT,
         "task_name": "child",
         "agent_type": agent_type,
-        "fork_context": fork_context,
+        "fork_turns": if fork_context { "all" } else { "none" },
     }))?;
 
     mount_sse_once_match(
@@ -669,7 +632,7 @@ async fn subagent_start_replaces_session_start_and_injects_context(
             ev_response_created("resp-turn1-1"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
+                MULTI_AGENT_V2_NAMESPACE,
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -717,6 +680,10 @@ async fn subagent_start_replaces_session_start_and_injects_context(
                 .features
                 .enable(Feature::Collab)
                 .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 spawn");
         })
         // Command hooks run on the host and require a host-native working directory.
         .build(&server)
@@ -792,6 +759,7 @@ async fn subagent_stop_replaces_stop_and_skips_internal_subagents() -> Result<()
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
         "task_name": "child",
+        "fork_turns": "none",
         "agent_type": "worker",
     }))?;
 
@@ -802,7 +770,7 @@ async fn subagent_stop_replaces_stop_and_skips_internal_subagents() -> Result<()
             ev_response_created("resp-turn1-1"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
+                MULTI_AGENT_V2_NAMESPACE,
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -872,6 +840,10 @@ async fn subagent_stop_replaces_stop_and_skips_internal_subagents() -> Result<()
                 .features
                 .enable(Feature::Collab)
                 .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 spawn");
         })
         .build(&server)
         .await?;
@@ -980,36 +952,6 @@ async fn subagent_stop_replaces_stop_and_skips_internal_subagents() -> Result<()
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn subagent_notification_is_included_without_wait() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let server = start_mock_server().await;
-    let (test, _spawned_id) =
-        setup_turn_one_with_spawned_child(&server, /*child_response_delay*/ None).await?;
-
-    let turn2 = mount_sse_once_match(
-        &server,
-        |req: &wiremock::Request| body_contains(req, TURN_2_NO_WAIT_PROMPT),
-        sse(vec![
-            ev_response_created("resp-turn2-1"),
-            ev_assistant_message("msg-turn2-1", "no wait path"),
-            ev_completed("resp-turn2-1"),
-        ]),
-    )
-    .await;
-    test.submit_turn(TURN_2_NO_WAIT_PROMPT).await?;
-
-    let turn2_requests = wait_for_requests(&turn2).await?;
-    assert!(
-        turn2_requests
-            .iter()
-            .any(|request| request.has_content_kinds(&["multi_agent.subagent_notification"]))
-    );
-
-    Ok(())
-}
-
 #[test_case(ThreadHistoryMode::Legacy; "legacy")]
 #[test_case(ThreadHistoryMode::Paginated; "paginated")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1033,7 +975,8 @@ async fn spawned_child_receives_forked_parent_context(
 
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
-        "fork_context": true,
+        "task_name": "child",
+        "fork_turns": "all",
     }))?;
     let spawn_turn = mount_sse_once_match(
         &server,
@@ -1042,7 +985,7 @@ async fn spawned_child_receives_forked_parent_context(
             ev_response_created("resp-turn1-1"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
+                MULTI_AGENT_V2_NAMESPACE,
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -1083,6 +1026,10 @@ async fn spawned_child_receives_forked_parent_context(
                 .features
                 .enable(Feature::Collab)
                 .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 spawn");
             config.model = Some(INHERITED_MODEL.to_string());
             config.model_reasoning_effort = Some(INHERITED_REASONING_EFFORT);
             config.agent_default_subagent_model = Some(REQUESTED_MODEL.to_string());
@@ -1151,7 +1098,7 @@ async fn spawned_child_receives_forked_parent_context(
     })
     .await?;
     let args = serde_json::to_string(&json!({
-        "target": child_thread_id.to_string(),
+        "target": "/root/child",
         "message": "legacy child follow-up",
     }))?;
     let parent = mount_sse_once_match(
@@ -1161,8 +1108,8 @@ async fn spawned_child_receives_forked_parent_context(
             ev_response_created("resp-legacy-reuse"),
             ev_function_call_with_namespace(
                 "legacy-reuse-call",
-                MULTI_AGENT_V1_NAMESPACE,
-                "send_input",
+                MULTI_AGENT_V2_NAMESPACE,
+                "followup_task",
                 &args,
             ),
             ev_completed("resp-legacy-reuse"),
@@ -1380,7 +1327,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
             config
                 .features
                 .enable(Feature::MultiAgentV2)
-                .expect("test config should allow feature update");
+                .expect("enable V2 spawn");
             config.model = Some(V2_DEFAULT_MODEL.to_string());
             config.agent_default_subagent_model = Some(V2_DEFAULT_MODEL.to_string());
             config.developer_instructions = Some(INSTRUCTIONS.to_string());
@@ -1559,6 +1506,10 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             V2_REQUESTED_REASONING_EFFORT,
         ),
     };
+    let mut spawn_args = spawn_args;
+    let arguments = spawn_args.as_object_mut().expect("spawn arguments object");
+    arguments.entry("task_name").or_insert(json!("child"));
+    arguments.entry("fork_turns").or_insert(json!("none"));
     let spawn_args = serde_json::to_string(&spawn_args)?;
     let mode_transition_turns = if matches!(
         selection,
@@ -1637,7 +1588,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         config
             .features
             .enable(Feature::MultiAgentV2)
-            .expect("test config should allow feature update");
+            .expect("enable V2 spawn");
         if reasoning_effort_updates {
             config.multi_agent_v2.preserve_fork_prefix = false;
             config
@@ -2281,7 +2232,6 @@ async fn spawned_agent_uses_summary_support_for_final_model(
             "model": REQUESTED_MODEL,
         }),
         /*child_response_delay*/ Some(Duration::from_secs(1)),
-        /*wait_for_parent_notification*/ false,
         INHERITED_REASONING_EFFORT,
         move |builder| {
             builder.with_config(move |config| {
@@ -2465,6 +2415,10 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
     if let Some(reasoning_effort) = reasoning_effort {
         spawn_args["reasoning_effort"] = json!(reasoning_effort);
     }
+    let mut spawn_args = spawn_args;
+    let arguments = spawn_args.as_object_mut().expect("spawn arguments object");
+    arguments.entry("task_name").or_insert(json!("child"));
+    arguments.entry("fork_turns").or_insert(json!("none"));
     let spawn_args = serde_json::to_string(&spawn_args)?;
     let mut spawn_event = ev_function_call_with_namespace(
         SPAWN_CALL_ID,
@@ -2524,7 +2478,7 @@ async fn multi_agent_v2_spawn_sends_agent_message_to_child(
             config
                 .features
                 .enable(Feature::MultiAgentV2)
-                .expect("test config should allow feature update");
+                .expect("enable V2 spawn");
             if plaintext {
                 config
                     .features
@@ -2861,7 +2815,7 @@ async fn plaintext_multi_agent_v2_completion_sends_agent_message(
             config
                 .features
                 .enable(Feature::MultiAgentV2)
-                .expect("test config should allow feature update");
+                .expect("enable V2 spawn");
             config.model_provider.request_max_retries = Some(0);
             config.model_provider.stream_max_retries = Some(0);
             config.model_provider.supports_websockets = false;
@@ -3484,7 +3438,7 @@ async fn skill_instructions_in_parent_and_spawned_child(include_instructions: bo
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> Result<()> {
+async fn spawn_agent_requested_model_preserves_role_reasoning_settings() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -3519,7 +3473,7 @@ async fn spawn_agent_role_overrides_requested_model_and_reasoning_settings() -> 
     )
     .await?;
 
-    assert_eq!(child_snapshot.model, ROLE_MODEL);
+    assert_eq!(child_snapshot.model, REQUESTED_MODEL);
     assert_eq!(child_snapshot.reasoning_effort, Some(ROLE_REASONING_EFFORT));
 
     Ok(())
@@ -3618,7 +3572,7 @@ async fn failed_spawn_edge_leaves_no_child_history(fork_context: bool) -> Result
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let spawn_args = json!({ "message": CHILD_PROMPT, "fork_context": fork_context }).to_string();
+    let spawn_args = json!({ "message": CHILD_PROMPT, "task_name": "child", "fork_turns": if fork_context { "all" } else { "none" } }).to_string();
     mount_sse_once_match(
         &server,
         |request: &wiremock::Request| body_contains(request, TURN_1_PROMPT),
@@ -3626,7 +3580,7 @@ async fn failed_spawn_edge_leaves_no_child_history(fork_context: bool) -> Result
             ev_response_created("spawn"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
+                MULTI_AGENT_V2_NAMESPACE,
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -3676,6 +3630,10 @@ async fn failed_spawn_edge_leaves_no_child_history(fork_context: bool) -> Result
                 .features
                 .enable(Feature::Collab)
                 .expect("enable native spawn");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 spawn");
         })
         .build_with_auto_env(&server)
         .await?;
@@ -3755,6 +3713,8 @@ async fn spawn_agent_rejects_reasoning_effort_unsupported_by_role_model() -> Res
     let server = start_mock_server().await;
     let spawn_args = serde_json::to_string(&json!({
         "message": CHILD_PROMPT,
+        "task_name": "child",
+        "fork_turns": "none",
         "agent_type": "custom",
     }))?;
     mount_sse_once_match(
@@ -3764,7 +3724,7 @@ async fn spawn_agent_rejects_reasoning_effort_unsupported_by_role_model() -> Res
             ev_response_created("resp-turn1-1"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
+                MULTI_AGENT_V2_NAMESPACE,
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -3788,6 +3748,10 @@ async fn spawn_agent_rejects_reasoning_effort_unsupported_by_role_model() -> Res
                 .features
                 .enable(Feature::Collab)
                 .expect("test config should allow feature update");
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 spawn");
             let role_path = config.codex_home.join("model-only-role.toml");
             std::fs::write(&role_path, format!("model = \"{ROLE_MODEL}\"\n"))
                 .expect("write role config");
@@ -3825,27 +3789,9 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let call_id = "tool-search-spawn-agent";
-    let resp_mock = mount_sse_sequence(
+    let resp_mock = mount_sse_once(
         &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-turn1-1"),
-                ev_tool_search_call(
-                    call_id,
-                    &json!({
-                        "query": "spawn agent custom role",
-                        "limit": 1,
-                    }),
-                ),
-                ev_completed("resp-turn1-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-turn1-2"),
-                ev_assistant_message("msg-turn1-2", "done"),
-                ev_completed("resp-turn1-2"),
-            ]),
-        ],
+        sse(vec![ev_response_created("done"), ev_completed("done")]),
     )
     .await;
 
@@ -3854,6 +3800,7 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
             .features
             .enable(Feature::Collab)
             .expect("test config should allow feature update");
+            config.features.enable(Feature::MultiAgentV2).expect("enable V2 spawn");
         config.multi_agent_v2.hide_spawn_agent_metadata = false;
         let role_path = config.codex_home.join("custom-role.toml");
         std::fs::write(
@@ -3876,11 +3823,9 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
 
     test.submit_turn(TURN_1_PROMPT).await?;
 
-    let requests = resp_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let output = requests[1].tool_search_output(call_id);
-    let spawn_agent = namespace_child_tool(&output, "multi_agent_v1", "spawn_agent")
-        .expect("tool_search should return multi_agent_v1.spawn_agent");
+    let body = resp_mock.single_request().body_json();
+    let spawn_agent = namespace_child_tool(&body, MULTI_AGENT_V2_NAMESPACE, "spawn_agent")
+        .expect("V2 spawn_agent should be exposed");
     let agent_type_description = tool_parameter_description(spawn_agent, "agent_type")
         .expect("spawn_agent agent_type description");
     let custom_role_description =

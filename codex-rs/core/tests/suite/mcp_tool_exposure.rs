@@ -308,7 +308,9 @@ async fn root_and_spawned_subagent_receive_distinct_mcp_session_sources() -> Res
     const SPAWN_CALL_ID: &str = "mcp-session-source-spawn";
 
     let server = responses::start_mock_server().await;
-    let spawn_args = serde_json::to_string(&json!({ "message": CHILD_PROMPT }))?;
+    let spawn_args = serde_json::to_string(
+        &json!({ "message": CHILD_PROMPT, "task_name": "worker", "fork_turns": "none" }),
+    )?;
     mount_sse_once_match(
         &server,
         |request: &Request| {
@@ -319,7 +321,7 @@ async fn root_and_spawned_subagent_receive_distinct_mcp_session_sources() -> Res
             ev_response_created("resp-parent-spawn"),
             ev_function_call_with_namespace(
                 SPAWN_CALL_ID,
-                "multi_agent_v1",
+                "collaboration",
                 "spawn_agent",
                 &spawn_args,
             ),
@@ -365,6 +367,12 @@ async fn root_and_spawned_subagent_receive_distinct_mcp_session_sources() -> Res
     }));
     let test = core_test_support::test_codex::test_codex()
         .with_extensions(Arc::new(extensions.build()))
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2");
+        })
         .build(&server)
         .await?;
 

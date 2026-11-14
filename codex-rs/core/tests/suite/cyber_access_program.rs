@@ -408,19 +408,9 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
             responses::ev_completed(id),
         ])
     };
-    for (namespace, fork_turns) in [
-        ("collaboration", "none"),
-        ("collaboration", "all"),
-        ("multi_agent_v1", "none"),
-    ] {
-        let is_v2 = namespace == "collaboration";
-        let spawn_arguments = if is_v2 {
-            json!({"message": "inspect the repository", "task_name": "worker", "fork_turns": fork_turns})
-        } else {
-            json!({"message": "inspect the repository"})
-        };
+    for (namespace, fork_turns) in [("collaboration", "none"), ("collaboration", "all")] {
+        let spawn_arguments = json!({"message": "inspect the repository", "task_name": "worker", "fork_turns": fork_turns});
         let server = responses::start_mock_server().await;
-        // V1 completion notifications can require another parent response.
         Mock::given(method("POST"))
             .and(path("/v1/responses"))
             .and(|request: &wiremock::Request| !request.headers.contains_key("x-openai-subagent"))
@@ -449,18 +439,16 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
         .await;
         let test = test_codex()
             .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-            .with_model(if is_v2 { "gpt-5.6-sol" } else { "gpt-5.1" })
+            .with_model("gpt-5.6-sol")
             .with_config(move |config| {
                 config
                     .features
                     .enable(Feature::Collab)
                     .expect("enable multi-agent tools");
-                if is_v2 {
-                    config
-                        .features
-                        .enable(Feature::MultiAgentV2)
-                        .expect("enable v2 tools");
-                }
+                config
+                    .features
+                    .enable(Feature::MultiAgentV2)
+                    .expect("enable v2 tools");
             })
             .build_with_auto_env(&server)
             .await?;
@@ -509,31 +497,19 @@ async fn cyber_access_program_is_inherited_by_child_turns() -> Result<()> {
                 child.shutdown_and_wait().await?;
                 test.thread_manager.remove_thread(&child_id).await;
             }
-            let mut reply_sequence = Vec::new();
-            if reload && !is_v2 {
-                reply_sequence.push(responses::sse(vec![
-                    responses::ev_function_call_with_namespace(
-                        "resume-worker",
-                        namespace,
-                        "resume_agent",
-                        &json!({"id": child_id}).to_string(),
-                    ),
-                    responses::ev_completed("resp-resume"),
-                ]));
-            }
-            reply_sequence.push(responses::sse(vec![
+            let reply_sequence = vec![responses::sse(vec![
                 responses::ev_function_call_with_namespace(
                     "followup-worker",
                     namespace,
-                    if is_v2 { "followup_task" } else { "send_input" },
+                    "followup_task",
                     &json!({
-                        "target": if is_v2 { "worker".to_string() } else { child_id.to_string() },
+                        "target": "worker",
                         "message": "inspect the tests too",
                     })
                     .to_string(),
                 ),
                 responses::ev_completed("resp-followup"),
-            ]));
+            ])];
             responses::mount_sse_sequence(&server, reply_sequence).await;
             let followup_child_request = responses::mount_sse_once_match(
                 &server,
@@ -958,8 +934,6 @@ async fn saved_daybreak_uses_existing_websocket_requests() -> Result<()> {
     Ok(())
 }
 
-#[test_case("multi_agent_v1", true, true, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "v1 blue to red")]
-#[test_case("multi_agent_v1", true, true, Some(true), CyberAccessProgram::DaybreakRed, CyberAccessProgram::DaybreakBlue; "v1 red to blue")]
 #[test_case("collaboration", true, true, Some(true), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "v2 blue to red")]
 #[test_case("collaboration", true, true, Some(true), CyberAccessProgram::DaybreakRed, CyberAccessProgram::DaybreakBlue; "v2 red to blue")]
 #[test_case("collaboration", true, true, Some(false), CyberAccessProgram::DaybreakBlue, CyberAccessProgram::DaybreakRed; "turn override wins over saved off")]
@@ -985,12 +959,9 @@ async fn saved_daybreak_follows_the_child_model_and_automatic_compaction(
         CyberAccessProgram::Standard => CyberAccessProgram::DaybreakBlue,
         program => program,
     };
-    let is_v2 = namespace == "collaboration";
     let mut spawn = json!({"message": "inspect the repository", "model": child_model});
-    if is_v2 {
-        spawn["task_name"] = json!("worker");
-        spawn["fork_turns"] = json!("none");
-    }
+    spawn["task_name"] = json!("worker");
+    spawn["fork_turns"] = json!("none");
     let summary = json!({"type": "response.output_item.done", "item": {
         "type": "compaction", "encrypted_content": "CHILD_SUMMARY"
     }});
@@ -1038,11 +1009,7 @@ async fn saved_daybreak_follows_the_child_model_and_automatic_compaction(
         ],
     )
     .await;
-    let version = if is_v2 {
-        MultiAgentVersion::V2
-    } else {
-        MultiAgentVersion::V1
-    };
+    let version = MultiAgentVersion::V2;
     let test = test_codex()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model_info_override(parent_model, move |model| {
@@ -1076,7 +1043,7 @@ async fn saved_daybreak_follows_the_child_model_and_automatic_compaction(
                 .expect("enable spawn");
             config
                 .features
-                .set_enabled(Feature::MultiAgentV2, is_v2)
+                .enable(Feature::MultiAgentV2)
                 .expect("set spawn version");
             config
                 .features

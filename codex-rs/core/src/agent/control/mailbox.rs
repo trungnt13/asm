@@ -93,17 +93,6 @@ impl Mailboxes {
         }
     }
 
-    pub(super) fn remove(&self, agent: ThreadId) {
-        // Dropping pending mail can run extension destructors. Release the lock first.
-        let mailbox = self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_mut()
-            .and_then(|mailboxes| mailboxes.remove(&agent));
-        drop(mailbox);
-    }
-
     pub(super) fn close(&self) {
         // Detach under the lock, then notify readers and drop pending mail outside it.
         let mailboxes = self.0.lock().unwrap_or_else(PoisonError::into_inner).take();

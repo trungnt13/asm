@@ -13,7 +13,6 @@ use crate::config::Config;
 use crate::config::test_config;
 use crate::session::turn_context::NewTurnContextOptions;
 use crate::session::turn_context::TurnContext;
-use crate::tools::handlers::multi_agents_common::thread_spawn_source;
 use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
@@ -82,19 +81,19 @@ async fn spawn_child(
     program_source: SpawnProgramSource,
 ) -> codex_protocol::error::Result<Arc<CodexThread>> {
     let parent_id = parent.session.thread_id();
-    let source = thread_spawn_source(
-        parent_id,
-        &parent.session_source,
-        next_thread_spawn_depth(&parent.session_source),
-        /*agent_role*/ None,
-        /*task_name*/ None,
-    )
-    .expect("native child source");
-    let child = parent
-        .session
-        .services
-        .local_agent_runtime
-        .control(parent.session.session_id())
+    let source = codex_protocol::protocol::SessionSource::SubAgent(
+        codex_protocol::protocol::SubAgentSource::ThreadSpawn {
+            parent_thread_id: parent_id,
+            depth: next_thread_spawn_depth(&parent.session_source),
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
+        },
+    );
+    let mut control = crate::agent::LocalAgentControl::default()
+        .with_session_id(parent.session.session_id(), /*max_threads*/ usize::MAX);
+    control.runtime = parent.session.services.local_agent_runtime.clone();
+    let child = control
         .spawn_agent_with_metadata(
             config.clone(),
             text(),

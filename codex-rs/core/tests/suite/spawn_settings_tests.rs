@@ -7,7 +7,6 @@ use codex_extension_api::ExtensionFuture;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
-use codex_protocol::protocol::CollabAgentRef;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -31,7 +30,7 @@ impl TurnLifecycleContributor for RemoveChildOnTurnStart {
                 return;
             }
 
-            // V1 spawn awaits this callback before accepting the child's initial input, so
+            // Spawn awaits this callback before accepting the child's initial input, so
             // the manager lookup is guaranteed to fail before the spawn tool reports settings.
             let child = manager
                 .upgrade()
@@ -62,10 +61,12 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
                 ev_response_created("parent-spawn"),
                 ev_function_call_with_namespace(
                     SPAWN_CALL_ID,
-                    MULTI_AGENT_V1_NAMESPACE,
+                    MULTI_AGENT_V2_NAMESPACE,
                     "spawn_agent",
                     &json!({
                         "message": CHILD_PROMPT,
+                        "task_name": "child",
+                        "fork_turns": "none",
                         "agent_type": "custom",
                         "model": REQUESTED_MODEL,
                         "reasoning_effort": REQUESTED_REASONING_EFFORT,
@@ -93,8 +94,9 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
             config.features.enable(Feature::Collab).expect("enable collab");
             config
                 .features
-                .disable(Feature::MultiAgentV2)
-                .expect("use V1 spawn");
+                .enable(Feature::MultiAgentV2)
+                .expect("use V2 spawn");
+            config.multi_agent_v2.hide_spawn_agent_metadata = false;
             let role_path = config.codex_home.join("custom-role.toml");
             fs::write(
                 &role_path,
@@ -137,7 +139,7 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
     ));
     let spawn = wait_for_event_match(&test.codex, |event| match event {
         EventMsg::ItemCompleted(completed) => match &completed.item {
-            TurnItem::CollabAgentToolCall(item) if item.id == SPAWN_CALL_ID => Some(item.clone()),
+            TurnItem::SubAgentActivity(item) if item.id == SPAWN_CALL_ID => Some(item.clone()),
             _ => None,
         },
         _ => None,
@@ -149,15 +151,17 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
     }
 
     assert_eq!(
-        (spawn.model, spawn.reasoning_effort, spawn.receiver_agents),
         (
-            Some(ROLE_MODEL.to_string()),
+            spawn.model,
+            spawn.reasoning_effort,
+            spawn.agent_thread_id,
+            spawn.agent_path.to_string()
+        ),
+        (
+            Some(REQUESTED_MODEL.to_string()),
             Some(ROLE_REASONING_EFFORT),
-            vec![CollabAgentRef {
-                thread_id: child_id,
-                agent_nickname: Some("Captured".to_string()),
-                agent_role: Some("custom".to_string()),
-            }],
+            child_id,
+            "/root/child".to_string(),
         )
     );
     let requests = responses.requests();
@@ -168,7 +172,7 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
     let child_body = child_request.body_json();
     assert_eq!(
         (&child_body["model"], &child_body["reasoning"]["effort"]),
-        (&json!(ROLE_MODEL), &json!(ROLE_REASONING_EFFORT)),
+        (&json!(REQUESTED_MODEL), &json!(ROLE_REASONING_EFFORT)),
     );
     let output = requests
         .iter()
@@ -176,7 +180,7 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
         .expect("parent receives successful spawn output");
     assert_eq!(
         serde_json::from_str::<Value>(&output)?,
-        json!({ "agent_id": child_id.to_string(), "nickname": "Captured" }),
+        json!({ "task_name": "/root/child", "nickname": "Captured" }),
     );
     Ok(())
 }

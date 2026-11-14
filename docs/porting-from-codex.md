@@ -238,6 +238,14 @@ Optional `macos_concurrency_experiment` compares cold same-commit `macos-15` bui
 
 ## Intentional behavior differences
 
+### Retired multi-agent V1 execution
+
+- Remove V1 as a complete execution surface: its tool registration, schema builders, handler modules, and exclusive close/resume lifecycle adapters. Do not retain advertised tools that only return unsupported.
+- Preserve V1 config/version decoding, canonical rollout types, collaboration events, history projections, and transcript readers. Old histories remain readable; V1 agent operations no longer run. Keep shared V2, native-runtime, Guardian, mailbox, residency, and tree-shutdown code.
+- Do not silently upgrade version defaults or rewrite saved history. Explicit `features.multi_agent_v2 = true` selects the supported tools, including when resuming old sessions. A session resolving to V1 exposes no V1 tools.
+- During upstream syncs, treat the deleted `core/src/tools/handlers/multi_agents.rs`, its `multi_agents/` directory, and `core/src/agent/control/{legacy,resume}.rs` modules as retired chunks, not individual patches to restore. Trace any new upstream callers before migrating useful behavior into V2. Search for `multi_agent_v1`, `create_spawn_agent_tool_v1`, `SpawnConfigVersion`, `spawn_agent_with_source`, `close_agent`, and `resume_agent`; distinguish executable producers from retained history/config consumers. Keep V2/shared code outside the deletion boundary.
+- This reduces maintenance scope. It does not establish an overall runtime speed improvement.
+
 ### Desktop app-context filtering
 
 `app_context_filter` defaults to `[]`. Before session creation, remove only exact named `###` sections from Desktop `<app-context>` instructions. Preserve unknown sections, surrounding instructions, per-turn context, and rollout history. Keep filtered instructions consistent when rebuilding initial context. After filter changes, use a fresh chat.
@@ -321,7 +329,7 @@ The shared native rules below also apply to Cursor, except for its listed differ
 
 **Login and permissions**
 
-- Resolve `claude` through PATH; use native settings/subscription login. Do not extract subscription credentials or enable API billing implicitly. Preserve native tools/skills/instructions, except V1/V2 ASM-spawned Claude children use `--disallowedTools AskUserQuestion`. Mains retain native questions.
+- Resolve `claude` through PATH; use native settings/subscription login. Do not extract subscription credentials or enable API billing implicitly. Preserve native tools/skills/instructions, except V2 ASM-spawned Claude children use `--disallowedTools AskUserQuestion`. Mains retain native questions.
 - Use deterministic subscription login through shared app-server chat requests/responses, without Desktop changes. Explicit `claude login`/`cursor login` selects the provider in any main chat, including GPT parents, without changing models. Store that provider in pending login state; never infer it from the chat model. Children cannot start interactive login.
 - Keep login exchanges display-only, outside model history/rollouts. Intercept replies before normal ingestion, history, hooks, or inference. Send authorization codes only to the official Claude login subprocess. Never put codes in model requests, logs, or rollouts; client drafts/recall are accepted.
 - Expired/interrupted exchanges fail closed. Unrecognized replies get fixed restart instructions, not normal ingestion. Only explicit non-secret actions exit/restart login. Preserve a code-free pending marker across backend restart/resume, without codes/OAuth state or checkpoint changes. Keep output private and errors fixed. Verify subscription auth; never fall back to Console/API keys/cloud providers.
@@ -589,7 +597,7 @@ Keep upstream per-content provenance in local history, prompt assembly, and comp
 Optional `allowed_agent_roles` in `[[skills.config]]` restricts normal catalog visibility and skill selection to listed child roles. Example: `name = "review"`, `enabled = true`, `allowed_agent_roles = ["reviewer"]`.
 
 - Match the current child's explicit role, not an ancestor or displayed TUI view. Omission keeps existing visibility; `[]` hides matching skills from all roles.
-- Root, ordinary Side, saved user forks, and unnamed/nonmatching children do not match. Reviewer children match in fresh or V2 full-history context; resume restores their role. Preserve V1 full-history restrictions.
+- Root, ordinary Side, saved user forks, and unnamed/nonmatching children do not match. Reviewer children match in fresh or V2 full-history context; resume restores their role.
 - Keep parent enablement and permissions. Role overrides are deny-only and cannot re-enable disabled skills. Scope restrictions also survive enables using another matching selector.
 - Share local snapshots for identical effective visibility, without task/thread/raw-role cache keys. Apply scope in config-aware and cwd caches. Keep prompt lists stable, append-only availability updates, and existing context budgets.
 - This controls visibility, not access. Preserve filesystem/script/sandbox/network/approval permissions. History can retain old lists or read skill content; never scrub it.
@@ -599,7 +607,7 @@ Optional `allowed_agent_roles` in `[[skills.config]]` restricts normal catalog v
 
 Role TOML can explicitly disable web search with `web_search = "disabled"` or System1 with `[system1] enabled = false`. Apply only explicit disabling. Omission keeps inheritance, including the parent's live System1 toggle. Roles cannot enable either against parent restrictions. Keep System1 restrictions through child spawn/reload.
 
-Roles can independently override `[system1] min_effort` and `max_effort`; omitted bounds inherit. Validate the merged ordinary-effort range. Intersect it with model-supported efforts; fewer than two choices skips Decisions. Keep role bounds through model changes/reload. New children resolve their own role, without ancestor role bounds; V1 full-history forks retain their role bounds. Other System1 settings inherit. Bounds constrain decision choices, not manual effort or fallback.
+Roles can independently override `[system1] min_effort` and `max_effort`; omitted bounds inherit. Validate the merged ordinary-effort range. Intersect it with model-supported efforts; fewer than two choices skips Decisions. Keep role bounds through model changes/reload. New children resolve their own role, without ancestor role bounds. Other System1 settings inherit. Bounds constrain decision choices, not manual effort or fallback.
 
 After a supporting release is published and installed, set the personal reviewer to `min_effort = "high"`, `max_effort = "xhigh"`. Do not change it earlier. Align the projected role layer with runtime settings. Do not add arbitrary role fields or change session authority.
 
@@ -607,13 +615,13 @@ After a supporting release is published and installed, set the personal reviewer
 
 Top-level `include_model_catalog_in_spawn_agent_list` defaults to `true`.
 
-- False removes generated model/effort/tier lists and references from V1/V2 spawn descriptions and `<model_catalog>`. Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists cease to apply.
+- False removes generated model/effort/tier lists and references from V2 spawn descriptions and `<model_catalog>`. Preserve custom descriptions, arguments, loading, validation, and history. Use normal invalidation when retained lists cease to apply.
 - Keep inclusion independent of `model_catalog_in_context` placement and `expose_spawn_agent_model_overrides` arguments.
 
-`load_external_models_json` controls compact exact-alias discovery independently of full-catalog visibility and placement. True (default) includes it in V1/V2 spawn descriptions; false omits it.
+`load_external_models_json` controls compact exact-alias discovery independently of full-catalog visibility and placement. True (default) includes it in V2 spawn descriptions; false omits it.
 
 - List only picker-visible, backend-compatible entries with bundled aliases: native runtimes or configured API providers allowed by managed requirements. Discovery proves no runtime, credentials, or service availability.
-- Hide the list when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: V1 `fork_context=false`, V2 `fork_turns="none"`.
+- Hide the list when V2 model override arguments are disabled. Include cross-provider fresh-history guidance: `fork_turns="none"`.
 - Do not change personal configuration automatically. Identify truncated model previews as partial in unknown-model errors.
 
 ### MCP resource tools
@@ -759,7 +767,7 @@ Apply `[agents] max_depth` to V2 creation, with root at 0. Default 1 permits dir
 
 Optional top-level `subagent_model_context_windows` maps exact final model IDs to positive `i64` token counts. Apply only to V2 spawned children at startup/model changes/reload. Missing entries keep scalar/model fallback. Keep original `model_context_window` so matches cannot spill into unmatched grandchildren. Preserve clamping/headroom/compaction. Keep root/review/guardian unchanged; add no API/rollout fields.
 
-A positive role TOML `model_context_window` overrides map/scalar fallback at startup/model changes/reload. New children resolve their own role, not parent role limits. V1 full-history forks keep role inheritance. Preserve clamping/headroom/compaction and root/internal workers. The picker shows top-level map/scalar configuration, not effective role limits.
+A positive role TOML `model_context_window` overrides map/scalar fallback at startup/model changes/reload. New children resolve their own role, not parent role limits. Preserve clamping/headroom/compaction and root/internal workers. The picker shows top-level map/scalar configuration, not effective role limits.
 
 `[subagent_service_tiers]` maps model/effort to tiers, e.g. `gpt-6-sol = { high = "fast" }`. Match final child model/effective effort after overrides/roles. Matches override root tier throughout child lifetime, including later root-tier changes. Unmatched/root behavior stays upstream. Reject unsupported matched tiers and Fast when disabled. Do not expose spawn arguments.
 
@@ -812,7 +820,7 @@ Require `reason` for `clock.sleep`, V2 `agents.wait_agent`, Code Mode `wait`, AS
 - Preserve children/cells/processes/collected output. Explicit stop/termination must not prompt resumption. Reminders do not guarantee continuation or automatic waits.
 - Use existing `instant_interrupt` for Code Mode, terminal polls, and TUI waits. Disabling it preserves normal waits. Interrupted TUI waits return `interrupted: true` without snapshots and cancel observation only.
 - Limit MCP early cancellation to marked `codex_tui.wait_threads`; preserve its envelope. Do not rewrite user messages, persist reminders, or change app-server schemas. Amend effective schemas after catalog overrides.
-- Exclude V1 waits, environment readiness, desktop-owned tools, and initial command execution.
+- Exclude environment readiness, desktop-owned tools, and initial command execution.
 
 ### Test-only dependencies
 

@@ -537,7 +537,6 @@ async fn spawn_agent_function_tools_use_agent_matcher_alias() {
     let hook_payloads = [
         codex_tools::ToolName::plain("spawn_agent"),
         codex_tools::ToolName::namespaced(DEFAULT_FUNCTION_NAMESPACE, "spawn_agent"),
-        codex_tools::ToolName::namespaced(MULTI_AGENT_V1_NAMESPACE, "spawn_agent"),
     ]
     .into_iter()
     .map(|tool_name| {
@@ -557,10 +556,6 @@ async fn spawn_agent_function_tools_use_agent_matcher_alias() {
     assert_eq!(
         hook_payloads,
         vec![
-            Some(PreToolUsePayload {
-                tool_name: HookToolName::spawn_agent(),
-                tool_input: serde_json::json!({ "message": "inspect this repo" }),
-            }),
             Some(PreToolUsePayload {
                 tool_name: HookToolName::spawn_agent(),
                 tool_input: serde_json::json!({ "message": "inspect this repo" }),

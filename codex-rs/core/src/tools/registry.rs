@@ -21,7 +21,6 @@ use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::control_tool_analytics::ControlToolCallGuard;
 use crate::tools::flat_tool_name;
-use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::lifecycle::notify_tool_finish;
 use crate::tools::lifecycle::notify_tool_start;
@@ -1155,10 +1154,7 @@ pub(crate) async fn apply_pre_tool_use(
 }
 
 fn function_hook_tool_name(invocation: &ToolInvocation) -> HookToolName {
-    if invocation.tool_name.name == "spawn_agent"
-        && (invocation.tool_name.is_default_namespace()
-            || invocation.tool_name.namespace.as_deref() == Some(MULTI_AGENT_V1_NAMESPACE))
-    {
+    if invocation.tool_name.name == "spawn_agent" && invocation.tool_name.is_default_namespace() {
         return HookToolName::spawn_agent();
     }
 

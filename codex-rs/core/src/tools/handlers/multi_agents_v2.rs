@@ -83,3 +83,7 @@ pub(crate) async fn emit_inter_agent_communication(
         .emit_turn_item_completed(turn, TurnItem::CollabAgentToolCall(item))
         .await;
 }
+
+#[cfg(test)]
+#[path = "multi_agents_tests.rs"]
+mod tests;
