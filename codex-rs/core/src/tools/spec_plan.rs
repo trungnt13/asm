@@ -38,6 +38,7 @@ use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHand
 use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
 use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
 use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
+use crate::tools::handlers::protected_review;
 use crate::tools::handlers::tool_search_spec::ToolSearchSourceListing;
 use crate::tools::handlers::view_image_spec::ViewImageToolOptions;
 use crate::tools::hosted_spec::WebSearchToolOptions;
@@ -843,8 +844,13 @@ fn agent_type_description(
     turn_context: &TurnContext,
     default_agent_type_description: &str,
 ) -> String {
-    let agent_type_description =
+    let mut agent_type_description =
         crate::agent::role::spawn_tool_spec::build(&turn_context.config.agent_roles);
+    if turn_context.multi_agent_version == MultiAgentVersion::V2
+        && !turn_context.session_source.is_non_root_agent()
+    {
+        agent_type_description.push_str("\n- reviewer: Independent protected review; fresh context, trusted settings, no steering or continuation.");
+    }
     if agent_type_description.is_empty() {
         default_agent_type_description.to_string()
     } else {
@@ -1328,6 +1334,15 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     let turn_context = context.turn_context;
     let features = turn_context.config.features.get();
     let environment_mode = tool_environment_mode(context.environments);
+    if turn_context.multi_agent_version == MultiAgentVersion::V2
+        && !turn_context.session_source.is_non_root_agent()
+    {
+        registry.add(protected_review::CLOSE_REVIEW);
+    }
+    if crate::protected_reviewer::is_reviewer(&turn_context.session_source) {
+        registry.add(protected_review::READ_CONTEXT);
+        registry.add(protected_review::EXPLORE);
+    }
 
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);
@@ -1590,7 +1605,8 @@ fn add_collaboration_tools(context: &CoreToolPlanContext<'_>, registry: &mut Too
                                 .features
                                 .enabled(Feature::ModelCatalogInContext),
                             agent_type_description,
-                            expose_agent_type: !turn_context.config.agent_roles.is_empty(),
+                            expose_agent_type: !turn_context.config.agent_roles.is_empty()
+                                || !turn_context.session_source.is_non_root_agent(),
                             hide_agent_type_model_reasoning: hide_spawn_agent_metadata,
                             expose_spawn_agent_model_overrides: turn_context
                                 .config

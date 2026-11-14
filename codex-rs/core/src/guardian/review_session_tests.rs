@@ -198,6 +198,7 @@ async fn test_review_session() -> (
         GuardianReviewSession {
             session,
             io: SessionIo {
+                protected: false,
                 tx_sub,
                 rx_event,
                 agent_status,

@@ -20,7 +20,7 @@ pub struct ThreadStartupMetadata {
     pub session_id: SessionId,
     pub thread_id: ThreadId,
     forked_from_id: Option<ThreadId>,
-    parent_thread_id: Option<ThreadId>,
+    pub(crate) parent_thread_id: Option<ThreadId>,
     thread_source: Option<ThreadSource>,
     thread_name: Option<String>,
     model: String,
