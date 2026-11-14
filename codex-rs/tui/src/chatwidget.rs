@@ -696,7 +696,6 @@ pub(crate) struct ChatWidget {
     active_side_conversation: bool,
     blocks_direct_input: bool,
     show_interagent_communication: bool,
-    external_writer_view: bool,
     read_only_thread: Option<ReadOnlyThread>,
     read_only_history: bool,
     thread_settings_confirmed: bool,

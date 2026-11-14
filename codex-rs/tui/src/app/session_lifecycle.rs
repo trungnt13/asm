@@ -1022,9 +1022,6 @@ impl App {
         {
             self.adopt_server_permissions();
         }
-        if external_writer {
-            self.chat_widget.show_external_writer_thread();
-        }
         archived_thread::show_cached_read_only_thread(self, thread_id);
         if tui.is_owned_screen() {
             // Hold drawing and input through the history events emitted by replay.
