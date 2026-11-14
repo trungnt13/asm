@@ -13,7 +13,6 @@ use crate::model_catalog::LUNA_RESERVE_MODEL;
 use crate::status::format_credit_micros;
 use crate::status::format_estimated_usd_micros;
 use crate::status::format_tokens_compact;
-use crate::status::thread_cost_micros;
 use crate::status_line_labels::compact_model_name;
 use crate::status_line_labels::compact_reasoning_label;
 use crate::terminal_program_status::ProgramStatus;

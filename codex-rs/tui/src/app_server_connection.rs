@@ -73,7 +73,7 @@ pub(crate) async fn enable_asm_transcript(
     match response {
         Ok(response) if response.version == 1 => Ok(()),
         Ok(response) => {
-            color_eyre::eyre::bail!("unsupported ASM transcript version: {}", response.version)
+            color_eyre::eyre::bail!("unsupported ASM transcript version: {}", response.version);
         }
         Err(TypedRequestError::Server { source, .. })
             if source.code == -32601

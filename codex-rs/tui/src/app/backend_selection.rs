@@ -258,6 +258,7 @@ impl App {
                     destination,
                     &settings,
                     destination_cwd,
+                    /*selected_model*/ None,
                     /*cloud_switch*/ None,
                 )),
             )
