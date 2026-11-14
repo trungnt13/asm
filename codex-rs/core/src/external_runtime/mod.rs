@@ -41,6 +41,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use anyhow::bail;
 use codex_async_utils::OrCancelExt;
+use codex_external_runtime::ExternalTurnFailure;
 use codex_history::RolloutItem;
 use codex_protocol::error::CodexErr;
 use codex_protocol::models::ResponseItem;
@@ -182,10 +183,12 @@ async fn run_turn_start(
         Some(continuation) => continuation::run(&session, &turn, continuation, &cancellation).await,
         None => run_conversation(&session, &turn, &mut input, &cancellation).await,
     };
-    let authentication_required = result
+    let failure = result
         .as_ref()
-        .is_err_and(anyhow::Error::is::<codex_external_runtime::ExternalTurnFailure>);
-    if authentication_required {
+        .err()
+        .and_then(|error| error.downcast_ref::<ExternalTurnFailure>())
+        .copied();
+    if failure == Some(ExternalTurnFailure::Authentication) {
         session
             .external_runtime
             .authentication_required
@@ -205,7 +208,11 @@ async fn run_turn_start(
         Err(error) if error.is::<ConfirmedInterrupt>() || cancellation.is_cancelled() => {
             Err(CodexErr::TurnAborted)
         }
-        Err(_) if authentication_required => {
+        Err(_) if failure == Some(ExternalTurnFailure::UsageLimit) => Err(CodexErr::InvalidRequest(
+            "Claude usage limit reached. This chat stays usable: send a new message after the limit resets; nothing will be replayed."
+                .to_owned(),
+        )),
+        Err(_) if failure == Some(ExternalTurnFailure::Authentication) => {
             let message = match NativeRuntime::for_model(&turn.model_info().slug) {
                 Some((NativeRuntime::ClaudeCode, _)) => {
                     "Claude authentication failed. Send `claude login` in this chat to sign in to your Claude subscription; the failed message will not be replayed."
@@ -325,8 +332,7 @@ async fn run_conversation(
     } else {
         None
     };
-    // Native children get ASM messaging tools through a session MCP server. Cursor team policy
-    // can block it without telling ASM; mail still arrives between Cursor turns.
+    // Native V2 children get ASM messaging tools through the loopback JSON bridge.
     let messaging = child_agent;
     let page_context = if native_runtime == NativeRuntime::ClaudeCode {
         let lease = RuntimeLease::take(&session.external_runtime)?;
