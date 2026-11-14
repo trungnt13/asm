@@ -331,7 +331,7 @@ pub(super) async fn model_catalog_refresh_requests(
     );
     assert_eq!(
         listing.contains("Service tiers: priority."),
-        include_model_catalog_in_spawn_agent_list,
+        include_model_catalog_in_spawn_agent_list && model_catalog_in_context,
         "expected service tier guidance in model catalog: {catalog:?}"
     );
     assert!(

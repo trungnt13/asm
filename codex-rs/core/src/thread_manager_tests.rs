@@ -90,13 +90,6 @@ impl codex_extension_api::ThreadInstructionsProvider for ParentInstructionsProvi
     }
 }
 
-fn local_control(session: &crate::session::session::Session) -> crate::agent::LocalAgentControl {
-    let mut control = crate::agent::LocalAgentControl::default()
-        .with_session_id(session.session_id(), /*max_threads*/ usize::MAX);
-    control.runtime = session.services.local_agent_runtime.clone();
-    control
-}
-
 #[tokio::test]
 async fn live_fork_keeps_instructions_when_source_is_unloaded_during_setup() {
     let temp_dir = tempdir().expect("tempdir");
@@ -793,7 +786,12 @@ async fn thread_id_generator_applies_to_roots_children_and_forks() {
         })
         .await
         .expect("start root thread");
-    let child = local_control(&root.thread.session)
+    let child = root
+        .thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(root.thread.session.session_id())
         .spawn_agent_with_metadata(
             config.clone(),
             vec![UserInput::Text {
@@ -963,7 +961,12 @@ async fn child_session_inherits_resumed_parent_auth(host_child: bool) {
         })),
         ..StartThreadOptions::new(config)
     };
-    let control = local_control(&parent.thread.session);
+    let control = parent
+        .thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent.thread.session.session_id());
     let child = if host_child {
         manager
             .state
@@ -3588,7 +3591,12 @@ async fn new_uses_active_provider_for_model_refresh(with_cache: bool) {
                     environments: Some(Vec::new()),
                     ..StartThreadOptions::new(thread_config.clone())
                 },
-                local_control(&started.thread.session),
+                started
+                    .thread
+                    .session
+                    .services
+                    .local_agent_runtime
+                    .control(started.thread.session.session_id()),
                 Some(started.thread_id),
                 /*inherited_exec_policy*/ None,
             )

@@ -581,13 +581,6 @@ async fn assert_thread_not_loaded(manager: &ThreadManager, thread_id: ThreadId) 
     }
 }
 
-fn local_control(session: &crate::session::session::Session) -> LocalAgentControl {
-    LocalAgentControl {
-        session_id: session.session_id(),
-        runtime: session.services.local_agent_runtime.clone(),
-    }
-}
-
 #[tokio::test]
 async fn send_input_errors_when_manager_dropped() {
     let control = LocalAgentControl::default();
@@ -1143,7 +1136,11 @@ async fn cancelled_v2_send_finishes_reload_registration() {
     config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     let harness = AgentControlHarness::new_with_config(home, config).await;
     let (parent_id, parent) = harness.start_paginated_thread().await;
-    let control = local_control(&parent.session);
+    let control = parent
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent.session.session_id());
     let child =
         spawn_v2_reload_test_child(&control, harness.config.clone(), &parent, "worker").await;
     let child_id = child.thread_id;
@@ -1344,7 +1341,12 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         })
         .await
         .expect("start root thread");
-    let control = local_control(&root.thread.session);
+    let control = root
+        .thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(root.thread.session.session_id());
     let parent_thread = match route {
         V2ReloadRoute::Sender => root.thread,
         V2ReloadRoute::NestedParent => {
@@ -1737,18 +1739,32 @@ async fn cold_root_resume_does_not_reopen_v2_descendants() {
         std::sync::Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
         harness.state_db.clone(),
     );
-    let stored_parent = parent_thread
-        .read_thread(
-            /*include_archived*/ true, /*include_history*/ true,
-        )
+    let state = harness
+        .control
+        .runtime
+        .upgrade()
+        .expect("thread manager state");
+    let stored_parent = state
+        .read_stored_thread(ReadThreadParams {
+            thread_id: parent_thread_id,
+            include_archived: true,
+            include_history: false,
+        })
         .await
-        .expect("read root history");
+        .expect("read root metadata");
+    let history = crate::agent::history::load_agent_model_context(
+        &state,
+        parent_thread_id,
+        stored_parent.history_mode,
+    )
+    .await
+    .expect("load root model context");
     let resumed_parent = resumed_manager
         .start_thread(StartThreadOptions {
             initial_history: InitialHistory::Resumed(ResumedHistory {
-                history_revision: None,
+                history_revision: history.revision,
                 conversation_id: parent_thread_id,
-                history: Arc::new(stored_parent.history.expect("root history").items),
+                history: Arc::new(history.items),
                 rollout_path: stored_parent.rollout_path,
             }),
             ..StartThreadOptions::new(harness.config.clone())
@@ -1756,7 +1772,12 @@ async fn cold_root_resume_does_not_reopen_v2_descendants() {
         .await
         .expect("cold root resume");
     let resumed_parent_thread_id = resumed_parent.thread_id;
-    let resumed_control = local_control(&resumed_parent.thread.session);
+    let resumed_control = resumed_parent
+        .thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(resumed_parent.thread.session.session_id());
     assert_eq!(resumed_parent_thread_id, parent_thread_id);
     assert_ne!(
         resumed_control.get_status(parent_thread_id).await,
@@ -1832,7 +1853,12 @@ async fn cold_resume_with_thread_instructions_preserves_lazy_v2_child_inheritanc
         .await
         .expect("start parent with thread instructions");
     let parent_thread_id = parent.thread_id;
-    let control = &local_control(&parent.thread.session);
+    let control = &parent
+        .thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent.thread.session.session_id());
     let worker_thread_id =
         spawn_v2_reload_test_child(control, harness.config.clone(), &parent.thread, "worker")
             .await
@@ -2017,7 +2043,12 @@ async fn v2_reload_preserves_shared_instructions_after_root_unloads(
         .inherited_instructions()
         .await
         .thread_provider;
-    let control = &local_control(&root.thread.session);
+    let control = &root
+        .thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(root.thread.session.session_id());
     let sender_id =
         spawn_v2_reload_test_child(control, harness.config.clone(), &root.thread, "sender")
             .await
@@ -2379,7 +2410,11 @@ async fn pending_environment_failure_reaches_child_and_grandchild() {
         .await
         .expect("start root")
         .thread;
-    let control = local_control(&root.session);
+    let control = root
+        .session
+        .services
+        .local_agent_runtime
+        .control(root.session.session_id());
     let mut parent = Arc::clone(&root);
     let mut descendants = Vec::new();
     for name in ["child", "grandchild"] {
@@ -4447,7 +4482,11 @@ async fn spawn_agent_releases_slot_after_shutdown() {
     config.multi_agent_v2.max_concurrent_threads_per_session = 2;
     let harness = AgentControlHarness::new_with_config(home, config).await;
     let (_, parent) = harness.start_thread().await;
-    let control = local_control(&parent.session);
+    let control = parent
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent.session.session_id());
     let first =
         spawn_v2_reload_test_child(&control, harness.config.clone(), &parent, "first").await;
     let first_thread = harness
@@ -5069,7 +5108,11 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         .expect("start parent with roots");
     let parent_thread_id = parent.thread_id;
     let parent_thread = parent.thread;
-    let control = local_control(&parent_thread.session);
+    let control = parent_thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent_thread.session.session_id());
     let agent_path = AgentPath::from_string("/root/reviewer".to_string())
         .expect("test agent path should be valid");
 

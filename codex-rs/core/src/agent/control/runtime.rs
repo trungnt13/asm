@@ -17,6 +17,7 @@ use crate::thread_manager::ThreadManagerState;
 use arc_swap::ArcSwapOption;
 use codex_extension_api::ThreadInstructionsProvider;
 use codex_protocol::AgentPath;
+use codex_protocol::SessionId;
 use codex_protocol::ThreadId;
 use codex_protocol::error::AgentErrorContext;
 use codex_protocol::error::CodexErr;
@@ -304,6 +305,14 @@ impl LocalAgentRuntime {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .tree_id
+    }
+
+    /// Bind local startup to the same tree state with this session's identity.
+    pub(crate) fn control(&self, session_id: SessionId) -> LocalAgentControl {
+        LocalAgentControl {
+            session_id,
+            runtime: self.clone(),
+        }
     }
 }
 

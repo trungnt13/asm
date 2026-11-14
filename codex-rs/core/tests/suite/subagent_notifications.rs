@@ -59,6 +59,7 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_function_call_with_namespace;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_response_once_match;
+use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::namespace_child_tool;
@@ -587,8 +588,21 @@ async fn spawned_agent_uses_multi_agent_reasoning_effort_for_requests(
         &server,
         json!({ "message": CHILD_PROMPT }),
         /*child_response_delay*/ None,
-        selected_reasoning_effort,
-        std::convert::identity,
+        selected_reasoning_effort.clone(),
+        |builder| {
+            if selected_reasoning_effort == ReasoningEffort::Ultra {
+                builder.with_model_info_override(INHERITED_MODEL, |model| {
+                    model
+                        .supported_reasoning_levels
+                        .push(ReasoningEffortPreset {
+                            effort: ReasoningEffort::Ultra,
+                            description: "Parent test mode.".to_string(),
+                        });
+                })
+            } else {
+                builder
+            }
+        },
     )
     .await?;
 
@@ -712,7 +726,7 @@ async fn subagent_start_replaces_session_start_and_injects_context(
     let user_prompt_submit_inputs = wait_for_hook_log(
         test.codex_home_path(),
         "user_prompt_submit_hook_log.jsonl",
-        /*expected_len*/ 2,
+        /*expected_len*/ 1,
     )
     .await?;
     let parent_prompt_input = user_prompt_submit_inputs
@@ -722,18 +736,7 @@ async fn subagent_start_replaces_session_start_and_injects_context(
     assert_eq!(parent_prompt_input.get("agent_id"), None);
     assert_eq!(parent_prompt_input.get("agent_type"), None);
 
-    let child_prompt_input = user_prompt_submit_inputs
-        .iter()
-        .find(|input| input["prompt"].as_str() == Some(CHILD_PROMPT))
-        .expect("child prompt submit hook input should be logged");
-    assert_eq!(
-        child_prompt_input["agent_id"].as_str(),
-        Some(spawned_id.as_str())
-    );
-    assert_eq!(
-        child_prompt_input["agent_type"].as_str(),
-        Some(expected_agent_type)
-    );
+    assert_eq!(user_prompt_submit_inputs.len(), 1);
 
     let session_start_inputs = wait_for_hook_log(
         test.codex_home_path(),
@@ -997,7 +1000,10 @@ async fn spawned_child_receives_forked_parent_context(
     let child_request_log = mount_sse_once_match(
         &server,
         |req: &wiremock::Request| {
-            body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
+            body_contains(req, CHILD_PROMPT)
+                && decoded_body(req)
+                    .and_then(|body| serde_json::from_slice::<Value>(&body).ok())
+                    .is_some_and(|body| body["model"] == REQUESTED_MODEL)
         },
         sse(vec![
             ev_response_created("resp-child-1"),
@@ -1091,12 +1097,17 @@ async fn spawned_child_receives_forked_parent_context(
         .await?;
     assert!(serde_json::to_string(&persisted.items)?.contains(TURN_0_FORK_PROMPT));
     let child_thread = test.thread_manager.get_thread(child_thread_id).await?;
-    tokio::time::timeout(Duration::from_secs(2), async {
+    let completed = tokio::time::timeout(Duration::from_secs(2), async {
         while !matches!(child_thread.agent_status().await, AgentStatus::Completed(_)) {
             sleep(Duration::from_millis(10)).await;
         }
     })
-    .await?;
+    .await;
+    assert!(
+        completed.is_ok(),
+        "child completion timed out: {:?}",
+        child_thread.agent_status().await
+    );
     let args = serde_json::to_string(&json!({
         "target": "/root/child",
         "message": "legacy child follow-up",
@@ -1328,6 +1339,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
                 .features
                 .enable(Feature::MultiAgentV2)
                 .expect("enable V2 spawn");
+            config.agent_max_depth = 2;
             config.model = Some(V2_DEFAULT_MODEL.to_string());
             config.agent_default_subagent_model = Some(V2_DEFAULT_MODEL.to_string());
             config.developer_instructions = Some(INSTRUCTIONS.to_string());
@@ -3834,7 +3846,7 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
         role_block(&agent_type_description, "custom").expect("custom role description");
     assert_eq!(
         custom_role_description,
-        "custom: {\nCustom role\n- This role's model is set to `gpt-5.5` and its reasoning effort is set to `high`. These settings cannot be changed.\n}"
+        "custom: {\nCustom role\n- This role defaults to model `gpt-5.5`; an explicit spawn model overrides it. Its reasoning effort is fixed at `high`.\n}"
     );
 
     Ok(())

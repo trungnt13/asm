@@ -2458,7 +2458,7 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
         &server,
         |request: &wiremock::Request| {
             request_body_contains(request, SPAWN_CHILD_PROMPT)
-                && !request_body_contains(request, SPAWN_CALL_ID)
+                && request_body_contains(request, r#""recipient":"/root/worker""#)
         },
         responses::sse(vec![
             responses::ev_response_created("child-response"),
@@ -2488,6 +2488,10 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
     let mut builder = test_codex()
         .with_home(Arc::clone(&home))
         .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Collab)
+                .expect("enable collaboration");
             config
                 .features
                 .enable(Feature::MultiAgentV2)
@@ -2523,9 +2527,16 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
         loop {
             if let Some(request) = child_mock.requests().into_iter().find(|request| {
                 request
-                    .message_input_texts("user")
+                    .inputs_of_type("agent_message")
                     .iter()
-                    .any(|text| text == SPAWN_CHILD_PROMPT)
+                    .any(|item| {
+                        item["author"] == "/root"
+                            && item["recipient"] == "/root/worker"
+                            && item["content"] == json!([{
+                                "type": "input_text",
+                                "text": format!("Message Type: NEW_TASK\nTask name: /root/worker\nSender: /root\nPayload:\n{SPAWN_CHILD_PROMPT}"),
+                            }])
+                    })
             }) {
                 break request;
             }
@@ -2583,12 +2594,9 @@ async fn run_subagent_global_instruction_case(fork_context: bool) -> Result<()> 
             "fresh-context subagent should omit parent user history; observed: {child_user_texts:?}"
         );
         assert_eq!(
-            child_user_texts
-                .iter()
-                .filter(|text| text.as_str() == SPAWN_CHILD_PROMPT)
-                .count(),
+            child_request.inputs_of_type("agent_message").len(),
             1,
-            "fresh-context subagent should contain its own prompt exactly once; observed: {child_user_texts:?}"
+            "fresh-context subagent should contain its own typed task message exactly once"
         );
     }
 

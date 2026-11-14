@@ -1,6 +1,5 @@
 ---
 source: core/tests/suite/scenarios_guardian_direct_mcp.rs
-assertion_line: 174
 expression: snapshot
 ---
 Scenario: A live MCP denial and a direct approval render the same action; neither dispatches the tool.
@@ -15,7 +14,6 @@ Scenario: A live MCP denial and a direct approval render the same action; neithe
     [03] <tools>
         Deferred tool namespaces:
         - mcp__codex_apps__calendar: Plan events and manage your calendar.
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
         </tools>
 02:message/user:
     <ENVIRONMENT_CONTEXT>
@@ -24,8 +22,8 @@ Scenario: A live MCP denial and a direct approval render the same action; neithe
 
 ## Window 2 (after request 1: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 2 (turn) --
-00:additional_tools/developer (1; hash=7758f662cd124827):
-        - namespace/functions; hash=70d14ec929ba5cd7
+00:additional_tools/developer (1; hash=52ea95dcf9097e64):
+        - namespace/functions; hash=d578c3c58dba1a34
           - custom/exec
           - function/wait
 01:message/developer:
@@ -107,7 +105,6 @@ Scenario: A live MCP denial and a direct approval render the same action; neithe
     [03] <tools>
         Deferred tool namespaces:
         - mcp__codex_apps__calendar: Plan events and manage your calendar.
-        - multi_agent_v1: Tools for spawning and managing sub-agents.
         </tools>
 02:message/user:
     <ENVIRONMENT_CONTEXT>
@@ -121,8 +118,8 @@ Scenario: A live MCP denial and a direct approval render the same action; neithe
 
 ## Window 4 (after request 3: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=7758f662cd124827):
-        - namespace/functions; hash=70d14ec929ba5cd7
+00:additional_tools/developer (1; hash=52ea95dcf9097e64):
+        - namespace/functions; hash=d578c3c58dba1a34
           - custom/exec
           - function/wait
 01:message/developer:

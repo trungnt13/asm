@@ -90,9 +90,11 @@ async fn spawn_child(
             agent_role: None,
         },
     );
-    let mut control = crate::agent::LocalAgentControl::default()
-        .with_session_id(parent.session.session_id(), /*max_threads*/ usize::MAX);
-    control.runtime = parent.session.services.local_agent_runtime.clone();
+    let control = parent
+        .session
+        .services
+        .local_agent_runtime
+        .control(parent.session.session_id());
     let child = control
         .spawn_agent_with_metadata(
             config.clone(),
