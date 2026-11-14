@@ -26,3 +26,5 @@ Keep commands and config consistent with the candidate version.
 Use the worktree scenario only for worktree changes. For other experiments,
 select a small Desktop scenario that checks the requested behavior.
 Skill use does not authorize deployment, cleanup, or model calls.
+
+After an authorized PR merge, apply the guide’s [post-merge cleanup](../../../docs/porting-from-codex.md#post-merge-cleanup) to PR-only candidate files and temporary processes. Preserve active backends, retained diagnostics, and reusable test accounts/SSH configuration; merge does not authorize account removal or shared-server changes.

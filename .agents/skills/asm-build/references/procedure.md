@@ -12,3 +12,5 @@ Read the [fork guide](../../../../docs/porting-from-codex.md#build-the-binary-fi
 For ordinary runtime/UI checks, use the verified absolute copied CLI with `--no-daemon` and [real-session isolation](../../../../docs/porting-from-codex.md#real-session-checks). This uses the embedded backend and sibling helper without changing/stopping the shared daemon. Check daemon/remote behavior separately when needed; `codex agents` and `--remote` cannot use `--no-daemon`.
 
 Before handoff, verify both files, CLI `--version`, both `--help` commands, and pair source identity. Help does not prove model/tool operation. When safe, hand off before automated checks finish. Report verified absolute paths, build time, a manual check, and pending checks. After runtime edits, rebuild and copy both; never present old binaries as current. Get permission before replacing installed `codex`.
+
+After an authorized PR merge, complete the guide’s [post-merge cleanup](../../../../docs/porting-from-codex.md#post-merge-cleanup) before closing out integration. Inventory artifacts produced by this procedure; retain required evidence and active handoffs, and report cleanup exceptions.
