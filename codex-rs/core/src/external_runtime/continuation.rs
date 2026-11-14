@@ -146,7 +146,7 @@ pub(super) async fn run(
         .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
     if let Some(bridge) = &runtime.bridge {
         let step = session
-            .capture_speculative_step_context(Arc::clone(turn), cancellation)
+            .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
             .await?;
         bridge
             .set_turn(Arc::clone(session), step, cancellation.clone())
