@@ -289,15 +289,33 @@ impl Session {
         self.start_task(turn_context, input, task).await
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "register the turn and its pending input atomically with the suspension fence"
-    )]
+    #[tracing::instrument(skip_all)]
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
+    ) -> TurnInputSubmission {
+        let start: BoxFuture<'_, TurnInputSubmission> = Box::pin(self.start_task_with_reservation(
+            turn_context,
+            input,
+            task,
+            /*reservation*/ None,
+        ));
+        start.await
+    }
+
+    #[tracing::instrument(skip_all)]
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "task registration remains atomic with admission and the suspension fence"
+    )]
+    pub(crate) async fn start_task_with_reservation<T: SessionTask>(
+        self: &Arc<Self>,
+        turn_context: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        task: T,
+        reservation: Option<Arc<Mutex<crate::state::TurnState>>>,
     ) -> TurnInputSubmission {
         // Replace the cache; in-flight acquisitions retain their previous Arc.
         self.services
@@ -345,6 +363,15 @@ impl Session {
                     reason: NotSubmittedReason::ServerDraining,
                 };
             }
+            if let Some(reservation) = &reservation
+                && active.as_ref().is_none_or(|turn| {
+                    turn.task.is_some() || !Arc::ptr_eq(&turn.turn_state, reservation)
+                })
+            {
+                return TurnInputSubmission::NotSubmitted {
+                    reason: NotSubmittedReason::Superseded,
+                };
+            }
             let turn = active.get_or_insert_with(ActiveTurn::default);
             debug_assert!(turn.task.is_none());
             turn.finishing = None;
@@ -377,13 +404,12 @@ impl Session {
             .map(|reporting| reporting.handoffs.token());
         let Some(turn) = active
             .as_mut()
-            .filter(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state))
+            .filter(|turn| turn.task.is_none() && Arc::ptr_eq(&turn.turn_state, &turn_state))
         else {
             return TurnInputSubmission::NotSubmitted {
                 reason: NotSubmittedReason::Superseded,
             };
         };
-        debug_assert!(turn.task.is_none());
         // Keep mail in its queue until a task owns it. Suspension can save it if it wins this lock.
         let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         self.input_queue
@@ -1001,6 +1027,7 @@ impl Session {
         }
         drop(outcome_handoff);
         if cleared_active_turn {
+            self.external_runtime.turn_finished.notify_waiters();
             self.emit_thread_idle_lifecycle_if_idle(idle_cause).await;
         }
         // Private reviewers already flushed the terminal event before delivering it.
@@ -1029,7 +1056,9 @@ impl Session {
             // persisted, so capacity eviction cannot close their rollout writer.
             self.mark_interrupted();
         }
-        active.take()
+        let turn = active.take();
+        self.external_runtime.turn_finished.notify_waiters();
+        turn
     }
 
     pub(crate) async fn close_unified_exec_processes(&self) {

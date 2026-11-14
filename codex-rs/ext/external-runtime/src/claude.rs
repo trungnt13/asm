@@ -66,14 +66,16 @@ pub struct ClaudeOptions {
     pub skill_overrides: serde_json::Map<String, Value>,
 }
 
-pub struct ClaudeRuntime {
-    process: ExternalProcess,
+pub(crate) struct ClaudeDriver {
+    pub(super) process: ExternalProcess,
     session_id: String,
     usable: bool,
     failure_result: Option<Value>,
     mid_turn_delivery: watch::Sender<bool>,
     // Native reports this level per process; live tasks can start another native turn.
-    background_work: bool,
+    pub(super) background_work: bool,
+    pub(super) first_frame: Option<Value>,
+    active_agents: HashMap<String, Option<String>>,
     // Last top-level assistant message of the latest turn, for pinned native forks.
     last_assistant_uuid: Option<String>,
     per_turn_effort_active: Option<bool>,
@@ -89,7 +91,7 @@ fn execution_abort_reason(result: &Value) -> Option<&str> {
     }
 }
 
-impl ClaudeRuntime {
+impl ClaudeDriver {
     #[tracing::instrument(skip_all)]
     pub async fn spawn(options: ClaudeOptions) -> Result<Self> {
         if !cfg!(any(target_os = "linux", target_os = "macos")) {
@@ -212,6 +214,8 @@ impl ClaudeRuntime {
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
             background_work: false,
+            first_frame: None,
+            active_agents: HashMap::new(),
             last_assistant_uuid: None,
             per_turn_effort_active: None,
         })
@@ -336,7 +340,7 @@ impl ClaudeRuntime {
                 }
                 result = self.process.write_frame(user_frame(prompt, &user_message_uuid)) => result?,
             }
-            self.read_result(&events, cancel, &user_message_uuid, steering)
+            self.read_result(&events, cancel, &user_message_uuid, steering.map(crate::claude_steering::Steering::Foreground))
                 .await
         }
         .await;
@@ -351,16 +355,20 @@ impl ClaudeRuntime {
         result
     }
 
-    async fn read_result(
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn read_result(
         &mut self,
         events: &mpsc::Sender<Value>,
         cancel: CancellationToken,
         user_message_uuid: &str,
-        mut steering: Option<mpsc::Receiver<Prompt>>,
+        mut steering: Option<crate::claude_steering::Steering>,
     ) -> Result<ExternalTurnOutcome> {
         let mut pending_result = None;
         let mut latest_command = user_message_uuid.to_owned();
-        let mut commands = HashSet::from([latest_command.clone()]);
+        let mut commands = HashSet::new();
+        if !user_message_uuid.is_empty() {
+            commands.insert(latest_command.clone());
+        }
         let mut submitted_commands = commands.clone();
         let mut latest_command_succeeded = false;
         let mut cancelled_commands = HashSet::new();
@@ -374,9 +382,30 @@ impl ClaudeRuntime {
         let mut pending_failure = None;
         let mut authentication_deadline = None;
         let mut idle = false;
-        // Local agents by task ID, with the latest run ID when Claude reports one.
-        let mut active_agents: HashMap<String, Option<String>> = HashMap::new();
+
         loop {
+            if interrupt_id.is_none()
+                && idle
+                && (submitted_steering_count == 0
+                    || (latest_command_succeeded && commands.is_empty()))
+                && (pending_failure.is_none()
+                    || (commands.is_empty()
+                        && cancelled_commands.contains(user_message_uuid)
+                        && self.active_agents.is_empty()
+                        && !self.background_work))
+                && (pending_result.is_some() || user_message_uuid.is_empty())
+                && steering
+                    .as_mut()
+                    .is_none_or(crate::claude_steering::Steering::close_at_idle)
+            {
+                return Ok(ExternalTurnOutcome {
+                    result: pending_result.take(),
+                    interrupted: false,
+                    submitted_steering_count,
+                    failure: pending_failure,
+                });
+            }
+
             let frame = tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if interrupt_id.is_none() => {
@@ -412,9 +441,10 @@ impl ClaudeRuntime {
                         None => std::future::pending().await,
                     }
                 }, if interrupt_id.is_none() && pending_failure.is_none() => {
-                    let Some(prompt) = prompt else {
-                        steering = None;
-                        continue;
+                    let prompt = match prompt {
+                        crate::claude_steering::SteeringInput::Prompt(prompt) => prompt,
+                        crate::claude_steering::SteeringInput::Cancelled => continue,
+                        crate::claude_steering::SteeringInput::Closed => { steering = None; continue; },
                     };
                     if !*self.mid_turn_delivery.borrow() {
                         bail!("Claude steering was submitted without command lifecycle support");
@@ -435,16 +465,14 @@ impl ClaudeRuntime {
                     idle = false;
                     continue;
                 }
-                frame = self.process.frames.recv() => frame.context("Claude stream reader stopped")??,
+                frame = async {
+                    match self.first_frame.take() {
+                        Some(frame) => Ok(frame),
+                        None => self.process.frames.recv().await.context("Claude stream reader stopped")?,
+                    }
+                } => frame?,
             };
-            if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
-                bail!("Claude emitted a JSON frame without an event type");
-            }
-            if let Some(id) = frame.get("session_id").and_then(Value::as_str)
-                && id != self.session_id
-            {
-                bail!("Claude returned a different session ID than requested");
-            }
+            self.observe_session_frame(&frame)?;
             let tool_block = |block: &Value| {
                 matches!(
                     block.get("type").and_then(Value::as_str),
@@ -467,33 +495,6 @@ impl ClaudeRuntime {
                     .is_some_and(|id| !id.is_null())
                 || (frame.get("type").and_then(Value::as_str) == Some("system")
                     && frame.get("subtype").and_then(Value::as_str) == Some("task_started"));
-            if frame["type"] == "system"
-                && matches!(
-                    frame["subtype"].as_str(),
-                    Some("init" | "per_turn_effort_changed")
-                )
-                && let Some(active) = frame["per_turn_effort_active"].as_bool()
-            {
-                self.per_turn_effort_active = Some(active);
-            }
-            if frame.get("type").and_then(Value::as_str) == Some("system")
-                && frame.get("subtype").and_then(Value::as_str) == Some("init")
-            {
-                self.process
-                    .record_cli_version(&frame["claude_code_version"]);
-                // Send now is never requested. This capability only identifies the verified
-                // CLI generation whose UUID command lifecycle lets queued input be reconciled.
-                self.mid_turn_delivery.send_replace(
-                    frame
-                        .get("capabilities")
-                        .and_then(Value::as_array)
-                        .is_some_and(|items| {
-                            items
-                                .iter()
-                                .any(|item| item.as_str() == Some("interrupt_send_now_v1"))
-                        }),
-                );
-            }
             if frame.get("type").and_then(Value::as_str) == Some("command_lifecycle")
                 && let Some(id) = frame.get("command_uuid").and_then(Value::as_str)
                 && submitted_commands.contains(id)
@@ -564,9 +565,10 @@ impl ClaudeRuntime {
                     let run = frame.get("run_id").and_then(Value::as_str);
                     // A resumed task keeps its ID with a new, later-sorting run ID. Late or
                     // run-less starts must not replace a known newer run.
-                    let known = active_agents.get(task_id).cloned().flatten();
+                    let known = self.active_agents.get(task_id).cloned().flatten();
                     if known.is_none() || run.is_some_and(|run| Some(run) >= known.as_deref()) {
-                        active_agents.insert(task_id.to_owned(), run.map(str::to_owned));
+                        self.active_agents
+                            .insert(task_id.to_owned(), run.map(str::to_owned));
                     }
                 }
                 if subtype == Some("task_notification")
@@ -575,27 +577,18 @@ impl ClaudeRuntime {
                         Some("stopped" | "completed" | "failed" | "killed")
                     )
                     && let Some(task_id) = frame.get("task_id").and_then(Value::as_str)
-                    && let Some(known) = active_agents.get(task_id)
+                    && let Some(known) = self.active_agents.get(task_id)
                 {
                     // A run-less or older-run terminal cannot prove that a known newer run stopped.
                     let run = frame.get("run_id").and_then(Value::as_str);
                     if known.is_none() || run.is_some_and(|run| Some(run) >= known.as_deref()) {
-                        active_agents.remove(task_id);
+                        self.active_agents.remove(task_id);
                     }
                 }
-                if subtype == Some("background_tasks_changed") {
-                    self.background_work = frame
-                        .get("tasks")
-                        .and_then(Value::as_array)
-                        .context("Claude reported background tasks without a task list")?
-                        .iter()
-                        .any(|task| task.get("ambient").and_then(Value::as_bool) != Some(true));
-                }
                 if subtype == Some("session_state_changed") {
-                    // Idle with live background work is not final: its notification starts
-                    // another native turn. Interrupts keep their separate idle confirmation.
-                    idle = frame.get("state").and_then(Value::as_str) == Some("idle")
-                        && (interrupt_id.is_some() || !self.background_work);
+                    // Native idle already accounts for blocking tasks. The task snapshot also
+                    // includes background shells, which must not veto this completion boundary.
+                    idle = frame.get("state").and_then(Value::as_str) == Some("idle");
                 }
             }
             if pending_failure.is_some()
@@ -646,10 +639,15 @@ impl ClaudeRuntime {
                 let abort_reason = execution_abort_reason(&frame);
                 let interrupted_execution = interrupt_id.is_some()
                     && matches!(abort_reason, Some("aborted_streaming" | "aborted_tools"))
-                    && frame
+                    && (frame
                         .get("user_message_uuid")
                         .and_then(Value::as_str)
-                        .is_some_and(|id| commands.contains(id) || cancelled_commands.contains(id));
+                        .is_some_and(|id| {
+                            commands.contains(id) || cancelled_commands.contains(id)
+                        })
+                        || (user_message_uuid.is_empty()
+                            && frame.get("user_message_uuid").is_none_or(Value::is_null)));
+
                 let result_command = frame.get("user_message_uuid").and_then(Value::as_str);
                 if interrupted_execution && let Some(id) = result_command {
                     interrupted_commands.insert(id.to_owned());
@@ -693,7 +691,8 @@ impl ClaudeRuntime {
                 // own input succeeded, so a stale notification never answers new input.
                 let notification = frame.pointer("/origin/kind").and_then(Value::as_str)
                     == Some("task-notification");
-                if (submitted_steering_count == 0 && !notification)
+                if (user_message_uuid.is_empty()
+                    || (submitted_steering_count == 0 && !notification && result_command.is_none()))
                     || (result_command.is_some_and(|id| submitted_commands.contains(id))
                         && !interrupted_execution)
                     || (result_command.is_none()
@@ -710,12 +709,12 @@ impl ClaudeRuntime {
             // A result ends one generation, not necessarily the native agent's run.
             // Require explicit idle before the next ASM turn can consume this stream.
             if interrupt_id.is_some() {
-                if is_idle && !active_agents.is_empty() {
+                if is_idle && !self.active_agents.is_empty() {
                     bail!("Claude became idle before interrupted local agents stopped");
                 }
                 if interrupt_acknowledged
                     && idle
-                    && active_agents.is_empty()
+                    && self.active_agents.is_empty()
                     && interrupted_commands.is_subset(&cancelled_commands)
                 {
                     return Ok(ExternalTurnOutcome {
@@ -725,24 +724,55 @@ impl ClaudeRuntime {
                         failure: None,
                     });
                 }
-            } else if idle
-                && (submitted_steering_count == 0
-                    || (latest_command_succeeded && commands.is_empty()))
-                && (pending_failure.is_none()
-                    || (commands.is_empty()
-                        && cancelled_commands.contains(user_message_uuid)
-                        && active_agents.is_empty()
-                        && !self.background_work))
-                && let Some(result) = pending_result.take()
-            {
-                return Ok(ExternalTurnOutcome {
-                    result: Some(result),
-                    interrupted: false,
-                    submitted_steering_count,
-                    failure: pending_failure,
-                });
             }
         }
+    }
+
+    pub(super) fn observe_session_frame(&mut self, frame: &Value) -> Result<()> {
+        if !frame.is_object() || frame.get("type").and_then(Value::as_str).is_none() {
+            bail!("Claude emitted a JSON frame without an event type");
+        }
+        if let Some(id) = frame.get("session_id").and_then(Value::as_str)
+            && id != self.session_id
+        {
+            bail!("Claude returned a different session ID than requested");
+        }
+        if frame["type"] == "system"
+            && matches!(
+                frame["subtype"].as_str(),
+                Some("init" | "per_turn_effort_changed")
+            )
+            && let Some(active) = frame["per_turn_effort_active"].as_bool()
+        {
+            self.per_turn_effort_active = Some(active);
+        }
+        if frame.get("type").and_then(Value::as_str) == Some("system")
+            && frame.get("subtype").and_then(Value::as_str) == Some("init")
+        {
+            self.process
+                .record_cli_version(&frame["claude_code_version"]);
+            // Send now is never requested. This capability only identifies the verified
+            // CLI generation whose UUID command lifecycle lets queued input be reconciled.
+            self.mid_turn_delivery.send_replace(
+                frame
+                    .get("capabilities")
+                    .and_then(Value::as_array)
+                    .is_some_and(|items| {
+                        items
+                            .iter()
+                            .any(|item| item.as_str() == Some("interrupt_send_now_v1"))
+                    }),
+            );
+        }
+        if frame["type"] == "system" && frame["subtype"] == "background_tasks_changed" {
+            self.background_work = frame
+                .get("tasks")
+                .and_then(Value::as_array)
+                .context("Claude reported background tasks without a task list")?
+                .iter()
+                .any(|task| task.get("ambient").and_then(Value::as_bool) != Some(true));
+        }
+        Ok(())
     }
 
     #[tracing::instrument(skip_all)]
