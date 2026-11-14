@@ -336,6 +336,7 @@ pub(super) async fn submit_steering(
     }
     let history = session.clone_history().await;
     let messages = super::input_messages(history.raw_items())?;
+    drop(history);
     if let Err(error) = super::validate_pending_prompt(
         session,
         &messages[checkpoint.input_count..],
@@ -355,6 +356,7 @@ pub(super) async fn submit_steering(
             .await;
         return Ok(false);
     }
+    drop(messages);
     for item in pending {
         super::record_pending_input(
             session,
@@ -370,6 +372,7 @@ pub(super) async fn submit_steering(
     let prompt = super::prompt_content(&messages[checkpoint.input_count..])?;
     checkpoint.input_count = messages.len();
     checkpoint.input_prefix = super::input_prefix(&messages)?;
+    drop(messages);
     session.flush_rollout().await?;
     linkage.save(checkpoint, path)?;
     match reserved {

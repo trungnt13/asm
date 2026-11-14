@@ -250,6 +250,7 @@ mod new_session;
 mod quick_dials;
 mod turn_tips;
 pub(crate) use new_session::has_launch_setting;
+mod archived_thread;
 mod auto_rename;
 mod auto_rename_persistence;
 mod autorename_command;

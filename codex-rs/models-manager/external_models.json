@@ -1,11 +1,66 @@
 {
   "models": [
     {
+      "slug": "claude-code/claude-fable-5-2",
+      "alias": "claude/fable-5.2",
+      "tool_mode": "direct",
+      "display_name": "Fable 5.2 · CC",
+      "description": "Most capable for your hardest and longest-running tasks",
+      "default_reasoning_level": "medium",
+      "supported_reasoning_levels": [
+        {
+          "effort": "low",
+          "description": "Low native reasoning effort"
+        },
+        {
+          "effort": "medium",
+          "description": "Medium native reasoning effort"
+        },
+        {
+          "effort": "high",
+          "description": "High native reasoning effort"
+        },
+        {
+          "effort": "xhigh",
+          "description": "Extra-high native reasoning effort"
+        },
+        {
+          "effort": "max",
+          "description": "Maximum native reasoning effort"
+        }
+      ],
+      "shell_type": "disabled",
+      "visibility": "list",
+      "supported_in_api": false,
+      "priority": 106,
+      "availability_nux": null,
+      "upgrade": null,
+      "model_messages": {
+        "instructions_template": "",
+        "persistent_instructions": ""
+      },
+      "include_skills_usage_instructions": false,
+      "include_apps_usage_instructions": false,
+      "include_plugin_usage_instructions": false,
+      "support_verbosity": false,
+      "default_verbosity": null,
+      "apply_patch_tool_type": null,
+      "truncation_policy": {
+        "mode": "tokens",
+        "limit": 10000
+      },
+      "experimental_supported_tools": [],
+      "supports_reasoning_summary_parameter": false,
+      "node_repl_disabled": true,
+      "context_window": 484000,
+      "max_context_window": 1000000
+    },
+    {
       "slug": "claude-code/sonnet-5-5",
       "alias": "claude/sonnet-5.5",
       "tool_mode": "direct",
       "display_name": "Sonnet 5.5 · CC",
-      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "description": "Efficient for routine tasks",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
@@ -54,7 +109,7 @@
       "alias": "claude/opus-5.5",
       "tool_mode": "direct",
       "display_name": "Opus 5.5 · CC",
-      "description": "Runs through Claude Code with native tools, instructions, and subscription.",
+      "description": "Best for everyday, complex tasks",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         {
