@@ -1938,7 +1938,7 @@ impl App {
     pub(super) async fn prepare_resume_handoff(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         handoff: std::sync::Arc<()>,
     ) -> Result<std::sync::Arc<()>> {
         self.drain_outgoing_thread_events(app_server).await;
