@@ -1920,7 +1920,7 @@ impl App {
     pub(super) async fn drain_active_thread_events(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
     ) -> Result<()> {
         let frame_deadline = Instant::now() + tui::TARGET_FRAME_INTERVAL;
         self.drain_active_thread_events_until(tui, app_server, frame_deadline)
@@ -1930,7 +1930,7 @@ impl App {
     pub(super) async fn drain_active_thread_events_until(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         frame_deadline: Instant,
     ) -> Result<()> {
         let Some(mut rx) = self.active_thread_rx.take() else {

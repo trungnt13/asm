@@ -1595,7 +1595,7 @@ impl App {
     pub(super) async fn replace_chat_widget_with_app_server_thread(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         started: AppServerStartedThread,
         presentation: ThreadAttachPresentation,
         initial_user_message: Option<crate::chatwidget::UserMessage>,
@@ -1611,7 +1611,7 @@ impl App {
         .await
     }
 
-    async fn drain_outgoing_thread_events(&mut self, app_server: &AppServerSession) {
+    async fn drain_outgoing_thread_events(&mut self, app_server: &mut AppServerSession) {
         if let Some(mut receiver) = self.active_thread_rx.take() {
             self.chat_widget.set_thread_switch_pending(/*pending*/ true);
             while let Ok(event) = receiver.try_recv() {
@@ -1626,7 +1626,7 @@ impl App {
     async fn replace_chat_widget_with_account(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         started: AppServerStartedThread,
         presentation: ThreadAttachPresentation,
         initial_user_message: Option<crate::chatwidget::UserMessage>,
