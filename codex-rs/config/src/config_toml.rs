@@ -473,6 +473,11 @@ pub struct ConfigToml {
     #[serde(default)]
     pub subagent_service_tiers: HashMap<String, HashMap<ReasoningEffort, String>>,
 
+    /// Model-specific defaults replace inherited reasoning for V2 spawned children.
+    /// Explicit spawn efforts and role efforts take precedence.
+    #[serde(default)]
+    pub subagent_default_reasoning: HashMap<String, ReasoningEffort>,
+
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,
 
