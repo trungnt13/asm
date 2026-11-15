@@ -129,9 +129,10 @@ class RPC:
             while True:
                 msg = json.loads(self.ws.recv())
                 with self.condition:
-                    self.events.append((stamp(), msg))
+                    received_at = stamp()
+                    self.events.append((received_at, msg))
                     self.output.write(
-                        json.dumps({"time": stamp(), "message": msg}) + "\n"
+                        json.dumps({"time": received_at, "message": msg}) + "\n"
                     )
                     self.output.flush()
                     self.condition.notify_all()
@@ -221,6 +222,7 @@ def run(args):
     work = output / "work"
     work.mkdir()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Model)
+    server.daemon_threads = False
     server.records = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
     config = f"""model = "bench-model"
@@ -257,6 +259,25 @@ tool_namespace = "agents"
         env["LD_PRELOAD"] = str(args.jemalloc.resolve())
         if args.jemalloc_arenas is not None:
             env["MALLOC_CONF"] = f"narenas:{args.jemalloc_arenas}"
+    allocator_keys = (
+        "GLIBC_TUNABLES",
+        "LD_PRELOAD",
+        "MALLOC_CONF",
+        "MALLOC_ARENA_MAX",
+        "MALLOC_ARENA_TEST",
+        "MALLOC_CHECK_",
+        "MALLOC_PERTURB_",
+        "MALLOC_MMAP_MAX_",
+        "MALLOC_MMAP_THRESHOLD_",
+        "MALLOC_TOP_PAD_",
+        "MALLOC_TRIM_THRESHOLD_",
+        "MALLOC_MXFAST_",
+        "_RJEM_MALLOC_CONF",
+    )
+    allocator_environment = {
+        "inherited": {key: os.environ.get(key) for key in allocator_keys},
+        "effective": {key: env.get(key) for key in allocator_keys},
+    }
     cmd = [
         str(args.binary.resolve()),
         "--no-daemon",
@@ -270,6 +291,7 @@ tool_namespace = "agents"
                 "args": cmd,
                 "allocator": env.get("LD_PRELOAD", "glibc"),
                 "malloc_conf": env.get("MALLOC_CONF"),
+                "allocator_environment": allocator_environment,
             },
             indent=2,
         )
@@ -360,22 +382,12 @@ tool_namespace = "agents"
                     )
                     assert child_event["params"]["turn"]["status"] == "completed"
                     end = max(end, child_end)
-            intervals = sorted(
-                (max(begin, r["begin"]), min(end, r["end"]))
-                for r in server.records
-                if r["end"] > begin and r["begin"] < end
-            )
-            union = 0
-            edge = begin
-            for low, high in intervals:
-                union += max(0, high - max(low, edge))
-                edge = max(edge, high)
             turns.append(
                 {
                     "index": i,
-                    "wall_ms": (end - begin) * 1000,
-                    "provider_union_ms": union * 1000,
-                    "non_model_ms": (end - begin - union) * 1000,
+                    "round_start": begin,
+                    "round_completed": end,
+                    "root_turn_id": turn_id,
                     "thread_id": target,
                 }
             )
@@ -462,10 +474,33 @@ tool_namespace = "agents"
             assert done["params"]["turn"]["status"] == "completed"
         phase[0] = "reactivated"
         time.sleep(2)
+        server.shutdown()
+        server.server_close()
+        # Warmup child requests can finish after the root completion boundary.
+        # Finalize metrics only after their complete intervals have been recorded.
+        for turn in turns:
+            begin, end = turn["round_start"], turn["round_completed"]
+            intervals = sorted(
+                (max(begin, r["begin"]), min(end, r["end"]))
+                for r in server.records
+                if r["end"] > begin and r["begin"] < end
+            )
+            union = 0
+            edge = begin
+            for low, high in intervals:
+                union += max(0, high - max(low, edge))
+                edge = max(edge, high)
+            turn.update(
+                wall_ms=(end - begin) * 1000,
+                provider_union_ms=union * 1000,
+                non_model_ms=(end - begin - union) * 1000,
+            )
         (output / "result.json").write_text(
             json.dumps(
                 {
+                    "clock": {"source": "time.monotonic", "unit": "seconds"},
                     "turns": turns,
+                    "allocator_environment": allocator_environment,
                     "allocator_config": {
                         "jemalloc_arenas": args.jemalloc_arenas,
                         "malloc_conf": env.get("MALLOC_CONF"),
@@ -488,6 +523,7 @@ tool_namespace = "agents"
         os.killpg(proc.pid, signal.SIGTERM)
         proc.wait(timeout=15)
         server.shutdown()
+        server.server_close()
         (output / "samples.json").write_text(json.dumps(samples))
         (output / "requests.json").write_text(json.dumps(server.records))
 

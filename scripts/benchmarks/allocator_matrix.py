@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 import statistics
 import subprocess
@@ -15,6 +16,39 @@ def summarize(output):
         result = json.loads((directory / "result.json").read_text())
         samples = json.loads((directory / "samples.json").read_text())
         assert all(x.get("valid", True) and x["rss"] > 0 for x in samples)
+        raw_timing = "clock" in result or any(
+            {"round_start", "round_completed", "root_turn_id"} & turn.keys()
+            for turn in result["turns"]
+        )
+        if raw_timing:
+            assert result["clock"] == {"source": "time.monotonic", "unit": "seconds"}
+            requests = json.loads((directory / "requests.json").read_text())
+            for turn in result["turns"]:
+                begin, end = turn["round_start"], turn["round_completed"]
+                assert math.isfinite(begin) and math.isfinite(end) and end >= begin
+                assert turn["root_turn_id"]
+                intervals = sorted(
+                    (max(begin, request["begin"]), min(end, request["end"]))
+                    for request in requests
+                    if request["end"] > begin and request["begin"] < end
+                )
+                union, edge = 0.0, begin
+                for low, high in intervals:
+                    union += max(0, high - max(low, edge))
+                    edge = max(edge, high)
+                measured = {
+                    "wall_ms": (end - begin) * 1000,
+                    "provider_union_ms": union * 1000,
+                    "non_model_ms": (end - begin - union) * 1000,
+                }
+                for key, value in measured.items():
+                    assert math.isclose(turn[key], value, rel_tol=0, abs_tol=1e-6), (
+                        directory,
+                        turn["index"],
+                        key,
+                        turn[key],
+                        value,
+                    )
         turns = [x["non_model_ms"] for x in result["turns"][4:]]
         steady = [x for x in samples if x["phase"] == "steady_hold"]
         assert result["stability"]["stable"]
@@ -45,6 +79,12 @@ def summarize(output):
             "run": directory.name,
             "allocator": "glibc" if directory.name.endswith("-a") else "jemalloc",
             "allocator_config": result.get("allocator_config", {}),
+            "timing_audit": "raw_boundaries_verified"
+            if raw_timing
+            else "legacy_unverified",
+            "environment_audit": (
+                "recorded" if "allocator_environment" in result else "legacy_unrecorded"
+            ),
             "latency_median_ms": statistics.median(turns),
             "latency_p95_ms": sorted(turns)[int(0.95 * (len(turns) - 1))],
             "fork_ms": result["fork_ms"],
