@@ -349,7 +349,7 @@ impl McpHandler {
             )
             .await
             {
-                Some(mut result) => {
+                Some(Ok(mut result)) => {
                     for content in &mut result.result.content {
                         if let Some(text) = content
                             .get("text")
@@ -365,21 +365,20 @@ impl McpHandler {
                             content["text"] = Value::String(value.to_string());
                         }
                     }
-                    result
+                    Ok(result)
                 }
-                None if !cancellation_token.is_cancelled() => {
-                    crate::mcp_tool_call::HandledMcpToolCall {
-                        result: codex_protocol::mcp::CallToolResult {
-                            content: vec![
-                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &wait_tool).to_string()}),
-                            ],
-                            structured_content: None,
-                            is_error: Some(false),
-                            meta: None,
-                        },
-                        tool_input: wait_input,
-                    }
-                }
+                Some(Err(error)) => Err(error),
+                None if !cancellation_token.is_cancelled() => Ok(CompletedMcpToolCall {
+                    result: codex_protocol::mcp::CallToolResult {
+                        content: vec![
+                            serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &wait_tool).to_string()}),
+                        ],
+                        structured_content: None,
+                        is_error: Some(false),
+                        meta: None,
+                    },
+                    tool_input: wait_input,
+                }),
                 None => {
                     return Err(FunctionCallError::RespondToModel(
                         "wait_threads cancelled".to_string(),
