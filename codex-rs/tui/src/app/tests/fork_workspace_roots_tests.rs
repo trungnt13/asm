@@ -45,7 +45,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         })
         .build()
         .await?;
-    let (server, requests, proxy) = match mode {
+    let (mut server, requests, proxy) = match mode {
         ThreadParamsMode::Remote | ThreadParamsMode::Cloud => {
             Box::pin(start_recording_remote_app_server(&server_config)).await?
         }
@@ -98,7 +98,8 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
             AppServerEvent::ServerRequest(Box::new(approval.clone())),
         )
         .await;
-        app.drain_active_thread_events(&mut tui, &server).await?;
+        app.drain_active_thread_events(&mut tui, &mut server)
+            .await?;
         vec![approval]
     } else {
         Vec::new()
@@ -145,7 +146,8 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
     );
     assert!(!app.chat_widget.has_active_view());
     Box::pin(app.select_agents_overview_thread(&mut tui, &mut server, source_thread_id)).await?;
-    app.drain_active_thread_events(&mut tui, &server).await?;
+    app.drain_active_thread_events(&mut tui, &mut server)
+        .await?;
     assert!(
         app.pending_app_server_requests
             .contains_server_request(&question)

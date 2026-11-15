@@ -247,7 +247,8 @@ async fn foreign_backend_events_leave_thread_cache_and_connection_untouched() ->
         Some("owned-turn")
     );
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.drain_active_thread_events(&mut tui, &server).await?;
+    app.drain_active_thread_events(&mut tui, &mut server)
+        .await?;
     app.handle_backend_event(
         &server,
         AppServerSessionEvent {
@@ -256,7 +257,8 @@ async fn foreign_backend_events_leave_thread_cache_and_connection_untouched() ->
         },
     )
     .await;
-    app.drain_active_thread_events(&mut tui, &server).await?;
+    app.drain_active_thread_events(&mut tui, &mut server)
+        .await?;
     let history =
         super::active_reconnect::drain_history(&mut app, &mut tui, &mut server, &mut events)
             .await?;

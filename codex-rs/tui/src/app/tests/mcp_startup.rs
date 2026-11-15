@@ -72,7 +72,7 @@ async fn remote_mcp_startup_settles_when_attaching_mid_round() -> Result<()> {
                 AppServerEvent::ServerNotification(Box::new(notification)),
             )
             .await;
-            app.drain_active_thread_events(&mut tui, &app_server)
+            app.drain_active_thread_events(&mut tui, &mut app_server)
                 .await?;
             assert_eq!(
                 app.chat_widget.is_task_running_for_test(),
@@ -128,7 +128,7 @@ async fn remote_mcp_startup_reports_terminal_only_failures_and_cancellations() -
 
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     app.app_server_target = AppServerTarget::Remote {
         endpoint: crate::resolve_remote_addr("ws://127.0.0.1:4500")?,
     };
@@ -172,7 +172,7 @@ async fn remote_mcp_startup_reports_terminal_only_failures_and_cancellations() -
             AppServerEvent::ServerNotification(Box::new(notification)),
         )
         .await;
-        app.drain_active_thread_events(&mut tui, &app_server)
+        app.drain_active_thread_events(&mut tui, &mut app_server)
             .await?;
         let mut emitted = Vec::new();
         while let Ok(event) = events.try_recv() {

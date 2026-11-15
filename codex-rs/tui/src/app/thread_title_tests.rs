@@ -553,7 +553,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     let thread_id = started.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
-        &app_server,
+        &mut app_server,
         started,
         ThreadAttachPresentation::SessionLineage,
         /*initial_user_message*/ None,

@@ -573,7 +573,7 @@ impl App {
             };
             let handoff = self.chat_widget.pause_input_for_resume_handoff();
             let _handoff = self
-                .prepare_resume_handoff(tui, backends.session_at(displayed_session), handoff)
+                .prepare_resume_handoff(tui, backends.session_at_mut(displayed_session), handoff)
                 .await?;
             self.switch_backend_context(
                 backends,

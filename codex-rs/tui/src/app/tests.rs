@@ -733,7 +733,7 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
-        &app_server,
+        &mut app_server,
         AppServerStartedThread {
             session: test_thread_session(ThreadId::new(), app.config.cwd.to_path_buf()),
             turns: Vec::new(),
@@ -1165,9 +1165,9 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         app.enqueue_thread_notification(thread_id, event).await?;
     }
 
-    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.drain_active_thread_events_until(&mut tui, &app_server, Instant::now())
+    app.drain_active_thread_events_until(&mut tui, &mut app_server, Instant::now())
         .await?;
     assert_eq!(
         app.chat_widget.token_usage(),
@@ -1191,7 +1191,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
         "ordinary notifications left by the frame deadline must not block terminal input"
     );
 
-    app.drain_active_thread_events(&mut tui, &app_server)
+    app.drain_active_thread_events(&mut tui, &mut app_server)
         .await?;
     assert!(
         app.active_thread_rx
@@ -3073,7 +3073,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
                 .await?;
             // A queued close from the old runtime must not undo the new attachment.
             app.handle_backend_event(&app_server, closed).await;
-            app.drain_active_thread_events(&mut tui, &app_server).await?;
+            app.drain_active_thread_events(&mut tui, &mut app_server).await?;
             assert_eq!(app.active_thread_id, Some(child_thread_id));
             assert!(!matches!(
                 app_server.thread_read(child_thread_id, /*include_turns*/ false).await?.status,
@@ -3157,7 +3157,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(resumed.blocks_direct_input);
         app.replace_chat_widget_with_app_server_thread(
             &mut tui,
-            &app_server,
+            &mut app_server,
             resumed,
             crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
             /*initial_user_message*/ None,
@@ -9761,7 +9761,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
     let next_thread_id = ThreadId::new();
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
-        &app_server,
+        &mut app_server,
         AppServerStartedThread {
             session: test_thread_session(next_thread_id, test_path_buf("/tmp/next")),
             turns: vec![test_turn(
