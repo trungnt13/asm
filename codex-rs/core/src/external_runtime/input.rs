@@ -103,6 +103,29 @@ fn page_context_part(item: &ResponseItem) -> Option<PageContextPart> {
     Some(PageContextPart::Snapshot(present))
 }
 
+pub(super) fn normalize_selections(input: &mut [TurnInput]) {
+    for item in input {
+        let TurnInput::UserInput { content, .. } = item else {
+            continue;
+        };
+        for part in content {
+            let text = match part {
+                UserInput::Skill { name, path } => {
+                    format!("Selected ASM skill {name}: {}", path.display())
+                }
+                UserInput::Mention { name, path } => {
+                    format!("Selected ASM capability {name}: {path}")
+                }
+                _ => continue,
+            };
+            *part = UserInput::Text {
+                text,
+                text_elements: Vec::new(),
+            };
+        }
+    }
+}
+
 pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize> {
     let mut skipped = 0;
     let mut prepared = Vec::with_capacity(input.len());

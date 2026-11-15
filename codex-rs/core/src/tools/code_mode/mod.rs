@@ -52,7 +52,7 @@ use codex_utils_output_truncation::formatted_truncate_function_output_items_with
 
 use delegate::CodeModeCellDelegate;
 use delegate::CodeModeDispatchBroker;
-use delegate::CodeModeDispatchWorker;
+pub(crate) use delegate::CodeModeDispatchWorker;
 pub(crate) use execute_handler::CodeModeExecuteHandler;
 use output::CodeModeToolOutput;
 use response_adapter::into_function_call_output_content_items;
@@ -172,20 +172,27 @@ impl CodeModeService {
     }
 
     pub(crate) async fn interrupt_active_cells(&self) {
+        if let Err(error) = self.drain_active_cells().await {
+            tracing::warn!(%error, "failed to terminate interrupted code-mode cells");
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(crate) async fn drain_active_cells(&self) -> Result<(), String> {
         let Some(session) = self.session.get() else {
-            return;
+            return Ok(());
         };
-        join_all(
+        for result in join_all(
             self.dispatch_broker
                 .active_cell_ids()
                 .into_iter()
-                .map(|cell_id| async move {
-                    if let Err(error) = session.terminate(cell_id.clone().into()).await {
-                        tracing::warn!(%cell_id, %error, "failed to terminate interrupted code-mode cell");
-                    }
-                }),
+                .map(|cell_id| session.terminate(cell_id.into())),
         )
-        .await;
+        .await
+        {
+            result?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn shutdown(&self) -> Result<(), String> {

@@ -39,7 +39,7 @@ async fn call_native_tool() -> anyhow::Result<Value> {
         .context("Missing ASM bridge credential")?;
     let (route, body) = match arguments.as_slice() {
         [command] if command == "list" => ("/tools", json!({})),
-        [command, name] if command == "call" => {
+        [command, ..] if command == "call" || command == "attest" => {
             let mut input = String::new();
             std::io::stdin()
                 .take(/*limit*/ 1024 * 1024 + 1)
@@ -47,8 +47,15 @@ async fn call_native_tool() -> anyhow::Result<Value> {
             if input.len() > 1024 * 1024 {
                 bail!("ASM tool arguments exceed 1 MiB");
             }
-            let arguments: Value = serde_json::from_str(&input)?;
-            ("/call", json!({"name":name,"arguments":arguments}))
+            let body: Value = serde_json::from_str(&input)?;
+            if command == "attest" {
+                ("/attest", body)
+            } else {
+                let name = arguments
+                    .get(/*index*/ 1)
+                    .context("Missing ASM tool name")?;
+                ("/call", json!({"name":name,"arguments":body}))
+            }
         }
         _ => bail!("Usage: --asm-native-tools list | call <name> (JSON arguments on stdin)"),
     };

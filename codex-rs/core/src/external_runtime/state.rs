@@ -38,7 +38,12 @@ impl Checkpoint {
         messages: &[serde_json::Value],
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.format_version == 2,
+            self.format_version
+                == if model.starts_with("claude-code/") {
+                    3
+                } else {
+                    2
+                },
             "incompatible native session linkage; start a new chat"
         );
         anyhow::ensure!(
@@ -270,7 +275,7 @@ impl ExternalSession {
             .as_object()
             .context("Claude skill overrides must be an object")?
             .clone();
-        ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
+        let mut runtime = ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
             model,
@@ -283,8 +288,16 @@ impl ExternalSession {
             skill_overrides,
             bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
         })
-        .await
-        .map(RuntimeProcess::Claude)
+        .await?;
+        if let Some(bridge) = bridge
+            && let Err(error) = bridge.wait_ready().await
+        {
+            if let Err(shutdown_error) = runtime.shutdown().await {
+                tracing::warn!(%shutdown_error, "Claude startup cleanup also failed");
+            }
+            return Err(error);
+        }
+        Ok(RuntimeProcess::Claude(runtime))
     }
 
     pub(super) fn measure_usage_delta(&mut self, result: &serde_json::Value) -> Option<TokenUsage> {

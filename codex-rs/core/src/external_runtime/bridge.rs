@@ -1,4 +1,4 @@
-//! Child-only local JSON bridge to the canonical ASM messaging and message-board tools.
+//! Session-local JSON transport for canonical ASM tools and native child communication.
 
 use std::sync::Arc;
 use std::sync::Weak;
@@ -19,6 +19,7 @@ use codex_message_board::MessageBoardTool;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
@@ -48,6 +49,8 @@ use crate::tools::spec_plan::register_multi_agent_v2_communication_tools;
 use crate::turn_diff_tracker::TurnDiffTracker;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+// Reserve native metadata space below the 32 MiB image frame limit.
+const MAX_IMAGE_RESULT_BYTES: usize = 31 * 1024 * 1024;
 /// Concurrent HTTP requests admitted; their tool calls run one at a time per turn.
 const ADMITTED_REQUESTS: u32 = 8;
 /// Allowance beyond queued canonical waits for dispatch and result conversion.
@@ -63,6 +66,7 @@ pub(super) struct ExternalMessageBridge {
 }
 
 struct BridgeState {
+    ready: tokio::sync::watch::Sender<Option<bool>>,
     authority: String,
     token: String,
     turn: Mutex<Option<Arc<BridgeTurn>>>,
@@ -77,16 +81,18 @@ struct BridgeTurn {
     stop: CancellationToken,
     step: Arc<StepContext>,
     cancel: CancellationToken,
-    tools: Vec<ToolName>,
+    tools: Vec<MessageTool>,
     execution: Arc<Semaphore>,
     tracker: crate::tools::context::SharedTurnDiffTracker,
+    worker: Option<Mutex<crate::tools::code_mode::CodeModeDispatchWorker>>,
     mail_delivery: tokio::sync::mpsc::Sender<tokio::sync::oneshot::Sender<Vec<String>>>,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 struct MessageTool {
     name: ToolName,
     spec: Value,
+    custom: bool,
 }
 
 impl ExternalMessageBridge {
@@ -96,7 +102,11 @@ impl ExternalMessageBridge {
         let authority = listener.local_addr()?.to_string();
         let stop = CancellationToken::new();
         let (mail_tx, mail_delivery) = tokio::sync::mpsc::channel(/*buffer*/ 1);
+        let directory = tempfile::Builder::new()
+            .prefix("asm-native-tools-")
+            .tempdir()?;
         let state = Arc::new(BridgeState {
+            ready: tokio::sync::watch::channel(/*init*/ None).0,
             mail_delivery: mail_tx,
             authority,
             token: Uuid::new_v4().to_string(),
@@ -106,12 +116,10 @@ impl ExternalMessageBridge {
             message_tools: Mutex::new(/*t*/ None),
         });
         let app = Router::new()
+            .route("/attest", post(serve_json))
             .route("/tools", post(serve_json))
             .route("/call", post(serve_json))
             .with_state(Arc::clone(&state));
-        let directory = tempfile::Builder::new()
-            .prefix("asm-native-tools-")
-            .tempdir()?;
         let descriptor = json!({"url":format!("http://{}",state.authority), "token":state.token,
             "timeoutMs":u64::try_from(max_wait.saturating_mul(ADMITTED_REQUESTS).saturating_add(TOOL_TIMEOUT_MARGIN).as_millis()).unwrap_or(u64::MAX)});
         use std::io::Write;
@@ -153,6 +161,21 @@ impl ExternalMessageBridge {
         })
     }
 
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(super) async fn wait_ready(&self) -> anyhow::Result<()> {
+        let mut ready = self.state.ready.subscribe();
+        let valid = tokio::time::timeout(
+            Duration::from_secs(/*secs*/ 10),
+            ready.wait_for(Option::is_some),
+        )
+        .await
+        .context("Claude startup did not attest its effective ASM tool inventory")?
+        .context("Claude startup inventory channel closed")?
+        .unwrap_or(/*default*/ false);
+        anyhow::ensure!(valid, "Claude startup exposed unexpected tools or commands");
+        Ok(())
+    }
+
     pub(super) fn directory(&self) -> &std::path::Path {
         self.directory.path()
     }
@@ -167,25 +190,48 @@ impl ExternalMessageBridge {
         if self.stop.is_cancelled() {
             bail!("Native messaging bridge is stopped");
         }
-        if step.turn.parent_thread_id.is_none()
-            || !step.turn.session_source.is_non_root_agent()
-            || step.turn.multi_agent_version != MultiAgentVersion::V2
+        let managed = step.settings.model_info.slug.starts_with("claude-code/");
+        if !managed
+            && (step.turn.parent_thread_id.is_none()
+                || !step.turn.session_source.is_non_root_agent()
+                || step.turn.multi_agent_version != MultiAgentVersion::V2)
         {
             bail!("Native messaging is available only to native V2 child agents");
         }
-        let (router, message_tools) = build_message_tools(&session, &step)?;
-        // The bridge owns a fresh captured step. Inference metadata must not hide
-        // caller-authorized messaging on a native child with no native model catalog.
-        Arc::get_mut(&mut step)
-            .context("Native messaging requires an exclusively owned captured step")?
-            .tool_router = Arc::new(router);
-        let tools = message_tools.iter().map(|tool| tool.name.clone()).collect();
+        let mut message_tools = if managed {
+            bridge_tools(step.tool_router.model_visible_specs().as_ref())?
+        } else {
+            let (router, tools) = build_message_tools(&session, &step)?;
+            Arc::get_mut(&mut step)
+                .context("Native messaging requires an exclusively owned captured step")?
+                .tool_router = Arc::new(router);
+            tools
+        };
+        let tools = message_tools.clone();
+        if managed {
+            message_tools.retain(|tool| {
+                matches!(
+                    tool.name.name.as_str(),
+                    codex_code_mode::PUBLIC_TOOL_NAME | codex_code_mode::WAIT_TOOL_NAME
+                )
+            });
+            message_tools.push(MessageTool {
+                name: ToolName::plain("direct_tool"), custom: false,
+                spec: json!({"name":"direct_tool","description":"Discover the CURRENT ASM tool catalog and Code Mode exec definitions by omitting name. Call direct-interaction tools, including user questions, sleep and configured direct-only namespaces, using their exact listed name and arguments. Other tools use Code Mode exec/wait.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object"}},"additionalProperties":false}}),
+            });
+        }
         {
             let mut original = self.state.message_tools.lock().await;
-            if original
-                .as_ref()
-                .is_some_and(|original| *original != message_tools)
-            {
+            if original.as_ref().is_some_and(|original| {
+                if managed {
+                    original
+                        .iter()
+                        .map(|tool| (&tool.name, tool.custom))
+                        .ne(message_tools.iter().map(|tool| (&tool.name, tool.custom)))
+                } else {
+                    *original != message_tools
+                }
+            }) {
                 bail!("Native messaging definitions changed; start a new thread");
             }
             *original = Some(message_tools);
@@ -194,6 +240,12 @@ impl ExternalMessageBridge {
         if turn.is_some() {
             bail!("Native messaging bridge already has an active turn");
         }
+        let tracker = Arc::new(Mutex::new(TurnDiffTracker::new()));
+        let worker = session.services.code_mode_service.start_turn_worker(
+            &session,
+            Arc::clone(&step),
+            Arc::clone(&tracker),
+        );
         *turn = Some(Arc::new(BridgeTurn {
             session: Arc::downgrade(&session),
             mail_delivery: self.state.mail_delivery.clone(),
@@ -202,7 +254,8 @@ impl ExternalMessageBridge {
             cancel: cancel.child_token(),
             tools,
             execution: Arc::new(Semaphore::new(/*permits*/ 1)),
-            tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+            tracker,
+            worker: worker.map(Mutex::new),
         }));
         Ok(())
     }
@@ -212,13 +265,35 @@ impl ExternalMessageBridge {
         let turn = self.state.turn.lock().await.take();
         if let Some(turn) = turn {
             turn.cancel.cancel();
-            // Revoke first, then drain. A timed-out runtime is permanently dirty.
-            if tokio::time::timeout(Duration::from_secs(/*secs*/ 5), turn.execution.acquire())
-                .await
-                .is_err()
-            {
-                self.stop.cancel();
-                bail!("Native messaging cleanup exceeded 5 seconds; bridge cannot be reused");
+            // Yielded cells outlive exec: revoke them and drain callbacks before a clean checkpoint.
+            let cleanup = async {
+                let _permit = turn.execution.acquire().await?;
+                if let Some(worker) = &turn.worker {
+                    turn.session
+                        .upgrade()
+                        .context("ASM thread stopped during cleanup")?
+                        .services
+                        .code_mode_service
+                        .drain_active_cells()
+                        .await
+                        .map_err(anyhow::Error::msg)?;
+                    worker
+                        .lock()
+                        .await
+                        .drain()
+                        .await
+                        .map_err(anyhow::Error::msg)?;
+                }
+                Ok::<_, anyhow::Error>(())
+            };
+            match tokio::time::timeout(Duration::from_secs(/*secs*/ 5), cleanup).await {
+                Ok(Ok(())) => {}
+                result => {
+                    self.stop.cancel();
+                    return result.context(
+                        "Native tool cleanup exceeded 5 seconds; bridge cannot be reused",
+                    )?;
+                }
             }
         }
         Ok(())
@@ -304,6 +379,28 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
     let Ok(params) = serde_json::from_slice::<Value>(&bytes) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
+    if path == "/attest" {
+        let expected = state.message_tools.lock().await;
+        let tools = params["tools"].as_array();
+        let commands_empty = params["commands"].as_array().is_some_and(Vec::is_empty);
+        let valid = commands_empty
+            && tools.is_some_and(|tools| {
+                expected.as_ref().is_some_and(|expected| {
+                    tools.len() == expected.len()
+                        && expected.iter().all(|tool| {
+                            tools.iter().any(|entry| {
+                                entry["name"].as_str()
+                                    == tool.spec["name"]
+                                        .as_str()
+                                        .map(|name| format!("mcp__asm__{name}"))
+                                        .as_deref()
+                            })
+                        })
+                })
+            });
+        state.ready.send_replace(Some(valid));
+        return Json(json!({"isError":!valid,"ready":valid})).into_response();
+    }
     let Some(turn) = state.turn.lock().await.clone() else {
         return (StatusCode::CONFLICT, "No active ASM turn").into_response();
     };
@@ -321,6 +418,64 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
                 .into_response()
         }
     }
+}
+
+fn bridge_tools(specs: &[ToolSpec]) -> anyhow::Result<Vec<MessageTool>> {
+    let mut tools = Vec::new();
+    for spec in specs {
+        let entries = match spec {
+            ToolSpec::Namespace(namespace) => namespace
+                .tools
+                .iter()
+                .map(|tool| {
+                    (
+                        Some(namespace.name.clone()),
+                        match tool {
+                            ResponsesApiNamespaceTool::Function(tool) => {
+                                ToolSpec::Function(tool.clone())
+                            }
+                            ResponsesApiNamespaceTool::Custom(tool) => {
+                                ToolSpec::Freeform(tool.clone())
+                            }
+                        },
+                    )
+                })
+                .collect(),
+            spec => vec![(None, spec.clone())],
+        };
+        for (namespace, spec) in entries {
+            let (name, description, parameters, custom) = match spec {
+                ToolSpec::Function(tool) => (
+                    tool.name,
+                    tool.description,
+                    serde_json::to_value(tool.parameters)?,
+                    false,
+                ),
+                ToolSpec::Freeform(tool) => (
+                    tool.name,
+                    tool.description,
+                    json!({"type":"object","properties":{"input":{"type":"string"}},"required":["input"],"additionalProperties":false}),
+                    true,
+                ),
+                _ => continue,
+            };
+            let wire_name = namespace
+                .as_ref()
+                .map_or_else(|| name.clone(), |namespace| format!("{namespace}__{name}"));
+            tools.push(MessageTool {
+                name: ToolName::new(namespace, name),
+                custom,
+                spec: json!({"name":wire_name,"description":description,"inputSchema":parameters}),
+            });
+        }
+    }
+    anyhow::ensure!(
+        tools
+            .iter()
+            .any(|tool| tool.name.name == codex_code_mode::PUBLIC_TOOL_NAME),
+        "Claude requires ASM Code Mode tools"
+    );
+    Ok(tools)
 }
 
 fn build_message_tools(
@@ -380,6 +535,7 @@ fn build_message_tools(
         }
         tools.push(MessageTool {
             name,
+            custom: false,
             spec: json!({"name":wire_name,"description":tool.description,"inputSchema":tool.parameters}),
         });
         specs.push(spec);
@@ -397,7 +553,7 @@ fn build_message_tools(
 }
 
 #[tracing::instrument(level = "trace", skip_all, err)]
-async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Result<Value> {
+async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow::Result<Value> {
     let _execution = tokio::select! {
         permit = turn.execution.acquire() => permit?,
         _ = turn.cancel.cancelled() => bail!("ASM turn cancelled"),
@@ -407,16 +563,50 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
         bail!("ASM turn cancelled");
     }
     let session = turn.session.upgrade().context("ASM thread stopped")?;
-    let name = params
+    let mut name = params
         .get("name")
         .and_then(Value::as_str)
-        .context("Missing tool name")?;
+        .context("Missing tool name")?
+        .to_owned();
+    if name == "direct_tool"
+        && turn
+            .step
+            .settings
+            .model_info
+            .slug
+            .starts_with("claude-code/")
+    {
+        let direct = turn.tools.iter().filter(|tool| {
+            !matches!(
+                tool.name.name.as_str(),
+                codex_code_mode::PUBLIC_TOOL_NAME | codex_code_mode::WAIT_TOOL_NAME
+            )
+        });
+        let Some(selected) = params["arguments"]["name"].as_str() else {
+            let specs = turn
+                .tools
+                .iter()
+                .map(|tool| tool.spec.clone())
+                .collect::<Vec<_>>();
+            return Ok(
+                json!({"isError":false,"content":[{"type":"text","text":serde_json::to_string(&specs)?}]}),
+            );
+        };
+        anyhow::ensure!(
+            direct
+                .into_iter()
+                .any(|tool| tool.spec["name"].as_str() == Some(selected)),
+            "Tool is not currently exposed for direct model interaction"
+        );
+        name = selected.to_owned();
+        params = json!({"arguments":params["arguments"].get("arguments").cloned().unwrap_or_else(|| json!({}))});
+    }
     let tool = turn
         .tools
         .iter()
-        .find(|tool| match &tool.namespace {
-            Some(namespace) => name == format!("{namespace}__{}", tool.name),
-            None => name == tool.name,
+        .find(|tool| match &tool.name.namespace {
+            Some(namespace) => name == format!("{namespace}__{}", tool.name.name),
+            None => name == tool.name.name,
         })
         .context("Only exposed messaging tools are allowed")?;
     let arguments = params
@@ -428,19 +618,45 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
     }
     let call_id = format!("claude-{}", Uuid::new_v4());
     let arguments = arguments.to_string();
-    let payload = ToolPayload::Function {
-        arguments: arguments.clone(),
+    let custom = tool
+        .custom
+        .then(|| {
+            params["arguments"]["input"]
+                .as_str()
+                .context("Freeform tool requires an input string")
+        })
+        .transpose()?;
+    let payload = match custom {
+        Some(input) => ToolPayload::Custom {
+            input: input.to_owned(),
+        },
+        None => ToolPayload::Function {
+            arguments: arguments.clone(),
+        },
     };
-    let item = ResponseItem::FunctionCall {
-        encrypted_content: None,
-        status: None,
-        id: None,
-        name: tool.name.clone(),
-        namespace: tool.namespace.clone(),
-        arguments,
-        encrypted_function_args: None,
-        call_id: call_id.clone(),
-        internal_chat_message_metadata_passthrough: None,
+    let item = if let Some(input) = custom {
+        ResponseItem::CustomToolCall {
+            encrypted_content: None,
+            status: None,
+            id: None,
+            name: tool.name.name.clone(),
+            namespace: tool.name.namespace.clone(),
+            input: input.to_owned(),
+            call_id: call_id.clone(),
+            internal_chat_message_metadata_passthrough: None,
+        }
+    } else {
+        ResponseItem::FunctionCall {
+            encrypted_content: None,
+            status: None,
+            id: None,
+            name: tool.name.name.clone(),
+            namespace: tool.name.namespace.clone(),
+            arguments,
+            encrypted_function_args: None,
+            call_id: call_id.clone(),
+            internal_chat_message_metadata_passthrough: None,
+        }
     };
     session
         .record_conversation_items(
@@ -450,7 +666,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
         )
         .await;
     let call = ToolCall {
-        tool_name: tool.clone(),
+        tool_name: tool.name.clone(),
         call_id,
         payload,
         encrypted_function_args: None,
@@ -471,7 +687,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
         }
         result = &mut dispatch => result?,
     };
-    let mut result = convert_output(&output.item)?;
+    let result = convert_output(&output.item);
     session
         .record_conversation_items(
             &turn.step.turn,
@@ -479,7 +695,8 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
             &[std::sync::Arc::unwrap_or_clone(output.item)],
         )
         .await;
-    if tool.name == "wait_agent"
+    let mut result = result?;
+    if tool.name.name == "wait_agent"
         && turn
             .step
             .settings
@@ -512,9 +729,29 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, params: Value) -> anyhow::Re
 }
 
 fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
-    let ResponseItem::FunctionCallOutput { output, .. } = item else {
-        bail!("Unsupported native messaging result");
+    let output = match item {
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => output,
+        _ => bail!("Unsupported native tool result"),
     };
+    let encoded_bytes = match &output.body {
+        FunctionCallOutputBody::Text(text) => text.len(),
+        FunctionCallOutputBody::ContentItems(items) => items
+            .iter()
+            .map(|item| match item {
+                FunctionCallOutputContentItem::InputText { text } => text.len(),
+                FunctionCallOutputContentItem::InputImage {
+                    image: ImageReference::Inline { image_url },
+                    ..
+                } => image_url.len(),
+                _ => 0,
+            })
+            .sum(),
+    };
+    anyhow::ensure!(
+        encoded_bytes <= MAX_IMAGE_RESULT_BYTES,
+        "Native tool result exceeds the image transport budget"
+    );
     let content = match &output.body {
         FunctionCallOutputBody::Text(text) => vec![json!({"type":"text","text":text})],
         FunctionCallOutputBody::ContentItems(items) => items
@@ -523,9 +760,33 @@ fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
                 FunctionCallOutputContentItem::InputText { text } => {
                     Ok(json!({"type":"text","text":text}))
                 }
-                _ => bail!("Native messaging returned non-text content"),
+                FunctionCallOutputContentItem::InputImage {
+                    image: ImageReference::Inline { image_url },
+                    ..
+                } => {
+                    let normalized = codex_utils_image::load_data_url_for_prompt(
+                        image_url,
+                        codex_utils_image::PromptImageMode::Original,
+                        codex_utils_image::PromptImageDecoder::Legacy,
+                    )?
+                    .into_data_url();
+                    let (metadata, data) = normalized
+                        .split_once(',')
+                        .context("Native result requires inline image data")?;
+                    let mime_type = metadata
+                        .strip_prefix("data:")
+                        .and_then(|value| value.strip_suffix(";base64"))
+                        .context("Native result requires base64 image data")?;
+                    Ok(json!({"type":"image", "mimeType":mime_type, "data":data}))
+                }
+                _ => bail!("Native tool returned unsupported media"),
             })
             .collect::<anyhow::Result<Vec<_>>>()?,
     };
-    Ok(json!({"isError":output.success == Some(false), "content":content}))
+    let result = json!({"isError":output.success == Some(false), "content":content});
+    anyhow::ensure!(
+        serde_json::to_vec(&result)?.len() <= MAX_IMAGE_RESULT_BYTES,
+        "Native tool result exceeds the image transport budget"
+    );
+    Ok(result)
 }

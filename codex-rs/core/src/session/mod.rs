@@ -4563,12 +4563,17 @@ impl Session {
         turn_context: Arc<TurnContext>,
         cancellation_token: &CancellationToken,
     ) -> CodexResult<Arc<StepContext>> {
+        let routing = if turn_context.model_info().slug.starts_with("claude-code/") {
+            turn::StepToolRouting::ResponsesApi
+        } else {
+            turn::StepToolRouting::NativeMessaging
+        };
         self.capture_step_context_inner(
             turn_context,
             cancellation_token,
             /*required_servers*/ &[],
             /*required_plugins*/ &HashSet::new(),
-            turn::StepToolRouting::NativeMessaging,
+            routing,
         )
         .await
     }

@@ -301,6 +301,24 @@ pub(super) async fn submit_steering(
         let history = session.clone_history().await;
         super::input::filter_page_context(&mut pending, page_context, history.raw_items());
     }
+    if pending.iter().any(|item| {
+        matches!(item,
+            TurnInput::UserInput { content, .. } if content.iter().any(|part| matches!(part,
+                codex_protocol::user_input::UserInput::Skill { .. }
+                    | codex_protocol::user_input::UserInput::Mention { .. }
+            ))
+        )
+    }) {
+        if let Some(active) = session.active_turn.lock().await.as_ref() {
+            session
+                .input_queue
+                .extend_pending_input_for_turn_state(&active.turn_state, pending)
+                .await;
+        } else {
+            anyhow::bail!("Claude selection input lost its active turn before deferral");
+        }
+        return Ok(false);
+    }
     match super::input::prepare_input(&mut pending) {
         Ok(0) => {}
         Ok(_) => {
@@ -335,7 +353,7 @@ pub(super) async fn submit_steering(
         return Ok(false);
     }
     let history = session.clone_history().await;
-    let messages = super::input_messages(history.raw_items())?;
+    let messages = super::input_messages(history.raw_items(), NativeRuntime::ClaudeCode)?;
     drop(history);
     if let Err(error) = super::validate_pending_prompt(
         session,
@@ -343,6 +361,7 @@ pub(super) async fn submit_steering(
         &pending,
         /*boundary*/ None,
         codex_external_runtime::validate_claude_prompt,
+        NativeRuntime::ClaudeCode,
     ) {
         session
             .send_event(
@@ -368,7 +387,10 @@ pub(super) async fn submit_steering(
         )
         .await;
     }
-    let messages = super::input_messages(session.clone_history().await.raw_items())?;
+    let messages = super::input_messages(
+        session.clone_history().await.raw_items(),
+        NativeRuntime::ClaudeCode,
+    )?;
     let prompt = super::prompt_content(&messages[checkpoint.input_count..])?;
     checkpoint.input_count = messages.len();
     checkpoint.input_prefix = super::input_prefix(&messages)?;

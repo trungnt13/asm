@@ -1,5 +1,5 @@
 //! Run persistent official Claude and Cursor CLI sessions.
-//! The native CLI owns tools and configuration. Callers serialize turns.
+//! Callers serialize turns and provide each runtime's tool boundary.
 
 mod claude;
 mod claude_owner;

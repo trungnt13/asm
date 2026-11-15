@@ -129,10 +129,18 @@ impl CodeModeDispatchBroker {
         let dispatch_rx = self.dispatch_rx.clone();
         let dispatch_gates = Arc::clone(&self.dispatch_gates);
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
+            let mut tasks = tokio::task::JoinSet::new();
+            let mut failure = None;
             loop {
                 let message = tokio::select! {
                     _ = &mut shutdown_rx => break,
+                    result = tasks.join_next(), if !tasks.is_empty() => {
+                        if let Some(Err(error)) = result {
+                            failure = Some(error.to_string());
+                        }
+                        continue;
+                    }
                     message = dispatch_rx.recv() => message.ok(),
                 };
                 let Some(message) = message else {
@@ -199,7 +207,7 @@ impl CodeModeDispatchBroker {
                         let host = Arc::clone(&host);
                         let dispatch_gates = Arc::clone(&dispatch_gates);
                         let span = dispatch_trace.span.clone();
-                        tokio::spawn(async move {
+                        tasks.spawn(async move {
                             let invocation = {
                                 let dispatch_gate = track_completeness.then(|| {
                                     dispatch_gates
@@ -241,9 +249,16 @@ impl CodeModeDispatchBroker {
                     }
                 }
             }
+            while let Some(result) = tasks.join_next().await {
+                if let Err(error) = result {
+                    failure = Some(error.to_string());
+                }
+            }
+            failure.map_or(Ok(()), Err)
         });
         CodeModeDispatchWorker {
             shutdown_tx: Some(shutdown_tx),
+            task,
         }
     }
 }
@@ -426,6 +441,17 @@ enum DispatchMessage {
 
 pub(crate) struct CodeModeDispatchWorker {
     shutdown_tx: Option<oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<Result<(), String>>,
+}
+
+impl CodeModeDispatchWorker {
+    #[tracing::instrument(level = "trace", skip_all, err)]
+    pub(crate) async fn drain(&mut self) -> Result<(), String> {
+        if let Some(shutdown_tx) = self.shutdown_tx.take() {
+            let _ = shutdown_tx.send(());
+        }
+        (&mut self.task).await.map_err(|error| error.to_string())?
+    }
 }
 
 impl Drop for CodeModeDispatchWorker {

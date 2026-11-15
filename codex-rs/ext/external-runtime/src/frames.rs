@@ -34,7 +34,15 @@ impl FramePolicy {
                 frame["type"] == "user"
                     && frame["message"]["content"]
                         .as_array()
-                        .is_some_and(|content| content.iter().any(|block| block["type"] == "image"))
+                        .is_some_and(|content| {
+                            content.iter().any(|block| {
+                                block["type"] == "image"
+                                    || (block["type"] == "tool_result"
+                                        && block["content"].as_array().is_some_and(|parts| {
+                                            parts.iter().any(|part| part["type"] == "image")
+                                        }))
+                            })
+                        })
             }
             Self::CursorImages => {
                 (frame["method"] == "session/prompt"

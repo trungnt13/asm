@@ -2,6 +2,7 @@
 mod activity;
 mod bridge;
 mod completion;
+mod context;
 mod continuation;
 use completion::complete_response;
 use completion::save_reconciled_checkpoint;
@@ -272,7 +273,7 @@ async fn run_conversation(
     let (native_runtime, _) = NativeRuntime::for_model(&settings.model_info.slug)
         .context("not a native runtime model")?;
     let runtime_name = native_runtime.display_name();
-    if session.tool_policy.require_managed_sandbox {
+    if native_runtime == NativeRuntime::CursorAgent && session.tool_policy.require_managed_sandbox {
         bail!(
             "{runtime_name} native tools cannot satisfy the required ASM-managed sandbox; use an ASM-managed model"
         );
@@ -336,7 +337,7 @@ async fn run_conversation(
         None
     };
     // Native V2 children get ASM messaging tools through the loopback JSON bridge.
-    let messaging = child_agent;
+    let messaging = child_agent || native_runtime == NativeRuntime::ClaudeCode;
     let page_context = if native_runtime == NativeRuntime::ClaudeCode {
         let lease = RuntimeLease::take(&session.external_runtime)?;
         lease.runtime.as_ref().map_or(
@@ -367,19 +368,8 @@ async fn run_conversation(
             let history = session.clone_history().await;
             input::filter_page_context(input, page_context, history.raw_items());
         }
-        if input::prepare_input(input)? > 0 {
-            session
-                .send_event(
-                    turn,
-                    EventMsg::Warning(WarningEvent {
-                        message: "Encrypted ASM input was ignored; the user prompt is preserved."
-                            .to_owned(),
-                    }),
-                )
-                .await;
-        }
         let original_history = session.clone_history().await;
-        let messages = input_messages(original_history.raw_items())?;
+        let messages = input_messages(original_history.raw_items(), native_runtime)?;
         let mut lease = RuntimeLease::take(&session.external_runtime)?;
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
@@ -447,7 +437,7 @@ async fn run_conversation(
                             kinds.len() == 1 && kinds[0].as_str() == input::SHELL_CONTEXT_KIND
                         }))
                     });
-                    if !input_messages(previous_input)?.is_empty()
+                    if !input_messages(previous_input, native_runtime)?.is_empty()
                         || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
                     {
                         bail!("missing native session linkage for existing history; start a new chat");
@@ -455,7 +445,11 @@ async fn run_conversation(
                     let id = session.thread_id().to_string();
                     (
                         Checkpoint {
-                            format_version: 2,
+                            format_version: if native_runtime == NativeRuntime::ClaudeCode {
+                                3
+                            } else {
+                                2
+                            },
                             model: settings.model_info.slug.clone(),
                             effort: effort.clone(),
                             auto_compact_window,
@@ -488,9 +482,13 @@ async fn run_conversation(
                 return Ok(last_message);
             }
             let bridge = if messaging {
-                let step = session
-                    .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
-                    .await?;
+                let step = if native_runtime == NativeRuntime::ClaudeCode {
+                    context::capture(session, Arc::clone(turn), input, cancellation).await?
+                } else {
+                    session
+                        .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
+                        .await?
+                };
                 let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
                 let bridge = ExternalMessageBridge::start(std::time::Duration::from_millis(
                     u64::try_from(max_wait).unwrap_or_default(),
@@ -505,7 +503,7 @@ async fn run_conversation(
             };
             let message = match native_runtime {
                 NativeRuntime::ClaudeCode => {
-                    "Claude Code owns instructions, tools, hooks and permissions, and bypasses its permission prompts; native deny rules and managed policy still apply. ASM sandbox and approvals do not apply."
+                    "Claude Code supplies inference and conversation state. ASM owns tools, instructions, skills, sandbox and approvals."
                 }
                 NativeRuntime::CursorAgent if child_agent => {
                     "Cursor Agent owns instructions, tools and permissions. Cursor runs with --force; native denies and team auto-run controls still apply. ASM sandbox and approvals do not apply; remaining Cursor approval requests are denied. Token usage and context fill are unavailable. ASM communication uses a local CLI helper through native shell tools; messages arrive between turns."
@@ -540,7 +538,11 @@ async fn run_conversation(
                 bridge.as_ref(),
                 disallowed_tools,
                 &turn.config.native_runtimes.claude_code,
-                role_instructions,
+                if native_runtime == NativeRuntime::ClaudeCode {
+                    Some(session.get_prompt_base_instructions().await.text)
+                } else {
+                    role_instructions
+                },
                 if thread_spawn_child {
                     codex_external_runtime::ClaudeSessionKind::ManagedChild
                 } else if !turn.session_source.is_non_root_agent()
@@ -586,8 +588,32 @@ async fn run_conversation(
                 usage_baseline,
             });
         }
+        let prepared_step = if needs_binding && native_runtime == NativeRuntime::ClaudeCode {
+            Some(context::capture(session, Arc::clone(turn), input, cancellation).await?)
+        } else {
+            None
+        };
+        if native_runtime == NativeRuntime::ClaudeCode {
+            input::normalize_selections(input);
+        }
+        if input::prepare_input(input)? > 0 {
+            session
+                .send_event(
+                    turn,
+                    EventMsg::Warning(WarningEvent {
+                        message: "Encrypted ASM input was ignored; the user prompt is preserved."
+                            .to_owned(),
+                    }),
+                )
+                .await;
+        }
         // Release the shared history vector before recording input to avoid a deep copy.
         drop(original_history);
+        let messages = if native_runtime == NativeRuntime::ClaudeCode {
+            input_messages(session.clone_history().await.raw_items(), native_runtime)?
+        } else {
+            messages
+        };
         let runtime = lease
             .runtime
             .as_mut()
@@ -608,6 +634,7 @@ async fn run_conversation(
                 RuntimeProcess::Claude(_) => codex_external_runtime::validate_claude_prompt(prompt),
                 RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
             },
+            native_runtime,
         )?;
         drop(messages);
         if runtime.checkpoint.effort != effort {
@@ -639,7 +666,7 @@ async fn run_conversation(
             .await;
         }
         let history = session.clone_history().await;
-        let messages = input_messages(history.raw_items())?;
+        let messages = input_messages(history.raw_items(), native_runtime)?;
         drop(history);
         let mut pending_messages = messages[runtime.checkpoint.input_count..].to_vec();
         let mut prompt = prompt_content(&pending_messages)?;
@@ -652,9 +679,14 @@ async fn run_conversation(
         }
         drop(pending_messages);
         if needs_binding && let Some(bridge) = &runtime.bridge {
-            let step = session
-                .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
-                .await?;
+            let step = match prepared_step {
+                Some(step) => step,
+                None => {
+                    session
+                        .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
+                        .await?
+                }
+            };
             bridge
                 .set_turn(Arc::clone(session), step, cancellation.clone())
                 .await?;
@@ -737,7 +769,7 @@ async fn run_conversation(
                                     codex_thread_store::PersistContext::TurnStart).await;
                             }
                         }
-                        let messages = input_messages(session.clone_history().await.raw_items())?;
+                        let messages = input_messages(session.clone_history().await.raw_items(), native_runtime)?;
                         let mut delivered = messages[runtime.checkpoint.input_count..].iter()
                             .map(|message| message.as_str().map(str::to_owned)
                                 .context("Cursor mailbox only supports text input"))

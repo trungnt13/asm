@@ -1,9 +1,11 @@
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
+use codex_protocol::openai_models::ApplyPatchToolType;
 use codex_protocol::openai_models::ConfigShellToolType;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::openai_models::ModelVisibility;
+use codex_protocol::openai_models::ToolMode;
 use codex_protocol::openai_models::TruncationMode;
 use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::openai_models::WebSearchToolType;
@@ -17,6 +19,34 @@ pub const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const PERSONALITY_SECTION_HEADER: &str = "# Personality";
 
 pub fn with_config_overrides(mut model: ModelInfo, config: &ModelsManagerConfig) -> ModelInfo {
+    if model.slug.starts_with("claude-code/") {
+        model.shell_type = ConfigShellToolType::UnifiedExec;
+        model.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+        model.tool_mode = Some(ToolMode::CodeModeOnly);
+        model.include_skills_usage_instructions = true;
+        model.include_plugin_usage_instructions = true;
+        model.include_apps_usage_instructions = true;
+        model.supports_search_tool = false;
+        model.use_responses_lite = false;
+        model.node_repl_disabled = false;
+        model.supported_in_api = false;
+        let messages = model.model_messages.get_or_insert_default();
+        if messages
+            .instructions_template
+            .as_ref()
+            .is_none_or(|text| text.is_empty())
+        {
+            messages.instructions_template = Some(BASE_INSTRUCTIONS.to_owned());
+        }
+        if messages
+            .persistent_instructions
+            .as_ref()
+            .is_some_and(|text| text.is_empty())
+        {
+            messages.persistent_instructions = None;
+        }
+    }
+
     if let Some(context_window) = config.model_context_window {
         model.context_window = Some(
             model
