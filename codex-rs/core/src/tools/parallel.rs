@@ -1161,11 +1161,11 @@ mod tests {
         assert_eq!(
             held_reply.item,
             codex_protocol::models::ResponseItem::from(ResponseInputItem::FunctionCallOutput {
-                call_id: "held-at-start").into(),
+                call_id: "held-at-start".into(),
                 output: FunctionCallOutputPayload::from_text(format!(
                     "aborted before handler start: {expected_denial}"
                 ),),
-            }
+            })
             .into()
         );
         lifecycle.release_finish.notify_one();
