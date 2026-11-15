@@ -135,6 +135,7 @@ use crate::attestation::X_OAI_ATTESTATION_HEADER;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
+use crate::client_common::SamplingStream;
 use crate::context::BaseInstructionsFragment;
 use crate::context::ContextualUserFragment;
 use crate::cyber_access_program;
@@ -386,6 +387,7 @@ pub struct ModelClient {
     restored_history: bool,
     continue_when_model_at_capacity: bool,
     request_contributors: Vec<Arc<dyn codex_extension_api::ModelRequestContributor>>,
+    budget_policy: Option<crate::rollout_budget::ThreadBudgetPolicy>,
     executed_tool_calls: Option<ExecutedToolCalls>,
     // Resolved once when the session is created, like other session feature flags.
     api_key_cyber_access_programs: cyber_access_program::ApiKeyCyberAccessPrograms,
@@ -791,6 +793,7 @@ impl ModelClient {
             restored_history: false,
             continue_when_model_at_capacity: false,
             request_contributors,
+            budget_policy: None,
             executed_tool_calls: None,
             api_key_cyber_access_programs:
                 cyber_access_program::ApiKeyCyberAccessPrograms::UnsupportedProvider,
@@ -800,6 +803,14 @@ impl ModelClient {
 
     pub(crate) fn with_executed_tool_calls(mut self, recorder: ExecutedToolCalls) -> Self {
         self.executed_tool_calls = Some(recorder);
+        self
+    }
+
+    pub(crate) fn with_budget_policy(
+        mut self,
+        policy: crate::rollout_budget::ThreadBudgetPolicy,
+    ) -> Self {
+        self.budget_policy = Some(policy);
         self
     }
 
@@ -1471,6 +1482,14 @@ impl ModelClient {
             request_country: Default::default(),
         };
         Ok(request)
+    }
+
+    fn check_generation_start(&self, metadata: &CodexResponsesMetadata) -> Result<()> {
+        if let Some(policy) = &self.budget_policy {
+            let _ = metadata;
+            policy.check_start()?;
+        }
+        Ok(())
     }
 
     fn prepare_response_items_for_request(&self, input: &mut [Arc<ResponseItem>]) {
@@ -2259,6 +2278,7 @@ impl ResponsesHttpExecutor<'_> {
             {
                 continue;
             }
+            self.client.check_generation_start(responses_metadata)?;
             let interceptors = crate::model_request::prepare(
                 &self.client.request_contributors,
                 &thread_id,
@@ -2595,6 +2615,9 @@ impl ModelClientSession {
                 client_setup.auth.as_ref(),
                 &responses_headers,
             );
+            if !warmup {
+                self.client.check_generation_start(responses_metadata)?;
+            }
             let interceptors = crate::model_request::prepare(
                 &self.client.request_contributors,
                 &thread_id,
@@ -2780,7 +2803,7 @@ impl ModelClientSession {
             .await
         {
             Ok(WebsocketStreamOutcome::Stream(opened)) => {
-                let mut stream = (*opened).into_stream()?;
+                let mut stream = (*opened).into_raw_stream()?;
                 // Wait for the v2 warmup request to complete before sending the first turn request.
                 while let Some(event) = stream.next().await {
                     match event {
@@ -2836,7 +2859,7 @@ impl ModelClientSession {
             inference_trace,
         )
         .await?
-        .into_stream()
+        .into_raw_stream()
     }
 
     pub(crate) async fn open_model_response(
@@ -2980,16 +3003,20 @@ pub(crate) struct OpenedModelResponse {
 }
 
 impl OpenedModelResponse {
-    pub(crate) fn into_stream(self) -> Result<ResponseStream> {
-        self.deliver(&mut None, /*sampling_turn*/ None)
+    fn into_raw_stream(self) -> Result<ResponseStream> {
+        self.deliver(
+            &mut None, /*sampling_turn*/ None, /*settlement*/ None,
+        )
+        .map(ResponseStream)
     }
 
     pub(crate) fn deliver(
         mut self,
         attempt: &mut Option<crate::hook_runtime::sampling::SamplingAttempt>,
         sampling_turn: Option<Arc<TurnContext>>,
-    ) -> Result<ResponseStream> {
-        let delivery = ResponseDelivery::new(attempt);
+        settlement: Option<(Arc<crate::session::session::Session>, Arc<TurnContext>)>,
+    ) -> Result<SamplingStream> {
+        let delivery = ResponseDelivery::new(attempt, settlement);
         let routing_affinity = self.stream.routing_affinity.take();
         let request_id = self.stream.upstream_request_id.take();
         let interrupt = self.stream.interrupt.take();
@@ -3031,17 +3058,17 @@ fn map_response_events<S>(
     client: &ModelClientState,
     mut last_response_tx: Option<oneshot::Sender<LastResponse>>,
     mut delivery: ResponseDelivery,
-) -> ResponseStream
+) -> SamplingStream
 where
     S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
         + Unpin
         + Send
         + 'static,
 {
-    let (tx_event, rx_event) =
-        mpsc::channel::<Result<ResponseEvent>>(RESPONSE_STREAM_CHANNEL_CAPACITY);
+    let (tx_event, rx_event) = mpsc::channel(RESPONSE_STREAM_CHANNEL_CAPACITY);
     let consumer_dropped = CancellationToken::new();
     let consumer_dropped_for_stream = consumer_dropped.clone();
+    let settlement_started = Arc::clone(&delivery.settlement_started);
     let provider = Arc::clone(&client.provider);
     let item_id_generator = Arc::clone(&client.item_id_generator);
 
@@ -3071,6 +3098,14 @@ where
             };
             let Some(event) = event else {
                 break;
+            };
+            let overflow = delivery.would_overflow(&event);
+            let event = if overflow {
+                Err(ApiError::Stream(
+                    "sampling response exceeded event buffer limit".to_owned(),
+                ))
+            } else {
+                event
             };
             let event = match event {
                 Ok(ResponseEvent::OutputItemDone(mut item)) => {
@@ -3190,6 +3225,9 @@ where
                 }
                 return;
             }
+            if overflow {
+                return;
+            }
         }
         inference_trace_attempt.record_failed(
             "stream closed before response.completed",
@@ -3199,11 +3237,12 @@ where
         delivery.finish_eof(&tx_event).await;
     });
 
-    ResponseStream {
+    SamplingStream {
         routing_affinity: None,
         rx_event,
         interrupt: None,
         consumer_dropped: consumer_dropped_for_stream,
+        settlement_started,
     }
 }
 

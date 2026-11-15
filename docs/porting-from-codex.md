@@ -71,6 +71,7 @@ After approved integration, reuse checks and the verified binary pair only with 
 Before real-provider validation, use [asm-live-check](../.agents/skills/asm-live-check/SKILL.md). Follow its isolation, evidence, and cleanup procedure.
 
 - Every PR needs a successful real-provider live check before review or merge readiness. Select the smallest changed-behavior/fork-interaction scenario; state the expected result. Builds, offline checks, and mocks are not substitutes. Missing credentials, budget, or compatible setup block readiness. Do not replay unrelated upstream features or whole sessions. Release smoke remains separately required.
+- Always choose the cheapest available model that supports the behavior being validated, using current prices and including required helper calls. Do not inherit the interactive model merely because it is configured. Use the lowest adequate reasoning effort and standard speed; apply overrides only in isolated validation state, never personal defaults. Record the model, selection evidence, and budget before calling. If the behavior requires a more expensive model, ask before making that exception.
 - Before calls, set request/turn counts and a time limit. Minimize input/requested output; set supported token limits. Stop at proof or first failure, then inspect evidence. Do not default to broad replays, model matrices, benchmarks, or repeated cold builds.
 - Use existing sign-in only as authorized. No separate spend approval is needed when the conservative estimate for the entire live check is strictly below US$1.00. Record the estimate before making calls, using current provider pricing and the planned request and token limits, including required runtime helper calls. If the cost cannot be estimated or the estimate is US$1.00 or more, get approval for the endpoint, model, request/token limits, and spend cap before making calls.
 - Do not trigger unrelated billable retries, warmups, Decisions calls, or extra subagents. Budget required runtime helpers; preserve release defaults. Record calls, elapsed time, and reported tokens. Report cost only when known; otherwise mark unknown. Missing prerequisites mean blocked, not verified.
@@ -155,6 +156,8 @@ For PR #200, the owner accepted this unchanged older-stock voice-reader boundary
 
 For PR #207, the owner accepted both the unchanged ordinary stock cold-history limitation and the older-stock voice-reader boundary through `81b995a6c9a4c978f399775cfa5ce50702368749` only. Fresh ASM cold reads pass; stock alpha.11 needs resume before exact saved history is readable. Keep upstream voice records unchanged. Neither limitation is fixed, and this acceptance does not cover later commits, establish actual Desktop voice behavior, or waive other checks.
 
+For PR #208, the owner accepted both unchanged stock boundaries through `87fccdc1bc0bc9af04db844a23d9c025f3b82000` only: ordinary cold reads still require resume, and older stock readers can skip the new voice records. Fresh text history passes ASM cold reads; stock alpha.11 resume and reopened warm reads preserve exact items, saved permissions and original canonical bytes. This acceptance does not establish exact voice handoff, cover later upstream commits, or waive other checks.
+
 #### Opt-in per-environment context
 
 Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
@@ -165,7 +168,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `81b995a6c9a4c978f399775cfa5ce50702368749`, 2026-11-14. Subject: Unify model request hook lifecycles across sampling and compaction (#61562).
+Last incorporated commit: `87fccdc1bc0bc9af04db844a23d9c025f3b82000`, 2026-11-15. Subject: Defer plugin manifest loading until marketplace entries are selected (#61686).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

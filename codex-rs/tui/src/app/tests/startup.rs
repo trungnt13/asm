@@ -1196,7 +1196,7 @@ async fn fresh_startup_thread_drains_buffered_approval_before_draft_handoff() ->
         app.primary_thread_id,
     ) {
         waiting_for_initial_session_configured = false;
-        app.drain_active_thread_events(&mut tui, &app_server)
+        app.drain_active_thread_events(&mut tui, &mut app_server)
             .await?;
     }
 

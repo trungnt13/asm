@@ -7,9 +7,11 @@ use crate::context::NodeReplReviewEvidenceMode;
 use crate::context::node_repl_review_evidence_mode;
 use crate::function_tool::FunctionCallError;
 use crate::image_preparation::prompt_image_decoder;
+use crate::mcp_tool_call::CompletedMcpToolCall;
 use crate::mcp_tool_call::handle_mcp_tool_call;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::session::session::Session;
+use crate::tools::context::AbortedToolOutput;
 use crate::tools::context::McpToolOutput;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolEnvironments;
@@ -347,7 +349,7 @@ impl McpHandler {
             )
             .await
             {
-                Some(mut result) => {
+                Some(Ok(mut result)) => {
                     for content in &mut result.result.content {
                         if let Some(text) = content
                             .get("text")
@@ -363,21 +365,20 @@ impl McpHandler {
                             content["text"] = Value::String(value.to_string());
                         }
                     }
-                    result
+                    Ok(result)
                 }
-                None if !cancellation_token.is_cancelled() => {
-                    crate::mcp_tool_call::HandledMcpToolCall {
-                        result: codex_protocol::mcp::CallToolResult {
-                            content: vec![
-                                serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &wait_tool).to_string()}),
-                            ],
-                            structured_content: None,
-                            is_error: Some(false),
-                            meta: None,
-                        },
-                        tool_input: wait_input,
-                    }
-                }
+                Some(Err(error)) => Err(error),
+                None if !cancellation_token.is_cancelled() => Ok(CompletedMcpToolCall {
+                    result: codex_protocol::mcp::CallToolResult {
+                        content: vec![
+                            serde_json::json!({"type": "text", "text": super::tui_wait::interrupted(reason, &wait_tool).to_string()}),
+                        ],
+                        structured_content: None,
+                        is_error: Some(false),
+                        meta: None,
+                    },
+                    tool_input: wait_input,
+                }),
                 None => {
                     return Err(FunctionCallError::RespondToModel(
                         "wait_threads cancelled".to_string(),
@@ -388,9 +389,16 @@ impl McpHandler {
             result.await
         };
 
+        let (result, tool_input) = match result {
+            Ok(CompletedMcpToolCall { result, tool_input }) => (result, tool_input),
+            Err(FunctionCallError::RespondToModel(message)) => {
+                return Ok(boxed_tool_output(AbortedToolOutput { message }));
+            }
+            Err(error) => return Err(error),
+        };
         Ok(boxed_tool_output(McpToolOutput {
-            result: result.result,
-            tool_input: result.tool_input,
+            result,
+            tool_input,
             result_metadata_capture_allowed,
             wall_time: started.elapsed(),
             original_image_detail_supported: can_request_original_image_detail(

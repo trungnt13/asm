@@ -53,7 +53,10 @@ pub(super) async fn complete_response(
             .record_token_usage_info(
                 turn,
                 settings,
-                usage.as_ref(),
+                crate::client_common::SamplingUsage {
+                    provider: usage,
+                    charge: Default::default(),
+                },
                 TokenUsageContext::SpendingOnly,
             )
             .await
@@ -84,7 +87,10 @@ pub(super) async fn complete_response(
             .record_token_usage_info(
                 turn,
                 settings,
-                /*usage*/ None,
+                crate::client_common::SamplingUsage {
+                    provider: None,
+                    charge: Default::default(),
+                },
                 TokenUsageContext::SpendingOnly,
             )
             .await

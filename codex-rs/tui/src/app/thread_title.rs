@@ -10,12 +10,12 @@ use crate::app_event::AppEvent;
 use crate::app_event::AutoRenameRequest;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
-use crate::app_server_session::ThreadSettingsOwner;
 use crate::temporary_structured_request::TemporaryStructuredThreadOptions;
 use crate::temporary_structured_request::TemporaryThreadKind;
 use crate::temporary_structured_request::run_temporary_structured_turn;
 use crate::temporary_structured_request::start_temporary_thread;
 use crate::temporary_structured_request::unsubscribe_temporary_thread;
+use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::Turn;
@@ -68,21 +68,22 @@ impl App {
         });
     }
 
-    /// Start a hidden title-generation thread without blocking the UI loop.
+    /// Generate a title without blocking the UI loop.
     pub(super) fn generate_thread_title(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
         prompt: String,
         auto_rename: AutoRenameRequest,
         fallback_title: Option<String>,
     ) {
-        if app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server {
-            if let ThreadTitleDestination::RenameSuggestion { request_id } = destination {
-                self.chat_widget
-                    .apply_thread_name_suggestion(thread_id, request_id, /*suggestion*/ None);
-            }
+        let request_handle = app_server.request_handle();
+        if let AppServerRequestHandle::Cloud(_) = &request_handle
+            && let ThreadTitleDestination::RenameSuggestion { request_id } = destination
+        {
+            self.chat_widget
+                .apply_thread_name_suggestion(thread_id, request_id, /*suggestion*/ None);
             return;
         }
         if codex_protocol::openai_models::is_native_runtime_model(self.chat_widget.current_model())
@@ -103,14 +104,14 @@ impl App {
             return;
         };
         let cancellation = entry.insert(CancellationToken::new()).clone();
-        let request_handle = app_server.request_handle();
         let preferred_model = match destination {
             ThreadTitleDestination::Automatic | ThreadTitleDestination::ExplicitAutoRename => {
                 AUTO_RENAME_MODEL
             }
             ThreadTitleDestination::RenameSuggestion { .. } => THREAD_TITLE_MODEL,
         };
-        let model = if self.chat_widget.config_ref().model_provider_id == "openai"
+        let model = if (matches!(&request_handle, AppServerRequestHandle::Cloud(_))
+            || self.chat_widget.config_ref().model_provider_id == "openai")
             && self.chat_widget.has_chatgpt_account()
             && self
                 .chat_widget
@@ -151,6 +152,38 @@ impl App {
                     .then_some(ReasoningEffort::Low)
             });
         let explicit_model = automatic_settings.and_then(|settings| settings.model.clone());
+        let event_sender = self.app_event_tx.clone();
+        if let AppServerRequestHandle::Cloud(handle) = request_handle {
+            let writer = app_server
+                .automatic_thread_name_writer(thread_id, auto_rename.expected_name.clone());
+            let mut shutdown = self.cloud_title_shutdown.subscribe();
+            tokio::spawn(async move {
+                let result = tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => return,
+                    _ = shutdown.changed() => Err(color_eyre::eyre::eyre!("shutting down")),
+                    result = handle.generate_thread_title(&model, effort, prompt, thread_title_output_schema(max_title_chars)) => result,
+                };
+                if let Some(title) = result
+                    .as_deref()
+                    .ok()
+                    .and_then(|response| parse_thread_title(response, max_title_chars))
+                    .or(fallback_title)
+                {
+                    writer.save(title, &cancellation).await;
+                }
+                event_sender.send(AppEvent::GeneratedThreadTitle {
+                    auto_rename,
+                    max_title_chars,
+                    cancellation,
+                    thread_id,
+                    temporary_thread_id: None,
+                    destination,
+                    result: result.map_err(|error| error.to_string()),
+                });
+            });
+            return;
+        }
         let config = self.chat_widget.config_ref();
         let options = TemporaryStructuredThreadOptions {
             kind: TemporaryThreadKind::Title,
@@ -163,7 +196,6 @@ impl App {
                 .map(|profile| profile.id),
         };
 
-        let event_sender = self.app_event_tx.clone();
         tokio::spawn(async move {
             let result = match start_temporary_thread(&request_handle, options).await {
                 Ok(thread)
@@ -282,7 +314,7 @@ impl App {
                 max_title_chars,
                 cancellation,
                 thread_id,
-                temporary_thread_id,
+                temporary_thread_id: Some(temporary_thread_id),
                 destination,
                 result,
             });
@@ -292,7 +324,7 @@ impl App {
     /// Suggest a title from stored and live conversation items without persisting it.
     pub(super) async fn suggest_thread_name(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         thread_id: ThreadId,
         request_id: uuid::Uuid,
     ) {

@@ -186,9 +186,11 @@ async fn review_regression_agents_overview_creation_is_fresh_but_returning_is_no
             let before_footer = |output: &str| {
                 output
                     .lines()
-                    .take_while(|line| !line.contains("GPT-6-Astra"))
+                    .take_while(|line| !line.contains("/tmp/project"))
                     .collect::<Vec<_>>()
                     .join("\n")
+                    .trim_end()
+                    .to_string()
             };
             insta::assert_snapshot!(format!(
                 "created from the dashboard:\n{}\nreturned to the existing task:\n{}",

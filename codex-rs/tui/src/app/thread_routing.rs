@@ -191,13 +191,14 @@ impl App {
         }
     }
 
-    pub(super) fn retain_subscriptions_for_fork(&mut self) {
-        // Tasks can start while the fork RPC is pending.
+    pub(super) fn retain_thread_subscriptions(&mut self) {
+        // Keep approvals routable while leaving the current task.
         for id in self
             .thread_event_channels
             .keys()
             .copied()
             .chain(self.agent_navigation.tracked_thread_ids())
+            .chain(self.current_displayed_thread_id())
             .filter(|id| {
                 !self.side_threads.contains_key(id)
                     && !self
@@ -905,7 +906,11 @@ impl App {
                 let name = name.to_string();
                 self.cancel_thread_title_generation(thread_id);
                 self.forget_automatic_thread_title(thread_id)?;
-                app_server.thread_set_name(thread_id, name.clone()).await?;
+                if let Err(error) = app_server.thread_set_name(thread_id, name.clone()).await {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to rename thread: {error}"));
+                    return Ok(true);
+                }
                 self.chat_widget.display_thread_name(thread_id, name);
                 Ok(true)
             }
@@ -1915,7 +1920,7 @@ impl App {
     pub(super) async fn drain_active_thread_events(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
     ) -> Result<()> {
         let frame_deadline = Instant::now() + tui::TARGET_FRAME_INTERVAL;
         self.drain_active_thread_events_until(tui, app_server, frame_deadline)
@@ -1925,7 +1930,7 @@ impl App {
     pub(super) async fn drain_active_thread_events_until(
         &mut self,
         tui: &mut tui::Tui,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         frame_deadline: Instant,
     ) -> Result<()> {
         let Some(mut rx) = self.active_thread_rx.take() else {

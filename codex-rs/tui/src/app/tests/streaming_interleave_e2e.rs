@@ -91,7 +91,7 @@ async fn command_start_before_message_completion_does_not_duplicate_preamble() -
     let thread_id = started.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
-        &app_server,
+        &mut app_server,
         started,
         super::super::session_lifecycle::ThreadAttachPresentation::Fresh,
         /*initial_user_message*/ None,
@@ -173,7 +173,7 @@ async fn command_start_before_message_completion_does_not_duplicate_preamble() -
                         }
                     }
                     app.handle_backend_event(&app_server, event).await;
-                    app.drain_active_thread_events(&mut tui, &app_server).await?;
+                    app.drain_active_thread_events(&mut tui, &mut app_server).await?;
                     if capture_preview {
                         let lines = app.chat_widget.active_cell_transcript_lines(/*width*/ 80)
                             .expect("opening reply should already be visible");
