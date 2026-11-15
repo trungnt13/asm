@@ -20,4 +20,6 @@ Build V8 separately only when the exact version/target lacks a verified fork pai
 
 Reuse the existing verified macOS pair when its inputs remain compatible. Preserve historical GNU/MUSL assets. Never reuse a GNU archive for MUSL or substitute an upstream pair without the fork guide's compatibility proof.
 
+The upstream `rusty-v8-v152.2.0` x86_64 MUSL pair is not a compatible fallback for the pinned patched crate: native existing tests fail CppGC Member storage and inline typed-array binding checks. Build a corrected fork MUSL pair and run all existing `codex-v8-poc` checks, including ignored ABI checks, before publication. JavaScript execution and sandbox checks alone are insufficient.
+
 - Manual branch dispatch defaults to build-only. Explicit `publish=true` builds/smokes, then tags/publishes only the selected target's archive, binding, and manifest. Tag pushes infer the target from the generation. Tag moves or published-asset replacement need approval.
