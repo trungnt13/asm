@@ -45,10 +45,7 @@ pub(super) async fn complete_response(
             .record_observed_response_completed(
                 turn,
                 &response_id,
-                crate::client_common::SamplingUsage {
-                    provider: usage,
-                    ..Default::default()
-                },
+                usage.as_ref(),
                 /*usage_metadata*/ None,
             )
             .await;
@@ -58,7 +55,7 @@ pub(super) async fn complete_response(
                 settings,
                 crate::client_common::SamplingUsage {
                     provider: usage,
-                    ..Default::default()
+                    charge: Default::default(),
                 },
                 TokenUsageContext::SpendingOnly,
             )
@@ -81,7 +78,7 @@ pub(super) async fn complete_response(
                 .record_observed_response_completed(
                     turn,
                     &response_id,
-                    crate::client_common::SamplingUsage::default(),
+                    /*usage*/ None,
                     /*usage_metadata*/ None,
                 )
                 .await;
@@ -90,7 +87,10 @@ pub(super) async fn complete_response(
             .record_token_usage_info(
                 turn,
                 settings,
-                crate::client_common::SamplingUsage::default(),
+                crate::client_common::SamplingUsage {
+                    provider: None,
+                    charge: Default::default(),
+                },
                 TokenUsageContext::SpendingOnly,
             )
             .await
