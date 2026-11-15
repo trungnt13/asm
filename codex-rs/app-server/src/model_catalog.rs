@@ -150,17 +150,15 @@ impl ModelCatalog {
         let catalog = models_manager
             .model_catalog_with_origins(refresh_strategy, config.http_client_factory())
             .await;
-        // The first-party catalog supplies picker rows in display order. Bundled,
-        // configured and third-party catalogs rely on the manager's priority order.
+        // Preserve first-party display order ahead of bundled entries, which keep
+        // the manager's priority order. Configured and third-party catalogs use priority.
         let use_catalog_order = config.model_provider_id == OPENAI_PROVIDER_ID
             && (config.model_provider.supports_codex_backend_routes()
-                || config.model_provider.model_catalog_url.is_some())
-            && catalog
-                .iter()
-                .all(|entry| entry.origin == ModelOrigin::Provider);
+                || config.model_provider.model_catalog_url.is_some());
         let positions = use_catalog_order.then(|| {
             catalog
                 .iter()
+                .filter(|entry| entry.origin == ModelOrigin::Provider)
                 .enumerate()
                 .map(|(index, entry)| (entry.slug.clone(), index))
                 .collect::<HashMap<_, _>>()
@@ -172,7 +170,8 @@ impl ModelCatalog {
         let mut presets = models_manager.build_available_models(models);
         if let Some(positions) = positions {
             // The manager has filtered the models and marked the default using priority.
-            presets.sort_by_key(|preset| positions[&preset.model]);
+            presets
+                .sort_by_key(|preset| positions.get(&preset.model).copied().unwrap_or(usize::MAX));
         }
         Ok(presets)
     }

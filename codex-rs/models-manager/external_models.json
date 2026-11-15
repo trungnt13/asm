@@ -4,7 +4,7 @@
       "slug": "claude-code/claude-fable-5-2",
       "alias": "claude/fable-5.2",
       "tool_mode": "direct",
-      "display_name": "Fable 5.2 · CC",
+      "display_name": "Fable 5.2",
       "description": "Most capable for your hardest and longest-running tasks",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
@@ -32,7 +32,7 @@
       "shell_type": "disabled",
       "visibility": "list",
       "supported_in_api": false,
-      "priority": 106,
+      "priority": 100,
       "availability_nux": null,
       "upgrade": null,
       "model_messages": {
@@ -59,7 +59,7 @@
       "slug": "claude-code/sonnet-5-5",
       "alias": "claude/sonnet-5.5",
       "tool_mode": "direct",
-      "display_name": "Sonnet 5.5 · CC",
+      "display_name": "Sonnet 5.5",
       "description": "Efficient for routine tasks",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
@@ -83,7 +83,7 @@
       "shell_type": "disabled",
       "visibility": "list",
       "supported_in_api": false,
-      "priority": 100,
+      "priority": 103,
       "availability_nux": null,
       "upgrade": null,
       "model_messages": {
@@ -108,7 +108,7 @@
       "slug": "claude-code/opus-5-5",
       "alias": "claude/opus-5.5",
       "tool_mode": "direct",
-      "display_name": "Opus 5.5 · CC",
+      "display_name": "Opus 5.5",
       "description": "Best for everyday, complex tasks",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
@@ -239,7 +239,7 @@
       "shell_type": "disabled",
       "visibility": "list",
       "supported_in_api": false,
-      "priority": 103,
+      "priority": 104,
       "availability_nux": null,
       "upgrade": null,
       "model_messages": {
@@ -291,9 +291,9 @@
         }
       ],
       "shell_type": "disabled",
-      "visibility": "list",
+      "visibility": "hide",
       "supported_in_api": false,
-      "priority": 104,
+      "priority": 106,
       "availability_nux": null,
       "upgrade": null,
       "model_messages": {
