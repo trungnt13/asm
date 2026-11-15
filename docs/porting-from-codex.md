@@ -156,6 +156,8 @@ For PR #200, the owner accepted this unchanged older-stock voice-reader boundary
 
 For PR #207, the owner accepted both the unchanged ordinary stock cold-history limitation and the older-stock voice-reader boundary through `81b995a6c9a4c978f399775cfa5ce50702368749` only. Fresh ASM cold reads pass; stock alpha.11 needs resume before exact saved history is readable. Keep upstream voice records unchanged. Neither limitation is fixed, and this acceptance does not cover later commits, establish actual Desktop voice behavior, or waive other checks.
 
+For PR #208, the owner accepted both unchanged stock boundaries through `87fccdc1bc0bc9af04db844a23d9c025f3b82000` only: ordinary cold reads still require resume, and older stock readers can skip the new voice records. Fresh text history passes ASM cold reads; stock alpha.11 resume and reopened warm reads preserve exact items, saved permissions and original canonical bytes. This acceptance does not establish exact voice handoff, cover later upstream commits, or waive other checks.
+
 #### Opt-in per-environment context
 
 Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
