@@ -44,6 +44,7 @@ def summarize(output):
         row = {
             "run": directory.name,
             "allocator": "glibc" if directory.name.endswith("-a") else "jemalloc",
+            "allocator_config": result.get("allocator_config", {}),
             "latency_median_ms": statistics.median(turns),
             "latency_p95_ms": sorted(turns)[int(0.95 * (len(turns) - 1))],
             "fork_ms": result["fork_ms"],
@@ -99,6 +100,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--jemalloc", type=Path)
+    parser.add_argument("--jemalloc-arenas", type=int, choices=[4, 8])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--analyze-only", action="store_true")
     args = parser.parse_args()
@@ -116,6 +118,8 @@ def main():
             ]
             if mode == "b":
                 command += ["--jemalloc", str(args.jemalloc)]
+                if args.jemalloc_arenas is not None:
+                    command += ["--jemalloc-arenas", str(args.jemalloc_arenas)]
             subprocess.run(command, check=True)
     summarize(args.output)
 

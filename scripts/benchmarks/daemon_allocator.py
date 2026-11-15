@@ -255,6 +255,8 @@ tool_namespace = "agents"
     env["CODEX_HOME"] = str(home)
     if args.jemalloc:
         env["LD_PRELOAD"] = str(args.jemalloc.resolve())
+        if args.jemalloc_arenas is not None:
+            env["MALLOC_CONF"] = f"narenas:{args.jemalloc_arenas}"
     cmd = [
         str(args.binary.resolve()),
         "--no-daemon",
@@ -263,7 +265,14 @@ tool_namespace = "agents"
         f"ws://127.0.0.1:{port}",
     ]
     (output / "command.json").write_text(
-        json.dumps({"args": cmd, "allocator": env.get("LD_PRELOAD", "glibc")}, indent=2)
+        json.dumps(
+            {
+                "args": cmd,
+                "allocator": env.get("LD_PRELOAD", "glibc"),
+                "malloc_conf": env.get("MALLOC_CONF"),
+            },
+            indent=2,
+        )
     )
     proc = subprocess.Popen(
         cmd,
@@ -457,6 +466,10 @@ tool_namespace = "agents"
             json.dumps(
                 {
                     "turns": turns,
+                    "allocator_config": {
+                        "jemalloc_arenas": args.jemalloc_arenas,
+                        "malloc_conf": env.get("MALLOC_CONF"),
+                    },
                     "stability": stability,
                     "fork_ms": fork_ms,
                     "resume_ms": resume_ms,
@@ -483,7 +496,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--jemalloc", type=Path)
+    parser.add_argument("--jemalloc-arenas", type=int, choices=[4, 8])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--turns", type=int, default=24)
     parser.add_argument("--idle", type=float, default=65)
-    run(parser.parse_args())
+    args = parser.parse_args()
+    if args.jemalloc_arenas is not None and args.jemalloc is None:
+        parser.error("--jemalloc-arenas requires --jemalloc")
+    run(args)

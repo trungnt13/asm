@@ -10,6 +10,7 @@ Create a private Python environment with `websocket-client==1.9.2`, then run:
 python scripts/benchmarks/allocator_matrix.py \
   --binary /absolute/private/package/bin/codex \
   --jemalloc /absolute/private/libjemalloc.so.2 \
+  --jemalloc-arenas 4 \
   --output /absolute/new/evidence-directory
 ```
 
@@ -43,7 +44,14 @@ reported separately and is not substituted for steady-state memory.
 Jemalloc uses process-local `LD_PRELOAD`, affecting Rust, native libraries, and
 inherited helpers. It is not equivalent to a Rust-only `tikv-jemallocator` build.
 Verify dynamic malloc symbol binding separately; a mapped library alone does not
-prove allocator replacement. Neither arm receives allocator tuning overrides.
+prove allocator replacement. `--jemalloc-arenas 4` passes only `MALLOC_CONF=narenas:4`
+to jemalloc runs. Use `--jemalloc-arenas 8` with a fresh output directory for the
+separate eight-arena comparison. Omit this option to reproduce untuned jemalloc.
+Other allocator options remain unchanged; the command and results record the override.
+The GNU CLI already caps glibc arenas at four. Its `mallopt` setting does not
+configure preloaded jemalloc, and Cargo's musl jemalloc build-time configuration
+does not configure a prebuilt system library. Verify effective jemalloc options
+in a separate diagnostic process before timing; do not enable stats printing in runs.
 
 Raw RPCs, model response records, mapping samples, commands and outcomes are saved.
 `allocator_matrix.py --output PATH --analyze-only` validates completed turns,
