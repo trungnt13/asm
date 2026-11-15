@@ -2179,6 +2179,7 @@ async fn root_switch_preserves_vim_line_yank() -> Result<()> {
     );
     let composer_lines = render_bottom_popup(&app.chat_widget, /*width*/ 80)
         .lines()
+        .skip_while(|line| !line.starts_with("›"))
         .take(2)
         .collect::<Vec<_>>()
         .join("\n");
