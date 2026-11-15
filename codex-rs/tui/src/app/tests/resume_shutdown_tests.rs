@@ -122,7 +122,7 @@ async fn failed_close_status_read_reconnects_remote_or_closes_embedded() -> Resu
             )
             .await
         });
-        let session = AppServerSession::new(
+        let mut session = AppServerSession::new(
             crate::backend_id::BackendId::new(),
             crate::connect_remote_app_server(endpoint).await?,
             ThreadParamsMode::Remote,
@@ -136,7 +136,8 @@ async fn failed_close_status_read_reconnects_remote_or_closes_embedded() -> Resu
         )
         .await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.drain_active_thread_events(&mut tui, &session).await?;
+        app.drain_active_thread_events(&mut tui, &mut session)
+            .await?;
         assert_eq!(
             (reads.load(Ordering::SeqCst), app.reconnect.offline),
             (expected_reads, offline),

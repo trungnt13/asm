@@ -617,7 +617,8 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                     )),
                 )
                 .await;
-                app.drain_active_thread_events(&mut tui, &session).await?;
+                app.drain_active_thread_events(&mut tui, &mut session)
+                    .await?;
                 app.chat_widget
                     .restore_user_message_to_composer("latest draft!".into());
             }

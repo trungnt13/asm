@@ -45,7 +45,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         })
         .build()
         .await?;
-    let (mut server, requests, proxy) = match mode {
+    let (server, requests, proxy) = match mode {
         ThreadParamsMode::Remote | ThreadParamsMode::Cloud => {
             Box::pin(start_recording_remote_app_server(&server_config)).await?
         }
