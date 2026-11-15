@@ -53,7 +53,8 @@ pub(crate) async fn prepare_agent_spawn_config(
     let turn = step_context.turn.as_ref();
     let mut config =
         build_agent_spawn_config(&session.get_base_instructions().await, step_context)?;
-    let has_requested_reasoning_effort = options.reasoning_effort.is_some()
+    let has_explicit_reasoning_effort = options.reasoning_effort.is_some();
+    let has_requested_reasoning_effort = has_explicit_reasoning_effort
         || turn
             .config
             .agent_default_subagent_reasoning_effort
@@ -115,6 +116,16 @@ pub(crate) async fn prepare_agent_spawn_config(
         } else {
             model_info.default_reasoning_level.clone()
         };
+    }
+    if turn.multi_agent_version == MultiAgentVersion::V2
+        && !has_explicit_reasoning_effort
+        && role_reasoning_effort.is_none()
+        && let Some(reasoning_effort) = config
+            .model
+            .as_deref()
+            .and_then(|model| config.subagent_default_reasoning.get(model))
+    {
+        config.model_reasoning_effort = Some(reasoning_effort.clone());
     }
     validate_spawn_agent_config_effort(session, &config).await?;
     config

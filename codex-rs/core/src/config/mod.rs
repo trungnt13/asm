@@ -668,6 +668,10 @@ pub struct Config {
     /// Child-only routing overrides, keyed by model and reasoning effort.
     pub subagent_service_tiers: HashMap<String, HashMap<ReasoningEffort, String>>,
 
+    /// Model-specific defaults replace inherited reasoning for V2 spawned children.
+    /// Explicit spawn efforts and role efforts take precedence.
+    pub subagent_default_reasoning: HashMap<String, ReasoningEffort>,
+
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
 
@@ -4751,6 +4755,7 @@ impl Config {
             daybreak_enabled: cfg.daybreak.unwrap_or(false),
             service_tier,
             subagent_service_tiers: cfg.subagent_service_tiers,
+            subagent_default_reasoning: cfg.subagent_default_reasoning,
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,

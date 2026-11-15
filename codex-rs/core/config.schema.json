@@ -9546,6 +9546,14 @@
       ],
       "description": "Directory where Codex stores the SQLite state DB. Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`."
     },
+    "subagent_default_reasoning": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ReasoningEffort"
+      },
+      "default": {},
+      "description": "Model-specific defaults replace inherited reasoning for V2 spawned children. Explicit spawn efforts and role efforts take precedence.",
+      "type": "object"
+    },
     "subagent_model_context_windows": {
       "additionalProperties": {
         "format": "uint64",
