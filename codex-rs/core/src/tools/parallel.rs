@@ -1160,8 +1160,8 @@ mod tests {
         let expected_denial = "rollout budget exhausted";
         assert_eq!(
             held_reply.item,
-            ResponseInputItem::FunctionCallOutput {
-                call_id: "held-at-start".into(),
+            codex_protocol::models::ResponseItem::from(ResponseInputItem::FunctionCallOutput {
+                call_id: "held-at-start").into(),
                 output: FunctionCallOutputPayload::from_text(format!(
                     "aborted before handler start: {expected_denial}"
                 ),),

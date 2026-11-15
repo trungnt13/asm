@@ -275,7 +275,7 @@ async fn invalid_provider_rollout_budget_units_fail_without_retry() -> Result<()
     test.codex.ensure_rollout_materialized().await;
     let history = test.codex.load_history(/*include_archived*/ false).await?;
     assert!(!history.items.iter().any(|item| matches!(item,
-        RolloutItem::ResponseItem(envelope) if matches!(&envelope.item,
+        RolloutItem::ResponseItem(envelope) if matches!(envelope.item.as_ref(),
             ResponseItem::CustomToolCall { call_id, .. }
             | ResponseItem::CustomToolCallOutput { call_id, .. } if call_id == "unbilled-patch"
         )
@@ -531,7 +531,7 @@ async fn exhausted_budget_respects_enforcement_on_current_and_later_turns(
     test.codex.ensure_rollout_materialized().await;
     let history = test.codex.load_history(/*include_archived*/ false).await?;
     assert!(history.items.iter().any(|item| matches!(item, codex_history::RolloutItem::ResponseItem(envelope)
-        if matches!(&envelope.item, codex_protocol::models::ResponseItem::Message { role, content, .. }
+        if matches!(envelope.item.as_ref(), codex_protocol::models::ResponseItem::Message { role, content, .. }
             if role == "assistant" && content.iter().any(|part| matches!(part,
                 codex_protocol::models::ContentItem::OutputText { text, .. } if text == ACCEPTED_REVIEW))))),
         "a shared stop must not discard Guardian's already-selected final text");
@@ -543,7 +543,7 @@ async fn exhausted_budget_respects_enforcement_on_current_and_later_turns(
                 let RolloutItem::ResponseItem(item) = item else {
                     return None;
                 };
-                let ResponseItem::Message { role, content, .. } = &item.item else {
+                let ResponseItem::Message { role, content, .. } = item.item.as_ref() else {
                     return None;
                 };
                 content

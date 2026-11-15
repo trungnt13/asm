@@ -348,8 +348,8 @@ async fn mcp_budget_stop_at_handoff(phase: McpPause) -> anyhow::Result<()> {
         McpPause::Start => {
             assert_eq!(
                 reply.item,
-                ResponseInputItem::FunctionCallOutput {
-                    call_id: "handoff-probe".into(),
+                codex_protocol::models::ResponseItem::from(ResponseInputItem::FunctionCallOutput {
+                    call_id: "handoff-probe").into(),
                     output: FunctionCallOutputPayload::from_text(
                         "aborted before MCP handoff: rollout budget exhausted".into()
                     ),

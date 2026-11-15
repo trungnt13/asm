@@ -6416,7 +6416,7 @@ async fn model_request_post_hook_orders_tool_dispatch(case: ToolDispatchCase) ->
         let history = test.codex.load_history(/*include_archived*/ false).await?;
         assert!(
             !history.items.iter().any(|item| matches!(item,
-                RolloutItem::ResponseItem(envelope) if match &envelope.item {
+                RolloutItem::ResponseItem(envelope) if match envelope.item.as_ref() {
                     ResponseItem::CustomToolCall { call_id, .. } => call_id == "call",
                     ResponseItem::Message { role, content, .. } => role == "assistant" && content.iter().any(
                         |part| matches!(part, ContentItem::OutputText { text, .. } if text == STREAMED)),
@@ -6484,7 +6484,7 @@ async fn model_request_post_hook_orders_tool_dispatch(case: ToolDispatchCase) ->
         let history = test.codex.load_history(/*include_archived*/ false).await?;
         assert!(!history.items.iter().any(|item| {
             let RolloutItem::ResponseItem(envelope) = item else { return false; };
-            match &envelope.item {
+            match envelope.item.as_ref() {
                 ResponseItem::CustomToolCall { call_id, .. }
                 | ResponseItem::CustomToolCallOutput { call_id, .. } => call_id == "call",
                 ResponseItem::Message { role, content, .. } => role == "assistant"
@@ -6566,7 +6566,7 @@ async fn model_request_post_hook_orders_tool_dispatch(case: ToolDispatchCase) ->
             .items
             .iter()
             .filter_map(|item| match item {
-                RolloutItem::ResponseItem(envelope) => match &envelope.item {
+                RolloutItem::ResponseItem(envelope) => match envelope.item.as_ref() {
                     ResponseItem::Message { role, content, .. } if role == "assistant" && content.iter().any(
                         |part| matches!(part, ContentItem::OutputText { text, .. } if text == STREAMED)
                     ) => Some("assistant message"),

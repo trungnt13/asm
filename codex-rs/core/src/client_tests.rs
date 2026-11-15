@@ -1902,7 +1902,7 @@ async fn response_stream_records_last_model_feedback_ids() {
             request_duration_ms,
             generation_duration_ms,
             ..
-        } = event.unwrap()
+        } = event.event.unwrap()
         {
             completed_duration_ms = request_duration_ms;
             completed_generation_duration_ms = generation_duration_ms;
