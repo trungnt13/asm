@@ -13,11 +13,11 @@ from pathlib import Path
 
 ASSET_NAMES = (
     "codex-aarch64-apple-darwin.tar.gz",
-    "codex-x86_64-unknown-linux-gnu.tar.gz",
+    "codex-x86_64-unknown-linux-musl.tar.gz",
     "SHA256SUMS",
     "install.sh",
 )
-TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-gnu")
+TARGETS = ("aarch64-apple-darwin", "x86_64-unknown-linux-musl")
 PLATFORM_MANIFESTS = tuple(f"SHA256SUMS-{target}" for target in TARGETS)
 ROOT = Path(os.environ.get("GITHUB_WORKSPACE", Path(__file__).resolve().parents[2]))
 
@@ -189,9 +189,8 @@ def initialize(repository, tag, sha, release, installer):
                 "the entire package with its pinned install.sh. Platform checksum assets mark "
                 "packages ready for installation; Latest requires both platforms. "
                 "Use install.sh for external updates. macOS ARM64 is unsigned and "
-                "unnotarized. Linux x86_64 requires glibc 2.35+, system OpenSSL 3 "
-                "and XZ libraries; packages with bundled Bubblewrap also need libcap. "
-                "Use a system shell.\n\n"
+                "unnotarized. Linux x86_64 executables are statically linked with musl. "
+                "A compatible Linux kernel, system shell, and CA certificates are required.\n\n"
                 f"Source commit: {sha}"
             ),
             "generate_release_notes": True, "draft": True, "prerelease": False,
@@ -236,7 +235,7 @@ def publish_target(repository, tag, sha, release, installer, target):
                 verify_asset(directory / name, asset)
             subprocess.run([sys.executable, ROOT / ".github/scripts/smoke-codex-archive.py",
                             downloaded / archive], cwd=ROOT / "codex-rs", check=True)
-            if target == "x86_64-unknown-linux-gnu":
+            if target == "x86_64-unknown-linux-musl":
                 subprocess.run(["bash", ROOT / ".github/scripts/smoke-ubuntu-archive.sh",
                                 downloaded / archive, tag.removeprefix("v")], cwd=ROOT, check=True)
         release = upload_missing(repository, tag, release, directory, (manifest,))
@@ -327,6 +326,15 @@ def main():
         raise ValueError("invalid RELEASE_TAG")
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise ValueError("RELEASE_SHA must be a full commit SHA")
+    candidate_workflow = subprocess.check_output(
+        ["git", "show", f"{sha}:.github/workflows/fork-rust-release.yml"],
+        cwd=ROOT,
+        text=True,
+    )
+    if set(re.findall(r"x86_64-unknown-linux-(?:gnu|musl)\b", candidate_workflow)) != {
+        "x86_64-unknown-linux-musl"
+    }:
+        raise ValueError("Only musl release candidates may be published or resumed")
     candidate_cargo = subprocess.check_output(
         ["git", "show", f"{sha}:codex-rs/Cargo.toml"], cwd=ROOT, text=True
     )
@@ -399,9 +407,8 @@ def main():
                     "are installed externally; in-app updates are disabled. A system "
                     "shell is required for relevant features.\n\n"
                     "The macOS ARM64 binary is unsigned and unnotarized. The Linux "
-                    "x86_64 binary requires Ubuntu 22.04 or newer (glibc 2.35), with "
-                    "host OpenSSL 3 and XZ libraries; packages with bundled Bubblewrap "
-                    "also need libcap.\n\n"
+                    "x86_64 executables are statically linked with musl. A compatible "
+                    "Linux kernel, system shell, and CA certificates are required.\n\n"
                     f"Source commit: {sha}"
                 ),
                 "generate_release_notes": True,

@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   tag-check:
+    if: ${{ github.repository == 'openai/codex' }}
     outputs:
       build-systems: >-
         ${{ github.repository == 'openai/codex' && github.ref_protected &&

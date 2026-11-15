@@ -78,7 +78,12 @@ runs:
       run: |
         set -euo pipefail
         version="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/rusty_v8_bazel.py" resolved-v8-crate-version)"
-        tag="asm-v8-v${version}-glibc2.35.2"
+        case "$TARGET" in
+          x86_64-unknown-linux-musl) generation=musl.1 ;;
+          aarch64-apple-darwin) generation=glibc2.35.2 ;;
+          *) echo "Unsupported fork V8 target: $TARGET" >&2; exit 1 ;;
+        esac
+        tag="asm-v8-v${version}-${generation}"
         profile=ptrcomp_sandbox_release
         archive="librusty_v8_${profile}_${TARGET}.a.gz"
         binding="src_binding_${profile}_${TARGET}.rs"

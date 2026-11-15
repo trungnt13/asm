@@ -97,6 +97,21 @@ def version(revision):
     ]
 
 
+def linux_release_target(revision):
+    workflow = git_file(revision, ".github/workflows/fork-rust-release.yml")
+    targets = set(re.findall(r"x86_64-unknown-linux-(?:gnu|musl)\b", workflow))
+    if len(targets) != 1:
+        raise ValueError("Candidate has an ambiguous Linux release target")
+    return targets.pop()
+
+
+def require_musl_candidate(revision):
+    if linux_release_target(revision) != "x86_64-unknown-linux-musl":
+        raise ValueError(
+            "GNU release candidates are retired; prepare a new musl candidate"
+        )
+
+
 def remote_ref(reference):
     result = subprocess.run(
         ["git", "ls-remote", "--exit-code", "origin", reference],
@@ -175,17 +190,25 @@ def complete_candidate(tag, revision):
 
 def published_assets_complete(release):
     names = {asset["name"] for asset in release.get("assets", [])}
-    legacy = {
-        "codex-aarch64-apple-darwin.tar.gz",
-        "codex-x86_64-unknown-linux-gnu.tar.gz",
-        "SHA256SUMS",
-        "install.sh",
-    }
-    staged = legacy | {
-        "SHA256SUMS-aarch64-apple-darwin",
-        "SHA256SUMS-x86_64-unknown-linux-gnu",
-    }
-    return not release["draft"] and names in (legacy, staged)
+    complete_sets = []
+    for target in ("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"):
+        legacy = {
+            "codex-aarch64-apple-darwin.tar.gz",
+            f"codex-{target}.tar.gz",
+            "SHA256SUMS",
+            "install.sh",
+        }
+        complete_sets.extend(
+            (
+                legacy,
+                legacy
+                | {
+                    "SHA256SUMS-aarch64-apple-darwin",
+                    f"SHA256SUMS-{target}",
+                },
+            )
+        )
+    return not release["draft"] and names in complete_sets
 
 
 def completed_publication(run, candidate, tag, candidate_ref):
@@ -198,7 +221,7 @@ def completed_publication(run, candidate, tag, candidate_ref):
     )["jobs"]
     required = {
         "Verify published aarch64-apple-darwin binaries",
-        "Verify published x86_64-unknown-linux-gnu binaries",
+        f"Verify published {linux_release_target(candidate)} binaries",
         "Advance main only after release verification",
     }
     succeeded = {job["name"] for job in jobs if job["conclusion"] == "success"}
@@ -456,6 +479,7 @@ def output(revision, tag="", candidate_ref="", complete=False, publish=False):
 def prepare():
     revision = os.environ["GITHUB_SHA"]
     reference = os.environ["GITHUB_REF"]
+    require_musl_candidate(revision)
     publish = os.environ.get("PUBLISH_RELEASE", "false")
     if publish not in {"true", "false"}:
         raise ValueError("PUBLISH_RELEASE must be true or false")
@@ -484,6 +508,7 @@ def prepare():
         revision = git("rev-parse", "FETCH_HEAD^{commit}")
         if revision != candidate_sha:
             raise ValueError("Candidate changed during lookup")
+        require_musl_candidate(revision)
         base = validate_candidate(revision)
         if not resume_run_id and base != os.environ["GITHUB_SHA"]:
             raise ValueError("Candidate belongs to a different source commit")
@@ -520,6 +545,7 @@ def prepare():
 
 def sync_main():
     revision = os.environ["RELEASE_SHA"]
+    require_musl_candidate(revision)
     tag = os.environ["RELEASE_TAG"]
     candidate_ref = os.environ["CANDIDATE_REF"]
     if not candidate_ref:

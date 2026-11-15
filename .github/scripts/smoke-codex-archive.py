@@ -19,7 +19,7 @@ from codex_package.targets import TARGET_SPECS
 
 archive_path = Path(sys.argv[1])
 inspect_only = len(sys.argv) > 2 and sys.argv[2] == "--inspect-only"
-release_targets = {"aarch64-apple-darwin", "x86_64-unknown-linux-gnu"}
+release_targets = {"aarch64-apple-darwin", "x86_64-unknown-linux-musl"}
 target = archive_path.name.removeprefix("codex-").removesuffix(".tar.gz")
 if target not in release_targets:
     raise SystemExit(f"Unsupported CLI archive: {archive_path}")
@@ -108,34 +108,26 @@ with tarfile.open(archive_path, "r:gz") as archive:
                     ],
                     text=True,
                 )
-                # The pinned x86_64 ripgrep is static MUSL; ASM and bwrap are GNU.
                 if not all(
                     value in headers
                     for value in ("ELF64", "Advanced Micro Devices X86-64")
-                ) or (
-                    name != "codex-path/rg"
-                    and "/lib64/ld-linux-x86-64.so.2" not in headers
                 ):
                     raise SystemExit(f"{name} is not an expected x86_64 executable")
+                if re.search(r"\bINTERP\b", headers):
+                    raise SystemExit(f"{name} requires a dynamic loader")
                 versions = subprocess.check_output(
                     ["readelf", "--version-info", "--wide", executable], text=True
                 )
                 glibc_versions = set(re.findall(r"Name: (GLIBC_\S+)", versions))
-                if (name != "codex-path/rg" and not glibc_versions) or any(
-                    not re.fullmatch(r"GLIBC_[0-9]+(?:\.[0-9]+)+", value)
-                    or tuple(int(part) for part in value[6:].split(".")) > (2, 35)
-                    for value in glibc_versions
-                ):
-                    raise SystemExit(
-                        f"{name} exceeds the glibc 2.35 baseline: {sorted(glibc_versions)}"
-                    )
+                if glibc_versions:
+                    raise SystemExit(f"{name} requires glibc: {sorted(glibc_versions)}")
                 dependencies = subprocess.check_output(
                     ["readelf", "--dynamic", "--wide", executable], text=True
                 )
                 libraries = re.findall(r"\(NEEDED\).*?\[(.*?)\]", dependencies)
-                print(
-                    f"{name} glibc_versions={sorted(glibc_versions)} needed={libraries}"
-                )
+                if libraries:
+                    raise SystemExit(f"{name} requires shared libraries: {libraries}")
+                print(f"{name} linkage=static glibc_versions=[] needed=[]")
         else:
             for name in sorted(executables):
                 architectures = subprocess.check_output(

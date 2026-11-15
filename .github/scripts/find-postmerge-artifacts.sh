@@ -5,9 +5,9 @@ set -euo pipefail
 # Other reuse requires a successful same-commit main build for the selected target.
 repo="$GITHUB_REPOSITORY"
 sha="$(git rev-parse HEAD)"
-asset_names='["codex-aarch64-apple-darwin","codex-x86_64-unknown-linux-gnu"]'
+asset_names='["codex-aarch64-apple-darwin","codex-x86_64-unknown-linux-musl"]'
 if [[ -n "${TARGET:-}" ]]; then
-  case "$TARGET" in aarch64-apple-darwin|x86_64-unknown-linux-gnu) ;; *) echo "Unsupported artifact target" >&2; exit 1;; esac
+  case "$TARGET" in aarch64-apple-darwin|x86_64-unknown-linux-musl) ;; *) echo "Unsupported artifact target" >&2; exit 1;; esac
   asset_names="[\"codex-${TARGET}\"]"
 fi
 if [[ -n "${CANDIDATE_REF:-}" ]]; then
@@ -34,13 +34,12 @@ if [[ -n "${CANDIDATE_REF:-}" ]]; then
   echo 'reuse=false' >> "$GITHUB_OUTPUT"
   exit 0
 fi
-absent_deadline=$((SECONDS + 300))
 wait_seconds=11100
 if [[ "${TARGET:-}" == aarch64-apple-darwin ]]; then wait_seconds=9000; fi
 deadline=$((SECONDS + wait_seconds))
 while :; do
-  runs=$(gh api -X GET "repos/$repo/actions/workflows/postmerge-ci.yml/runs" -f head_sha="$sha" -f event=push -f per_page=100)
-  runs_for_commit=$(jq -c --arg sha "$sha" --arg repo "$repo" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .head_branch == "main" and .repository.full_name == $repo and .head_repository.full_name == $repo)] | sort_by(.created_at) | reverse' <<<"$runs")
+  runs=$(gh api -X GET "repos/$repo/actions/workflows/postmerge-ci.yml/runs" -f head_sha="$sha" -f per_page=100)
+  runs_for_commit=$(jq -c --arg sha "$sha" --arg repo "$repo" '[.workflow_runs[] | select(.head_sha == $sha and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "main" and .repository.full_name == $repo and .head_repository.full_name == $repo)] | sort_by(.created_at) | reverse' <<<"$runs")
   active_target=""
   while IFS= read -r run; do
     [[ -n "$run" ]] || continue
@@ -49,7 +48,8 @@ while :; do
       jobs=$(gh api "repos/$repo/actions/runs/$id/jobs?per_page=100")
       target_jobs=$(jq -c --arg name "Release build $TARGET" '[.jobs[] | select(.name == $name)]' <<<"$jobs")
       if jq -e 'any(.[]; .status != "completed")' <<<"$target_jobs" >/dev/null ||
-        [[ $(jq length <<<"$target_jobs") == 0 && $(jq -r .status <<<"$run") != completed ]]; then
+        { [[ $(jq length <<<"$target_jobs") == 0 && $(jq -r .status <<<"$run") != completed ]] &&
+          ! jq -e 'any(.jobs[]; .name | startswith("Release build "))' <<<"$jobs" >/dev/null; }; then
         if [[ -z "$active_target" ]]; then active_target="$id"; fi
         continue
       fi
@@ -72,11 +72,6 @@ while :; do
     active=$(jq -r '[.[] | select(.status != "completed") | .id] | first // empty' <<<"$runs_for_commit")
   fi
   if [[ -z "$active" ]]; then
-    if [[ $(jq length <<<"$runs_for_commit") -eq 0 && $SECONDS -lt $absent_deadline ]]; then
-      echo "Waiting briefly for postmerge run at $sha to appear"
-      sleep 30
-      continue
-    fi
     echo 'No usable postmerge archives; release will build.'
     echo 'reuse=false' >> "$GITHUB_OUTPUT"
     exit 0
