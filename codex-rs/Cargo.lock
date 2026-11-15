@@ -2209,10 +2209,12 @@ dependencies = [
 name = "codex-app-server-client"
 version = "0.171.1-alpha.5"
 dependencies = [
+ "codex-api",
  "codex-app-server",
  "codex-app-server-protocol",
  "codex-app-server-transport",
  "codex-arg0",
+ "codex-backend-client",
  "codex-cloud-client",
  "codex-config",
  "codex-core",
@@ -2220,6 +2222,7 @@ dependencies = [
  "codex-feedback",
  "codex-http-client",
  "codex-login",
+ "codex-model-provider",
  "codex-protocol",
  "codex-uds",
  "codex-utils-absolute-path",
@@ -3887,6 +3890,7 @@ dependencies = [
  "schemars 0.8.22",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "sha2 0.10.9",
  "tempfile",
  "tokio",

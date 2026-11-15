@@ -4622,8 +4622,8 @@ async fn async_compaction_reuses_pending_work(
                 "type": "mcp_tool", "server": "compaction-observer", "tool": tool, "input": input
             }]}]);
             let hooks = json!({
-                "PreModelRequest": hook("pre", json!({"kind": "${kind}"})),
-                "PostModelRequest": hook("post", json!({"kind": "${kind}", "response_id": "${response_id}", "token_usage": "${token_usage}"})),
+                "PreModelRequest": hook("pre", json!({"kind": "${kind}", "request_id": "${request_id}"})),
+                "PostModelRequest": hook("post", json!({"kind": "${kind}", "request_id": "${request_id}", "response_id": "${response_id}", "token_usage": "${token_usage}"})),
             });
             let config = json!({"hooks": hooks, "mcp_servers": {"compaction-observer": {
                 "url": url, "environment_id": super::rmcp_client::remote_aware_environment_id()
@@ -4652,6 +4652,8 @@ async fn async_compaction_reuses_pending_work(
         env,
         move |config| {
             if observe_attempts {
+                config.response_process_mode =
+                    codex_config::config_toml::ResponseProcessMode::AfterCompleteResponse;
                 core_test_support::hooks::trust_discovered_hooks(config);
             }
             if over_budget {
@@ -4745,7 +4747,12 @@ async fn async_compaction_reuses_pending_work(
             .lock()
             .expect("usage reports")
             .iter()
-            .any(|report| report.usage.total_tokens == BACKGROUND_TOKENS);
+            .any(|report| {
+                report
+                    .usage
+                    .as_ref()
+                    .is_some_and(|usage| usage.total_tokens == BACKGROUND_TOKENS)
+            });
         release_post.send(()).expect("release the compaction hook");
         assert!(
             !billed_while_held,
@@ -4801,7 +4808,12 @@ async fn async_compaction_reuses_pending_work(
         let reports = accounting.reports.lock().expect("usage reports");
         let charged_turns: Vec<_> = reports
             .iter()
-            .filter(|report| report.usage.total_tokens == BACKGROUND_TOKENS)
+            .filter(|report| {
+                report
+                    .usage
+                    .as_ref()
+                    .is_some_and(|usage| usage.total_tokens == BACKGROUND_TOKENS)
+            })
             .map(|report| &report.turn_id)
             .collect();
         assert_eq!(charged_turns, [&usage("seed").turn_id]);
@@ -4824,10 +4836,21 @@ async fn async_compaction_reuses_pending_work(
             (1, 1),
             "adopting the candidate must not run a second attempt"
         );
+        let background_id = post[0]["request_id"]
+            .as_str()
+            .expect("background request ID");
+        assert_eq!(pre[0]["request_id"], background_id);
         assert_eq!(pre[0]["kind"], "background_compaction");
         assert_eq!(post[0]["kind"], pre[0]["kind"]);
         assert_eq!(post[0]["response_id"], "background");
         assert_eq!(post[0]["token_usage"]["total_tokens"], BACKGROUND_TOKENS);
+        let seed_id = calls
+            .iter()
+            .map(|call| &call["arguments"])
+            .find(|input| input["response_id"] == "seed")
+            .and_then(|input| input["request_id"].as_str())
+            .expect("ordinary seed request ID");
+        assert_ne!(seed_id, background_id);
     }
     assert_eq!(
         (
