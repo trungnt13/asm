@@ -1857,6 +1857,7 @@ async fn run_ratatui_app(
                         resume_hint: None,
                         disconnect_info: None,
                         update_action: None,
+                        archive_warnings: Vec::new(),
                         exit_reason: ExitReason::UserRequested,
                     });
                 }
