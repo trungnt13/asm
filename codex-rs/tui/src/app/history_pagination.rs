@@ -261,7 +261,7 @@ impl App {
             if let Some(turn) = turns.iter().find(|turn| {
                 items[range.clone()]
                     .first()
-                    .is_some_and(|first| turn.items.iter().any(|item| item.id() == first.id()))
+                    .is_some_and(|(turn_id, _)| turn.id == *turn_id)
             }) {
                 cells.push(Arc::new(history_cell::TurnActivityBoundary::Begin(
                     turn.id.clone(),

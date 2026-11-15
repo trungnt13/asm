@@ -48,7 +48,7 @@ impl App {
     #[tracing::instrument(skip_all)]
     pub(super) async fn handle_live_thread_event(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         event: ThreadBufferedEvent,
     ) {
         let automatic_title_prompt = self.automatic_thread_title_prompt(&event).await;
