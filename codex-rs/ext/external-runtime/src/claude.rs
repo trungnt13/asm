@@ -196,9 +196,13 @@ impl ClaudeDriver {
             "syncClaudeAiSkills": false,
             "syncClaudeAiPlugins": false,
             "autoMemoryEnabled": false,
+            "spinnerTipsEnabled": false,
             "enabledPlugins": {
                 "cc-plugin-agents-md@builtin": false,
                 "cc-plugin-plugin-authoring@builtin": false,
+                "cc-plugin-mods-guide@builtin": false,
+                "cc-plugin-tips@builtin": false,
+                "cc-plugin-you-should-know@builtin": false,
                 "cc-plugin-privacy@builtin": false,
                 "cc-plugin-telemetry@builtin": false,
             },
