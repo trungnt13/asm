@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Fetch and validate the indexed profile used by Linux fork release builds."""
+
+import argparse
+import gzip
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--github-env", type=Path)
+    args = parser.parse_args()
+    root = Path(__file__).resolve().parents[2]
+    manifest = json.loads((root / ".github/pgo/agent-linux.json").read_text())
+    if args.target != manifest["target"]:
+        parser.error("No PGO profile is selected for this target")
+    args.output.mkdir(parents=True, exist_ok=True)
+    profile = args.output.resolve() / "agent.profdata"
+    with tempfile.TemporaryDirectory(dir=args.output) as temporary:
+        archive = Path(temporary) / "profile.gz"
+        with (
+            urllib.request.urlopen(manifest["url"], timeout=120) as source,
+            archive.open("wb") as dest,
+        ):
+            shutil.copyfileobj(source, dest)
+        if (
+            hashlib.sha256(archive.read_bytes()).hexdigest()
+            != manifest["archive_sha256"]
+        ):
+            raise RuntimeError("PGO archive checksum mismatch")
+        staged = Path(temporary) / "profile.profdata"
+        with gzip.open(archive, "rb") as source, staged.open("wb") as dest:
+            shutil.copyfileobj(source, dest)
+        if (
+            staged.stat().st_size != manifest["profile_bytes"]
+            or hashlib.sha256(staged.read_bytes()).hexdigest()
+            != manifest["profile_sha256"]
+        ):
+            raise RuntimeError("PGO profile checksum/size mismatch")
+        shutil.move(staged, profile)
+    version = subprocess.check_output(["rustc", "-Vv"], text=True)
+    host = next(
+        line.split(": ", 1)[1]
+        for line in version.splitlines()
+        if line.startswith("host: ")
+    )
+    sysroot = subprocess.check_output(
+        ["rustc", "--print", "sysroot"], text=True
+    ).strip()
+    tool = Path(sysroot) / "lib/rustlib" / host / "bin/llvm-profdata"
+    if not tool.is_file():
+        raise RuntimeError(
+            "Install llvm-tools-preview for the consuming Rust toolchain"
+        )
+    validation = subprocess.check_output(
+        [str(tool), "show", str(profile)], text=True, stderr=subprocess.STDOUT
+    )
+    report = {
+        "manifest": manifest,
+        "consumer_rustc": version,
+        "indexed_format_validation": validation,
+        "coverage_validation": "Inspect compiler missing/mismatched-profile diagnostics and candidate acceptance; readable format alone does not prove useful coverage.",
+    }
+    (args.output / "validation.json").write_text(json.dumps(report, indent=2) + "\n")
+    print(version + validation)
+    if args.github_env:
+        flags = os.environ.get("RUSTFLAGS", "")
+        if "profile-" in flags:
+            raise RuntimeError("Refusing to combine conflicting profiling flags")
+        with args.github_env.open("a") as output:
+            output.write(
+                f"RUSTFLAGS={flags} -Cprofile-use={profile} -Cllvm-args=-pgo-warn-missing-function\n"
+            )
+            output.write(
+                "CARGO_PROFILE_RELEASE_LTO=fat\nCARGO_PROFILE_RELEASE_CODEGEN_UNITS=1\nCARGO_BUILD_JOBS=1\n"
+            )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -889,3 +889,48 @@ On Linux, cap Tokio workers at `min(CPUs, 8)` unless `TOKIO_WORKER_THREADS` is s
 On the thread host, app-server handles recognized `codex_app.create_worktree`/`attach_worktree` dynamic tools. Create/attach durable managed worktrees without changing chat cwd, workspace roots, or skills. Return paths for explicit execution; do not call the Desktop handler that changes workspace. Preserve explicit navigation.
 
 Reject explicitly untrusted chat/source projects; allow unset trust, like TUI. Require non-ephemeral chats, local execution, and durable attachments. Immediate completion is allowed with `allowAsync: true`. Preserve partial-registration recovery without duplicate checkouts. Verify attachment rendering and subsequent-turn skill retention in actual Desktop; backend checks are insufficient.
+
+### Agent-trained release PGO
+
+Fork Linux GNU release builds consume `.github/pgo/agent-linux.json` through
+`setup-release-pgo.py`. macOS retains its existing non-PGO settings. Ordinary
+Cargo profiles remain unchanged. Linux uses fat LTO, one codegen unit and one
+Cargo job; Bubblewrap is built separately without PGO. The indexed profile is a
+checksum-pinned release dependency, not a CLI release. CI never needs model auth
+or training conversations. Never publish private training homes or credentials.
+
+Training compiler versions are provenance, not an exact-version gate. Validate
+indexed format with the consuming toolchain's `llvm-profdata`, retain compiler
+missing/mismatched-profile diagnostics, and validate the actual candidate's
+packaged and real-provider behavior. Successful parsing alone does not establish
+optimization coverage or performance. Revalidate after compiler/source changes;
+refresh the profile when matching coverage or measured optimization deteriorates.
+Do not silently fall back when a selected profile is missing or incompatible.
+
+The selected profile used three overlapping 10/15/20-turn sessions, parallel
+child batches of 4/3/2 on first/middle/final turns, Luna with System1 disabled,
+and real tools/streaming. Per-session peaks were 4/3/2; global child peak was 8.
+It is a bounded coding fixture, not exhaustive production coverage. Its original
+fat-LTO build used about 30 GiB sampled PSS. Standard Linux runners therefore
+use explicit swap and disk checks; only an actual successful Actions run proves
+runner feasibility. Keep diagnostics and do not infer a latency win from PGO.
+
+`scripts/pgo/train.py` preserves the source home's feature configuration in
+private copies, selects a cheap model, disables System1 and runs the bounded
+workload. It requires Python 3.11+, authorized existing Codex auth and a matching
+instrumented CLI/helper pair. It uses full-access sandbox mode in disposable
+fixture directories; this is not OS-enforced fixture isolation. It makes live
+model calls; never invoke it from profile-consuming CI. Its conservative guards
+are 900 reported completions, 20M input/250K output tokens, 60 minutes and $5
+API-equivalent. Actual account charges are unknown. Inspect failures and retain
+private diagnostics; never merge failed-attempt profiles with accepted training.
+
+Set `CODEX_HOME` to the authorized source home, `PGO_INSTRUMENTED_BIN` to the
+copied instrumented CLI (with its sibling helper), and `PGO_TRAINING_DIR` to a
+new private directory outside tracked sources. Run `python3 scripts/pgo/train.py`.
+Independently verify 10/15/20 successful root turns, per-session parallel child
+peaks 4/3/2, cheap-model selection, fixture checks and streaming events before
+merging only that run's `profiles/*.profraw` with matching `llvm-profdata`.
+Publish the indexed result and update both archive/profile hashes and provenance
+in the manifest. The workload is reproducible; exact profile bytes are not,
+because model responses and scheduling vary.
