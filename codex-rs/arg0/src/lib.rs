@@ -58,7 +58,7 @@ impl Arg0PathEntryGuard {
     }
 }
 
-pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
+fn dispatch_helpers() {
     #[cfg(target_os = "linux")]
     codex_utils_pty::init_spawn_helper(std::env::args_os());
     // Determine if we were invoked via the special alias.
@@ -128,6 +128,10 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
         };
         std::process::exit(exit_code);
     }
+}
+
+pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
+    dispatch_helpers();
 
     // This modifies the environment, which is not thread-safe, so do this
     // before creating any threads/the Tokio runtime.
@@ -146,6 +150,24 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
         }
     }
     path_entry_guard
+}
+
+/// Change the displayed command name without changing the executable or its arguments.
+/// Call before consuming startup environment variables or creating threads.
+/// Helper invocations retain their original dispatch behavior.
+#[cfg(target_os = "linux")]
+pub fn reexec_with_process_name(name: &str) {
+    use std::os::unix::process::CommandExt;
+
+    if std::env::args_os().next().as_deref() == Some(std::ffi::OsStr::new(name)) {
+        return;
+    }
+    dispatch_helpers();
+    let error = std::process::Command::new("/proc/self/exe")
+        .arg0(name)
+        .args(std::env::args_os().skip(/*n*/ 1))
+        .exec();
+    eprintln!("WARNING: could not set Linux command name: {error}");
 }
 
 fn prepare_path_env_var_with_aliases(
