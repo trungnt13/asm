@@ -14,12 +14,12 @@ Settings:
   store: false
   stream: true
   tool_choice: "auto"
-  tools (6; hash=c1c2e6d0e8c8da23):
-    - function/exec_command: Runs a command in a PTY, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=c04108e51a8548c5
+  tools (6; hash=a5e0db6b72ea1ef7):
+    - function/exec_command: Runs a command in a PTY, returning output or a session ID for ongoing interaction.; args=[cmd, justification, login, max_output_tokens, prefix_rule, sandbox_permissions, shell, tty, workdir, yield_time_ms]; hash=24f4b6739dd5d940
     - function/write_stdin: Writes characters to an existing unified exec session and returns recent output.; args=[chars, max_output_tokens, reason, session_id, yield_time_ms]; hash=0e67b616348e15f8
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/view_image: View a local image file from the filesystem when visual inspection is needed. Use this for images...; args=[path]; hash=1908de9c0be7118a
-    - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=21513f0548d88cdc
+    - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=91e40090d0f8c541
       - function/followup_task
       - function/interrupt_agent
       - function/list_agents
@@ -36,10 +36,10 @@ Settings:
         Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
         </permissions instructions>
     [02] <model_catalog>
-        - `claude-code/opus-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
-        - `claude-code/sonnet-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
+        - `claude-code/claude-fable-5-2`: Most capable for your hardest and longest-running tasks Reasoning efforts: low, medium (default), high, xhigh, max.
+        - `claude-code/opus-5-5`: Best for everyday, complex tasks Reasoning efforts: low, medium, high (default), xhigh.
+        - `claude-code/sonnet-5-5`: Efficient for routine tasks Reasoning efforts: low, medium, high (default), xhigh.
         - `cursor-agent/claude-opus-5-5`: Runs through Cursor Agent with native tools, instructions, and subscri...ing efforts: low, medium (default), high, xhigh, max. [hash=408d3677ec0016b6]
-        - `cursor-agent/claude-sonnet-5-5`: Runs through Cursor Agent with native tools, instructions, and subsc...ing efforts: low, medium, high (default), xhigh, max. [hash=2139f813725c57de]
         - `visible-model`: Fast and capable Reasoning efforts: low, medium (default), high. Service tiers: priority.
         </model_catalog>
 02:message/developer:
@@ -67,10 +67,10 @@ Settings:
 -- request 2 (turn) --
 05:message/developer:
     <model_catalog>
-    - `claude-code/opus-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
-    - `claude-code/sonnet-5-5`: Runs through Claude Code with native tools, instructions, and subscription. Reasoning efforts: low, medium, high (default), xhigh.
+    - `claude-code/claude-fable-5-2`: Most capable for your hardest and longest-running tasks Reasoning efforts: low, medium (default), high, xhigh, max.
+    - `claude-code/opus-5-5`: Best for everyday, complex tasks Reasoning efforts: low, medium, high (default), xhigh.
+    - `claude-code/sonnet-5-5`: Efficient for routine tasks Reasoning efforts: low, medium, high (default), xhigh.
     - `cursor-agent/claude-opus-5-5`: Runs through Cursor Agent with native tools, instructions, and subscri...ing efforts: low, medium (default), high, xhigh, max. [hash=408d3677ec0016b6]
-    - `cursor-agent/claude-sonnet-5-5`: Runs through Cursor Agent with native tools, instructions, and subsc...ing efforts: low, medium, high (default), xhigh, max. [hash=2139f813725c57de]
     - `visible-model`: Updated picker copy Reasoning efforts: low, medium (default), high. Service tiers: priority.
     </model_catalog>
 06:message/user:

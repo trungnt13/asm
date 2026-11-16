@@ -15,14 +15,14 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (7; hash=dacb9ed37dcd461c):
-    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. `image(imageUrlOrItem: string | { image_url: s...; hash=7a155fb92c03484d
-    - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, reason, terminate, yield_time_ms]; hash=be32741c52eca53e
+  tools (7; hash=1a4adc21364cf103):
+    - custom/exec: Catalog exec instructions. Default yield: 1234 ms. `image(imageUrlOrItem: string | { image_url: s...; hash=b91a7dc62d9d3966
+    - function/wait: Catalog wait instructions: resume the yielded cell.; args=[cell_id, max_tokens, reason, terminate, yield_time_ms]; hash=7edfe67c1cec3c96
     - function/request_user_input: Request user input for one to three short questions and wait for the response. This tool is only ...; args=[questions]; hash=64a729b25c424fc6
     - function/request_user_input_async: Ask the user one or more questions during ongoing work. Use this tool only to request missing inf...; args=[questions]; hash=d6d74f33db330162
-    - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
+    - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
       - function/sleep
-    - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+    - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=f1b8c37b09937cc6
       - function/followup_task
       - function/interrupt_agent
       - function/list_agents
@@ -134,4 +134,6 @@ Settings:
 12:function_call_output:Script completed
     Wall time <DURATION> seconds
     Output:
-     | finished
+     | finished | Your wait call returned.
+
+    If the task should continue, check whether the awaited work is complete or blocked. If it remains pendin...tatus question or a delegated agent is still working. [hash=13b9d56e8adcf275]

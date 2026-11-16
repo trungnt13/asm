@@ -5368,6 +5368,37 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let frame = side_frame(&mut app, &mut tui, even)?;
     let header = frame.lines().next().unwrap().split_once('│').unwrap().1;
     assert_app_snapshot!("side_chat_tabs", header.trim_end());
+    let owner = app
+        .app_server_backend_id
+        .unwrap_or_else(crate::backend_id::BackendId::new);
+    let local_registry = std::mem::replace(
+        &mut app.backend_registry,
+        crate::app::backend_registry::BackendRegistry::new([owner].into()),
+    );
+    assert!(app.backend_registry.observe(owner, parent_thread_id));
+    let frame = side_frame(&mut app, &mut tui, even)?;
+    let header = frame.lines().next().unwrap().split_once('│').unwrap().1;
+    insta::assert_snapshot!(
+        header.split_inclusive('×').take(2).collect::<String>(),
+        @" ☁︎ Invest…×  ☁︎ Fix ca…×"
+    );
+    keys!(prefix, chooser_key);
+    let frame = side_frame(&mut app, &mut tui, even)?;
+    let labels = frame
+        .lines()
+        .filter_map(|line| line.split_once('│').map(|(_, pane)| pane))
+        .filter(|pane| pane.contains("Investigate rendering") || pane.contains("Fix cache"))
+        .map(|pane| pane.trim().trim_start_matches(['›', '○', ' ']))
+        .filter(|pane| pane.starts_with("☁︎"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(labels, @"
+    ☁︎ Investigate rendering
+    ☁︎ Fix cache
+    ");
+    keys!(KeyCode::Enter.into());
+    app.backend_registry = local_registry;
+    side_frame(&mut app, &mut tui, even)?;
     assert_eq!(app.conversation_frame.chat_strip.unwrap().x, sidebar_x);
 
     // At this width only one tab fits. Use the arrow to go back and the wheel to return.
@@ -9388,13 +9419,20 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
     let thread_id = started.session.thread_id;
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
-    let objective = "x".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS + 1);
+    let long_paste = "한글".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS / 2);
+    let long_placeholder = "[Pasted Content 4000 chars]";
+    let objective = format!("Prefix {long_paste} suffix");
 
     app.set_thread_goal_draft(
         &mut app_server,
         thread_id,
         crate::goal_files::GoalDraft {
-            objective: objective.clone(),
+            objective: format!("Prefix {long_placeholder} suffix"),
+            text_elements: vec![TextElement::new(
+                (7..7 + long_placeholder.len()).into(),
+                Some(long_placeholder.to_string()),
+            )],
+            pending_pastes: vec![(long_placeholder.to_string(), long_paste)],
             ..Default::default()
         },
         crate::app_event::ThreadGoalSetMode::ConfirmIfExists,
@@ -9480,13 +9518,17 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         .await?
         .goal
         .expect("replacement goal should be set");
-    let paste_path = goal
-        .objective
-        .strip_prefix("Use pasted text file: ")
-        .and_then(|text| text.strip_suffix(". Read this file before continuing."))
-        .expect("paste file reference");
-    assert_eq!(std::fs::read_to_string(paste_path)?, "hello");
-    let attachment_count = std::fs::read_dir(&attachments_dir)?.count();
+    assert_eq!(goal.objective, "Use hello");
+    assert_eq!(
+        std::fs::read_dir(&attachments_dir)?.count(),
+        attachment_count
+    );
+    app.open_thread_goal_editor(&mut app_server, Some(thread_id))
+        .await;
+    insta::assert_snapshot!(
+        "pasted_goal_editor",
+        render_bottom_popup(&app.chat_widget, /*width*/ 80)
+    );
 
     let stale_paste = (placeholder.to_string(), "hello".to_string());
     app.set_thread_goal_draft(
@@ -9543,11 +9585,19 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         &mut app_server,
         thread_id,
         crate::goal_files::GoalDraft {
-            objective: format!("Describe {image_placeholder}"),
-            text_elements: vec![TextElement::new(
-                (9..9 + image_placeholder.len()).into(),
-                Some(image_placeholder.to_string()),
-            )],
+            objective: format!("Describe {placeholder} {image_placeholder}"),
+            text_elements: vec![
+                TextElement::new(
+                    (9..9 + placeholder.len()).into(),
+                    Some(placeholder.to_string()),
+                ),
+                TextElement::new(
+                    (10 + placeholder.len()..10 + placeholder.len() + image_placeholder.len())
+                        .into(),
+                    Some(image_placeholder.to_string()),
+                ),
+            ],
+            pending_pastes: vec![(placeholder.to_string(), "hello".to_string())],
             local_images: vec![crate::bottom_pane::LocalImageAttachment {
                 placeholder: image_placeholder.to_string(),
                 path: image_path,
@@ -9556,7 +9606,6 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
                 "https://example.com/first.png".to_string(),
                 "https://example.com/second.png".to_string(),
             ],
-            ..Default::default()
         },
         crate::app_event::ThreadGoalSetMode::ReplaceExisting,
     )
@@ -9568,7 +9617,7 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         .expect("image goal should be set")
         .objective;
     let copied_image = objective
-        .strip_prefix("Describe image file: ")
+        .strip_prefix("Describe hello image file: ")
         .and_then(|text| text.split_once("\n\n"))
         .map(|(path, _)| path)
         .expect("copied image path");

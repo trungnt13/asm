@@ -29,8 +29,8 @@ Scenario: Elastic sync budgeting keeps retained instructions, caps ordinary tool
 
 ## Window 2 (after request 3: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=52ea95dcf9097e64):
-        - namespace/functions; hash=d578c3c58dba1a34
+00:additional_tools/developer (1; hash=efe536fb549d8709):
+        - namespace/functions; hash=09cfe4867283bb41
           - custom/exec
           - function/wait
 01:message/developer:

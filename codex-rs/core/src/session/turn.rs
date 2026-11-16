@@ -119,7 +119,6 @@ use codex_protocol::protocol::ReasoningContentDeltaEvent;
 use codex_protocol::protocol::ReasoningRawContentDeltaEvent;
 use codex_protocol::protocol::SafetyBufferingEvent;
 use codex_protocol::protocol::SessionSource;
-use codex_protocol::protocol::TurnDiffEvent;
 use codex_protocol::protocol::WarningEvent;
 use codex_protocol::user_input::UserInput;
 use codex_skills::ToolMentionKind;
@@ -535,11 +534,14 @@ pub(crate) async fn run_turn(
 
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;
-    // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
-    // many turns, from the perspective of the user, it is a single turn.
-    let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(
-        TurnDiffTracker::with_environment_display_roots(display_roots),
-    ));
+    // A steer can reopen sampling within the same turn. Keep its aggregate until the turn ends.
+    let turn_diff_tracker = turn_context
+        .extension_data
+        .get_or_init(|| tokio::sync::Mutex::new(TurnDiffTracker::new()));
+    turn_diff_tracker
+        .lock()
+        .await
+        .update_environment_display_roots(display_roots);
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.
@@ -2022,7 +2024,7 @@ async fn run_sampling_request(
     let _code_mode_worker = sess.services.code_mode_service.start_turn_worker(
         &sess,
         Arc::clone(&step_context),
-        Arc::clone(&turn_diff_tracker),
+        turn_diff_tracker,
     );
     let max_retries = turn_context.provider.info().stream_max_retries();
     let incremental_tools = sess
@@ -2120,7 +2122,6 @@ async fn run_sampling_request(
             Arc::clone(&turn_store),
             client_session,
             &responses_metadata,
-            Arc::clone(&turn_diff_tracker),
             prompt,
             pending_audio,
             input_item_count,
@@ -3013,7 +3014,6 @@ async fn try_run_sampling_request(
     turn_store: Arc<codex_extension_api::ExtensionData>,
     client_session: &mut ModelClientSession,
     responses_metadata: &CodexResponsesMetadata,
-    turn_diff_tracker: SharedTurnDiffTracker,
     prompt: Prompt,
     mut pending_audio: Option<codex_history::AcceptedFileAudio>,
     input_item_count: usize,
@@ -3143,7 +3143,6 @@ async fn try_run_sampling_request(
         String,
         Box<dyn ToolArgumentDiffConsumer>,
     )> = None;
-    let mut should_emit_turn_diff = false;
     let mut should_emit_token_count = false;
     let mut output_tokens_per_second = None;
     const MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE: usize = 256;
@@ -3717,7 +3716,6 @@ async fn try_run_sampling_request(
                     )
                     .await;
                 should_emit_token_count = true;
-                should_emit_turn_diff = true;
                 if let Err(err) = budget_result {
                     break Err(err);
                 }
@@ -3932,17 +3930,6 @@ async fn try_run_sampling_request(
 
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted);
-    }
-
-    if should_emit_turn_diff {
-        let unified_diff = {
-            let tracker = turn_diff_tracker.lock().await;
-            tracker.get_unified_diff()
-        };
-        if let Some(unified_diff) = unified_diff {
-            let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
-            sess.clone().send_event(&turn_context, msg).await;
-        }
     }
 
     outcome

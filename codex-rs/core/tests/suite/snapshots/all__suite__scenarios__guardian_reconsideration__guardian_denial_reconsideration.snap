@@ -33,8 +33,8 @@ Scenario: Guardian retries the same request after a denial and preserves evidenc
 
 ## Window 2 (after request 3: input diverged at item 00, settings changed (model, parallel_tool_calls, prompt_cache_key, reasoning, text, tools))
 -- request 4 (turn) --
-00:additional_tools/developer (1; hash=52ea95dcf9097e64):
-        - namespace/functions; hash=d578c3c58dba1a34
+00:additional_tools/developer (1; hash=efe536fb549d8709):
+        - namespace/functions; hash=09cfe4867283bb41
           - custom/exec
           - function/wait
 01:message/developer:
@@ -102,8 +102,8 @@ Scenario: Guardian retries the same request after a denial and preserves evidenc
 
 ## Window 3 (after request 5: input repeated)
 -- request 6 (turn) --
-00:additional_tools/developer (1; hash=52ea95dcf9097e64):
-        - namespace/functions; hash=d578c3c58dba1a34
+00:additional_tools/developer (1; hash=efe536fb549d8709):
+        - namespace/functions; hash=09cfe4867283bb41
           - custom/exec
           - function/wait
 01:message/developer:

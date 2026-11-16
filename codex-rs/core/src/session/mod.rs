@@ -2369,7 +2369,7 @@ impl Session {
             commit,
             previous_config,
             new_config,
-            permission_profile_changed,
+            refresh_network_proxy,
             mcp_inputs_changed,
             credential_masking_warning,
         ) = {
@@ -2405,10 +2405,11 @@ impl Session {
                 });
             let previous_config = notify_config_contributors
                 .then(|| self.build_effective_session_config(&state.session_configuration));
-            let previous_permission_profile = state.session_configuration.permission_profile();
-            let updated_permission_profile = updated.permission_profile();
-            let permission_profile_changed =
-                previous_permission_profile != updated_permission_profile;
+            let current = &state.session_configuration;
+            let refresh_network_proxy = current.permission_profile()
+                != updated.permission_profile()
+                || current.original_config_do_not_use.permissions.network
+                    != updated.original_config_do_not_use.permissions.network;
             let root_service_tier_changed = updated.parent_thread_id.is_none()
                 && state.session_configuration.step_settings.service_tier
                     != updated.step_settings.service_tier;
@@ -2468,7 +2469,7 @@ impl Session {
                 commit,
                 previous_config,
                 new_config,
-                permission_profile_changed,
+                refresh_network_proxy,
                 mcp_inputs_changed,
                 credential_masking_warning,
             )
@@ -2481,7 +2482,7 @@ impl Session {
             );
         }
         self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
-        if permission_profile_changed {
+        if refresh_network_proxy {
             self.refresh_managed_network_proxy_for_current_permission_profile()
                 .await;
         }

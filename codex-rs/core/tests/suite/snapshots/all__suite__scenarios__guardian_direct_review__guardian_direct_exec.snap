@@ -6,8 +6,8 @@ Scenario: Sequential direct Guardian reviews of recorded exec calls on the same 
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (1; hash=52ea95dcf9097e64):
-        - namespace/functions; hash=d578c3c58dba1a34
+00:additional_tools/developer (1; hash=efe536fb549d8709):
+        - namespace/functions; hash=09cfe4867283bb41
           - custom/exec
           - function/wait
 01:message/developer:

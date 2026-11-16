@@ -274,11 +274,13 @@ impl App {
                         {
                             *refill = refill.saturating_sub(1);
                         }
-                        self.agents_overview
-                            .activity
-                            .entry(thread_id)
-                            .or_default()
-                            .latest_prompt = latest_prompt;
+                        if thread.history_mode == ThreadHistoryMode::Paginated {
+                            self.agents_overview
+                                .activity
+                                .entry(thread_id)
+                                .or_default()
+                                .latest_prompt = latest_prompt;
+                        }
                         thread.turns.clear();
                         self.agents_overview.threads.insert(thread_id, Some(thread));
                         if self.turn_agent_counts.running.get(&thread_id).is_some_and(
@@ -303,7 +305,14 @@ impl App {
                     && let Ok(thread_id) = ThreadId::from_string(&reverted.thread_id)
                 {
                     // Discard stale read results without clearing activity received after the revert.
-                    if let Some(activity) = self.agents_overview.activity.get_mut(&thread_id) {
+                    if self
+                        .agents_overview
+                        .threads
+                        .get(&thread_id)
+                        .and_then(Option::as_ref)
+                        .is_some_and(|thread| thread.history_mode == ThreadHistoryMode::Paginated)
+                        && let Some(activity) = self.agents_overview.activity.get_mut(&thread_id)
+                    {
                         activity.latest_prompt = None;
                     }
                     self.agents_overview.last_messages.remove(&thread_id);
@@ -589,11 +598,15 @@ impl App {
             if self.agents_overview.hidden_threads.contains(&thread_id) {
                 continue;
             }
+            let backend_id = self
+                .backend_registry
+                .owner(thread_id)
+                .or(self.app_server_backend_id);
             rows.push(AgentsOverviewRow {
-                backend_id: self
-                    .backend_registry
-                    .owner(thread_id)
-                    .or(self.app_server_backend_id),
+                backend_id,
+                label_style: backend_id
+                    .map(|owner| self.backend_registry.thread_label_style(owner))
+                    .unwrap_or_default(),
                 search_id: self
                     .agents_overview
                     .search_matches

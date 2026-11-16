@@ -70,15 +70,6 @@ pub(in crate::local) async fn first_user_preview(
     Ok(None)
 }
 
-pub(in crate::local) async fn find_source_turn(
-    store: &LocalThreadStore,
-    pool: &sqlx::SqlitePool,
-    lineage: &RolloutLineage,
-    turn_id: &str,
-) -> ThreadStoreResult<TurnRow> {
-    find_turn(store, pool, lineage.segments().iter(), turn_id).await
-}
-
 pub(in crate::local) async fn find_visible_turn(
     store: &LocalThreadStore,
     pool: &sqlx::SqlitePool,
