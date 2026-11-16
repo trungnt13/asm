@@ -105,6 +105,16 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     #[cfg(target_os = "linux")]
+    if std::env::args_os().next().as_deref() != Some(std::ffi::OsStr::new("asm-code-mode-host")) {
+        use std::os::unix::process::CommandExt;
+
+        let error = std::process::Command::new("/proc/self/exe")
+            .arg0("asm-code-mode-host")
+            .args(std::env::args_os().skip(/*n*/ 1))
+            .exec();
+        eprintln!("WARNING: could not set Linux command name: {error}");
+    }
+    #[cfg(target_os = "linux")]
     if let Err(error) = std::fs::write("/proc/self/comm", "asm-code-host") {
         eprintln!("WARNING: could not set Linux process label: {error}");
     }
