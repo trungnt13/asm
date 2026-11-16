@@ -89,6 +89,10 @@ fn main() -> anyhow::Result<()> {
     {
         return codex_core::run_native_tool_cli();
     }
+    #[cfg(target_os = "linux")]
+    if AppServerArgs::try_parse().is_ok() {
+        codex_arg0::reexec_with_process_name("asm");
+    }
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
         #[cfg(target_os = "linux")]
