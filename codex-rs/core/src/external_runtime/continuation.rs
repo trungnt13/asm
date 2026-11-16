@@ -397,6 +397,10 @@ pub(super) async fn submit_steering(
     drop(messages);
     session.flush_rollout().await?;
     linkage.save(checkpoint, path)?;
+    session
+        .external_runtime
+        .queued_input_count
+        .fetch_add(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
     match reserved {
         Some(reserved) => {
             reserved.send(prompt).map_err(|_| {
@@ -412,5 +416,7 @@ pub(super) async fn submit_steering(
             }
         },
     }
+    // A later ASM wait must not block Claude from absorbing input already queued natively.
+    session.input_queue.notify_mailbox();
     Ok(true)
 }

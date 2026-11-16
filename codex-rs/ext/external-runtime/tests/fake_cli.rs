@@ -47,6 +47,7 @@ async fn claude(mut rules: Value) -> anyhow::Result<(TempDir, ClaudeRuntime)> {
     );
     let directory = fake_cli(rules)?;
     let runtime = ClaudeRuntime::spawn(ClaudeOptions {
+        queued_input_count: Default::default(),
         executable: directory.path().join("cli"),
         cwd: directory.path().to_owned(),
         model: "fake".to_owned(),

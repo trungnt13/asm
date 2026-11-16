@@ -15,7 +15,8 @@ export function register(on) {
     if (!names.has(e.tool)) return next(e);
     const {tool, tool_use_id, agentId, consent, ...arguments_} = e;
     const result = await invoke($, executable, ["call", tool.slice("mcp__asm__".length)], JSON.stringify(arguments_));
-    if (result.isError) result.content.unshift({type: "text", text: "ASM tool failed. This is a tool result, not permission to retry an uncertain operation."});
+    if (!Array.isArray(result.content)) result.content = [{type: "text", text: result.error || "ASM helper returned no tool content."}];
+    if (result.isError && !result.notDispatched) result.content.unshift({type: "text", text: "ASM tool failed. This is a tool result, not permission to retry an uncertain operation."});
     return {result: result.content.map(item => item.type === "image"
       ? {type: "image", source: {type: "base64", media_type: item.mimeType, data: item.data}}
       : item)};

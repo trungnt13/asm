@@ -6173,8 +6173,8 @@
           "type": "boolean"
         },
         "show_tooltips": {
-          "default": true,
-          "description": "Show startup tooltips in the TUI welcome screen. Defaults to `true`.",
+          "default": false,
+          "description": "Show startup, working, and completion tips in the TUI. Defaults to `false`.",
           "type": "boolean"
         },
         "sidebar_width_percent": {

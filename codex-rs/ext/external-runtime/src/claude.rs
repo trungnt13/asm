@@ -48,6 +48,9 @@ pub enum ClaudeSessionKind {
 }
 
 pub struct ClaudeOptions {
+    /// Counts host steering submissions not yet acknowledged by native replay echoes.
+    /// Increment before enqueueing steering; the driver decrements after consumption.
+    pub queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub executable: PathBuf,
     pub cwd: PathBuf,
     pub model: String,
@@ -70,6 +73,7 @@ pub(crate) struct ClaudeDriver {
     usable: bool,
     failure_result: Option<Value>,
     mid_turn_delivery: watch::Sender<bool>,
+    queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     // Native reports this level per process; live tasks can start another native turn.
     pub(super) background_work: bool,
     pub(super) first_frame: Option<Value>,
@@ -149,6 +153,7 @@ impl ClaudeDriver {
             .args([
                 "--verbose",
                 "--include-partial-messages",
+                "--replay-user-messages",
                 "--await-initialize",
             ])
             // Run in native bypass mode. Native deny rules and managed policy still apply;
@@ -235,6 +240,9 @@ impl ClaudeDriver {
         command
             .arg("--disallowedTools")
             .arg(disallowed_tools.join(","));
+        options
+            .queued_input_count
+            .store(/*val*/ 0, std::sync::atomic::Ordering::SeqCst);
         let mut driver = Self {
             process: ExternalProcess::spawn(command, frames::FramePolicy::ClaudeImages)
                 .context("starting official Claude CLI")?,
@@ -242,6 +250,7 @@ impl ClaudeDriver {
             usable: true,
             failure_result: None,
             mid_turn_delivery: watch::channel(false).0,
+            queued_input_count: options.queued_input_count,
             background_work: false,
             first_frame: None,
             active_agents: HashMap::new(),
@@ -444,6 +453,7 @@ impl ClaudeDriver {
         let mut latest_command_succeeded = false;
         let mut cancelled_commands = HashSet::new();
         let mut submitted_steering_count = 0;
+        let mut queued_steering = HashSet::new();
         let mut interrupt_id = None;
         let mut interrupt_deadline = None;
         let mut interrupt_acknowledged = false;
@@ -522,6 +532,7 @@ impl ClaudeDriver {
                         bail!("Claude steering was submitted without command lifecycle support");
                     }
                     let command_uuid = Uuid::new_v4().to_string();
+                    queued_steering.insert(command_uuid.clone());
                     // No Send now or interrupt: native queues the message and folds it in at
                     // its next tool boundary, so running tools finish instead of being rejected.
                     // Persisted input is never replayed if the write fails partway through.
@@ -545,6 +556,14 @@ impl ClaudeDriver {
                 } => frame?,
             };
             self.observe_session_frame(&frame)?;
+            if frame["type"] == "user"
+                && frame["uuid"]
+                    .as_str()
+                    .is_some_and(|id| queued_steering.remove(id))
+            {
+                self.queued_input_count
+                    .fetch_sub(/*val*/ 1, std::sync::atomic::Ordering::SeqCst);
+            }
             let tool_block = |block: &Value| {
                 matches!(
                     block.get("type").and_then(Value::as_str),

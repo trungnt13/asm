@@ -373,6 +373,7 @@ async fn run_conversation(
         let mut lease = RuntimeLease::take(&session.external_runtime)?;
         let needs_binding = lease.runtime.is_some();
         let mut fork_boundary = None;
+        let mut prepared_context = None;
         if lease.runtime.is_none() {
             let mut role_instructions = if thread_spawn_child {
                 turn.config.role_developer_instructions.clone()
@@ -428,14 +429,26 @@ async fn run_conversation(
                     (checkpoint, resume, Linkage::Saved)
                 }
                 (None, Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                    // Shell-only history can precede the first native conversation.
-                    // Other native input still requires its saved linkage to prevent replay.
+                    // Unsent generated context can survive rejected first-input admission.
+                    // Only host-attributed text and shell context are safe without native linkage.
                     let previous_input = original_history.raw_items().filter(|item| {
                         !matches!(item, ResponseItem::Message {
-                            internal_chat_message_metadata_passthrough: Some(metadata), ..
+                            role, content, internal_chat_message_metadata_passthrough: Some(metadata), ..
                         } if metadata.content_item_kinds.as_ref().is_some_and(|kinds| {
                             kinds.len() == 1 && kinds[0].as_str() == input::SHELL_CONTEXT_KIND
-                        }))
+                        }) || (native_runtime == NativeRuntime::ClaudeCode
+                            && matches!(role.as_str(), "user" | "developer")
+                            && !content.is_empty()
+                            && content.iter().all(|part| matches!(part, codex_protocol::models::ContentItem::InputText { .. }))
+                            && metadata.content_item_metadata.as_ref().is_some_and(|parts| {
+                                parts.len() == content.len() && parts.iter().all(|part| matches!(
+                                    part.provenance,
+                                    codex_protocol::models::ContentItemProvenance::Harness { hook: false }
+                                        | codex_protocol::models::ContentItemProvenance::DeveloperInstructions { .. }
+                                        | codex_protocol::models::ContentItemProvenance::Skills
+                                        | codex_protocol::models::ContentItemProvenance::AgentsMd
+                                ))
+                            })))
                     });
                     if !input_messages(previous_input, native_runtime)?.is_empty()
                         || original_history.raw_items().any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "assistant"))
@@ -483,16 +496,21 @@ async fn run_conversation(
             }
             let bridge = if messaging {
                 let step = if native_runtime == NativeRuntime::ClaudeCode {
-                    context::capture(session, Arc::clone(turn), input, cancellation).await?
+                    let prepared =
+                        context::capture(session, Arc::clone(turn), input, cancellation).await?;
+                    let step = Arc::clone(&prepared.step);
+                    prepared_context = Some(prepared);
+                    step
                 } else {
                     session
                         .capture_native_messaging_step_context(Arc::clone(turn), cancellation)
                         .await?
                 };
                 let max_wait = turn.config.multi_agent_v2.max_wait_timeout_ms;
-                let bridge = ExternalMessageBridge::start(std::time::Duration::from_millis(
-                    u64::try_from(max_wait).unwrap_or_default(),
-                ))
+                let bridge = ExternalMessageBridge::start(
+                    std::time::Duration::from_millis(u64::try_from(max_wait).unwrap_or_default()),
+                    native_runtime,
+                )
                 .await?;
                 bridge
                     .set_turn(Arc::clone(session), step, cancellation.clone())
@@ -552,6 +570,7 @@ async fn run_conversation(
                 } else {
                     codex_external_runtime::ClaudeSessionKind::NativeDefault
                 },
+                Arc::clone(&session.external_runtime.queued_input_count),
                 &mut checkpoint,
                 &checkpoint_path,
                 session_start,
@@ -588,11 +607,10 @@ async fn run_conversation(
                 usage_baseline,
             });
         }
-        let prepared_step = if needs_binding && native_runtime == NativeRuntime::ClaudeCode {
-            Some(context::capture(session, Arc::clone(turn), input, cancellation).await?)
-        } else {
-            None
-        };
+        if needs_binding && native_runtime == NativeRuntime::ClaudeCode {
+            prepared_context =
+                Some(context::capture(session, Arc::clone(turn), input, cancellation).await?);
+        }
         if native_runtime == NativeRuntime::ClaudeCode {
             input::normalize_selections(input);
         }
@@ -653,6 +671,27 @@ async fn run_conversation(
                 .linkage
                 .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
         }
+        let prepared_step = prepared_context
+            .as_ref()
+            .map(|prepared| Arc::clone(&prepared.step));
+        if let Some(prepared) = prepared_context {
+            context::record(session, prepared).await?;
+        }
+        let history = session.clone_history().await;
+        let projected = input_messages(history.raw_items(), native_runtime)?;
+        drop(history);
+        validate_pending_prompt(
+            session,
+            &projected[runtime.checkpoint.input_count..],
+            input,
+            fork_boundary,
+            |prompt| match &runtime.runtime {
+                RuntimeProcess::Claude(_) => codex_external_runtime::validate_claude_prompt(prompt),
+                RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
+            },
+            native_runtime,
+        )?;
+        drop(projected);
         for item in input.drain(..) {
             // Reject native setup or effort changes before recording input for later delivery.
             record_pending_input(

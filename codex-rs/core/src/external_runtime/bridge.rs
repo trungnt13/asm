@@ -21,6 +21,7 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
+use codex_protocol::openai_models::NativeRuntime;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_tools::ResponsesApiNamespaceTool;
@@ -97,7 +98,7 @@ struct MessageTool {
 
 impl ExternalMessageBridge {
     #[tracing::instrument(level = "trace", skip_all, err)]
-    pub(super) async fn start(max_wait: Duration) -> anyhow::Result<Self> {
+    pub(super) async fn start(max_wait: Duration, runtime: NativeRuntime) -> anyhow::Result<Self> {
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
         let authority = listener.local_addr()?.to_string();
         let stop = CancellationToken::new();
@@ -121,6 +122,7 @@ impl ExternalMessageBridge {
             .route("/call", post(serve_json))
             .with_state(Arc::clone(&state));
         let descriptor = json!({"url":format!("http://{}",state.authority), "token":state.token,
+            "unboundedCalls":runtime == NativeRuntime::ClaudeCode,
             "timeoutMs":u64::try_from(max_wait.saturating_mul(ADMITTED_REQUESTS).saturating_add(TOOL_TIMEOUT_MARGIN).as_millis()).unwrap_or(u64::MAX)});
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new();
@@ -217,7 +219,7 @@ impl ExternalMessageBridge {
             });
             message_tools.push(MessageTool {
                 name: ToolName::plain("direct_tool"), custom: false,
-                spec: json!({"name":"direct_tool","description":"Discover the CURRENT ASM tool catalog and Code Mode exec definitions by omitting name. Call direct-interaction tools, including user questions, sleep and configured direct-only namespaces, using their exact listed name and arguments. Other tools use Code Mode exec/wait.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"arguments":{"type":"object"}},"additionalProperties":false}}),
+                spec: json!({"name":"direct_tool","description":"Call with {} (omit name) to discover CURRENT direct-tool schemas and Code Mode exec definitions. ALL_TOOLS and tool_search cover only tools nested inside Code Mode; direct-only tools, including configured agent tools, are absent there. Discover here before declaring a tool unavailable. Call a listed direct tool using its exact name and arguments; other tools use exec/wait.","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Omit to discover the current catalog; otherwise use an exact listed direct-tool name."},"arguments":{"type":"object","description":"Arguments matching the selected direct tool schema."}},"additionalProperties":false}}),
             });
         }
         {
@@ -287,7 +289,14 @@ impl ExternalMessageBridge {
                 Ok::<_, anyhow::Error>(())
             };
             match tokio::time::timeout(Duration::from_secs(/*secs*/ 5), cleanup).await {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => {
+                    if let Some(session) = turn.session.upgrade() {
+                        session
+                            .external_runtime
+                            .queued_input_count
+                            .store(/*val*/ 0, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
                 result => {
                     self.stop.cancel();
                     return result.context(
@@ -563,46 +572,65 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
         bail!("ASM turn cancelled");
     }
     let session = turn.session.upgrade().context("ASM thread stopped")?;
+    let managed = turn
+        .step
+        .settings
+        .model_info
+        .slug
+        .starts_with("claude-code/");
+    let step = if managed {
+        session
+            .capture_step_context(Arc::clone(&turn.step.turn), &turn.cancel)
+            .await?
+    } else {
+        Arc::clone(&turn.step)
+    };
+    let tools = if managed {
+        bridge_tools(step.tool_router.model_visible_specs().as_ref())?
+    } else {
+        turn.tools.clone()
+    };
     let mut name = params
         .get("name")
         .and_then(Value::as_str)
         .context("Missing tool name")?
         .to_owned();
-    if name == "direct_tool"
-        && turn
-            .step
-            .settings
-            .model_info
-            .slug
-            .starts_with("claude-code/")
-    {
-        let direct = turn.tools.iter().filter(|tool| {
+    if name == "direct_tool" && step.settings.model_info.slug.starts_with("claude-code/") {
+        let direct = tools.iter().filter(|tool| {
             !matches!(
                 tool.name.name.as_str(),
                 codex_code_mode::PUBLIC_TOOL_NAME | codex_code_mode::WAIT_TOOL_NAME
             )
         });
         let Some(selected) = params["arguments"]["name"].as_str() else {
-            let specs = turn
-                .tools
+            let specs = tools
                 .iter()
                 .map(|tool| tool.spec.clone())
                 .collect::<Vec<_>>();
+            let catalog = json!({
+                "execution": {
+                    "model": step.settings.model_info.slug,
+                    "reasoning_effort": step.settings.effective_reasoning_effort(),
+                    "spawn_guidance": "Omit model and reasoning_effort to inherit the current execution settings. When specifying model, use its canonical ASM slug, not a backend-only alias."
+                },
+                "tools": specs
+            });
             return Ok(
-                json!({"isError":false,"content":[{"type":"text","text":serde_json::to_string(&specs)?}]}),
+                json!({"isError":false,"content":[{"type":"text","text":serde_json::to_string(&catalog)?}]}),
             );
         };
-        anyhow::ensure!(
-            direct
-                .into_iter()
-                .any(|tool| tool.spec["name"].as_str() == Some(selected)),
-            "Tool is not currently exposed for direct model interaction"
-        );
+        if !direct
+            .into_iter()
+            .any(|tool| tool.spec["name"].as_str() == Some(selected))
+        {
+            return Ok(
+                json!({"isError":true,"notDispatched":true,"content":[{"type":"text","text":"No tool was dispatched: this name is not a current direct tool. Call direct_tool with {} to discover current direct-tool names and schemas. ALL_TOOLS and tool_search cover only tools nested inside Code Mode exec."}]}),
+            );
+        }
         name = selected.to_owned();
         params = json!({"arguments":params["arguments"].get("arguments").cloned().unwrap_or_else(|| json!({}))});
     }
-    let tool = turn
-        .tools
+    let tool = tools
         .iter()
         .find(|tool| match &tool.name.namespace {
             Some(namespace) => name == format!("{namespace}__{}", tool.name.name),
@@ -660,8 +688,8 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
     };
     session
         .record_conversation_items(
-            &turn.step.turn,
-            &turn.step.settings.model_info,
+            &step.turn,
+            &step.settings.model_info,
             std::slice::from_ref(&item),
         )
         .await;
@@ -674,7 +702,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
     };
     let runtime = ToolCallRuntime::new(
         Arc::clone(&session),
-        Arc::clone(&turn.step),
+        Arc::clone(&step),
         Arc::clone(&turn.tracker),
     );
     let dispatch = runtime.handle_tool_call(call, turn.cancel.child_token());
@@ -690,19 +718,14 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
     let result = convert_output(&output.item);
     session
         .record_conversation_items(
-            &turn.step.turn,
-            &turn.step.settings.model_info,
+            &step.turn,
+            &step.settings.model_info,
             &[std::sync::Arc::unwrap_or_clone(output.item)],
         )
         .await;
     let mut result = result?;
     if tool.name.name == "wait_agent"
-        && turn
-            .step
-            .settings
-            .model_info
-            .slug
-            .starts_with("cursor-agent/")
+        && step.settings.model_info.slug.starts_with("cursor-agent/")
         && result["isError"] == false
     {
         let (reply, delivered) = tokio::sync::oneshot::channel();

@@ -228,6 +228,7 @@ impl ExternalSession {
         claude_config: &codex_config::ClaudeCodeConfig,
         role_instructions: Option<String>,
         session_kind: codex_external_runtime::ClaudeSessionKind,
+        queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
         checkpoint: &mut Checkpoint,
         checkpoint_path: &std::path::Path,
         session: SessionStart,
@@ -287,6 +288,7 @@ impl ExternalSession {
             disallowed_tools,
             skill_overrides,
             bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
+            queued_input_count,
         })
         .await?;
         if let Some(bridge) = bridge
@@ -360,6 +362,8 @@ impl ExternalSession {
 }
 
 pub(crate) struct RuntimeSlot {
+    // Native queued input is absorbed only after the current tool boundary.
+    pub(crate) queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub(crate) authentication_required: std::sync::atomic::AtomicBool,
     state: std::sync::Mutex<SlotState>,
     returned: tokio::sync::Notify,
@@ -371,6 +375,7 @@ pub(crate) struct RuntimeSlot {
 impl Default for RuntimeSlot {
     fn default() -> Self {
         Self {
+            queued_input_count: Default::default(),
             authentication_required: Default::default(),
             state: Default::default(),
             returned: Default::default(),
