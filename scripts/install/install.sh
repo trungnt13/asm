@@ -335,10 +335,10 @@ select_release_assets() {
   if ! release_asset_exists "$checksum_asset"; then
     checksum_asset="SHA256SUMS"
   fi
-  if [ "$vendor_target" = "x86_64-unknown-linux-gnu" ] &&
+  if [ "$vendor_target" = "x86_64-unknown-linux-musl" ] &&
     ! release_asset_exists "$package_asset" &&
-    release_asset_exists "codex-x86_64-unknown-linux-musl.tar.gz"; then
-    echo "ASM release $resolved_version is MUSL-only; this installer requires $package_asset. Use that release's original installer for older releases." >&2
+    release_asset_exists "codex-x86_64-unknown-linux-gnu.tar.gz"; then
+    echo "ASM release $resolved_version is GNU-only; this installer requires $package_asset. Use that release's original installer for older releases." >&2
     return 1
   fi
   if ! release_asset_exists "$package_asset" || ! release_asset_exists "$checksum_asset"; then
@@ -407,20 +407,6 @@ verify_archive_digest() {
     echo "expected: $verify_expected_digest" >&2
     echo "actual:   $verify_actual_digest" >&2
     return 1
-  fi
-}
-
-require_linux_glibc() {
-  libc_version="$(getconf GNU_LIBC_VERSION 2>/dev/null || true)"
-  if ! printf '%s\n' "$libc_version" | awk '
-    /^glibc [0-9]+\.[0-9]+$/ {
-      split($2, version, ".")
-      supported = version[1] > 2 || (version[1] == 2 && version[2] >= 35)
-    }
-    END { exit !supported }
-  '; then
-    echo "ASM Linux releases require glibc 2.35 or newer (Ubuntu 22.04+); detected ${libc_version:-unknown or unsupported libc}." >&2
-    exit 1
   fi
 }
 
@@ -871,7 +857,7 @@ package_files_are_complete() {
       [ ! -L "$package_dir/$directory" ] || return 1
   done
   executable_paths="bin/codex bin/codex-code-mode-host codex-path/rg"
-  if [ "$expected_target" = "x86_64-unknown-linux-gnu" ]; then
+  if [ "$expected_target" = "x86_64-unknown-linux-musl" ]; then
     executable_paths="$executable_paths codex-resources/bwrap"
   fi
   for executable in $executable_paths; do
@@ -909,7 +895,7 @@ install_fork_release() {
       required["bin/codex-code-mode-host"] = "-"
       optional["bin/codex-exec-server"] = "-"
       required["codex-path/rg"] = "-"
-      if (target == "x86_64-unknown-linux-gnu") required["codex-resources/bwrap"] = "-"
+      if (target == "x86_64-unknown-linux-musl") required["codex-resources/bwrap"] = "-"
     }
     NR == FNR {
       if ((!($0 in required) && !($0 in optional)) || members[$0]++) invalid = 1
@@ -1015,9 +1001,8 @@ case "$os:$machine" in
     platform_label="macOS (Apple Silicon)"
     ;;
   linux:x86_64 | linux:amd64)
-    require_linux_glibc
-    vendor_target="x86_64-unknown-linux-gnu"
-    platform_label="Linux (x64, glibc 2.35+)"
+    vendor_target="x86_64-unknown-linux-musl"
+    platform_label="Linux (x64, static musl)"
     ;;
   *)
     echo "Unsupported ASM release target: $(uname -s) $(uname -m)" >&2

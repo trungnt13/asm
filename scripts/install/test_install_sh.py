@@ -14,7 +14,7 @@ import unittest
 INSTALL_SCRIPT = Path(__file__).with_name("install.sh")
 VERSION = "0.162.1-alpha.18.1.1"
 NEXT_VERSION = "0.162.1-alpha.18.1.2"
-TARGET = "x86_64-unknown-linux-gnu"
+TARGET = "x86_64-unknown-linux-musl"
 
 
 def write_release(
@@ -91,7 +91,7 @@ def run_installer(root, release, files):
     shim.mkdir(exist_ok=True)
     scripts = {
         "uname": '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n',
-        "getconf": '#!/bin/sh\necho "glibc 2.35"\n',
+        "getconf": "#!/bin/sh\nexit 1\n",
         "curl": """#!/bin/sh
 url=''; output=''
 while [ "$#" -gt 0 ]; do

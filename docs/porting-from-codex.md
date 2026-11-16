@@ -174,14 +174,14 @@ Last incorporated commit: `87fccdc1bc0bc9af04db844a23d9c025f3b82000`, 2026-11-15
 
 ## Platforms and CI
 
-Focus on macOS and Linux (Ubuntu). Do not add other platforms to fork CI/releases. Preserve other inherited code/workflows unless removal is requested. Other inherited workflow changes need approval. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs; expensive builds depend on relevant changes. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
+Focus on macOS ARM64 and portable Linux x86_64 MUSL; use Ubuntu and Alpine for Linux package smoke checks, not additional build targets. Do not add other platforms to fork CI/releases. Preserve other inherited code/workflows unless removal is requested. Other inherited workflow changes need approval. Keep inherited upstream release entrypoints and [V8 canary](../.github/workflows/v8-canary.yml) source-build matrices upstream-only; fork validation uses the targeted dependency workflow and consumer checks. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
 
 Use standard GitHub-hosted runners; paid larger runners need explicit approval. V8 canary Apple Silicon variants use `macos-15` and two Bazel jobs for runner memory.
 
 - [Blocking CI](../.github/workflows/blocking-ci.yml) and [postmerge CI](../.github/workflows/postmerge-ci.yml) are manual-only `workflow_dispatch`, never automatic or required.
 - Blocking CI keeps workspace formatting, production Clippy, and result collection. Cover `codex-cli`, `codex-tui`, `codex-core`, and `codex-config` on both release targets. Preserve `--lib --bin codex -- -D warnings`. No test-target matrix, `cargo shear`, or warning suppression. Check other affected packages narrowly.
 - Postmerge CI keeps optimized builds, packaging, smoke checks, uploads, diagnostics, and results for targeted cross-platform checks. Do not run it for every merge. Releases retain their own build/package checks; publication does not require blocking CI. Report existing failures separately.
-- Port useful upstream action/toolchain/security/build fixes without broad matrices or routine local CI repetition. Exclude unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, and OpenAI-only infrastructure. The required two-target V8 build is not a broad suite/canary.
+- Port useful upstream action/toolchain/security/build fixes without broad matrices or routine local CI repetition. Exclude unrelated platforms, Bazel suites, SDKs, remote executors, V8 source-build canaries, and OpenAI-only infrastructure. Validate only the V8 target whose inputs changed; do not rebuild macOS for a Linux-only dependency change.
 
 ## Releases
 
@@ -215,11 +215,11 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 | Platform | Target | Runner | Build timeout |
 | --- | --- | --- | --- |
 | macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 90 minutes |
+| Linux x86_64 | `x86_64-unknown-linux-musl` | `ubuntu-22.04` | 90 minutes |
 
 - Candidates allow build limit plus 15 publication minutes: 315 total on macOS. Preserve optimization, flags, runner, and candidate; allow needed time rather than weakening builds. Concurrency experiments retain 180-minute builds. Resume candidates; never replace ready platform assets.
 - Legacy lookup allows 190 minutes; wait guards are macOS 150/Linux 185. Timeout fails; do not duplicate builds. Only legacy tag jobs allow 360 total minutes. Actual builds retain table limits; fresh candidates do not wait for postmerge.
-- Keep Ubuntu 22.04 / glibc 2.35 as the Linux minimum and build/native-smoke baseline. A GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the minimum.
+- New Linux releases are static MUSL only. Do not build, publish, or resume GNU release candidates. Preserve historical GNU assets, tags, packages, and completion evidence. Keep Ubuntu 22.04 execution compatibility and verify the same package on Alpine; libc portability does not establish arbitrary kernel or external-tool compatibility.
 - Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.
 - Build `codex`, `codex-code-mode-host`, and `codex-exec-server` from one commit/target/profile. Pass all three prebuilt executables to canonical packaging. `codex-<target>.tar.gz` contains `bin/codex`, `bin/codex-code-mode-host`, `bin/codex-exec-server`, `codex-package.json`, and `codex-path/rg`. Linux also contains `codex-resources/bwrap`, built from matching source/release profile; embed its final SHA-256 in the CLI before packaging.
 - Keep canonical layout/pinned ripgrep manifest. Include only required resources as regular executables with matching version/target metadata, including `execServer: "bin/codex-exec-server"`. Shared-server startup must recognize/validate the package without host helpers.
@@ -227,10 +227,10 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 - Detect candidate contract from pinned smoke's required `codex-package.json`, not optional resource flags. Pass `--no-zsh` only if supported. Preserve older candidates' original contracts.
 - Pin builds, packaging, installer bytes, checks, and reuse to candidate SHA. Pin orchestration to dispatch SHA; save controls before checkout. Never fetch newer controls mid-run. Legacy uses verified exact tagged SHA. Candidate packaging may precede tagging.
 - Before upload, run [native smoke](../.github/scripts/smoke-codex-archive.py). CLI/exec-server versions match Cargo; all three help commands succeed with usage; manifest/resources and bundled ripgrep/Bubblewrap pass. Code-mode-host `--version` is not required. Record binary/archive sizes.
-- GNU source-built ELF requires x86_64 GNU loader and glibc symbols no newer than 2.35. Pinned ripgrep may be static. Check architecture/minimum-OS execution; run version/help in a clean Ubuntu 22.04 container with only declared runtime libraries. Runners alone do not prove compatibility.
+- Every packaged Linux executable, including Bubblewrap and ripgrep, must be x86_64 static ELF without a dynamic interpreter, shared-library dependencies, or GLIBC version requirements. Run package smoke on clean Ubuntu 22.04 and Alpine containers. Runners alone do not prove portability.
 - No Apple signing/notarization, paid Apple membership, Azure Key Vault, release secrets, or self-hosted runners. Bundle only required ripgrep/Linux Bubblewrap; use system shell. No voice, patched zsh, or optional helpers. Preserve sandbox/security defaults.
-- Fork Linux uses native GNU and [`install-gnu-build-tools.sh`](../.github/scripts/install-gnu-build-tools.sh), not Zig/MUSL wrappers. Preserve inherited MUSL tooling. Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Install Python 3.11+ explicitly on Ubuntu 22.04.
-- Preserve upstream GNU system allocator, locale, and PTY choices; do not mimic MUSL in Rust conditions. Use system OpenSSL 3; system liblzma is permitted. Match [`smoke-ubuntu-archive.sh`](../.github/scripts/smoke-ubuntu-archive.sh) libraries to ELF dependencies. Do not add ALSA/GStreamer requirements for GNU migration.
+- Reuse upstream [`install-musl-build-tools.sh`](../.github/scripts/install-musl-build-tools.sh), target-scoped native dependencies, and verified V8 through [`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). Retain `AWS_LC_SYS_NO_JITTER_ENTROPY` and Python 3.11+. Keep builds and caches target-specific; reuse verified artifacts rather than rebuilding unchanged dependencies.
+- Preserve upstream MUSL allocator, locale, PTY, and sandbox behavior; do not introduce runtime feature pruning or speculative allocator tuning. Keep optimized release settings. Static native dependencies require ASM rebuilds for security fixes. No speed or memory improvement is established without comparable measurements. Preserve Desktop terminal, client-owned voice/dictation, dynamic tools, Code Mode, and UI sandbox interfaces; actual Desktop acceptance is separate from package smoke.
 - Agree intent before adding platforms, DMGs, optional resources, npm, R2, WinGet, or website/OpenAI-only publishing.
 
 #### V8 dependency release
@@ -239,10 +239,10 @@ For V8 dependency preparation or publication, use [asm-v8-release](../.agents/sk
 
 - Reuse unchanged verified inputs. Same-version archive reuse for Cargo rebases/releases has standing approval only when independent review proves Cargo ABI, bindings, and full dependency-closure compatibility. Native consumer build/JavaScript/sandbox checks must pass. Record omitted source-recipe fixes; never claim source equivalence. Ask for incompatible dependencies/bindings, changed baselines, unsafe reuse, or ambiguous intent. Never replace published assets.
 - Do not reuse V8 152.2.0's original `glibc2.35` pair: CppGC sizes and typed-array threshold bindings are stale. Preserve its assets. `glibc2.35.2` rebuilds matching source-generated archives/bindings with Chromium C++ runtime isolation.
-- Build only optimized sandbox/pointer-compression pairs for macOS ARM64/Linux x86_64 GNU. Use existing Bazel source pair/staging helper locally on GitHub-hosted runners. No BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
-- Require both native `codex-v8-poc` sandbox/JavaScript smokes, including ignored CppGC ABI checks and Ubuntu 22.04 GNU. Reuse GNU Bazel platform/older glibc sysroot.
+- Build only optimized sandbox/pointer-compression pairs for macOS ARM64/Linux x86_64 MUSL when matching verified fork artifacts are unavailable. Build one selected target; retain unchanged verified macOS artifacts. Use the Linux `musl.1` generation. Do not use upstream V8 152.2.0 MUSL artifacts: native CppGC member-size and typed-array checks fail with the pinned consumer. No silent fallback, GNU builds, BuildBuddy, remote execution, paid infrastructure, or broad suites. Retain required static-library symbols.
+- Require target-matched native `codex-v8-poc` sandbox/JavaScript smokes, including ignored CppGC ABI checks. Use the inherited MUSL Bazel platform for Linux source builds. Validate ordinary Code Mode and the UI-plugin sandbox in the consuming package.
 - Publish each target's archive, Rust binding, and two-file manifest only. Use a normal release, **not Latest**, without installer; keep it separate from CLI discovery.
-- Before the first consuming `main` push, publish/verify both new version/generation pairs. CI/CLI releases use only matching verified fork V8. Verify GitHub SHA-256 digests and exact manifest names/hashes. Missing/bad assets fail without upstream fallback. Preserve upstream action paths for other workflows.
+- Before the first consuming `main` push, verify both selected target pairs; publish a new dependency only when explicitly authorized and necessary. Verify fork GitHub SHA-256 digests and exact asset names/hashes. Missing/bad assets fail without fallback. Preserve upstream action paths for other workflows.
 
 #### Reuse and publish
 
@@ -256,13 +256,13 @@ Use [artifact lookup](../.github/scripts/find-postmerge-artifacts.sh) per target
 4. After both platforms pass, append aggregate manifest for old installers. Verify six assets, mark Latest, and retain both native checks. Only then merge candidate into `origin/main`. Preserve concurrent changes; stop on version conflicts. Prefer fast-forwards; necessary rewrites follow push permissions.
 5. Verify ready platforms; resume only missing work. For archives uploaded before readiness markers, recover/verify exact public bytes, even after Actions expiry. Do not rebuild them. Partial releases are incomplete. Legacy completed four-asset releases remain valid. Candidates with installers lacking platform manifests retain all-platform publication.
 
-Before first partial release, deploy platform-aware `tngo-workflow/setup.py`. Select the highest published host-ready version; macOS must not select Linux-only. Installer defaults to Latest; explicit `--release` may install an earlier ready platform. Preserve frozen policy for in-flight runs.
+Coordinate `tngo-workflow/setup.py` MUSL target selection and package checks with the first host-ready MUSL release, before installation. Do not deploy the selector early: discovery could select an older MUSL release. Preserve platform-aware partial-release discovery. Select the highest published host-ready version; macOS must not select Linux-only. Installer defaults to Latest; explicit `--release` may install an earlier ready platform. Preserve frozen policy for in-flight runs.
 
 ### Installer
 
-- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 GNU. Before installing the complete package, verify GitHub digests and host `SHA256SUMS-<target>`. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
+- Use only `trungnt13/asm` GitHub `v*` releases for macOS ARM64/Linux x86_64 MUSL. Before installing the complete package, verify GitHub digests and host `SHA256SUMS-<target>`. Use legacy `SHA256SUMS` only when host manifest is absent, never after invalid digests/manifests.
 - Reject incomplete two-binary archives. Keep older complete canonical packages without declared `execServer` compatible. If declared, require its exact regular executable; reject undeclared exec-server. Historical incomplete releases keep pinned installers.
-- Before metadata downloads/state changes, reject unsupported targets or Linux without glibc 2.35+. No MUSL fallback; historical MUSL requires its original installer. Use separate target-qualified GNU package directories; preserve MUSL packages and shared config/state.
+- Before metadata downloads/state changes, reject unsupported operating systems/architectures. Select MUSL on Linux without requiring glibc; never fall back to GNU assets. Historical GNU releases require their pinned installer. Preserve target-qualified package directories, prior packages, and shared config/state.
 - Preserve `--release`, `CODEX_HOME`, `CODEX_INSTALL_DIR`, locking, and safe `current` selection. Store in `packages/asm-standalone`. Preserve upstream packages/update markers, shared Codex config/state, and `codex` command.
 - Only the owner installs externally. No OpenAI/CDN/legacy npm downloads, daemon-only installs, or `auto-update-version` writes. Do not port upstream standalone-release pruning. Preserve fork packages/layout.
 - Disable built-in update checks/prompts/commands/daemon loops regardless of settings/markers. CLI/daemon must not install/download upstream releases. Preserve ordinary daemon startup/restart separately.

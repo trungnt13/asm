@@ -8,7 +8,13 @@ from pathlib import Path
 
 
 def verify(metadata: dict, directory: Path, target: str, version: str) -> None:
-    tag = f"asm-v8-v{version}-glibc2.35.2"
+    generations = {
+        "x86_64-unknown-linux-musl": "musl.1",
+        "aarch64-apple-darwin": "glibc2.35.2",
+    }
+    if target not in generations:
+        raise ValueError(f"unsupported fork V8 target {target}")
+    tag = f"asm-v8-v{version}-{generations[target]}"
     if (
         metadata.get("tag_name") != tag
         or metadata.get("draft") is not False
