@@ -1,8 +1,10 @@
 ---
 source: tui/src/app/tests.rs
+assertion_line: 3039
 expression: "normalize_snapshot_paths(render_bottom_popup(&app.chat_widget, 80))"
 ---
                                                                            Main
 › Ask ASM to do anything
 
-  sol61 def·/tmp/project·child-0[worker]·← for agents
+  sol62 def·/tmp/project·child-0[worker]
+  ← for agents · ? for shortcuts

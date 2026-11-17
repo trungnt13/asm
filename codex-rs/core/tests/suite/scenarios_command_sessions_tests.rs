@@ -116,7 +116,7 @@ text(result.output);"#
 
     let drain = mount_sse_sequence(server, vec![
         sse(vec![ev_custom_tool_call("drain", "exec", &format!(
-            "const result = await tools.write_stdin({{session_id: {id}, chars: \"\"}}); text({{output: result.output, exit_code: result.exit_code}});"
+            "const result = await tools.write_stdin({{session_id: {id}, chars: \"\", reason: \"Collect the final command result.\"}}); text({{output: result.output, exit_code: result.exit_code}});"
         )), ev_completed("drain")]),
         sse(vec![ev_completed("done")]),
     ]).await;

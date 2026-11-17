@@ -248,15 +248,11 @@ async fn skill_catalog_deltas_survive_resume_and_rebuild_after_compaction() -> R
                     }
                     let metadata = &item["internal_chat_message_metadata_passthrough"];
                     assert_eq!(
-                        (
-                            &metadata["content_item_kinds"][index],
-                            &metadata["content_item_metadata"][index],
-                        ),
-                        (
-                            &json!("host_skills.instructions"),
-                            &json!({"provenance": {"type": "skills"}}),
-                        ),
+                        metadata["content_item_kinds"][index],
+                        json!("host_skills.instructions"),
                     );
+                    // ASM keeps provenance locally, not on the ordinary Responses wire.
+                    assert!(metadata.get("content_item_metadata").is_none());
                     let id = item["id"].as_str().expect("catalog message ID");
                     if seen_catalog_parts.insert((id.to_owned(), index)) {
                         injected += 1;
