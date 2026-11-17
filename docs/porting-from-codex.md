@@ -132,6 +132,9 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For the sync through `595f497f15a3e3239a62f6b99cf61067df00f0d0`, the owner accepted the unchanged stock cold-history limitation for this sync only. Fresh isolated checks passed ASM cold timeline, search, turn, and item reads. The independent stock reader found the thread through search but returned empty cold timeline, turns, and items; resume and reopening restored exact saved items and permissions without changing canonical history. This does not establish Desktop rendering or a runtime result from a stock build of this exact target.
+
+
 Stock `rust-v0.168.0-alpha.7` returns an empty cold child timeline with canonical rollouts but no derived history database. Resume builds the projection and exposes messages. This missing catch-up persists through `05cf8eeb14`. Independent stock `rust-v0.169.0-alpha.6` also returned an empty first cold timeline for valid real history; resume restored its projection and saved permissions. ASM already rebuilds before querying; this sync did not introduce the difference. Isolated checks found no history loss.
 
 Independent stock Linux `rust-v0.169.0-alpha.7` also reproduces the limitation: cold search finds the thread, but cold timeline, turn, and item reads are empty. Resume restores the saved projection and permissions without changing the canonical rollout. The stock tag is a release commit off `6bd17ba6ae`, not a build of `e1cc96712f`. The history and wire code in thread-store, rollout, state, app-server, and app-server-protocol matches the sync target.
@@ -172,7 +175,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `c8d1ba814eb984e8fdd2f595ffd9b287e825a5b3`, 2026-11-17. Subject: Add HTTP/2 fallback for SSH tunnels (#61964).
+Last incorporated commit: `595f497f15a3e3239a62f6b99cf61067df00f0d0`, 2026-11-17. Subject: Stop masking system SSH configuration drop-ins in Linux sandboxes (#62058).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

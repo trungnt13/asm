@@ -469,7 +469,9 @@ add_to_path() {
   path_profile="$profile"
   begin_marker="# >>> Codex installer >>>"
   end_marker="# <<< Codex installer <<<"
-  path_line="export PATH=\"$BIN_DIR:\$PATH\""
+  # Escape the directory for double quotes. Quote ! separately for interactive shells.
+  path_prefix=$(printf '%s:\n' "$BIN_DIR" | LC_ALL=C sed 's/[\\"$`]/\\&/g; s/!/"\\!"/g')
+  path_line="export PATH=\"$path_prefix\$PATH\""
 
   if [ -f "$profile" ] && grep -F "$begin_marker" "$profile" >/dev/null 2>&1; then
     if grep -F "$path_line" "$profile" >/dev/null 2>&1; then
@@ -508,7 +510,7 @@ rewrite_path_block() {
   path_line="$4"
   tmp_profile="$tmp_dir/profile.$$.tmp"
 
-  awk -v begin="$begin_marker" -v end="$end_marker" -v line="$path_line" '
+  CODEX_PATH_LINE="$path_line" awk -v begin="$begin_marker" -v end="$end_marker" '
     BEGIN {
       in_block = 0
       replaced = 0
@@ -516,7 +518,7 @@ rewrite_path_block() {
     $0 == begin {
       if (!replaced) {
         print begin
-        print line
+        print ENVIRON["CODEX_PATH_LINE"]
         print end
         replaced = 1
       }
@@ -732,26 +734,18 @@ prompt_yes_no() {
 }
 
 print_launch_instructions() {
+  if [ "$path_action" = "already" ]; then
+    step "$BIN_DIR is already on PATH"
+    step "Current terminal: codex"
+  else
+    step "Current terminal: $path_line && codex"
+  fi
+  step "Future terminals: open a new terminal and run: codex"
+
   case "$path_action" in
-    added)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
-      step "PATH was added to $path_profile"
-      ;;
-    updated)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
-      step "PATH was updated in $path_profile"
-      ;;
-    configured)
-      step "Current terminal: export PATH=\"$BIN_DIR:\$PATH\" && codex"
-      step "Future terminals: open a new terminal and run: codex"
-      step "PATH is already configured in $path_profile"
-      ;;
-    *)
-      step "Current terminal: codex"
-      step "Future terminals: open a new terminal and run: codex"
-      ;;
+    added) step "PATH was added to $path_profile" ;;
+    updated) step "PATH was updated in $path_profile" ;;
+    configured) step "PATH is already configured in $path_profile" ;;
   esac
 }
 
@@ -1106,22 +1100,7 @@ add_to_path
 verify_visible_command
 release_install_lock
 handle_conflicting_install
-
-case "$path_action" in
-  added)
-    print_launch_instructions
-    ;;
-  updated)
-    print_launch_instructions
-    ;;
-  configured)
-    print_launch_instructions
-    ;;
-  *)
-    step "$BIN_DIR is already on PATH"
-    print_launch_instructions
-    ;;
-esac
+print_launch_instructions
 
 printf 'ASM CLI %s installed successfully.\n' "$resolved_version"
 step "Use this ASM installer for manual updates; the inherited in-app updater targets OpenAI."

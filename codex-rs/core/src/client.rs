@@ -2261,6 +2261,8 @@ impl ResponsesHttpExecutor<'_> {
             )?;
             self.client
                 .validate_required_cyber_access_program(request.access_programs)?;
+            let history_ids =
+                inference_trace.stripped_output_ids(request.input.iter().map(Arc::as_ref));
             self.client
                 .prepare_response_items_for_request(&mut request.input);
             let request_session_telemetry =
@@ -2306,6 +2308,7 @@ impl ResponsesHttpExecutor<'_> {
                     inference_trace_attempt.record_started(
                         wire.clone(),
                         Arc::clone(prompt),
+                        history_ids,
                         || Ok(None),
                     );
                 })
@@ -2578,6 +2581,18 @@ impl ModelClientSession {
                 Some(continuation) => (Some(continuation.response_id), Some(continuation.items)),
                 None => (None, None),
             };
+            // The full context captured after a warmup already carries the original IDs.
+            let history_ids = if previous_response_id_from_untraced_warmup {
+                Vec::new()
+            } else {
+                inference_trace.stripped_output_ids(
+                    incremental_items
+                        .as_deref()
+                        .unwrap_or(&request.input)
+                        .iter()
+                        .map(Arc::as_ref),
+                )
+            };
             let cleared_item_ids = if let Some(incremental_items) = &mut incremental_items {
                 self.client
                     .prepare_response_items_for_request(incremental_items);
@@ -2676,6 +2691,7 @@ impl ModelClientSession {
                         inference_trace_attempt.record_started(
                             wire.clone(),
                             Arc::clone(prompt),
+                            history_ids,
                             move || {
                                 #[derive(serde::Serialize)]
                                 struct WarmupContext<'a> {

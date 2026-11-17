@@ -1,9 +1,8 @@
 //! Complete request histories for cold resumes with historical images.
 
 use super::*;
+use codex_protocol::models::ResponseInputItem;
 use codex_protocol::openai_models::InputModality;
-use codex_user_input::LocalImagePreparation;
-use codex_user_input::ResolvedUserInput;
 use core_test_support::responses;
 use core_test_support::responses::WebSocketConnectionConfig;
 use core_test_support::responses::WebSocketTestServer;
@@ -139,13 +138,19 @@ async fn warmup_includes_interrupted_image_and_generation_adds_injected_image() 
     let _ = release.send(());
     reopen(&mut test, /*base_url*/ None).await?;
     test.codex
-        .inject_response_items(vec![ResponseItem::from(
-            ResolvedUserInput::into_message(
-                &[ResolvedUserInput::from_client(image_input("file_injected"))],
-                LocalImagePreparation::Defer,
-            )
-            .0,
-        )])
+        .inject_response_items(vec![
+            ResponseInputItem::Message {
+                role: "user".into(),
+                content: vec![ContentItem::InputImage {
+                    image: ImageReference::File {
+                        file_id: "file_injected".into(),
+                    },
+                    detail: Some(ImageDetail::High),
+                }],
+                phase: None,
+            }
+            .into(),
+        ])
         .await?;
     test.submit_text_turn("continue").await?;
 

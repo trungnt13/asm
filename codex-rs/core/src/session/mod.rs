@@ -183,6 +183,7 @@ use codex_protocol::request_user_input::RequestUserInputResponse;
 use codex_rmcp_client::ElicitationResponse;
 use codex_rollout::should_persist_response_item;
 use codex_rollout::state_db;
+use codex_rollout_trace::CompactionTraceContext;
 use codex_rollout_trace::ThreadStartedTraceMetadata;
 use codex_rollout_trace::ThreadTraceContext;
 use codex_sandboxing::SandboxType;
@@ -505,13 +506,16 @@ pub(crate) struct CompactionPrefix {
 }
 
 pub(crate) enum CompactedHistoryInstallation<'a> {
-    Complete(CompactedHistoryMetadata),
+    Complete(
+        CompactedHistoryMetadata,
+        Option<(&'a CompactionTraceContext, &'a ContextManager)>,
+    ),
     Prefix(PrefixCompactionInstallation<'a>),
 }
 
 impl From<CompactedHistoryMetadata> for CompactedHistoryInstallation<'_> {
     fn from(metadata: CompactedHistoryMetadata) -> Self {
-        Self::Complete(metadata)
+        Self::Complete(metadata, None)
     }
 }
 
@@ -5140,9 +5144,11 @@ impl Session {
         installation: impl Into<CompactedHistoryInstallation<'a>>,
     ) -> bool {
         let installation = installation.into();
-        let compaction_model_hash = match &installation {
-            CompactedHistoryInstallation::Complete(metadata) => &metadata.compaction_model_hash,
-            CompactedHistoryInstallation::Prefix(prefix) => &prefix.model_info.comp_hash,
+        let (compaction_model_hash, trace) = match &installation {
+            CompactedHistoryInstallation::Complete(metadata, trace) => {
+                (&metadata.compaction_model_hash, *trace)
+            }
+            CompactedHistoryInstallation::Prefix(prefix) => (&prefix.model_info.comp_hash, None),
         };
         crate::model_search::SearchOwner::checkpoint(
             &self.services.thread_extension_data,
@@ -5179,9 +5185,9 @@ impl Session {
         let (compacted_item, world_state_baseline, started_item) = {
             let mut state = self.state.lock().await;
             let complete_replacement =
-                matches!(&installation, CompactedHistoryInstallation::Complete(_));
+                matches!(&installation, CompactedHistoryInstallation::Complete(..));
             let replacement = match installation {
-                CompactedHistoryInstallation::Complete(metadata) => {
+                CompactedHistoryInstallation::Complete(metadata, _) => {
                     let context = state
                         .additional_context
                         .restore_compacted_items(state.history.annotated_items(), &mut items);
@@ -5275,6 +5281,17 @@ impl Session {
             };
             (compacted_item, world_state_baseline, started_item)
         };
+
+        // Use the replacement captured under the state lock, including goal edits retained
+        // by the installer. A later edit or token recomputation cannot change this checkpoint.
+        if let Some((trace, input)) = trace
+            && let Some(replacement) = &compacted_item.replacement_history
+        {
+            trace.record_local_install(
+                input.raw_items(),
+                replacement.iter().map(|entry| entry.item.as_ref()),
+            );
+        }
 
         if let Some((turn_context, item)) = started_item {
             // The prefix is now known to be valid; announce the install before checkpoint I/O.
@@ -5775,6 +5792,7 @@ impl Session {
         &self,
         step_context: &StepContext,
         world_state: Arc<WorldState>,
+        trace: &CompactionTraceContext,
     ) {
         let turn_context = step_context.turn.as_ref();
         let history = self.clone_history().await;
@@ -5789,7 +5807,6 @@ impl Session {
                 )
             },
         );
-        drop(history);
         // Resolve the roster before allocating a new context window.
         let rendered = world_state.render_full_with_host_roster().await;
         let (window_number, window_ids) = self.state.lock().await.start_new_context_window();
@@ -5807,17 +5824,21 @@ impl Session {
             turn_context_item,
             world_state_snapshot,
             /*rejected_audio_file_ids*/ Default::default(),
-            CompactedHistoryMetadata {
-                input_goal_ids,
-                message: String::new(),
-                window_number,
-                window_ids,
-                compaction_response_id: None,
-                compaction_model_hash: None,
-                reviewer_compaction_hash: None,
-            },
+            CompactedHistoryInstallation::Complete(
+                CompactedHistoryMetadata {
+                    input_goal_ids,
+                    message: String::new(),
+                    window_number,
+                    window_ids,
+                    compaction_response_id: None,
+                    compaction_model_hash: None,
+                    reviewer_compaction_hash: None,
+                },
+                Some((trace, &history)),
+            ),
         )
         .await;
+        drop(history);
         self.recompute_token_usage(turn_context).await;
     }
 

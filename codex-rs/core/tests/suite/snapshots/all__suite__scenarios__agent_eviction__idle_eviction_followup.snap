@@ -1,17 +1,18 @@
 ---
 source: core/tests/suite/scenarios_agent_eviction_tests.rs
+assertion_line: 275
 expression: "format!(\"{history}\\n\\nResumed worker mailbox:\\n{mailbox}\")"
 ---
 Scenario: A parent with no configured environment delegates an API migration, queues a note while the worker is idle, and follows up after idle eviction. The worker temporarily attaches a workspace, then resumes with no environment, its earlier answer, and the unread note. Complete model streams are grouped as parent, then worker.
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=26eea8e186e27c30):
-        - namespace/functions; hash=96bee3ec56b62113
+00:additional_tools/developer (2; hash=ddbdddd4dfaa99df):
+        - namespace/functions; hash=00038ed0481eceeb
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=e84a0b97be9ff3b3
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -65,12 +66,12 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=26eea8e186e27c30):
-        - namespace/functions; hash=96bee3ec56b62113
+00:additional_tools/developer (2; hash=ddbdddd4dfaa99df):
+        - namespace/functions; hash=00038ed0481eceeb
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=e84a0b97be9ff3b3
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

@@ -119,7 +119,7 @@ if [ -n "$output" ]; then cp "$source" "$output"; else cat "$source"; fi
     home = root / "home"
     home.mkdir(exist_ok=True)
     env = dict(
-        os.environ,
+        os.environ | {"SHELL": "/bin/sh"},
         HOME=str(home),
         CODEX_HOME=str(root / "codex-home"),
         CODEX_INSTALL_DIR=str(root / "install-bin"),
@@ -143,7 +143,9 @@ class InstallShTest(unittest.TestCase):
         for platform_manifest in (False, True):
             with (
                 self.subTest(platform_manifest=platform_manifest),
-                tempfile.TemporaryDirectory() as directory,
+                tempfile.TemporaryDirectory(
+                    prefix="asm ' $value `value` ! "
+                ) as directory,
             ):
                 root = Path(directory)
                 files = write_release(

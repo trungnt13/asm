@@ -9180,6 +9180,8 @@ async fn make_test_app() -> Box<App> {
     let session_telemetry = test_session_telemetry(&config, model.as_str());
 
     Box::new(App {
+        statusline_picker: None,
+        statusline_metrics: Default::default(),
         provider_writes: HashMap::new(),
         feature_write_lock: Arc::default(),
         config_notification_test_generation: 0,
@@ -9326,6 +9328,8 @@ pub(super) async fn make_test_app_with_channels() -> (
 
     (
         Box::new(App {
+            statusline_picker: None,
+            statusline_metrics: Default::default(),
             provider_writes: HashMap::new(),
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,
@@ -9941,7 +9945,7 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
     let next_thread_id = ThreadId::new();
     app.render_thread_snapshot(
         &mut tui,
-        &app_server,
+        &mut app_server,
         next_thread_id,
         ThreadEventSnapshot {
             output_tps: None,
@@ -9970,7 +9974,8 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
             input_state: None,
         },
         /*resume_restored_queue*/ false,
-    )?;
+    )
+    .await?;
     assert_eq!(app.pending_thread_switch_resets, 1);
     while let Ok(event) = events.try_recv() {
         app.handle_event(&mut tui, &mut app_server, event).await?;
