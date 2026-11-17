@@ -160,6 +160,8 @@ For PR #208, the owner accepted both unchanged stock boundaries through `87fccdc
 
 For the sync through `77873dd0d284aeba7ce849b995b28ee8f4498d73`, the owner accepted the unchanged stock cold-history limitation and older-stock voice-reader boundary on 2026-11-17. Fresh ASM cold reads and stock alpha.11 resume/reopened warm reads preserve exact saved text items, permissions and original rollout bytes. This acceptance applies only to this target; it does not establish exact voice handoff or waive other checks.
 
+For the sync through `c8d1ba814eb984e8fdd2f595ffd9b287e825a5b3`, the owner accepted both unchanged stock reader limitations on 2026-11-17. Fresh candidate text history passes separate ASM cold timeline, search, turn and item reads; stock alpha.11 finds the thread but requires resume before exact saved items are readable. Resume and reopened warm reads preserve the two saved text items and canonical bytes. This exception applies only to this target; exact older-reader voice handoff remains unverified and other checks are not waived.
+
 #### Opt-in per-environment context
 
 Keep upstream `per_environment_context` disabled by default. When enabled, it groups permissions and workspace details by environment and appends scoped changes instead of rewriting saved history. Manual source review found that an aggregate context item can exceed 1K tokens: existing leaf limits do not bound the whole multi-environment item. Preserve upstream formatting and limits; this review does not establish opt-in runtime behavior.
@@ -170,7 +172,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `77873dd0d284aeba7ce849b995b28ee8f4498d73`, 2026-11-16. Subject: Preserve plugin skill picker ranking across version changes (#61871).
+Last incorporated commit: `c8d1ba814eb984e8fdd2f595ffd9b287e825a5b3`, 2026-11-17. Subject: Add HTTP/2 fallback for SSH tunnels (#61964).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 

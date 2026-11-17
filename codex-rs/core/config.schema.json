@@ -1206,6 +1206,9 @@
             "guardian_native_multi_agent_history": {
               "type": "boolean"
             },
+            "guardian_nested_approval_context": {
+              "type": "boolean"
+            },
             "guardian_node_repl_transcript_images": {
               "type": "boolean"
             },
@@ -1446,6 +1449,9 @@
             "responses_websockets_v2": {
               "type": "boolean"
             },
+            "restored_history_prewarm": {
+              "type": "boolean"
+            },
             "retain_client_developer_messages": {
               "type": "boolean"
             },
@@ -1615,6 +1621,9 @@
               "type": "boolean"
             },
             "use_xaa": {
+              "type": "boolean"
+            },
+            "utc_environment_date": {
               "type": "boolean"
             },
             "view_image": {
@@ -3561,6 +3570,10 @@
         "hide_spawn_agent_metadata": {
           "type": "boolean"
         },
+        "interrupt_at_item_boundary": {
+          "description": "Let a subagent finish its current output item while cancelling tools immediately.",
+          "type": "boolean"
+        },
         "max_concurrent_threads_per_session": {
           "format": "uint",
           "minimum": 1.0,
@@ -5030,6 +5043,25 @@
       },
       "type": "object"
     },
+    "RolloutTraceToml": {
+      "additionalProperties": false,
+      "description": "Storage budgets for one native rollout trace, shared by the root and its children.",
+      "properties": {
+        "max_bytes": {
+          "description": "Maximum bytes for the manifest, event log, and compressed payload shards. Defaults to 256 MiB.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_payload_bytes": {
+          "description": "Maximum uncompressed bytes retained per new body or separated value. Defaults to 64 MiB.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "RuntimeAgentInstancesConfigToml": {
       "additionalProperties": false,
       "properties": {
@@ -5842,8 +5874,10 @@
               "history_search_next": null,
               "history_search_previous": null,
               "queue": null,
+              "redo": null,
               "submit": null,
-              "toggle_shortcuts": null
+              "toggle_shortcuts": null,
+              "undo": null
             },
             "editor": {
               "delete_backward": null,
@@ -6494,6 +6528,14 @@
           ],
           "description": "Queue the current composer draft while a task is running."
         },
+        "redo": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Redo an undone composer edit."
+        },
         "submit": {
           "allOf": [
             {
@@ -6509,6 +6551,14 @@
             }
           ],
           "description": "Toggle the composer shortcut overlay."
+        },
+        "undo": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Undo the last edit to the composer draft."
         }
       },
       "type": "object"
@@ -7036,8 +7086,10 @@
             "history_search_next": null,
             "history_search_previous": null,
             "queue": null,
+            "redo": null,
             "submit": null,
-            "toggle_shortcuts": null
+            "toggle_shortcuts": null,
+            "undo": null
           }
         },
         "editor": {
@@ -8685,6 +8737,9 @@
         "guardian_native_multi_agent_history": {
           "type": "boolean"
         },
+        "guardian_nested_approval_context": {
+          "type": "boolean"
+        },
         "guardian_node_repl_transcript_images": {
           "type": "boolean"
         },
@@ -8925,6 +8980,9 @@
         "responses_websockets_v2": {
           "type": "boolean"
         },
+        "restored_history_prewarm": {
+          "type": "boolean"
+        },
         "retain_client_developer_messages": {
           "type": "boolean"
         },
@@ -9094,6 +9152,9 @@
           "type": "boolean"
         },
         "use_xaa": {
+          "type": "boolean"
+        },
+        "utc_environment_date": {
           "type": "boolean"
         },
         "view_image": {
@@ -9534,6 +9595,14 @@
     "review_model": {
       "description": "Review model override used by the `/review` feature.",
       "type": "string"
+    },
+    "rollout_trace": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/RolloutTraceToml"
+        }
+      ],
+      "description": "Capture limits for local rollout traces when recording is enabled."
     },
     "sandbox_mode": {
       "allOf": [

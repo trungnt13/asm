@@ -544,6 +544,7 @@ impl ChatWidget {
                     question_drafts = self.take_question_drafts();
                 }
                 self.last_non_retry_error = None;
+                self.flush_generated_images(&notification.turn.id);
                 let completion = self.completion_cell(&notification.turn, replay_kind);
                 self.on_task_complete(
                     last_agent_message.map(|(_, text)| text.to_owned()),
@@ -556,6 +557,7 @@ impl ChatWidget {
                     question_drafts = self.take_question_drafts();
                 }
                 self.last_non_retry_error = None;
+                self.flush_generated_images(&notification.turn.id);
                 let reason = if self
                     .turn_lifecycle
                     .take_budget_limited(notification.turn.id.as_str())
@@ -570,6 +572,7 @@ impl ChatWidget {
                 if replay_kind.is_none() {
                     question_drafts = self.take_question_drafts();
                 }
+                self.flush_generated_images(&notification.turn.id);
                 let error = notification
                     .turn
                     .error

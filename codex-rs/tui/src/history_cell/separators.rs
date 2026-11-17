@@ -22,10 +22,10 @@ use std::collections::HashMap;
 /// restoring the conversation constructs new cells and refreshes whether the timestamp needs a date.
 #[derive(Debug)]
 pub struct FinalMessageSeparator {
+    pub(crate) turn_id: Option<String>,
     elapsed_seconds: Option<u64>,
     token_usage: Option<TokenUsageBreakdown>,
     session_id: Option<ThreadId>,
-    turn_id: Option<String>,
     agent_count: Option<usize>,
     runtime_metrics: Option<RuntimeMetricsSummary>,
     completed_at: Option<DateTime<Local>>,

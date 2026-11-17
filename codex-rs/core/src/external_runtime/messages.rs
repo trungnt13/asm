@@ -182,9 +182,7 @@ pub(super) fn validate_pending_prompt(
     let items = pending
         .iter()
         .map(|item| match item {
-            TurnInput::UserInput { content, .. } => {
-                session.response_item_from_user_input(content.clone())
-            }
+            TurnInput::UserInput { content, .. } => session.response_item_from_user_input(content),
             TurnInput::ResponseItem(envelope) | TurnInput::FunctionCallOutput(envelope) => {
                 envelope.item.as_ref().clone()
             }

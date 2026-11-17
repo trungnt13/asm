@@ -1,4 +1,3 @@
-use anyhow::Context;
 use anyhow::bail;
 use codex_protocol::models::AgentMessageInputContent;
 use codex_protocol::models::ContentItem;
@@ -9,7 +8,7 @@ use codex_protocol::models::ImageDetail;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 use codex_utils_image::PromptImageDecoder;
 use codex_utils_image::PromptImageMode;
 use codex_utils_image::load_data_url_for_prompt;
@@ -126,9 +125,9 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
             TurnInput::UserInput { content, .. } => {
                 for part in content {
                     let (encoded, detail) = match part {
-                        UserInput::Text { .. } => continue,
-                        UserInput::Image { image, detail } => {
-                            let ImageReference::Inline { image_url } = image else {
+                        ResolvedUserInput::Text { .. } => continue,
+                        ResolvedUserInput::Image { image, detail } => {
+                            let ImageReference::Inline { image_url } = image.as_ref() else {
                                 bail!("Native images require a base64 data URL, not a file ID");
                             };
                             (
@@ -140,11 +139,15 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                                 *detail,
                             )
                         }
-                        UserInput::LocalImage { path, detail } => {
-                            let bytes = std::fs::read(&*path)
-                                .with_context(|| format!("read native image {}", path.display()))?;
+                        ResolvedUserInput::LocalImage {
+                            path,
+                            detail,
+                            bytes,
+                        } => {
+                            let bytes =
+                                bytes.as_ref().map_err(|err| anyhow::anyhow!(err.clone()))?;
                             (
-                                load_for_prompt_bytes(path, bytes, image_mode(*detail))?,
+                                load_for_prompt_bytes(path, bytes.to_vec(), image_mode(*detail))?,
                                 *detail,
                             )
                         }
@@ -152,10 +155,11 @@ pub(super) fn prepare_input(input: &mut Vec<TurnInput>) -> anyhow::Result<usize>
                             "native runtimes support text and image attachments; use native text references for other files and skills"
                         ),
                     };
-                    *part = UserInput::Image {
+                    *part = ResolvedUserInput::Image {
                         image: ImageReference::Inline {
                             image_url: encoded.into_data_url(),
-                        },
+                        }
+                        .into(),
                         detail,
                     };
                 }

@@ -64,8 +64,6 @@ use crate::request_user_input::RequestUserInputResponse;
 use crate::response_item_id::OptionalWireItemId;
 use crate::turn_input::CyberAccessProgram;
 use crate::turn_input::SuspendTurnOutcome;
-use crate::turn_input::TurnInputMode;
-use crate::turn_input::TurnInputRequest;
 use crate::turn_input::TurnInputSubmission;
 use crate::turn_input::TurnStartOptions;
 use codex_extension_items::image_generation::GeneratedImageRef;
@@ -731,6 +729,9 @@ pub enum Op {
     /// This server sends [`EventMsg::TurnAborted`] in response.
     Interrupt,
 
+    /// Interrupt a spawned agent, respecting its configured sampling boundary.
+    InterruptAgent,
+
     /// Interrupt the named turn only if no input is queued for it.
     /// The decision is acknowledged before cancellation finishes.
     #[debug("InterruptIfNoPendingInput {{ turn_id: {turn_id:?} }}")]
@@ -785,14 +786,6 @@ pub enum Op {
 
     /// Request the list of voices supported by realtime conversation streams.
     RealtimeConversationListVoices,
-
-    /// Submit turn input using the requested routing behavior.
-    #[debug("TurnInput {{ requested_settings: {:?} }}", request.thread_settings)]
-    TurnInput {
-        request: Box<TurnInputRequest>,
-        mode: TurnInputMode,
-        reply: oneshot::Sender<CodexResult<TurnInputSubmission>>,
-    },
 
     /// Resume an interrupted regular turn.
     #[debug("RecoverTurn {{ requested_settings: {thread_settings:?} }}")]
@@ -1145,6 +1138,7 @@ impl Op {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Interrupt => "interrupt",
+            Self::InterruptAgent => "interrupt_agent",
             Self::InterruptIfNoPendingInput { .. } => "interrupt_if_no_pending_input",
             Self::CleanBackgroundTerminals => "clean_background_terminals",
             Self::RealtimeConversationStart(_) => "realtime_conversation_start",
@@ -1156,7 +1150,6 @@ impl Op {
             Self::RealtimeConversationClose => "realtime_conversation_close",
             Self::RealtimeConversationDetach { .. } => "realtime_conversation_detach",
             Self::RealtimeConversationListVoices => "realtime_conversation_list_voices",
-            Self::TurnInput { .. } => "turn_input",
             Self::RecoverTurn { .. } => "recover_turn",
             Self::SuspendTurnAndShutdown { .. } => "suspend_turn_and_shutdown",
             Self::ThreadSettings { .. } => "thread_settings",

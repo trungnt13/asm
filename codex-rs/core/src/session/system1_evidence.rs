@@ -4,7 +4,7 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 
 #[derive(Default)]
 pub(super) struct System1Evidence {
@@ -29,7 +29,7 @@ impl System1Evidence {
             match item {
                 TurnInput::UserInput { content, .. } => {
                     for item in content.iter().take(part_limit) {
-                        if let UserInput::Text { text, .. } = item {
+                        if let ResolvedUserInput::Text { text, .. } = item {
                             append_text(&mut incoming, text, limit / 3);
                         }
                     }

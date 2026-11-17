@@ -179,11 +179,11 @@ impl ChatComposer {
         let Some(range) = self.active_empty_quote_comment() else {
             return false;
         };
-        let started_vim_edit = self.begin_direct_vim_edit();
+        let started_edit = self.begin_direct_edit();
         self.draft.textarea.replace_range(range.clone(), "");
         self.draft.textarea.set_cursor(range.start);
-        if started_vim_edit {
-            self.finish_vim_edit();
+        if started_edit {
+            self.finish_edit();
         }
         true
     }

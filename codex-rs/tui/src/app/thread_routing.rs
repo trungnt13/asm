@@ -159,6 +159,7 @@ impl App {
         };
         if let Some(pane) = self.sidebars.get_mut(&Some(active_id)) {
             pane.opening = None;
+            pane.cancel_hidden_document_primary(/*visible*/ false);
         }
         let input_state = self.chat_widget.capture_thread_input_state();
         let reasoning_state = self.chat_widget.capture_reasoning_state();
@@ -1169,6 +1170,7 @@ impl App {
             return Ok(());
         }
         self.track_side_chat_title(thread_id, &notification);
+        self.notice_sidebar_file_item(thread_id, &notification);
         if self.current_displayed_thread_id() == Some(thread_id)
             && let ServerNotification::TurnCompleted(notification) = &notification
         {

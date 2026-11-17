@@ -3084,6 +3084,7 @@ dependencies = [
  "codex-test-binary-support",
  "codex-thread-store",
  "codex-tools",
+ "codex-user-input",
  "codex-utils-absolute-path",
  "codex-utils-audio",
  "codex-utils-cache",
@@ -4717,6 +4718,7 @@ dependencies = [
  "codex-protocol",
  "codex-state",
  "codex-thread-store",
+ "codex-user-input",
  "codex-utils-absolute-path",
  "core_test_support",
  "pretty_assertions",
@@ -5094,6 +5096,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "clap",
+ "h2",
  "h3",
  "h3-quinn",
  "http 1.4.0",
@@ -5105,6 +5108,7 @@ dependencies = [
  "rustls-native-certs",
  "serde_json",
  "tokio",
+ "tokio-rustls",
  "url",
 ]
 
@@ -5236,6 +5240,7 @@ dependencies = [
  "codex-terminal-detection",
  "codex-tools",
  "codex-uds",
+ "codex-user-input",
  "codex-utils-absolute-path",
  "codex-utils-approval-presets",
  "codex-utils-cargo-bin",
@@ -5331,6 +5336,20 @@ dependencies = [
  "tokio-util",
  "uds_windows",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "codex-user-input"
+version = "0.171.1-alpha.6"
+dependencies = [
+ "anyhow",
+ "codex-protocol",
+ "codex-utils-image",
+ "derive_more 2.1.1",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -5581,6 +5600,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
+ "nix 0.28.0",
  "portable-pty",
  "pretty_assertions",
  "shared_library",
@@ -11544,6 +11564,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "zstd",
 ]
 
 [[package]]

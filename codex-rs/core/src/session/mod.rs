@@ -264,9 +264,10 @@ mod guardian_checkpoint;
 mod handlers;
 pub(crate) mod inject;
 mod reasoning_effort;
-mod submission;
+pub(crate) mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
+use submission::SubmissionOp;
 mod cloud_plugins;
 mod decision_log;
 mod input_queue;
@@ -283,6 +284,8 @@ mod retained_context;
 mod review;
 mod rollout_budget;
 mod rollout_reconstruction;
+mod sampling_interrupt;
+pub(crate) use sampling_interrupt::SamplingInterrupt;
 #[allow(clippy::module_inception)]
 pub(crate) mod session;
 pub(crate) mod startup_prewarm;
@@ -393,8 +396,6 @@ use codex_protocol::config_types::Settings;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::mcp::OPENAI_STANDARD_FORM_INPUT_EXTENSION_ID;
-use codex_protocol::models::LocalImagePreparation;
-use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use codex_protocol::protocol::ApplyPatchApprovalRequestEvent;
@@ -433,6 +434,8 @@ use codex_protocol::turn_input::TurnStartOptions;
 use codex_protocol::user_input::UserInput;
 use codex_skills_extension::HostSkillsService;
 use codex_tools::ToolName;
+use codex_user_input::LocalImagePreparation;
+use codex_user_input::ResolvedUserInput;
 use codex_utils_absolute_path::AbsolutePathBuf;
 #[cfg(test)]
 use codex_utils_stream_parser::ProposedPlanSegment;
@@ -1360,7 +1363,7 @@ impl SessionIo {
         } = op.into();
         let sub = Submission {
             id: id.clone(),
-            op,
+            op: op.into(),
             turn_extension_init,
             trace,
             parent_turn_id,
@@ -1390,7 +1393,7 @@ impl SessionIo {
     /// session loop exits before replying, the caller gets `InternalAgentDied`.
     pub(crate) async fn submit_turn_input(
         &self,
-        request: impl Into<WithTurnExtensionData<TurnInputRequest>>,
+        request: impl Into<WithTurnExtensionData<TurnInputRequest<ResolvedUserInput>>>,
         mode: TurnInputMode,
     ) -> CodexResult<TurnInputSubmission> {
         let id = new_submission_id();
@@ -1402,7 +1405,7 @@ impl SessionIo {
         let trace = request.trace.take();
         self.submit_with_id(Box::new(Submission {
             id,
-            op: Op::TurnInput {
+            op: SubmissionOp::TurnInput {
                 request: Box::new(request),
                 mode,
                 reply: reply_tx,
@@ -1433,7 +1436,8 @@ impl SessionIo {
                 thread_settings,
                 start_options,
                 reply: reply_tx,
-            },
+            }
+            .into(),
             trace,
             turn_extension_init,
             parent_turn_id: None,
@@ -4212,20 +4216,21 @@ impl Session {
         assign_missing_item_id(item, &self.item_id_generator);
     }
 
-    pub(crate) fn response_item_from_user_input(&self, input: Vec<UserInput>) -> ResponseItem {
-        self.response_item_from_user_input_with_image_positions(input, &mut HashMap::new())
+    pub(crate) fn response_item_from_user_input(
+        &self,
+        input: &[ResolvedUserInput],
+    ) -> ResponseItem {
+        self.response_item_from_user_input_with_image_positions(input)
+            .0
     }
 
     fn response_item_from_user_input_with_image_positions(
         &self,
-        input: Vec<UserInput>,
-        user_image_content_indices: &mut HashMap<usize, usize>,
-    ) -> ResponseItem {
-        let mut item = ResponseItem::from(ResponseInputItem::from_user_input(
-            input,
-            LocalImagePreparation::Defer,
-            user_image_content_indices,
-        ));
+        input: &[ResolvedUserInput],
+    ) -> (ResponseItem, HashMap<usize, usize>) {
+        let (message, image_positions) =
+            ResolvedUserInput::into_message(input, LocalImagePreparation::Defer);
+        let mut item = ResponseItem::from(message);
         if let ResponseItem::Message {
             content,
             internal_chat_message_metadata_passthrough,
@@ -4254,7 +4259,7 @@ impl Session {
                     ..Default::default()
                 });
         }
-        item
+        (item, image_positions)
     }
 
     /// Appends to history, persists the prepared items, then notifies raw-item observers.
@@ -6240,19 +6245,20 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         model_info: &ModelInfo,
-        input: &[UserInput],
+        input: &[ResolvedUserInput],
         client_id: Option<String>,
         metadata: UserInputMetadata,
         persist_context: PersistContext,
     ) {
-        // Persist the user message to history, but emit the turn item from `UserInput` so
-        // UI-only `text_elements` are preserved. `ResponseItem::Message` does not carry
-        // those spans, and `record_response_item_and_emit_turn_item` would drop them.
-        let mut user_image_content_indices = HashMap::new();
-        let mut response_item = self.response_item_from_user_input_with_image_positions(
-            input.to_vec(),
-            &mut user_image_content_indices,
-        );
+        let display_input = input
+            .iter()
+            .map(ResolvedUserInput::to_user_input)
+            .collect::<Vec<_>>();
+        let mut user_message_item = UserMessageItem::new(&display_input);
+        // Emit full prompt telemetry only for inputs selected for recording.
+        turn_context.session_telemetry.user_prompt(&display_input);
+        let (mut response_item, user_image_content_indices) =
+            self.response_item_from_user_input_with_image_positions(input);
         if let Some(uuid) = metadata.response_item_uuid {
             response_item.set_id(Some(ResponseItemId::for_admitted_user_input(uuid)));
         }
@@ -6281,7 +6287,6 @@ impl Session {
                 }],
             )
             .await;
-        let mut user_message_item = UserMessageItem::new(input);
         apply_prepared_image_file_ids(
             &mut user_message_item,
             &prepared_items,
@@ -6339,15 +6344,6 @@ impl Session {
             return;
         };
         turn_state.lock().await.has_memory_citation = true;
-    }
-
-    pub async fn interrupt_task(self: &Arc<Self>) {
-        info!("interrupt received: abort current task, if any");
-        let had_active_turn = self.active_turn.lock().await.is_some();
-        self.abort_all_tasks(TurnAbortReason::Interrupted).await;
-        if !had_active_turn {
-            self.cancel_mcp_startup();
-        }
     }
 
     pub(crate) fn hooks(&self) -> Arc<Hooks> {

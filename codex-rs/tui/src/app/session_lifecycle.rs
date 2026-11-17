@@ -1642,6 +1642,7 @@ impl App {
             self.drain_outgoing_thread_events(app_server).await;
         }
         self.store_active_thread_receiver().await;
+        self.refresh_transcript_document_links();
         self.reset_transcript_state_after_clear();
         tui.clear_pending_history_lines();
         let presentation = match presentation {
