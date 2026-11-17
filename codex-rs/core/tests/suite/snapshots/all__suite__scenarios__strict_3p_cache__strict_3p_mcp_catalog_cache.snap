@@ -25,7 +25,7 @@ Settings:
           - function/request_user_input_async
         - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=e84a0b97be9ff3b3
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

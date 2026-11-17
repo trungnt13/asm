@@ -7,12 +7,12 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
 ## Window 1
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=ddbdddd4dfaa99df):
+00:additional_tools/developer (2; hash=986c496967009f45):
         - namespace/functions; hash=00038ed0481eceeb
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=e84a0b97be9ff3b3
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents
@@ -55,7 +55,7 @@ Scenario: A parent with no configured environment delegates an API migration, qu
     Run send_message for the API migration.
 -- request 4 (turn) --
 10:function_call/collaboration.send_message:{"message":"Use the new API for the migration.","target":"worker"}
-11:function_call_output:Message accepted. If the recipient is idle and should act now, use followup_task to ask it to act on the message.
+11:function_call_output:
 12:agent_message
 -- request 5 (turn) --
 13:message/user:
@@ -66,12 +66,12 @@ Scenario: A parent with no configured environment delegates an API migration, qu
 
 ## Window 2 (after request 6: input diverged at item 03)
 -- request 7 (turn) --
-00:additional_tools/developer (2; hash=ddbdddd4dfaa99df):
+00:additional_tools/developer (2; hash=986c496967009f45):
         - namespace/functions; hash=00038ed0481eceeb
           - custom/exec
           - function/wait
           - function/request_user_input
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=e84a0b97be9ff3b3
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=dfc7229f861c7bcf
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

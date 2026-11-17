@@ -1,5 +1,6 @@
 ---
 source: tui/src/app/tests.rs
+assertion_line: 4718
 expression: "frames.join(\"\\n\\n\")"
 ---
 100 columns, hidden
@@ -19,7 +20,7 @@ parent-29
                                                                                                Main
 › parent draft
 
-  sol61 def·Main[default]
+  sol62 def·Main[default]
   New activity · esc latest
 
 100 columns, reopened
@@ -36,11 +37,11 @@ parent-28                                                      │
 parent-29                                                      │
                                                                │child-29
                                                                │
-                                                               │                               Side
-› parent draft-                                                │› child draft!
                                                                │
-  sol61 def                                                    │  sol61 def·Agent
-                                                               │  Side from main thread · ⌃/ to swit
+› parent draft-                                                │                               Side
+                                                               │› child draft!
+  sol62 def                                                    │
+                                                               │  sol62 def·Agent
 
 99 columns, reopened
  Side chat           ×                                                                          +
@@ -59,5 +60,5 @@ child-29
                                                                                               Side
 › child draft!
 
-  sol61 def·Agent
-                                               Side from main thread · ⌃/ to switch · ⌃c to close
+  sol62 def·Agent
+  Side from main thread · ⌃/ to switch · ⌃c to close

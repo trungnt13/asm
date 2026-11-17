@@ -734,7 +734,7 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
                                                                                        Main
             › Ask ASM to do anything
 
-              sol61 hig·<PROJECT>
+              sol62 hig·<PROJECT>
               ? for shortcuts
             ");
         }
