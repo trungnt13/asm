@@ -225,6 +225,7 @@ impl ChatWidget {
         &mut self,
         current_email: Option<String>,
         current_workspace: Option<String>,
+        plan_type: PlanType,
     ) {
         if let Some(StatusAccountDisplay::ChatGpt {
             email, workspace, ..
@@ -232,6 +233,9 @@ impl ChatWidget {
         {
             *email = current_email;
             *workspace = current_workspace;
+            self.account_plan = Some(plan_type);
+            self.refresh_billing_plan();
+            self.refresh_status_surfaces();
         }
     }
 
@@ -289,6 +293,8 @@ impl ChatWidget {
         self.status_line_workspace_messages_disabled = false;
         self.clear_thread_usage_state();
         self.status_account_display = status_account_display;
+        self.account_plan = plan_type;
+        self.quota_plan = None;
         self.plan_type = plan_type;
         self.has_chatgpt_account = has_chatgpt_account;
         if api_key_changed {

@@ -8,6 +8,7 @@ mod multi_environment_mcp;
 
 use super::image_rollout::RecordingFileAttachmentStore;
 use codex_attachment_store::AttachmentStoreErrorKind;
+use codex_attachment_store::UploadContent;
 use codex_core::RequestCountry;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -236,6 +237,9 @@ mod frozen_cloud_skills;
 
 #[path = "scenarios_compaction_tests.rs"]
 mod compaction;
+
+#[path = "scenarios_statusline_authoring_tests.rs"]
+mod statusline_authoring;
 
 #[path = "scenarios_budget_context.rs"]
 mod budget_context;

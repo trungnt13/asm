@@ -5900,6 +5900,7 @@
             },
             "global": {
               "change_host": null,
+              "choose_cloud_environment": null,
               "clear_terminal": null,
               "close_sidebar_tab": null,
               "copy": null,
@@ -6755,6 +6756,14 @@
           ],
           "description": "Change where a new conversation runs."
         },
+        "choose_cloud_environment": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Choose a saved environment for a new Cloud conversation."
+        },
         "clear_terminal": {
           "allOf": [
             {
@@ -7126,6 +7135,7 @@
           ],
           "default": {
             "change_host": null,
+            "choose_cloud_environment": null,
             "clear_terminal": null,
             "close_sidebar_tab": null,
             "copy": null,

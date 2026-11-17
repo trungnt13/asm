@@ -23,7 +23,7 @@ async fn owned_thread_switch_preserves_frame_until_current_history_finishes() ->
     app.active_thread_id = Some(next_thread);
     app.render_thread_snapshot(
         &mut tui,
-        &server,
+        &mut server,
         next_thread,
         ThreadEventSnapshot {
             output_tps: None,
@@ -49,7 +49,8 @@ async fn owned_thread_switch_preserves_frame_until_current_history_finishes() ->
             input_state: None,
         },
         /*resume_restored_queue*/ false,
-    )?;
+    )
+    .await?;
     assert!(app.awaiting_thread_switch_replay(&tui));
     let mut finished = false;
     while let Ok(event) = events.try_recv() {

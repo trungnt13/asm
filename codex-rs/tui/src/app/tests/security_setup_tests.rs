@@ -131,6 +131,7 @@ async fn security_setup_disabled_preserves_account_email_and_backend_banners() -
                 request_id: uuid::Uuid::new_v4(),
                 email: Some("stale@example.com".into()),
                 workspace: Some("stale-account".into()),
+                plan_type: codex_protocol::account::PlanType::Plus,
             },
         )
         .await?;

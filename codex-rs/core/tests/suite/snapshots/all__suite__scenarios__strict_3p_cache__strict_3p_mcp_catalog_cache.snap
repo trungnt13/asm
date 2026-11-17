@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_strict_3p_cache.rs
+assertion_line: 194
 expression: snapshot
 ---
 Scenario: Strict Code Mode Only: MCP config changes between turns, with omit-all and namespace skips. Exec calls the live catalog. One window means the captured prefix stayed stable. The execution environment remains running.
@@ -22,9 +23,9 @@ Settings:
           - function/wait
           - function/request_user_input
           - function/request_user_input_async
-        - namespace/clock: Tools for reading and waiting on time.; hash=1f83c2a5a3e13e0c
+        - namespace/clock: Tools for reading and waiting on time.; hash=7c9fa8bed22f77c8
           - function/sleep
-        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=df5b289e78e89efa
+        - namespace/collaboration: Tools for spawning and managing sub-agents.; hash=e84a0b97be9ff3b3
           - function/followup_task
           - function/interrupt_agent
           - function/list_agents

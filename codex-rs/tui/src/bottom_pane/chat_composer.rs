@@ -18,8 +18,8 @@
 //! loss cancels the pending paste; a late clipboard result cannot overwrite newer input.
 //! The live voice strip renders after effort ignition, followed by the Astra sparkle when eligible.
 //! Owned transcripts keep persistent status below the composer and hints on a separate final row.
-//! Shortcut help expands above the composer, with its close hint replacing the final shortcuts row
-//! so input and persistent status stay anchored when help opens or closes.
+//! Shortcut help opens a grouped action list above the composer and can switch to a keyboard.
+//! Its close hint replaces the final shortcuts row so input and persistent status stay anchored.
 //! Escape dismisses visible shortcut help before editing, transcript backtracking, or interruption.
 //! Fullscreen limits the composer height; wheel browsing preserves the caret until editor input.
 //! Transcript interactions borrow the hint footer through `ComposerRenderOptions`;
@@ -866,6 +866,9 @@ impl ChatComposer {
                 queue_key: default_keymap.primary_hint(KeymapContext::Composer, "queue"),
                 toggle_shortcuts_key: default_keymap
                     .primary_hint(KeymapContext::Composer, "toggle_shortcuts"),
+                shortcut_guide_keys: super::shortcut_overlay::ShortcutGuideKeys::from_keymap(
+                    &default_keymap,
+                ),
                 history_search_key: default_keymap
                     .primary_hint(KeymapContext::Composer, "history_search_previous"),
                 reasoning_down_key: default_keymap
@@ -1173,6 +1176,8 @@ impl ChatComposer {
         self.footer.queue_key = keymap.primary_hint(KeymapContext::Composer, "queue");
         self.footer.toggle_shortcuts_key =
             keymap.primary_hint(KeymapContext::Composer, "toggle_shortcuts");
+        self.footer.shortcut_guide_keys =
+            super::shortcut_overlay::ShortcutGuideKeys::from_keymap(keymap);
         self.footer.history_search_key =
             keymap.primary_hint(KeymapContext::Composer, "history_search_previous");
         self.footer.reasoning_down_key =
@@ -4153,7 +4158,7 @@ impl ChatComposer {
             .remove_deleted_local_placeholders(&removed_payloads, &mut self.draft.textarea);
     }
 
-    /// Handle empty-prompt agents navigation and shortcut-overlay toggling or dismissal.
+    /// Handle empty-prompt agents navigation and shortcut guide toggling or dismissal.
     ///
     /// This only toggles when the composer is empty and no paste burst is in
     /// progress, so typing/pasting `?` still inserts text instead of opening
@@ -6966,7 +6971,7 @@ mod tests {
             composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         assert_eq!(result, InputResult::None);
         assert!(needs_redraw, "toggling overlay should request redraw");
-        assert_eq!(composer.footer.mode, FooterMode::ShortcutOverlay);
+        assert!(composer.shortcut_overlay_visible());
 
         // Toggle back to prompt mode so subsequent typing captures characters.
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
@@ -7007,7 +7012,7 @@ mod tests {
             composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT));
         assert_eq!(result, InputResult::None);
         assert!(needs_redraw, "toggling overlay should request redraw");
-        assert_eq!(composer.footer.mode, FooterMode::ShortcutOverlay);
+        assert!(composer.shortcut_overlay_visible());
     }
 
     /// Behavior: while a paste-like burst is being captured, `?` must not toggle the shortcut
@@ -7043,7 +7048,7 @@ mod tests {
         let _ = flush_after_paste_burst(&mut composer);
 
         assert_eq!(composer.draft.textarea.text(), "hi?there");
-        assert_ne!(composer.footer.mode, FooterMode::ShortcutOverlay);
+        assert!(!composer.shortcut_overlay_visible());
     }
 
     #[test]
@@ -8324,12 +8329,11 @@ mod tests {
         );
 
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
-        assert_eq!(composer.footer.mode, FooterMode::ShortcutOverlay);
+        assert!(composer.shortcut_overlay_visible());
 
         composer.set_task_running(/*running*/ true);
 
-        assert_eq!(composer.footer.mode, FooterMode::ShortcutOverlay);
-        assert_eq!(composer.footer_mode(), FooterMode::ShortcutOverlay);
+        assert!(composer.shortcut_overlay_visible());
     }
 
     #[test]
