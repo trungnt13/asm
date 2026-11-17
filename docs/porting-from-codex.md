@@ -176,7 +176,7 @@ Last incorporated commit: `77873dd0d284aeba7ce849b995b28ee8f4498d73`, 2026-11-16
 
 ## Platforms and CI
 
-Focus on macOS and Linux (Ubuntu). Do not add other platforms to fork CI/releases. Preserve other inherited code/workflows unless removal is requested. Other inherited workflow changes need approval. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs; expensive builds depend on relevant changes. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
+Support Apple Silicon macOS (`aarch64-apple-darwin`) and Linux (Ubuntu). Intel macOS (`x86_64-apple-darwin`) is outside this fork's supported, validation, and release scope; do not add or require Intel macOS CI jobs or release artifacts. Preserve inherited Intel-compatible source without promising support. Do not add other platforms to fork CI/releases. Preserve other inherited code/workflows unless removal is requested. Other inherited workflow changes need approval. Inspect triggers: [V8 canary](../.github/workflows/v8-canary.yml) runs on PRs; expensive builds depend on relevant changes. [CLA](../.github/workflows/cla.yml) restricts its job to `openai`.
 
 Use standard GitHub-hosted runners; paid larger runners need explicit approval. V8 canary Apple Silicon variants use `macos-15` and two Bazel jobs for runner memory.
 
