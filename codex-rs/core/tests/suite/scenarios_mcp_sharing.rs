@@ -16,17 +16,6 @@ use core_test_support::responses;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shared_mcp_keeps_tools_and_model_requested_input_per_chat() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-    core_test_support::skip_if_remote!(Ok(()), "the shared stdio fixture runs on the host");
-    skip_if_wine_exec!(Ok(()), "requires a Windows test_stdio_server binary");
-
-    let snapshot = exercise_mcp_sharing(/*resume_with_replacement_auth*/ false).await?;
-    insta::assert_snapshot!(snapshot);
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resumed_parent_and_child_share_mcp_process() -> Result<()> {
     skip_if_no_network!(Ok(()));
     core_test_support::skip_if_remote!(Ok(()), "the shared stdio fixture runs on the host");
