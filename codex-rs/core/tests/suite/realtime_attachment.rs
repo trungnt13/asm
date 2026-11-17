@@ -441,6 +441,7 @@ async fn cancelled_attachments_release_the_queue_and_preserve_the_next_call() ->
             options: RealtimeAttachmentOptions {
                 cancel: Some(cancellation),
                 start_before: None,
+                ..Default::default()
             },
         })
         .await?;
@@ -457,6 +458,7 @@ async fn cancelled_attachments_release_the_queue_and_preserve_the_next_call() ->
             options: RealtimeAttachmentOptions {
                 cancel: Some(cancellation),
                 start_before: None,
+                ..Default::default()
             },
         })
         .await?;
@@ -469,6 +471,7 @@ async fn cancelled_attachments_release_the_queue_and_preserve_the_next_call() ->
             options: RealtimeAttachmentOptions {
                 cancel: Some(cancellation),
                 start_before: Some(SystemTime::now() - Duration::from_secs(1)),
+                ..Default::default()
             },
         })
         .await?;
@@ -481,6 +484,7 @@ async fn cancelled_attachments_release_the_queue_and_preserve_the_next_call() ->
             options: RealtimeAttachmentOptions {
                 cancel: Some(cancellation),
                 start_before: None,
+                ..Default::default()
             },
         })
         .await?;
@@ -559,6 +563,7 @@ async fn attachment_deadline_releases_a_pending_handshake() -> Result<()> {
             options: RealtimeAttachmentOptions {
                 cancel: None,
                 start_before: Some(SystemTime::now() + Duration::from_secs(60)),
+                ..Default::default()
             },
         })
         .await?;
