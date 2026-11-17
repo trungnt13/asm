@@ -92,6 +92,7 @@ use codex_http_client::OutboundProxyPolicy;
 use codex_login::AuthManagerConfig;
 use codex_login::AuthRouteConfig;
 use codex_mcp::DEFAULT_OPTIONAL_MCP_STARTUP_GRACE;
+use codex_mcp::McpClientConfig;
 use codex_mcp::McpConfig;
 use codex_mcp::McpPluginAttribution;
 use codex_mcp::McpProtocolMode;
@@ -142,6 +143,7 @@ use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_rmcp_client::McpOAuthRefreshMode;
+use codex_rollout_trace::TraceCaptureLimits;
 use codex_sandboxing::SandboxType;
 pub use codex_thread_store::ExtraConfig;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -1081,6 +1083,9 @@ pub struct Config {
     /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
     pub history: History,
 
+    /// Limits shared by all threads recording into one native rollout trace.
+    pub rollout_trace_limits: TraceCaptureLimits,
+
     /// When true, session is not persisted on disk. Default to `false`
     pub ephemeral: bool,
 
@@ -1516,6 +1521,7 @@ pub struct MultiAgentV2Config {
     pub expose_spawn_agent_model_overrides: bool,
     pub subagent_model_list: Option<Vec<String>>,
     pub wait_agent_enabled: bool,
+    pub interrupt_at_item_boundary: bool,
     pub disable_native_tools: bool,
     pub disable_direct_message: bool,
     pub message_board_in_memory: bool,
@@ -1541,6 +1547,7 @@ impl MultiAgentV2Config {
             expose_spawn_agent_model_overrides: true,
             subagent_model_list: None,
             wait_agent_enabled: true,
+            interrupt_at_item_boundary: false,
             disable_native_tools: false,
             disable_direct_message: false,
             message_board_in_memory: false,
@@ -2107,9 +2114,23 @@ impl Config {
         }
 
         McpConfig {
-            chatgpt_base_url: self.chatgpt_base_url.clone(),
+            client: McpClientConfig {
+                chatgpt_base_url: self.chatgpt_base_url.clone(),
+                requires_read_only_mcp_tools: false,
+                protocol_mode: self.mcp_protocol_mode(),
+                discover_local_stdio: self.features.enabled(Feature::McpConnectionSharing),
+                mcp_tool_list_changed: self.features.enabled(Feature::McpToolListChanged),
+                client_elicitation_capability: if self.features.enabled(Feature::AuthElicitation) {
+                    ElicitationCapability::new()
+                        .with_form(FormElicitationCapability::new())
+                        .with_url(UrlElicitationCapability::new())
+                } else {
+                    // https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation#capabilities
+                    // indicates this should be an empty object.
+                    ElicitationCapability::default()
+                },
+            },
             apps_mcp_product_sku: self.apps_mcp_product_sku.clone(),
-            requires_read_only_mcp_tools: false,
             codex_home: self.codex_home.to_path_buf(),
             mcp_enterprise_managed_auth: self.mcp_enterprise_managed_auth.clone(),
             ema_state: Default::default(),
@@ -2117,7 +2138,6 @@ impl Config {
             xaa_enabled: self.features.enabled(Feature::UseXaa)
                 && self.mcp_enterprise_managed_auth.is_some(),
             mcp_oauth_credentials_store_mode: self.mcp_oauth_credentials_store_mode,
-            mcp_tool_list_changed: self.features.enabled(Feature::McpToolListChanged),
             oauth_refresh_mode: if self.features.enabled(Feature::McpOAuthRefreshCoordination) {
                 McpOAuthRefreshMode::Coordinated
             } else {
@@ -2157,21 +2177,10 @@ impl Config {
             } else {
                 Vec::new()
             },
-            protocol_mode: self.mcp_protocol_mode(),
-            discover_local_stdio: self.features.enabled(Feature::McpConnectionSharing),
             host_owned_apps_protocol_mode: if self.features.enabled(Feature::CodexAppsMcp20260728) {
                 McpProtocolMode::V20260728
             } else {
                 McpProtocolMode::Legacy
-            },
-            client_elicitation_capability: if self.features.enabled(Feature::AuthElicitation) {
-                ElicitationCapability::new()
-                    .with_form(FormElicitationCapability::new())
-                    .with_url(UrlElicitationCapability::new())
-            } else {
-                // https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation#capabilities
-                // indicates this should be an empty object.
-                ElicitationCapability::default()
             },
             mcp_server_catalog: catalog.build(),
             connector_snapshot:
@@ -3033,6 +3042,9 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
     let wait_agent_enabled = base
         .and_then(|config| config.wait_agent_enabled)
         .unwrap_or(default.wait_agent_enabled);
+    let interrupt_at_item_boundary = base
+        .and_then(|config| config.interrupt_at_item_boundary)
+        .unwrap_or(default.interrupt_at_item_boundary);
     let disable_native_tools = base
         .and_then(|config| config.disable_native_tools)
         .unwrap_or(default.disable_native_tools);
@@ -3076,6 +3088,7 @@ fn resolve_multi_agent_v2_config(config_toml: &ConfigToml) -> MultiAgentV2Config
         expose_spawn_agent_model_overrides,
         subagent_model_list: config_toml.subagent_model_list.clone(),
         wait_agent_enabled,
+        interrupt_at_item_boundary,
         disable_native_tools,
         disable_direct_message,
         message_board_in_memory,
@@ -4264,6 +4277,12 @@ impl Config {
         let allow_login_shell = cfg.allow_login_shell.unwrap_or(true);
 
         let history = cfg.history.unwrap_or_default();
+        let rollout_trace = cfg.rollout_trace.unwrap_or_default();
+        let defaults = TraceCaptureLimits::default();
+        let rollout_trace_limits = TraceCaptureLimits {
+            max_payload_bytes: rollout_trace.max_payload_bytes.unwrap_or(defaults.max_payload_bytes),
+            max_bytes: rollout_trace.max_bytes.unwrap_or(defaults.max_bytes),
+        };
 
         if multi_agent_v2.max_concurrent_threads_per_session == 0 {
             return Err(std::io::Error::new(
@@ -4918,6 +4937,7 @@ impl Config {
             application_network_policy: Default::default(),
             application_auth_route_config: None,
             history,
+            rollout_trace_limits,
             ephemeral: ephemeral.unwrap_or_default(),
             allow_persistent_dynamic_tool_updates: false,
             extra_config: None,

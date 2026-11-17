@@ -560,7 +560,7 @@ async fn cloud_resume_picker_reconciles_admitted_steers() -> Result<()> {
             .iter()
             .flat_map(|cell| cell.display_lines(/*width*/ 80))
             .map(|line| line.to_string())
-            .filter(|line| line.contains("response"))
+            .filter(|line| line.starts_with("• ") && line.contains("response"))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -6189,7 +6189,7 @@ fn fresh_session_keeps_its_name_and_draft_when_cycling_backends() -> Result<()> 
                         toml::from_str(&std::fs::read_to_string(&preference_path)?)?;
                     Ok(saved["tui"]["default_hosts"].clone().try_into()?)
                 };
-                assert!(app.can_cycle_conversation_backend());
+                assert!(app.backend_draft().is_some());
                 app.start_new_session_on_other_backend(
                     &mut tui,
                     &mut backends,

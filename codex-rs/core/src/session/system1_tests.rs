@@ -6,7 +6,7 @@ use crate::state::TaskKind;
 use codex_features::Feature;
 use codex_http_client::HttpClient;
 use codex_login::CodexAuth;
-use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 use serde_json::Value;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
@@ -223,7 +223,7 @@ async fn system1_fixture(
 
 fn user_task(text: &str) -> Vec<TurnInput> {
     vec![TurnInput::UserInput {
-        content: vec![UserInput::Text {
+        content: vec![ResolvedUserInput::Text {
             text: text.to_string(),
             text_elements: Vec::new(),
         }],

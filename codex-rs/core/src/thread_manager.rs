@@ -160,6 +160,7 @@ type AgentControlFactory =
 fn capture_test_op(op: &Op) -> Option<Op> {
     match op {
         Op::Interrupt => Some(Op::Interrupt),
+        Op::InterruptAgent => Some(Op::InterruptAgent),
         Op::InterAgentCommunication {
             communication,
             start_options,
@@ -1032,6 +1033,10 @@ impl ThreadManager {
 
     pub fn image_store(&self) -> Arc<dyn AttachmentStore> {
         Arc::clone(&self.state.image_store)
+    }
+
+    pub fn thread_store(&self) -> Arc<dyn ThreadStore> {
+        Arc::clone(&self.state.thread_store)
     }
 
     /// Starts the local rollout migration path after a runtime feature enablement.
@@ -2664,11 +2669,13 @@ impl ThreadManagerState {
         let inherited_environments = captured_environments.or(inherited_environments);
         let session_source = session_source.unwrap_or_else(|| self.session_source.clone());
         if thread_extension_init.get::<InheritedSessionId>().is_some()
-            && (!matches!(&initial_history, InitialHistory::New)
-                || session_source.is_non_root_agent())
+            && (!matches!(
+                &initial_history,
+                InitialHistory::New | InitialHistory::Forked(_)
+            ) || session_source.is_non_root_agent())
         {
             return Err(CodexErr::InvalidRequest(
-                "an inherited agent session ID requires a fresh thread started directly by the host"
+                "an inherited agent session ID requires a new or forked thread started directly by the host"
                     .to_string(),
             ));
         }

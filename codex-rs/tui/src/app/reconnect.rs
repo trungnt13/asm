@@ -355,7 +355,7 @@ impl App {
         search_dir: PathBuf,
     ) {
         self.chat_widget.snapshot_local_images = self.app_server_target.uses_remote_workspace();
-        self.chat_widget.thread_settings_owner = app_server.thread_params_mode().settings_owner();
+        self.chat_widget.thread_params_mode = app_server.thread_params_mode();
         self.chat_widget.pending_cloud_turn_settings = app_server.pending_cloud_turn_settings();
         self.chat_widget.set_local_worktree_operations(
             !crate::uses_remote_workspace_or_environment(
@@ -414,6 +414,15 @@ impl App {
         self.app_event_tx = AppEventSender::new(tx);
         self.app_server_backend_id = Some(session.backend_id());
         *app_event_rx = rx;
+        for pane in self.sidebars.values_mut() {
+            pane.focus_document_request = None;
+            for doc in pane.documents.values_mut() {
+                doc.connection_replaced();
+            }
+            if let Some(files) = &mut pane.files {
+                files.connection_replaced();
+            }
+        }
         // The old timer targets the discarded channel, so a new preview can be scheduled.
         self.config_notification_test_pending = None;
         {

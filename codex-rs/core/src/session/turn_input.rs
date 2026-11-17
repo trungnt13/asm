@@ -51,12 +51,12 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::turn_input::AnnotatedResponseItem;
 use codex_protocol::turn_input::NotSubmittedReason;
 use codex_protocol::turn_input::ResponsesApiClientMetadataUpdate;
-use codex_protocol::turn_input::TurnInput as SubmittedTurnInput;
+type SubmittedTurnInput = codex_protocol::turn_input::TurnInput<ResolvedUserInput>;
 use codex_protocol::turn_input::TurnInputMode;
-use codex_protocol::turn_input::TurnInputRequest;
+type TurnInputRequest = codex_protocol::turn_input::TurnInputRequest<ResolvedUserInput>;
 use codex_protocol::turn_input::TurnInputSubmission;
 use codex_protocol::turn_input::TurnStartOptions;
-use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -512,7 +512,7 @@ async fn start_or_steer(
             };
             turn_context
                 .turn_metadata_state
-                .update_responsesapi_client_metadata(responsesapi_client_metadata);
+                .apply_start_responsesapi_client_metadata(responsesapi_client_metadata);
             session
                 .maybe_emit_model_warnings_for_turn(turn_context.as_ref())
                 .await;
@@ -670,7 +670,7 @@ async fn start_if_idle(
     };
     turn_context
         .turn_metadata_state
-        .update_responsesapi_client_metadata(responsesapi_client_metadata);
+        .apply_start_responsesapi_client_metadata(responsesapi_client_metadata);
     session
         .maybe_emit_model_warnings_for_turn(turn_context.as_ref())
         .await;
@@ -937,14 +937,12 @@ impl Session {
         let submission_id = Uuid::now_v7().to_string();
         let submission = handle(
             self,
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text,
-                text_elements: Vec::new(),
-            }])
-            .on_start(TurnStartOptions {
-                turn_trigger: Some("realtime".to_string()),
-                ..Default::default()
-            }),
+            TurnInputRequest::user_input(vec![ResolvedUserInput::text(text)]).on_start(
+                TurnStartOptions {
+                    turn_trigger: Some("realtime".to_string()),
+                    ..Default::default()
+                },
+            ),
             TurnInputMode::StartOrSteer,
             submission_id.clone(),
         )
@@ -1017,7 +1015,26 @@ impl Session {
         responsesapi_client_metadata: ResponsesApiClientMetadataUpdate,
         input_metadata: UserInputMetadata,
     ) -> Result<(String, String), NotSubmittedReason> {
-        let mut active = self.active_turn.lock().await;
+        let mut active = loop {
+            let active = self.active_turn.lock().await;
+            let Some(interrupt) = active
+                .as_ref()
+                .and_then(|turn| turn.sampling_interrupt.as_ref())
+                .filter(|interrupt| interrupt.is_requested())
+            else {
+                break active;
+            };
+            if expected_turn_id.is_some() {
+                return Err(NotSubmittedReason::NoActiveTurn);
+            }
+            // Start-or-steer can open a new turn once the old terminal event is published.
+            let finished = interrupt.finished.clone();
+            drop(active);
+            tokio::select! {
+                () = finished.cancelled() => {}
+                () = self.services.local_agent_runtime.shutdown.cancelled() => return Err(NotSubmittedReason::ServerDraining),
+            }
+        };
         let Some(active_turn) = active.as_mut() else {
             return Err(NotSubmittedReason::NoActiveTurn);
         };

@@ -49,6 +49,10 @@ pub(crate) fn hide_link_destination(destination: &str) -> bool {
     web_destination(destination).is_some() || super::local_links::is_markdown_file_link(destination)
 }
 
+pub(crate) fn hide_web_link_destination(destination: &str) -> bool {
+    hide_link_destination(destination)
+}
+
 #[cfg(test)]
 #[path = "web_links_tests.rs"]
 mod tests;

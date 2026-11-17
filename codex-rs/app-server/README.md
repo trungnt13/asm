@@ -1,19 +1,23 @@
-# Managed human command checkpoints (experimental)
+# Managed human command checkpoints
 
-A matching managed `requirements.toml` prefix rule with `decision = "prompt-user"`
-requires a fresh human decision, including when the thread uses automatic review.
-Prefix matching, exact-path precedence, and executable mappings stay unchanged. Clients
-supporting this workflow must initialize with `experimentalApi: true` and
-`requiredHumanApproval: true`.
+Managed `requirements.toml` prefix rules with `decision = "prompt-user"` are stable
+in the interactive Codex CLI. A matching command requires a fresh human decision
+before it can run, including when automatic review is enabled. Session and persistent
+approvals cannot satisfy the checkpoint. Rules follow the usual command prefix matching
+semantics, including exact-path precedence and executable mappings.
+
+## App-server integration (experimental)
+
+App-server clients supporting this workflow must initialize with `experimentalApi: true`
+and `requiredHumanApproval: true`.
 
 The server sends `item/commandExecution/requestApproval` with `kind: "humanCommand"`,
 a unique `approvalId`, and the command to display. Only `accept`, `decline`, and
-`cancel` are valid responses. Session and persistent approvals cannot satisfy the
-checkpoint. Only capable clients receive or answer these requests. Pending prompts
-use the normal approval replay flow when a capable client reconnects. With no capable
-connection when approval is requested, the command is rejected. The prompt itself
-does not start an execution item; normal command execution events report execution
-after approval.
+`cancel` are valid responses. Only capable clients receive or answer these requests.
+Pending prompts use the normal approval replay flow when a capable client reconnects.
+With no capable connection when approval is requested, the command is rejected.
+Once an approved command starts, normal command execution events report its
+execution item.
 
 # Thread memory summary (experimental)
 
@@ -107,12 +111,12 @@ exact revision match, and both conflicts return `-32600` with
 Do not blindly retry: the original action may precede an unseen result or
 another window's mark. Unavailable threads fail; writes never change recency.
 
-Started, resumed or forked threads send `thread/readState/changed` alongside
-ordinary thread events; thread/unsubscribe or disconnect stops delivery.
-Clients can filter this method with the existing notification opt-out setting.
+The server broadcasts `thread/readState/changed` to initialized experimental clients
+whenever a durable receipt changes, including for chats they have not opened. Clients can
+ignore irrelevant thread IDs or suppress the method with `optOutNotificationMethods`.
 Revisions are equality tokens, not clocks: never compare or merge them across
 threads or hosts. When concurrent responses disagree, refresh with `thread/read`.
-Offscreen threads converge on page refresh.
+Refresh the list after reconnecting to recover changes missed while disconnected.
 
 # Guardian circuit-breaker errors
 

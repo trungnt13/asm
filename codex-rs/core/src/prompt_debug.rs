@@ -13,6 +13,7 @@ use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::user_input::UserInput;
+use codex_user_input::ResolvedUserInput;
 use serde::Serialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -39,6 +40,7 @@ pub async fn build_prompt_input(
     extensions: Arc<ExtensionRegistry<Config>>,
     user_instructions_provider: Arc<dyn UserInstructionsProvider>,
 ) -> CodexResult<Vec<ResponseItem>> {
+    let input = crate::codex_thread::resolve_client_inputs(input).await?;
     config.ephemeral = true;
 
     let auth_manager =
@@ -115,6 +117,7 @@ pub async fn build_prompt_request_from_thread(
     input: Vec<UserInput>,
     output_schema: Option<Value>,
 ) -> CodexResult<PromptRequestAudit> {
+    let input = crate::codex_thread::resolve_client_inputs(input).await?;
     let sess = &thread.session;
     let (mut prompt, step_context) = prepare_debug_prompt(sess, input).await?;
     prompt.base_instructions = sess.get_prompt_base_instructions().await;
@@ -148,7 +151,7 @@ pub async fn build_prompt_request_from_thread(
 #[tracing::instrument(skip_all)]
 async fn prepare_debug_prompt(
     sess: &Arc<Session>,
-    input: Vec<UserInput>,
+    input: Vec<ResolvedUserInput>,
 ) -> CodexResult<(Prompt, Arc<StepContext>)> {
     let turn_context = sess.new_default_turn().await;
     // Prompt debugging builds a standalone request without entering run_turn.
@@ -159,7 +162,7 @@ async fn prepare_debug_prompt(
         .await?;
 
     if !input.is_empty() {
-        let response_item = sess.response_item_from_user_input(input);
+        let response_item = sess.response_item_from_user_input(&input);
         sess.record_conversation_items(
             turn_context.as_ref(),
             &step_context.settings.model_info,

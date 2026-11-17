@@ -27,7 +27,7 @@ fn message(
 fn basic_evidence_includes_task_and_conversation_history() {
     // Basic: retain the original task, steering, and readable user/assistant/tool history.
     let input = |text: &str| TurnInput::UserInput {
-        content: vec![UserInput::Text {
+        content: vec![ResolvedUserInput::Text {
             text: text.to_string(),
             text_elements: Vec::new(),
         }],
@@ -92,7 +92,7 @@ fn basic_evidence_includes_task_and_conversation_history() {
 fn basic_evidence_respects_configured_context_budget() {
     // Basic: the configured budget bounds Unicode text and reaches older genuine history.
     let input = TurnInput::UserInput {
-        content: vec![UserInput::Text {
+        content: vec![ResolvedUserInput::Text {
             text: "界".repeat(/*n*/ 32768),
             text_elements: Vec::new(),
         }],

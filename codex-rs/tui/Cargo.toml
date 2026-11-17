@@ -69,6 +69,7 @@ codex-tools = { workspace = true }
 codex-worktree = { workspace = true }
 codex-utils-approval-presets = { workspace = true }
 codex-uds = { workspace = true }
+codex-user-input = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-cli = { workspace = true }
 codex-utils-elapsed = { workspace = true }
@@ -131,6 +132,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 syntect = { version = "5", default-features = false, features = ["parsing", "plist-load", "regex-onig"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
+unicode-bidi = { workspace = true }
 unicode-linebreak = { workspace = true }
 unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
