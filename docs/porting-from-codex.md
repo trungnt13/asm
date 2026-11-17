@@ -132,6 +132,9 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For the sync through `bc2c328483ee60e82e08ad48f3a5efbb5712f914`, the owner accepted the unchanged stock cold-history limitation for this target only. Fresh ASM cold timeline/search/turn/item reads pass. Independent stock alpha.11 finds the thread through search but returns empty cold reads; resume and reopened warm reads restore exact items and saved permissions without changing canonical bytes. This is not a stock runtime build of this target or proof of Desktop rendering.
+
+
 For the sync through `595f497f15a3e3239a62f6b99cf61067df00f0d0`, the owner accepted the unchanged stock cold-history limitation for this sync only. Fresh isolated checks passed ASM cold timeline, search, turn, and item reads. The independent stock reader found the thread through search but returned empty cold timeline, turns, and items; resume and reopening restored exact saved items and permissions without changing canonical history. This does not establish Desktop rendering or a runtime result from a stock build of this exact target.
 
 
@@ -175,7 +178,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `595f497f15a3e3239a62f6b99cf61067df00f0d0`, 2026-11-17. Subject: Stop masking system SSH configuration drop-ins in Linux sandboxes (#62058).
+Last incorporated commit: `bc2c328483ee60e82e08ad48f3a5efbb5712f914`, 2026-11-17. Subject: Append transcript provenance to Guardian JSON instructions (#62090).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
