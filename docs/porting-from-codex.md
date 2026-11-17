@@ -132,6 +132,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 
 #### Known upstream cold-history limitation
 
+For the sync through `b8f6787e95a5006d91bc712f59d72af32ef9b205`, the owner accepted the unchanged stock cold-history limitation for this target only. ASM passes cold timeline, search, turn and item reads. The independent stock reader finds the thread through search but returns empty cold reads; resume and reopened warm reads restore exact items and permissions without changing canonical bytes.
+
 For the sync through `8fca6ffb92a602875a0b97e3e535eb48375bdd8c`, the owner accepted the unchanged stock cold-history limitation for this target only. Fresh ASM cold timeline, search, turn and item reads pass. Independent stock alpha.11 finds the thread through search but returns empty cold reads; resume and reopened warm reads restore exact saved items and permissions without changing canonical bytes. This does not verify a stock build of this commit or Desktop rendering.
 
 For the sync through `bc2c328483ee60e82e08ad48f3a5efbb5712f914`, the owner accepted the unchanged stock cold-history limitation for this target only. Fresh ASM cold timeline/search/turn/item reads pass. Independent stock alpha.11 finds the thread through search but returns empty cold reads; resume and reopened warm reads restore exact items and saved permissions without changing canonical bytes. This is not a stock runtime build of this target or proof of Desktop rendering.
@@ -180,7 +182,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `8fca6ffb92a602875a0b97e3e535eb48375bdd8c`, 2026-11-17. Subject: Support OTel header helpers in local managed requirements (#62110).
+Last incorporated commit: `b8f6787e95a5006d91bc712f59d72af32ef9b205`, 2026-11-17. Subject: Stabilize TUI startup tests and strengthen daemon recovery coverage (#62116).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
