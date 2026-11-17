@@ -68,6 +68,7 @@ def main():
     report = {
         "manifest": manifest,
         "consumer_rustc": version,
+        "consumer_settings": {"lto": "thin", "codegen_units": 4, "cargo_jobs": 1},
         "indexed_format_validation": validation,
         "coverage_validation": "Inspect compiler missing/mismatched-profile diagnostics and candidate acceptance; readable format alone does not prove useful coverage.",
     }
@@ -82,7 +83,7 @@ def main():
                 f"RUSTFLAGS={flags} -Cprofile-use={profile} -Cllvm-args=-pgo-warn-missing-function\n"
             )
             output.write(
-                "CARGO_PROFILE_RELEASE_LTO=fat\nCARGO_PROFILE_RELEASE_CODEGEN_UNITS=1\nCARGO_BUILD_JOBS=1\n"
+                "CARGO_PROFILE_RELEASE_LTO=thin\nCARGO_PROFILE_RELEASE_CODEGEN_UNITS=4\nCARGO_BUILD_JOBS=1\n"
             )
     return 0
 

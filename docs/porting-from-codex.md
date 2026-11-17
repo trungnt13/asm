@@ -894,7 +894,7 @@ Reject explicitly untrusted chat/source projects; allow unset trust, like TUI. R
 
 Fork Linux GNU release builds consume `.github/pgo/agent-linux.json` through
 `setup-release-pgo.py`. macOS retains its existing non-PGO settings. Ordinary
-Cargo profiles remain unchanged. Linux uses fat LTO, one codegen unit and one
+Cargo profiles remain unchanged. Linux uses Thin LTO, four codegen units and one
 Cargo job; Bubblewrap is built separately without PGO. The indexed profile is a
 checksum-pinned release dependency, not a CLI release. CI never needs model auth
 or training conversations. Never publish private training homes or credentials.
@@ -913,7 +913,12 @@ and real tools/streaming. Per-session peaks were 4/3/2; global child peak was 8.
 It is a bounded coding fixture, not exhaustive production coverage. Its original
 fat-LTO build used about 30 GiB sampled PSS. Standard Linux runners therefore
 use explicit swap and disk checks; only an actual successful Actions run proves
-runner feasibility. Keep diagnostics and do not infer a latency win from PGO.
+runner feasibility. The first fat-LTO/1 free-runner build timed out after 330
+minutes with sustained memory pressure and about 22 GiB swap in use. Linux
+therefore keeps Thin-LTO/4 while consuming the selected profile; training
+settings remain provenance, not the consuming build configuration. Validate
+profile matching and the actual candidate after this change. Keep diagnostics
+and do not infer a latency win from PGO.
 
 `scripts/pgo/train.py` preserves the source home's feature configuration in
 private copies, selects a cheap model, disables System1 and runs the bounded

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_OS:-}" == Linux ]] || { echo 'Only run on an ephemeral Linux Actions runner' >&2; exit 1; }
+[[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_OS:-}" == Linux && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]] || { echo 'Only run on an ephemeral Linux Actions runner' >&2; exit 1; }
 # These preinstalled SDKs are unused by the native GNU release build.
 sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
 available=$(df --output=avail -B1 "$RUNNER_TEMP" | tail -1)
