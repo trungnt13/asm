@@ -511,15 +511,14 @@ async fn handle_approved_mcp_tool_call(
     } else {
         None
     };
-    // Code Mode can retain this step past a later turn's first native call.
-    // A call rejected here never reaches the peer or acquires MCP attribution.
-    if matches!(
-        search.as_deref(),
-        Some(crate::model_search::ModelSearch::Hosted { .. })
-    ) && !crate::model_search::SearchOwner::admit(
-        &sess.services.thread_extension_data,
-        codex_protocol::openai_models::WebSearchProvider::SearchMcp,
-    ) {
+    // Every Search MCP call can create provider-specific references. Claim Search MCP before the
+    // peer runs so a stale Code Mode call cannot mix them with native search references.
+    if is_search
+        && !crate::model_search::SearchOwner::admit(
+            &sess.services.thread_extension_data,
+            codex_protocol::openai_models::WebSearchProvider::SearchMcp,
+        )
+    {
         let result = notify_mcp_tool_call_skip(
             sess,
             turn_context,
@@ -1071,7 +1070,7 @@ async fn augment_mcp_tool_request_meta_with_sandbox_state(
         return Ok(meta);
     };
     // TODO(anp): Build this metadata from the server's captured
-    // TurnEnvironment::sandbox_context instead of the runtime-wide Landlock value.
+    // TurnEnvironment::sandbox_context instead of the runtime-wide legacy Landlock setting.
     prepared_call
         .augment_sandbox_metadata(
             &mut meta,

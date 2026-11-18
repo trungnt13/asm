@@ -462,6 +462,7 @@ impl ChatWidget {
             | ServerNotification::EnvironmentDisconnected(_)
             | ServerNotification::RemoteControlStatusChanged(_)
             | ServerNotification::FsChanged(_)
+            | ServerNotification::ThreadSearchPartial(_)
             | ServerNotification::FuzzyFileSearchSessionUpdated(_)
             | ServerNotification::FuzzyFileSearchSessionCompleted(_)
             | ServerNotification::ThreadRealtimeItemAdded(_)

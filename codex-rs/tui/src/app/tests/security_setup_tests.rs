@@ -84,6 +84,7 @@ async fn security_setup_disabled_preserves_account_email_and_backend_banners() -
             &server,
             AppServerEvent::ServerNotification(Box::new(ServerNotification::AccountUpdated(
                 AccountUpdatedNotification {
+                    reason: None,
                     auth_mode: Some(AuthMode::Chatgpt),
                     plan_type: None,
                 },

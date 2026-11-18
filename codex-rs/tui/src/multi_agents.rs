@@ -6,10 +6,12 @@
 
 use crate::history_cell::HistoryCell;
 use crate::history_cell::LabeledToolCell;
-use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::ToolCallSummary;
-use crate::render::line_utils::prefix_lines;
+use crate::history_cell::WebHyperlinkHistoryCell;
 use crate::style::accent_color;
+use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::terminal_hyperlinks::TerminalHyperlink;
+use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 use crate::text_formatting::truncate_text;
 use codex_app_server_protocol::CollabAgentState;
 use codex_app_server_protocol::CollabAgentStatus;
@@ -214,7 +216,7 @@ pub(crate) fn tool_call_history_cell(
     item: &ThreadItemPayload,
     cached_spawn_request: Option<&SpawnRequestSummary>,
     mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
-) -> Option<LabeledToolCell> {
+) -> Option<LabeledToolCell<WebHyperlinkHistoryCell>> {
     let ThreadItemPayload::CollabAgentToolCall {
         id,
         tool,
@@ -332,7 +334,7 @@ pub(crate) fn sub_agent_activity_display(
 
 #[derive(Debug)]
 pub(crate) struct SubAgentActivityHistoryCell {
-    preview: PlainHistoryCell,
+    preview: WebHyperlinkHistoryCell,
     id: String,
     kind: SubAgentActivityKind,
     agent_path: String,
@@ -341,6 +343,14 @@ pub(crate) struct SubAgentActivityHistoryCell {
 impl HistoryCell for SubAgentActivityHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.preview.display_lines(width)
+    }
+
+    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.preview.display_hyperlink_lines(width)
+    }
+
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.preview.transcript_hyperlink_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -386,30 +396,39 @@ pub(crate) fn sub_agent_activity_history_cell(
         id,
         kind,
         agent_path,
+        agent_thread_id,
         ..
     } = item
     else {
         return None;
     };
+    let prefix = match kind {
+        SubAgentActivityKind::Started => "Started",
+        SubAgentActivityKind::Interacted => "Interacted with",
+        SubAgentActivityKind::Interrupted => "Interrupted",
+        SubAgentActivityKind::Completed => "Completed",
+    };
+    let mut title = title_text(format!("{prefix} "));
+    push_agent_label(
+        &mut title,
+        format!("`{agent_path}`").fg(accent_color()),
+        parse_thread_id(agent_thread_id),
+    );
     Some(SubAgentActivityHistoryCell {
-        preview: collab_event(sub_agent_activity_title(*kind, agent_path), Vec::new()),
+        preview: collab_event(title, Vec::new()),
         id: id.clone(),
         kind: *kind,
         agent_path: agent_path.clone(),
     })
 }
 
-fn sub_agent_activity_title(kind: SubAgentActivityKind, agent_path: &str) -> Line<'static> {
-    let (prefix, path) = match kind {
-        SubAgentActivityKind::Started => ("Started ", agent_path),
-        SubAgentActivityKind::Interacted => ("Interacted with ", agent_path),
-        SubAgentActivityKind::Interrupted => ("Interrupted ", agent_path),
-        SubAgentActivityKind::Completed => ("Completed ", agent_path),
-    };
-    title_spans_line(vec![
-        Span::from(prefix).bold(),
-        Span::from(format!("`{path}`")).fg(accent_color()),
-    ])
+fn push_agent_label(line: &mut HyperlinkLine, span: Span<'static>, id: Option<ThreadId>) {
+    let start = line.width();
+    line.line.push_span(span);
+    if let Some(id) = id {
+        line.hyperlinks
+            .push(TerminalHyperlink::agent(start..line.width(), id));
+    }
 }
 
 fn spawn_end(
@@ -417,7 +436,7 @@ fn spawn_end(
     prompt: &str,
     spawn_request: Option<&SpawnRequestSummary>,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     let title = match new_thread_id {
         Some(thread_id) => title_with_agent(
             "Spawned",
@@ -429,7 +448,7 @@ fn spawn_end(
 
     let mut details = Vec::new();
     if let Some(line) = prompt_line(prompt) {
-        details.push(line);
+        details.push(line.into());
     }
     collab_event(title, details)
 }
@@ -438,7 +457,7 @@ fn interaction_end(
     receiver_thread_id: ThreadId,
     prompt: &str,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     let title = title_with_agent(
         "Sent input to",
         agent_label(receiver_thread_id, &agent_metadata(receiver_thread_id)),
@@ -447,7 +466,7 @@ fn interaction_end(
 
     let mut details = Vec::new();
     if let Some(line) = prompt_line(prompt) {
-        details.push(line);
+        details.push(line.into());
     }
     collab_event(title, details)
 }
@@ -455,7 +474,7 @@ fn interaction_end(
 fn waiting_begin(
     receiver_thread_ids: &[String],
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     let receiver_agents = receiver_thread_ids
         .iter()
         .filter_map(|thread_id| parse_thread_id(thread_id))
@@ -488,7 +507,7 @@ fn waiting_end(
     receiver_thread_ids: &[String],
     agents_states: &std::collections::HashMap<String, CollabAgentState>,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     let details = wait_complete_lines(receiver_thread_ids, agents_states, agent_metadata);
     collab_event(title_text("Finished waiting"), details)
 }
@@ -496,7 +515,7 @@ fn waiting_end(
 fn close_end(
     receiver_thread_id: ThreadId,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     collab_event(
         title_with_agent(
             "Closed",
@@ -510,7 +529,7 @@ fn close_end(
 fn resume_begin(
     receiver_thread_id: ThreadId,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     collab_event(
         title_with_agent(
             "Resuming",
@@ -526,45 +545,38 @@ fn resume_end(
     status: Option<&CollabAgentState>,
     fallback_error: &str,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
+) -> WebHyperlinkHistoryCell {
     collab_event(
         title_with_agent(
             "Resumed",
             agent_label(receiver_thread_id, &agent_metadata(receiver_thread_id)),
             /*spawn_request*/ None,
         ),
-        vec![status_summary_line(status, fallback_error)],
+        vec![status_summary_line(status, fallback_error).into()],
     )
 }
 
-fn collab_event(title: Line<'static>, details: Vec<Line<'static>>) -> PlainHistoryCell {
-    let mut lines: Vec<Line<'static>> = vec![title];
+fn collab_event(title: HyperlinkLine, details: Vec<HyperlinkLine>) -> WebHyperlinkHistoryCell {
+    let mut lines = vec![title];
     if !details.is_empty() {
-        lines.extend(prefix_lines(details, "  └ ".dim(), "    ".into()));
+        lines.extend(prefix_hyperlink_lines(details, "  └ ".dim(), "    ".into()));
     }
-    PlainHistoryCell::new(lines)
+    WebHyperlinkHistoryCell::new_hyperlink_lines(lines)
 }
 
-fn title_text(title: impl Into<String>) -> Line<'static> {
-    title_spans_line(vec![Span::from(title.into()).bold()])
+fn title_text(title: impl Into<String>) -> HyperlinkLine {
+    Line::from(vec!["• ".dim(), title.into().bold()]).into()
 }
 
 fn title_with_agent(
     prefix: &str,
     agent: AgentLabel<'_>,
     spawn_request: Option<&SpawnRequestSummary>,
-) -> Line<'static> {
-    let mut spans = vec![Span::from(format!("{prefix} ")).bold()];
-    spans.extend(agent_label_spans(agent));
-    spans.extend(spawn_request_spans(spawn_request));
-    title_spans_line(spans)
-}
-
-fn title_spans_line(mut spans: Vec<Span<'static>>) -> Line<'static> {
-    let mut title = Vec::with_capacity(spans.len() + 1);
-    title.push(Span::from("• ").dim());
-    title.append(&mut spans);
-    title.into()
+) -> HyperlinkLine {
+    let mut title = title_text(format!("{prefix} "));
+    append_agent(&mut title, agent);
+    title.line.spans.extend(spawn_request_spans(spawn_request));
+    title
 }
 
 fn parse_thread_id(thread_id: &str) -> Option<ThreadId> {
@@ -579,32 +591,26 @@ fn agent_label(thread_id: ThreadId, metadata: &AgentMetadata) -> AgentLabel<'_> 
     }
 }
 
-fn agent_label_line(agent: AgentLabel<'_>) -> Line<'static> {
-    agent_label_spans(agent).into()
+fn agent_label_line(agent: AgentLabel<'_>) -> HyperlinkLine {
+    let mut line = HyperlinkLine::new(Line::default());
+    append_agent(&mut line, agent);
+    line
 }
 
-fn agent_label_spans(agent: AgentLabel<'_>) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let nickname = agent
-        .nickname
-        .map(str::trim)
-        .filter(|nickname| !nickname.is_empty());
-    let role = agent.role.map(str::trim).filter(|role| !role.is_empty());
-
-    if let Some(nickname) = nickname {
-        spans.push(Span::from(nickname.to_string()).fg(accent_color()).bold());
-    } else if let Some(thread_id) = agent.thread_id {
-        spans.push(Span::from(thread_id.to_string()).fg(accent_color()));
+fn append_agent(line: &mut HyperlinkLine, agent: AgentLabel<'_>) {
+    let nickname = agent.nickname.map(str::trim).filter(|n| !n.is_empty());
+    let name = if let Some(nickname) = nickname {
+        nickname.to_string().bold()
+    } else if let Some(id) = agent.thread_id {
+        Span::from(id.to_string())
     } else {
-        spans.push(Span::from("agent").fg(accent_color()));
+        Span::from("agent")
+    };
+    push_agent_label(line, name.fg(accent_color()), agent.thread_id);
+    if let Some(role) = agent.role.map(str::trim).filter(|r| !r.is_empty()) {
+        line.line.push_span(" ".dim());
+        line.line.push_span(format!("[{role}]"));
     }
-
-    if let Some(role) = role {
-        spans.push(Span::from(" ").dim());
-        spans.push(Span::from(format!("[{role}]")));
-    }
-
-    spans
 }
 
 fn spawn_request_spans(spawn_request: Option<&SpawnRequestSummary>) -> Vec<Span<'static>> {
@@ -642,7 +648,7 @@ fn wait_complete_lines(
     receiver_thread_ids: &[String],
     agents_states: &std::collections::HashMap<String, CollabAgentState>,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> Vec<Line<'static>> {
+) -> Vec<HyperlinkLine> {
     let mut seen = HashSet::new();
     let mut entries = receiver_thread_ids
         .iter()
@@ -666,15 +672,15 @@ fn wait_complete_lines(
     entries.extend(extras);
 
     if entries.is_empty() {
-        vec![Line::from(Span::from("No agents completed yet"))]
+        vec!["No agents completed yet".into()]
     } else {
         entries
             .into_iter()
             .map(|(thread_id, metadata, status)| {
-                let mut spans = agent_label_spans(agent_label(thread_id, &metadata));
-                spans.push(Span::from(": ").dim());
-                spans.extend(status_summary_spans(status));
-                spans.into()
+                let mut line = agent_label_line(agent_label(thread_id, &metadata));
+                line.line.push_span(": ".dim());
+                line.line.spans.extend(status_summary_spans(status));
+                line
             })
             .collect()
     }
@@ -886,6 +892,13 @@ mod tests {
         )
         .expect("wait end item renders");
 
+        let targets: Vec<_> = finished
+            .transcript_hyperlink_lines(/*width*/ 200)
+            .into_iter()
+            .flat_map(|row| row.hyperlinks)
+            .map(|link| (link.agent_id(), link.terminal_destination()))
+            .collect();
+        assert_eq!(targets, vec![(Some(robie_id), None), (Some(bob_id), None)]);
         let close = tool_call_history_cell(
             &ThreadItemPayload::CollabAgentToolCall {
                 id: "call-close".to_string(),
@@ -1015,7 +1028,7 @@ mod tests {
     fn resume_cell(
         status: CollabAgentToolCallStatus,
         agent_status: CollabAgentStatus,
-    ) -> LabeledToolCell {
+    ) -> LabeledToolCell<WebHyperlinkHistoryCell> {
         let sender_thread_id = ThreadId::from_string("00000000-0000-0000-0000-000000000001")
             .expect("valid sender thread id");
         let robie_id = ThreadId::from_string("00000000-0000-0000-0000-000000000002")
