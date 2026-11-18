@@ -30,9 +30,7 @@ async fn desktop_side_defaults_leave_other_forks_unchanged(kind: &str) -> Result
     .await;
     let home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
-        .with_root_config(
-            "side_model = \"mock-model-2\"\nside_reasoning_effort = \"low\"\nside_service_tier = \"priority\"",
-        )
+        .with_root_config("side_reasoning_effort = \"low\"\nside_service_tier = \"priority\"")
         .write(home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(home.path())

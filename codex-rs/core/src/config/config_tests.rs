@@ -1720,7 +1720,6 @@ fn test_tui_vim_mode_default_true() {
 #[tokio::test]
 async fn runtime_config_uses_tui_raw_output_mode() {
     let toml = r#"
-        side_model = "side-model"
         side_reasoning_effort = "low"
 
         [tui]
@@ -1743,10 +1742,7 @@ async fn runtime_config_uses_tui_raw_output_mode() {
     .await
     .expect("load config");
 
-    assert_eq!(
-        (cfg.side_model.as_deref(), cfg.side_reasoning_effort),
-        (Some("side-model"), Some(ReasoningEffort::Low))
-    );
+    assert_eq!(cfg.side_reasoning_effort, Some(ReasoningEffort::Low));
     assert!(cfg.tui_raw_output_mode);
     assert!(cfg.tui_multiline_enter);
     assert_eq!(

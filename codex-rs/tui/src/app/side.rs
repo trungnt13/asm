@@ -707,9 +707,6 @@ impl App {
 
     pub(super) fn side_fork_config(&self) -> Config {
         let mut fork_config = self.current_thread_fork_config();
-        if let Some(model) = &self.config.side_model {
-            fork_config.model = Some(model.clone());
-        }
         if let Some(effort) = &self.config.side_reasoning_effort {
             fork_config.model_reasoning_effort = Some(effort.clone());
         }
@@ -878,13 +875,7 @@ impl App {
             && app_server.can_list_saved_side_chats(parent_thread_id)
             && !codex_protocol::openai_models::is_native_runtime_model(
                 self.chat_widget.current_model(),
-            )
-            && !self
-                .config
-                .side_model
-                .as_deref()
-                .is_some_and(codex_protocol::openai_models::is_native_runtime_model)
-        {
+            ) {
             SideChatStorage::Attached
         } else {
             SideChatStorage::Temporary

@@ -35,9 +35,7 @@ pub(super) fn apply_defaults(
         instructions.insert_str(side_block_offset, &format!("{prompt}\n\n"));
         config.developer_instructions = Some(instructions);
     }
-    let configured = config.side_model.is_some()
-        || config.side_reasoning_effort.is_some()
-        || config.side_service_tier.is_some();
+    let configured = config.side_reasoning_effort.is_some() || config.side_service_tier.is_some();
     let pending_prompt = if matches!(origin, SideOrigin::Fork) {
         config
             .side_prompt
@@ -64,16 +62,13 @@ pub(super) fn apply_defaults(
         inherited_model: config.model.clone(),
         inherited_effort: config.model_reasoning_effort.clone(),
         inherited_tier: config.service_tier.clone(),
-        normalize_model: config.side_model.is_some(),
+        normalize_model: false,
         normalize_effort: config.side_reasoning_effort.is_some(),
         normalize_tier: config.side_service_tier.is_some(),
         pending_sync: configured,
         pending_first_turn: Some(origin),
         pending_prompt,
     };
-    if let Some(model) = &config.side_model {
-        config.model = Some(model.clone());
-    }
     if let Some(effort) = config.side_reasoning_effort.clone() {
         config.model_reasoning_effort = Some(effort);
     }

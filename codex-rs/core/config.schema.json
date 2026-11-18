@@ -9674,9 +9674,6 @@
       "description": "When set to `true`, `AgentReasoningRawContentEvent` events will be shown in the UI/output. Defaults to `false`.",
       "type": "boolean"
     },
-    "side_model": {
-      "type": "string"
-    },
     "side_prompt": {
       "description": "Adds default instructions to temporary sides without replacing their built-in boundaries.",
       "type": "string"
