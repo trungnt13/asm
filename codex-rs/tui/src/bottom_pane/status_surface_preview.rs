@@ -79,7 +79,7 @@ impl StatusSurfacePreviewItem {
             StatusSurfacePreviewItem::ThreadCredits => "5.2 credits",
             StatusSurfacePreviewItem::EstimatedThreadCost => "~$1.82",
             StatusSurfacePreviewItem::SessionId => "550e8400-e29b-41d4",
-            StatusSurfacePreviewItem::FastMode => "F:on",
+            StatusSurfacePreviewItem::FastMode => "⚡F",
             StatusSurfacePreviewItem::Daybreak => "Daybreak off",
             StatusSurfacePreviewItem::RawOutput => "raw output",
             StatusSurfacePreviewItem::WorkspaceHeadline => "Workspace headline",

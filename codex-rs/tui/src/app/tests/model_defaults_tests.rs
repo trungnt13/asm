@@ -206,7 +206,7 @@ async fn cloud_ultrafast_toggle_updates_the_conversation_on_admission() -> Resul
                 .on_models_loaded(request_id, Ok(vec![model]))
         );
         if current.is_none() {
-            insta::assert_snapshot!(app.chat_widget.last_terminal_title.as_deref().unwrap(), @"Standard");
+            insta::assert_snapshot!(app.chat_widget.last_terminal_title.as_deref().unwrap(), @"⚡S");
         }
         app.chat_widget.handle_key_event(KeyCode::Esc.into());
         while events.try_recv().is_ok() {}

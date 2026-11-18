@@ -21,6 +21,7 @@ use codex_app_server_protocol::AskForApproval;
 use codex_config::ConfigLayerSource;
 use codex_config::os_host_name;
 use codex_protocol::config_types::ApprovalsReviewer;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::models::PermissionProfile;
 use codex_utils_sandbox_summary::summarize_permission_profile;
@@ -849,23 +850,15 @@ impl ChatWidget {
                 .status_line_thread_cost_micros()
                 .and_then(format_estimated_usd_micros),
             StatusLineItem::SessionId => self.thread_id.map(|id| id.to_string()),
-            StatusLineItem::FastMode => self
-                .model_catalog
-                .try_list_models()
-                .ok()
-                .and_then(|models| {
-                    models
-                        .into_iter()
-                        .find(|preset| preset.model == self.current_model())
-                })
-                .is_none_or(|preset| preset.supports_fast_mode())
-                .then(|| {
-                    if self.current_service_tier() == Some(ServiceTier::Fast.request_value()) {
-                        "F:on".to_string()
-                    } else {
-                        "F:off".to_string()
-                    }
-                }),
+            StatusLineItem::FastMode => Some(match self.current_service_tier() {
+                None | Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE) => "⚡S".to_string(),
+                Some("ultrafast") => "⚡U".to_string(),
+                Some(tier) => match ServiceTier::from_request_value(tier) {
+                    Some(ServiceTier::Fast) => "⚡F".to_string(),
+                    Some(ServiceTier::Flex) => "⚡X".to_string(),
+                    None => format!("⚡{}", self.processing_tier_display_name().unwrap_or(tier)),
+                },
+            }),
             StatusLineItem::Daybreak => Some(
                 if self.daybreak_enabled && !self.side_conversation_active() {
                     "Daybreak on".to_string()

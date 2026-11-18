@@ -4426,29 +4426,29 @@ async fn status_line_processing_tier_updates_with_selection() {
     chat.local_settings.tui.terminal_title = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("⚡S".to_string()));
 
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
-    assert_eq!(status_line_text(&chat), Some("F:on".to_string()));
-    insta::assert_snapshot!(chat.last_terminal_title.as_deref().unwrap(), @"F:on");
+    assert_eq!(status_line_text(&chat), Some("⚡F".to_string()));
+    insta::assert_snapshot!(chat.last_terminal_title.as_deref().unwrap(), @"⚡F");
 
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ false);
     assert_eq!(
         (status_line_text(&chat), chat.last_terminal_title.clone()),
-        (Some("F:off".to_string()), Some("F:off".to_string()))
+        (Some("⚡S".to_string()), Some("⚡S".to_string()))
     );
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
 
     chat.set_model("gpt-5.2");
     chat.set_service_tier(Some(ServiceTier::Flex.request_value().to_string()));
-    assert_eq!(status_line_text(&chat), None);
+    assert_eq!(status_line_text(&chat), Some("⚡X".to_string()));
     for provider_id in [
         codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID,
         "remote-only-provider",
     ] {
         chat.config.model_provider_id = provider_id.into();
         chat.refresh_status_line();
-        assert_eq!(status_line_text(&chat), None);
+        assert_eq!(status_line_text(&chat), Some("⚡X".to_string()));
     }
 }
 
@@ -4459,18 +4459,18 @@ async fn status_line_fast_mode_updates_on_model_change() {
     chat.local_settings.tui.status_line = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
-    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("⚡S".to_string()));
 
     chat.set_model("gpt-5.2");
-    assert_eq!(status_line_text(&chat), None);
+    assert_eq!(status_line_text(&chat), Some("⚡S".to_string()));
 
     chat.set_model("gpt-5.4");
-    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("⚡S".to_string()));
 
     chat.set_model("uncatalogued-model");
-    assert_eq!(status_line_text(&chat), Some("F:off".to_string()));
+    assert_eq!(status_line_text(&chat), Some("⚡S".to_string()));
     chat.set_service_tier(Some(ServiceTier::Fast.request_value().to_string()));
-    assert_eq!(status_line_text(&chat), Some("F:on".to_string()));
+    assert_eq!(status_line_text(&chat), Some("⚡F".to_string()));
 }
 
 #[tokio::test]
