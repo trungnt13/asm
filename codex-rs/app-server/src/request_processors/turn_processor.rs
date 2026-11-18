@@ -1057,11 +1057,8 @@ impl TurnRequestProcessor {
         let (thread_id, thread) = self.load_thread(&params.thread_id).await?;
         self.ensure_direct_input_allowed(request_id, thread.as_ref())
             .await?;
-        let picker_fields = (
-            params.model.is_some() || params.collaboration_mode.is_some(),
-            params.effort.is_some() || params.collaboration_mode.is_some(),
-            params.service_tier.is_some(),
-        );
+        let picked_effort = params.effort.is_some() || params.collaboration_mode.is_some();
+        let picked_tier = params.service_tier.is_some();
         let cwd = resolve_request_cwd(params.cwd)?;
         let environments =
             resolve_turn_environment_requests(self.thread_manager.as_ref(), params.environments)?;
@@ -1139,9 +1136,8 @@ impl TurnRequestProcessor {
             .side_settings_initialization
             .as_mut()
         {
-            initialization.normalize_model |= picker_fields.0;
-            initialization.normalize_effort |= picker_fields.1;
-            initialization.normalize_tier |= picker_fields.2;
+            initialization.normalize_effort |= picked_effort;
+            initialization.normalize_tier |= picked_tier;
         }
         let system1 = if params.system1_enabled.is_some() {
             let snapshot = thread.config_snapshot().await;

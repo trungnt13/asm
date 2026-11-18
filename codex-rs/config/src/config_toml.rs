@@ -457,7 +457,6 @@ pub struct ConfigToml {
     pub show_raw_agent_reasoning: Option<bool>,
 
     pub model_reasoning_effort: Option<ReasoningEffort>,
-    pub side_model: Option<String>,
     pub side_reasoning_effort: Option<ReasoningEffort>,
     /// Overrides the parent service tier for temporary side conversations.
     pub side_service_tier: Option<String>,

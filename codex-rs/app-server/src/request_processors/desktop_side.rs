@@ -35,9 +35,7 @@ pub(super) fn apply_defaults(
         instructions.insert_str(side_block_offset, &format!("{prompt}\n\n"));
         config.developer_instructions = Some(instructions);
     }
-    let configured = config.side_model.is_some()
-        || config.side_reasoning_effort.is_some()
-        || config.side_service_tier.is_some();
+    let configured = config.side_reasoning_effort.is_some() || config.side_service_tier.is_some();
     let pending_prompt = if matches!(origin, SideOrigin::Fork) {
         config
             .side_prompt
@@ -61,19 +59,14 @@ pub(super) fn apply_defaults(
         return None;
     }
     let initialization = SideSettingsInitialization {
-        inherited_model: config.model.clone(),
         inherited_effort: config.model_reasoning_effort.clone(),
         inherited_tier: config.service_tier.clone(),
-        normalize_model: config.side_model.is_some(),
         normalize_effort: config.side_reasoning_effort.is_some(),
         normalize_tier: config.side_service_tier.is_some(),
         pending_sync: configured,
         pending_first_turn: Some(origin),
         pending_prompt,
     };
-    if let Some(model) = &config.side_model {
-        config.model = Some(model.clone());
-    }
     if let Some(effort) = config.side_reasoning_effort.clone() {
         config.model_reasoning_effort = Some(effort);
     }
@@ -102,10 +95,8 @@ pub(super) enum SideOrigin {
 
 pub(crate) struct SideSettingsInitialization {
     pub(super) pending_prompt: Option<ResponseItem>,
-    inherited_model: Option<String>,
     inherited_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
     pub(super) inherited_tier: Option<String>,
-    pub(super) normalize_model: bool,
     pub(super) normalize_effort: bool,
     pub(super) normalize_tier: bool,
     pub(super) pending_sync: bool,
@@ -121,19 +112,12 @@ impl SideSettingsInitialization {
         if self.pending_first_turn.is_none() {
             return;
         }
-        if let Some(mode) = params.collaboration_mode.as_mut() {
-            if self.normalize_model && Some(&mode.settings.model) == self.inherited_model.as_ref() {
-                mode.settings.model = snapshot.model.clone();
-            }
-            if self.normalize_effort
-                && (mode.settings.reasoning_effort.is_none()
-                    || mode.settings.reasoning_effort == self.inherited_effort)
-            {
-                mode.settings.reasoning_effort = snapshot.reasoning_effort.clone();
-            }
-        }
-        if self.normalize_model && params.model.is_some() && params.model == self.inherited_model {
-            params.model = Some(snapshot.model.clone());
+        if self.normalize_effort
+            && let Some(mode) = params.collaboration_mode.as_mut()
+            && (mode.settings.reasoning_effort.is_none()
+                || mode.settings.reasoning_effort == self.inherited_effort)
+        {
+            mode.settings.reasoning_effort = snapshot.reasoning_effort.clone();
         }
         if self.normalize_effort
             && params.effort.is_some()

@@ -54,8 +54,8 @@ async fn desktop_side_defaults_sync_and_picker_choices_persist(
     let requests =
         responses::mount_sse_sequence(&server, vec![body.clone(), body.clone(), body]).await;
     let home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).with_root_config(
-        "model_reasoning_effort = \"high\"\nside_model = \"gpt-6-astra\"\nside_reasoning_effort = \"low\"\nside_service_tier = \"priority\""
+    MockResponsesConfig::new(&server.uri()).with_model("gpt-6-astra").with_root_config(
+        "model_reasoning_effort = \"high\"\nside_reasoning_effort = \"low\"\nside_service_tier = \"priority\""
     ).write(home.path())?;
     write_models_cache(home.path()).await?;
     let mut mcp = TestAppServer::builder()
@@ -80,7 +80,7 @@ async fn desktop_side_defaults_sync_and_picker_choices_persist(
     let side = if kind == "start" {
         serde_json::to_value(
             mcp.start_thread(serde_json::from_value(json!({
-                "developerInstructions":developer,"model":"mock-model","serviceTier":null
+                "developerInstructions":developer,"model":parent.model,"serviceTier":null
             }))?)
             .await?,
         )?
@@ -94,7 +94,7 @@ async fn desktop_side_defaults_sync_and_picker_choices_persist(
     let expected_model = if pick_before_injection {
         "mock-model-4"
     } else {
-        "gpt-6-astra"
+        parent.model.as_str()
     };
     if pick_before_injection {
         rpc(
@@ -123,7 +123,7 @@ async fn desktop_side_defaults_sync_and_picker_choices_persist(
         (json!(expected_model), json!("low"), json!("priority"))
     );
     let mode = if kind == "start" {
-        json!({"mode":"default","settings":{"model":"mock-model","reasoning_effort":null,"developer_instructions":null}})
+        json!({"mode":"default","settings":{"model":expected_model,"reasoning_effort":null,"developer_instructions":null}})
     } else {
         settings["collaborationMode"].clone()
     };
