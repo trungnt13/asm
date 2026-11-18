@@ -160,11 +160,11 @@ jobs:
           repository: trungnt13/asm
 
       - name: Prepare standard Linux runner for PGO
-        if: ${{ contains(matrix.target, 'linux-gnu') && hashFiles('.github/scripts/setup-release-pgo.py') != '' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
-        run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-pgo-runner.sh"
+        if: ${{ contains(matrix.target, 'linux-gnu') && hashFiles('scripts/pgo/setup.py') != '' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-linux-release-runner.sh"
       - name: Fetch and validate release PGO profile
-        if: ${{ contains(matrix.target, 'linux-gnu') && hashFiles('.github/scripts/setup-release-pgo.py') != '' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
-        run: python3 "${GITHUB_WORKSPACE}/.github/scripts/setup-release-pgo.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --github-env "$GITHUB_ENV"
+        if: ${{ contains(matrix.target, 'linux-gnu') && hashFiles('scripts/pgo/setup.py') != '' && steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
+        run: python3 "${GITHUB_WORKSPACE}/scripts/pgo/setup.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --env-file "$GITHUB_ENV"
 
       - name: Build ASM with resource sampling
         timeout-minutes: ${{ matrix.build_timeout }}
@@ -202,7 +202,7 @@ jobs:
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
           # A resumed immutable candidate retains its original package contract.
           if [[ "$TARGET" == *-linux-gnu ]] && grep -Fq 'codex-package.json' "${GITHUB_WORKSPACE}/.github/scripts/smoke-codex-archive.py"; then
-            env -u RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
+            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
             export CODEX_BWRAP_SHA256
           fi

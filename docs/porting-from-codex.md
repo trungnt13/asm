@@ -892,10 +892,11 @@ Reject explicitly untrusted chat/source projects; allow unset trust, like TUI. R
 
 ### Agent-trained release PGO
 
-Fork Linux GNU release builds consume `.github/pgo/agent-linux.json` through
-`setup-release-pgo.py`. macOS retains its existing non-PGO settings. Ordinary
-Cargo profiles remain unchanged. Linux uses Thin LTO, four codegen units and one
-Cargo job; Bubblewrap is built separately without PGO. The indexed profile is a
+`scripts/pgo/setup.py` fetches and validates the profile pinned in
+`scripts/pgo/agent-linux.json`. Both local builds and CI can use it. Fork
+release workflows enable it only for Linux GNU. Ordinary Cargo profiles remain
+unchanged. The PGO build uses Thin LTO, four codegen units and one Cargo job;
+Bubblewrap is built separately without PGO. The indexed profile is a
 checksum-pinned release dependency, not a CLI release. CI never needs model auth
 or training conversations. Never publish private training homes or credentials.
 
@@ -906,6 +907,22 @@ packaged and real-provider behavior. Successful parsing alone does not establish
 optimization coverage or performance. Revalidate after compiler/source changes;
 refresh the profile when matching coverage or measured optimization deteriorates.
 Do not silently fall back when a selected profile is missing or incompatible.
+
+For local use, run from `codex-rs` so the script uses the same Rust toolchain as
+Cargo. Use Python 3.11+ and the consuming toolchain's `llvm-tools-preview`
+component. To validate without setting build flags, omit `--env-file`. To apply
+the flags to subsequent Cargo commands in a Bash shell:
+
+```bash
+pgo_dir=$(mktemp -d)
+python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
+  --output "$pgo_dir" --env-file "$pgo_dir/cargo.env" &&
+  while IFS= read -r setting; do export "$setting"; done < "$pgo_dir/cargo.env"
+```
+
+Load the file as assignments, not as shell code. Pass the same explicit
+`--target` to Cargo, and keep the profile directory until the build is done. Actions passes its own environment file to the same
+tool; runner-specific disk and swap setup stays in the workflows.
 
 The selected profile used three overlapping 10/15/20-turn sessions, parallel
 child batches of 4/3/2 on first/middle/final turns, Luna with System1 disabled,

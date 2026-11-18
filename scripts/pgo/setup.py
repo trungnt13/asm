@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch and validate the indexed profile used by Linux fork release builds."""
+"""Prepare the pinned PGO profile for a Cargo build."""
 
 import argparse
 import gzip
@@ -18,10 +18,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--github-env", type=Path)
+    parser.add_argument(
+        "--env-file", type=Path, help="Append Cargo settings as NAME=VALUE lines"
+    )
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[2]
-    manifest = json.loads((root / ".github/pgo/agent-linux.json").read_text())
+    manifest = json.loads(
+        Path(__file__).resolve().with_name("agent-linux.json").read_text()
+    )
     if args.target != manifest["target"]:
         parser.error("No PGO profile is selected for this target")
     args.output.mkdir(parents=True, exist_ok=True)
@@ -81,14 +84,20 @@ def main():
     print(version + validation.stdout)
     if validation.returncode != 0:
         return validation.returncode
-    if args.github_env:
-        flags = os.environ.get("RUSTFLAGS", "")
-        if "profile-" in flags:
+    if args.env_file:
+        separator = "\x1f"
+        encoded = os.environ.get("CARGO_ENCODED_RUSTFLAGS")
+        if encoded is None:
+            flags = os.environ.get("RUSTFLAGS", "").split()
+        else:
+            flags = encoded.split(separator) if encoded else []
+        if any("profile-" in flag for flag in flags):
             raise RuntimeError("Refusing to combine conflicting profiling flags")
-        with args.github_env.open("a") as output:
-            output.write(
-                f"RUSTFLAGS={flags} -Cprofile-use={profile} -Cllvm-args=-pgo-warn-missing-function\n"
-            )
+        flags.extend(
+            [f"-Cprofile-use={profile}", "-Cllvm-args=-pgo-warn-missing-function"]
+        )
+        with args.env_file.open("a") as output:
+            output.write(f"CARGO_ENCODED_RUSTFLAGS={separator.join(flags)}\n")
             output.write(
                 "CARGO_PROFILE_RELEASE_LTO=thin\nCARGO_PROFILE_RELEASE_CODEGEN_UNITS=4\nCARGO_BUILD_JOBS=1\n"
             )

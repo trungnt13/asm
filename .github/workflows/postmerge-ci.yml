@@ -66,10 +66,10 @@ jobs:
           repository: trungnt13/asm
       - name: Prepare standard Linux runner for PGO
         if: ${{ contains(matrix.target, 'linux-gnu') }}
-        run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-pgo-runner.sh"
+        run: bash "${GITHUB_WORKSPACE}/.github/scripts/prepare-linux-release-runner.sh"
       - name: Fetch and validate release PGO profile
         if: ${{ contains(matrix.target, 'linux-gnu') }}
-        run: python3 "${GITHUB_WORKSPACE}/.github/scripts/setup-release-pgo.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --github-env "$GITHUB_ENV"
+        run: python3 "${GITHUB_WORKSPACE}/scripts/pgo/setup.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --env-file "$GITHUB_ENV"
 
       - name: Build ASM with resource sampling
         timeout-minutes: ${{ matrix.build_timeout }}
@@ -96,7 +96,7 @@ jobs:
           sampler_pid=$!
           trap 'kill "$sampler_pid" 2>/dev/null || true' EXIT
           if [[ "$TARGET" == *-linux-gnu ]]; then
-            env -u RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
+            env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=4 cargo build --locked --release --target "$TARGET" --bin bwrap
             CODEX_BWRAP_SHA256="$(shasum -a 256 "target/${TARGET}/release/bwrap" | awk '{print $1}')"
             export CODEX_BWRAP_SHA256
           fi
