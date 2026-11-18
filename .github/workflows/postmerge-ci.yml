@@ -13,7 +13,7 @@ jobs:
   build:
     name: Release build ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout }}
+    timeout-minutes: ${{ matrix.job_timeout }}
     permissions:
       contents: read
     defaults:
@@ -28,10 +28,12 @@ jobs:
       matrix:
         include:
           - runner: macos-15
-            timeout: 180
+            build_timeout: 180
+            job_timeout: 195
             target: aarch64-apple-darwin
           - runner: ubuntu-22.04
-            timeout: 330
+            build_timeout: 330
+            job_timeout: 345
             target: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -70,6 +72,7 @@ jobs:
         run: python3 "${GITHUB_WORKSPACE}/.github/scripts/setup-release-pgo.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --github-env "$GITHUB_ENV"
 
       - name: Build ASM with resource sampling
+        timeout-minutes: ${{ matrix.build_timeout }}
         shell: bash
         env:
           TARGET: ${{ matrix.target }}

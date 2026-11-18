@@ -70,7 +70,7 @@ jobs:
     needs: prepare
     name: Build ${{ matrix.target }} (jobs ${{ matrix.jobs }})
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ needs.prepare.outputs.publish == 'true' && (needs.prepare.outputs.candidate_ref == '' && 360 || matrix.publish_timeout) || matrix.timeout }}
+    timeout-minutes: ${{ needs.prepare.outputs.publish == 'true' && needs.prepare.outputs.candidate_ref == '' && 360 || matrix.job_timeout }}
     permissions:
       actions: read
       contents: write
@@ -84,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","timeout":180,"publish_timeout":195,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","timeout":300,"publish_timeout":315,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-22.04","timeout":330,"publish_timeout":345,"target":"x86_64-unknown-linux-gnu","jobs":1}]') }}
+        include: ${{ fromJSON(inputs.macos_concurrency_experiment == true && '[{"runner":"macos-15","build_timeout":180,"job_timeout":195,"target":"aarch64-apple-darwin","jobs":2},{"runner":"macos-15","build_timeout":180,"job_timeout":195,"target":"aarch64-apple-darwin","jobs":3}]' || '[{"runner":"macos-15","build_timeout":300,"job_timeout":315,"target":"aarch64-apple-darwin","jobs":0},{"runner":"ubuntu-22.04","build_timeout":330,"job_timeout":345,"target":"x86_64-unknown-linux-gnu","jobs":0}]') }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -167,7 +167,7 @@ jobs:
         run: python3 "${GITHUB_WORKSPACE}/.github/scripts/setup-release-pgo.py" --target "${{ matrix.target }}" --output "${GITHUB_WORKSPACE}/diagnostics/pgo" --github-env "$GITHUB_ENV"
 
       - name: Build ASM with resource sampling
-        timeout-minutes: ${{ matrix.timeout }}
+        timeout-minutes: ${{ matrix.build_timeout }}
         if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && steps.find.outputs.reuse != 'true' }}
         shell: bash
         env:
@@ -183,7 +183,7 @@ jobs:
             logical_cpus=$(nproc)
             ram_bytes=$(awk '/MemTotal:/ { print $2 * 1024 }' /proc/meminfo)
           fi
-          printf 'build_jobs=%s logical_cpus=%s ram_bytes=%s\n' "$BUILD_JOBS" "$logical_cpus" "$ram_bytes" > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log"
+          printf 'build_jobs=%s logical_cpus=%s ram_bytes=%s\n' "${CARGO_BUILD_JOBS:-$BUILD_JOBS}" "$logical_cpus" "$ram_bytes" > "${GITHUB_WORKSPACE}/diagnostics/resources-${TARGET}.log"
           (while true; do
             echo "Resource sample $(date -u)"
             df -h "${GITHUB_WORKSPACE}" || echo 'Filesystem sample unavailable'
@@ -267,7 +267,7 @@ jobs:
         if: ${{ steps.platform.outputs.uploaded != 'true' && steps.platform.outputs.recovered != 'true' && (steps.find.outputs.reuse != 'true' || steps.find.outputs.run_id != github.run_id) }}
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: ${{ matrix.jobs == 0 && format('codex-{0}', matrix.target) || format('experiment-codex-{0}-jobs-{1}', matrix.target, matrix.jobs) }}
+          name: ${{ inputs.macos_concurrency_experiment == true && format('experiment-codex-{0}-jobs-{1}', matrix.target, matrix.jobs) || format('codex-{0}', matrix.target) }}
           path: dist/codex-${{ matrix.target }}.tar.gz
           if-no-files-found: error
 

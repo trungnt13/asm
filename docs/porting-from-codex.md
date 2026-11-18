@@ -215,9 +215,9 @@ Keep fork/upstream release workflows separate. Use GitHub-hosted runners:
 | Platform | Target | Runner | Build timeout |
 | --- | --- | --- | --- |
 | macOS ARM64 | `aarch64-apple-darwin` | `macos-15` | 300 minutes |
-| Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 90 minutes |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | 330 minutes |
 
-- Candidates allow build limit plus 15 publication minutes: 315 total on macOS. Preserve optimization, flags, runner, and candidate; allow needed time rather than weakening builds. Concurrency experiments retain 180-minute builds. Resume candidates; never replace ready platform assets.
+- Candidate, non-publishing, and postmerge jobs allow 15 minutes beyond the build step for setup, packaging, smoke, and uploads. Ordinary release jobs allow 315 minutes on macOS and 345 on Linux; postmerge and concurrency experiments retain a 180-minute macOS build step (195-minute job). Preserve optimization, flags, runner, and candidate; allow needed time rather than weakening builds. Resume candidates; never replace ready platform assets.
 - Legacy lookup allows 190 minutes; wait guards are macOS 150/Linux 185. Timeout fails; do not duplicate builds. Only legacy tag jobs allow 360 total minutes. Actual builds retain table limits; fresh candidates do not wait for postmerge.
 - Keep Ubuntu 22.04 / glibc 2.35 as the Linux minimum and build/native-smoke baseline. A GNU triple on newer runners is insufficient. Before April 2027 retirement, use an Ubuntu 22.04 container on supported runners. Never raise the minimum.
 - Use optimized `--release` and `CARGO_PROFILE_RELEASE_STRIP=debuginfo`, not `dev-small`. Retain function symbols/optimization. Fix timeouts without weakening profiles. Upstream tests do not justify more symbol/dependency removal. Keep shell commands compatible with macOS Bash 3.2, including `set -u` array expansion.

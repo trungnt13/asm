@@ -62,18 +62,25 @@ def main():
         raise RuntimeError(
             "Install llvm-tools-preview for the consuming Rust toolchain"
         )
-    validation = subprocess.check_output(
-        [str(tool), "show", str(profile)], text=True, stderr=subprocess.STDOUT
+    validation = subprocess.run(
+        [str(tool), "show", str(profile)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
     )
     report = {
         "manifest": manifest,
         "consumer_rustc": version,
         "consumer_settings": {"lto": "thin", "codegen_units": 4, "cargo_jobs": 1},
-        "indexed_format_validation": validation,
+        "indexed_format_validation": validation.stdout,
+        "indexed_format_exit_code": validation.returncode,
         "coverage_validation": "Inspect compiler missing/mismatched-profile diagnostics and candidate acceptance; readable format alone does not prove useful coverage.",
     }
     (args.output / "validation.json").write_text(json.dumps(report, indent=2) + "\n")
-    print(version + validation)
+    print(version + validation.stdout)
+    if validation.returncode != 0:
+        return validation.returncode
     if args.github_env:
         flags = os.environ.get("RUSTFLAGS", "")
         if "profile-" in flags:

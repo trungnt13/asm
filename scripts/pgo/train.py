@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import shutil
 import time
 import tomllib
@@ -11,14 +10,7 @@ R = Path(os.environ["PGO_TRAINING_DIR"]).resolve()
 R.mkdir(mode=0o700, parents=True, exist_ok=True)
 assert R.stat().st_mode & 0o077 == 0, "Training directory must be private (0700)"
 source_home = Path(os.environ["CODEX_HOME"]).resolve()
-(R / "config-check").mkdir(exist_ok=True)
 config = (source_home / "config.toml").read_text()
-start = config.index("[system1]")
-end = config.find("\n[", start + 1)
-if end < 0:
-    end = len(config)
-part = re.sub(r"(?m)^(enabled\s*=\s*)(?:true|false)", r"\1false", config[start:end])
-(R / "config-check/config.toml").write_text(config[:start] + part + config[end:])
 (R / "requested-features.json").write_text(
     json.dumps(tomllib.loads(config)["features"])
 )
@@ -35,7 +27,7 @@ async def session(index, turns, children):
     w = d / "work"
     shutil.copytree(Path(__file__).resolve().parent / "fixture", w)
     (w / "checks.py.in").rename(w / "test_eventlog.py")
-    shutil.copy2(R / "config-check/config.toml", h / "config.toml")
+    shutil.copy2(source_home / "config.toml", h / "config.toml")
     if (source_home / "agent-roles").is_dir():
         shutil.copytree(source_home / "agent-roles", h / "agent-roles")
     for name in ["auth.json", "models_cache.json"]:
@@ -43,6 +35,7 @@ async def session(index, turns, children):
         (h / name).chmod(0o600)
     flags = {
         "model": "gpt-6-luna",
+        "system1.enabled": False,
         "model_provider": "codex-validation",
         "model_reasoning_effort": "low",
         "model_context_window": 65536,
