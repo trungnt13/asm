@@ -1,6 +1,6 @@
 ---
 source: tui/src/app/tests.rs
-assertion_line: 4718
+assertion_line: 4721
 expression: "frames.join(\"\\n\\n\")"
 ---
 100 columns, hidden
@@ -37,11 +37,11 @@ parent-28                                                      │
 parent-29                                                      │
                                                                │child-29
                                                                │
+                                                               │                               Side
+› parent draft-                                                │› child draft!
                                                                │
-› parent draft-                                                │                               Side
-                                                               │› child draft!
-  sol62 def                                                    │
-                                                               │  sol62 def·Agent
+  sol62 def                                                    │  sol62 def·Agent
+                                                               │
 
 99 columns, reopened
  Side chat           ×                                                                          +

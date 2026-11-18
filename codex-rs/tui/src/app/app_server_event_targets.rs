@@ -215,6 +215,7 @@ pub(super) fn server_notification_thread_target(
         | ServerNotification::RemoteControlStatusChanged(_)
         | ServerNotification::DeprecationNotice(_)
         | ServerNotification::ConfigWarning(_)
+        | ServerNotification::ThreadSearchPartial(_)
         | ServerNotification::FuzzyFileSearchSessionUpdated(_)
         | ServerNotification::FuzzyFileSearchSessionCompleted(_)
         | ServerNotification::CommandExecOutputDelta(_)

@@ -1705,6 +1705,21 @@ impl App {
             self.recap.reset_for_new_thread(Instant::now());
         }
         self.primary_thread_id = Some(thread_id);
+        if self.local_settings.workspace_enabled(&self.config)
+            && matches!(
+                presentation,
+                ThreadAttachPresentation::SessionLineage
+                    | ThreadAttachPresentation::SessionLineageAfterClear
+            )
+        {
+            self.restore_sidebar_agent_outcomes(
+                thread_id,
+                &turns,
+                super::sidebar_subagents::OutcomeReplay::History,
+            );
+            self.app_event_tx
+                .send(AppEvent::DiscoverSidebarAgents(thread_id));
+        }
         self.agents_overview.hidden_threads.remove(&thread_id);
         self.agents_overview.threads.entry(thread_id).or_default();
         self.primary_session_configured = Some(session.clone());
@@ -2000,6 +2015,13 @@ impl App {
         if let Some(session) = snapshot.session.as_ref() {
             self.turn_agent_counts
                 .record_native_turns(session.thread_id, &snapshot.turns);
+            if self.primary_thread_id == Some(session.thread_id) {
+                self.restore_sidebar_agent_outcomes(
+                    session.thread_id,
+                    &snapshot.turns,
+                    super::sidebar_subagents::OutcomeReplay::History,
+                );
+            }
         }
         let mut reasoning_replay = reasoning_replay::ReasoningReplay::new(&mut snapshot);
         let replayed_final_items = realtime_delivery::completed_agent_items(&snapshot);
@@ -2365,7 +2387,9 @@ impl App {
             && self.startup_protected_input_boundary
         {
             self.chat_widget.pre_draw_tick();
-            self.render_chat_widget_frame(tui, tui.terminal.last_known_screen_size)?;
+            let screen_size = tui.prepare_draw_size()?;
+            self.handle_draw_pre_render(tui, screen_size)?;
+            self.render_chat_widget_frame(tui, screen_size)?;
             self.discard_startup_modal_input(tui)?;
         }
         if self.backtrack_render_pending {

@@ -2829,6 +2829,7 @@ async fn annotated_history_uses_explicit_model_without_a_step(
         metadata.history_sequence = Some(index as u64 + 1);
         metadata.sampled_through_sequence = Some(0);
         metadata.history_truncation_token_limit = Some(expected_budget);
+        metadata.model_search_state = Some(codex_history::ModelSearchState::Unused);
         let (ResponseItem::FunctionCallOutput { output, .. }
         | ResponseItem::CustomToolCallOutput { output, .. }) =
             std::sync::Arc::make_mut(&mut envelope.item)
@@ -7112,6 +7113,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
         state: Mutex::new(state),
+        initial_context_publication: Semaphore::new(/*permits*/ 1),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
         ephemeral_rollout_items: None,
         code_mode_message_tasks: Default::default(),
@@ -9472,6 +9474,7 @@ where
         parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
         state: Mutex::new(state),
+        initial_context_publication: Semaphore::new(/*permits*/ 1),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
         ephemeral_rollout_items: None,
         code_mode_message_tasks: Default::default(),

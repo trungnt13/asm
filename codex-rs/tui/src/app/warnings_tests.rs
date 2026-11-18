@@ -53,28 +53,27 @@ async fn warnings_hide_and_restore_draft_and_freeze_until_reopened() -> Result<(
     );
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     app.reconnect.offline = true;
-    app.handle_tui_event(
+    Box::pin(app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyCode::Char('E').into()),
-    )
+    ))
     .await?;
     assert!(app.chat_widget.keymap_contexts().is_warnings());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "/m");
-    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Paste("xample".into()))
+    Box::pin(app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Paste("xample".into())))
         .await?;
     assert!(app.chat_widget.keymap_contexts().is_warnings());
-    app.handle_tui_event(
+    Box::pin(app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyCode::Char('k').into()),
-    )
+    ))
     .await?;
     assert!(!app.chat_widget.keymap_contexts().is_warnings());
     let repeat =
         KeyEvent::new_with_kind(KeyCode::Char('k'), KeyModifiers::NONE, KeyEventKind::Repeat);
-    app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(repeat))
-        .await?;
+    Box::pin(app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Key(repeat))).await?;
     assert_eq!(app.chat_widget.composer_text_with_pending(), "/m");
     app.render_owned_transcript(&mut tui, size)?;
     assert_eq!(
@@ -99,15 +98,13 @@ async fn warnings_hide_and_restore_draft_and_freeze_until_reopened() -> Result<(
     let first_keep = std::iter::from_fn(|| events.try_recv().ok())
         .find(|event| matches!(event, AppEvent::UpdateWarnings { kept, .. } if !kept.is_empty()))
         .expect("the first keep queued a decision");
-    app.handle_event(&mut tui, &mut app_server, first_keep)
-        .await?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, first_keep)).await?;
     app.chat_widget.handle_key_event(KeyCode::Esc.into());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "/m");
     let dismissal = std::iter::from_fn(|| events.try_recv().ok())
         .find(|event| matches!(event, AppEvent::UpdateWarnings { dismissed, .. } if !dismissed.is_empty()))
         .expect("dismiss the viewed warning offline");
-    app.handle_event(&mut tui, &mut app_server, dismissal)
-        .await?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, dismissal)).await?;
     // The slash popup masks the passive footer; check the count with a plain draft.
     app.chat_widget.apply_external_edit("draft".into());
     app.render_owned_transcript(&mut tui, size)?;
@@ -137,17 +134,16 @@ async fn warnings_hide_and_restore_draft_and_freeze_until_reopened() -> Result<(
         .collect::<String>();
     assert!(reopened.contains("1 of 1"));
     assert!(reopened.contains("Later warning"));
-    app.handle_tui_event(
+    Box::pin(app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-    )
+    ))
     .await?;
     let dismissal = std::iter::from_fn(|| events.try_recv().ok())
         .find(|event| matches!(event, AppEvent::UpdateWarnings { dismissed, .. } if !dismissed.is_empty()))
         .expect("Ctrl+C dismisses the viewed warning");
-    app.handle_event(&mut tui, &mut app_server, dismissal)
-        .await?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, dismissal)).await?;
     app.render_owned_transcript(&mut tui, size)?;
     let after = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
     assert!(!after.content.iter().any(|cell| cell.symbol() == "⚠"));
@@ -160,25 +156,25 @@ async fn warnings_hide_and_restore_draft_and_freeze_until_reopened() -> Result<(
     assert!(!app.should_handle_backtrack_esc(escape));
     app.chat_widget.handle_key_event(escape);
     assert!(app.chat_widget.no_modal_or_popup_active());
-    app.handle_tui_event(
+    Box::pin(app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyCode::F(2).into()),
-    )
+    ))
     .await?;
     assert!(app.chat_widget.keymap_contexts().is_warnings());
     app.chat_widget.handle_key_event(KeyCode::Esc.into());
     app.chat_widget.apply_external_edit("/warnings".into());
-    app.handle_tui_event(
+    Box::pin(app.handle_tui_event(
         &mut tui,
         &mut app_server,
         TuiEvent::Key(KeyCode::Enter.into()),
-    )
+    ))
     .await?;
     let event = std::iter::from_fn(|| events.try_recv().ok())
         .find(|event| matches!(event, AppEvent::OpenWarnings))
         .expect("offline /warnings dispatch");
-    app.handle_event(&mut tui, &mut app_server, event).await?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, event)).await?;
     assert!(app.chat_widget.keymap_contexts().is_warnings());
     app.reconnect.offline = false;
     app_server.shutdown().await?;

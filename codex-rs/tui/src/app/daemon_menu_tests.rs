@@ -77,7 +77,7 @@ async fn daemon_menu_keeps_status_but_offers_no_builtin_update() {
     };
     app.chat_widget.remote_connection = Some(RemoteConnectionStatus {
         address: "local".into(),
-        version: "v0.153.0".into(),
+        version: Some("v0.153.0".into()),
         is_local_daemon: true,
         is_managed_daemon: true,
     });
@@ -225,7 +225,7 @@ async fn unavailable_daemon_menu_offers_guidance_without_update_actions() {
     };
     app.chat_widget.remote_connection = Some(RemoteConnectionStatus {
         address: "ws://example.test:1234".into(),
-        version: "v0.153.0".into(),
+        version: Some("v0.153.0".into()),
         is_local_daemon: false,
         is_managed_daemon: false,
     });

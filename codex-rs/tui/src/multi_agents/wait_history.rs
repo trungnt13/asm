@@ -84,7 +84,7 @@ impl Drop for AgentWaitHistory {
 
 #[derive(Debug)]
 pub(crate) struct AgentWaitHistoryCell {
-    preview: LabeledToolCell,
+    preview: LabeledToolCell<WebHyperlinkHistoryCell>,
     // One namespaced identity retains group disclosure and deduplicates paired preview counts.
     count_key: String,
     state: Arc<RwLock<WaitGroupState>>,
@@ -93,6 +93,14 @@ pub(crate) struct AgentWaitHistoryCell {
 impl HistoryCell for AgentWaitHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.preview.display_lines(width)
+    }
+
+    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.preview.display_hyperlink_lines(width)
+    }
+
+    fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.preview.transcript_hyperlink_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
