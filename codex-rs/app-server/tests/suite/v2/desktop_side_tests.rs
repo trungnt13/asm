@@ -123,7 +123,7 @@ async fn desktop_side_defaults_sync_and_picker_choices_persist(
         (json!(expected_model), json!("low"), json!("priority"))
     );
     let mode = if kind == "start" {
-        json!({"mode":"default","settings":{"model":parent.model,"reasoning_effort":null,"developer_instructions":null}})
+        json!({"mode":"default","settings":{"model":expected_model,"reasoning_effort":null,"developer_instructions":null}})
     } else {
         settings["collaborationMode"].clone()
     };
