@@ -790,7 +790,7 @@ Keep Markdown paragraphs/code blocks/list items adjacent during streaming and co
 
 ### Compact status line
 
-- Join with `·`, without spaces. Use `CtxN%`/`CtxN%left` for used/remaining context and `F:on`/`F:off` for fast mode. Show capacity as a compact token count without `window`, including `/statusline` previews.
+- Join with `·`, without spaces. Use `CtxN%`/`CtxN%left` for used/remaining context. Keep the `fast-mode` key for the effective processing tier: `⚡S` for Standard, `⚡F` for Fast, `⚡U` for Ultrafast, and `⚡X` for Flex. For other tiers, prefix the catalog name or tier ID with `⚡`. Show capacity as a compact token count without `window`, including `/statusline` previews.
 - For model labels, lowercase, remove `gpt-`, and keep at most three letters, including aliases. Append all version digits without separators: `GPT-6-Astra` → `ast6`, `GPT-6.1-Sol` → `sol61`, `Terra 5.6` → `ter56`. Without digits, omit the suffix.
 - Abbreviate effort to three letters, including model-with-reasoning: `medium` → `med`, `high` → `hig`, `xhigh` → `xhi`.
 - Apply to footer, `/statusline` previews, and `/subagents` model info. Preserve IDs, other picker labels, titles, paths/roles/colors/order/single-row truncation. Remove role-leading space only in footer: `Main[default]`.
