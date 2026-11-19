@@ -1262,7 +1262,9 @@ pub(crate) async fn run_hooks_and_record_inputs(
             let is_user_input = matches!(input_item.as_ref(), TurnInput::UserInput { content, .. } if !content.is_empty());
             // Owned inputs were stripped of unsupported audio and cannot lead to a model step.
             let decision_input = match &input_item {
-                Cow::Borrowed(item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_))) => Some(*item),
+                Cow::Borrowed(
+                    item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_)),
+                ) => Some(*item),
                 _ => None,
             };
             if let Err(error) = record_pending_input(
