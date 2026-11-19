@@ -189,6 +189,16 @@ Use standard GitHub-hosted runners; paid larger runners need explicit approval. 
 
 Before release operations, use [asm-release](../.agents/skills/asm-release/SKILL.md). Require an explicit release request. Publication grants no installation or shared-server-restart authority. The procedure covers preparation, CI recovery, live smoke, dispatch, and finishing.
 
+A release request includes Linux v3. Check v3 support on the machine running
+the release procedure. Start or resume the standard GitHub Actions release
+after its normal checks. Do not wait for the local v3 build or a skip decision.
+
+If the machine supports v3, build the exact tagged candidate locally while CI
+runs. If any v3 prerequisite or check blocks progress, report the blocker and ask
+for approval to skip v3 for this tag. Keep CI running. Do not report the release
+complete until all required checks pass and v3 is published or the owner
+approves the skip. Report an approved skip explicitly.
+
 6. **Recover:** after interruption, rerun failed jobs. For a new resume dispatch, use `main`, `publish_release=true`, and `resume_run_id=<original run ID>`. Preserve original version/commit despite upstream advances. Never invent versions or replace tags. Report failures needing owner decisions. Only with explicit approval, supersede a source-defective failed unpublished candidate with a new immutable candidate. Record old run/source/tag and draft assets in `.github/scripts/superseded-fork-releases.json`. Preparation must verify that record and reject publication or asset drift. Preserve old candidate/tag/assets and occupied version. Never apply this exception to published or partially ready releases. The owner separately approved superseding cancelled run `42465703649` on 2026-11-09 to release current main. Preserve draft `v0.169.1-alpha.3.1`, its tag, candidate and installer unchanged; verify its recorded cancelled state before creating the new candidate.
 7. **Verify:** a platform is ready after its checked archive and platform checksum manifest are published. Candidate completion requires `release`, both `verify_native` jobs, and `sync_main` success for that candidate. Legacy `v*` pushes/dispatches require publication and both native checks, not `sync_main`. Inspect recorded checks/current metadata; do not repeat successful checks on unchanged artifacts. Builds, tag pushes, and version labels do not prove publication.
 
@@ -248,7 +258,7 @@ LTO means link-time optimization.
 | Build | CPU | LTO | Codegen units | PGO |
 | --- | --- | --- | --- | --- |
 | Linux CI | Portable x86-64 | Thin | 4 | Yes |
-| Linux local, optional | x86-64-v3 | Fat | 1 | Yes |
+| Linux local | x86-64-v3 | Fat | 1 | Yes |
 | macOS CI | Apple Silicon | Upstream | Upstream | No |
 
 Leave Cargo profiles unchanged. Use one Cargo job for Linux PGO. Build Bubblewrap
@@ -275,10 +285,11 @@ python3 ../scripts/pgo/setup.py --target x86_64-unknown-linux-gnu \
 Load assignments without evaluating shell code. Pass the same target to Cargo.
 Keep the profile until the build ends.
 
-#### Optional Linux v3 package
+#### Linux v3 package
 
-Build from the exact release tag in a clean checkout. Use a v3-capable machine
-and an Ubuntu 22.04 environment. Install the candidate toolchain, CI build tools,
+Check glibc for full v3 support on the current machine. Do not infer support
+from AVX2 alone. When CI assigns the tag, build from that exact tag in a clean
+checkout. Use Ubuntu 22.04, natively or in a local container. Install the candidate toolchain, CI build tools,
 `llvm-tools-preview`, and Python 3.11+ (set `PYTHON` if needed). Use absolute
 paths. For `v8_dir`, supply the archive, bindings, checksum file, and
 `release.json` from the release used by
@@ -294,8 +305,8 @@ Keep the archive and its `.provenance` file together. Run the release-source
 live check before uploading. Before the first v3 upload, update and validate
 `tngo-workflow`: its verification and rollback assume the portable directory.
 
-After the base release is complete, get approval to upload. Use Docker and a
-`GH_TOKEN` with Actions read and Contents write access. Set `base_run_id` to
+After the base release is complete, upload v3 as part of the release request.
+Use Docker and a `GH_TOKEN` with Actions read and Contents write access. Set `base_run_id` to
 the successful release or resume run for this exact tag. Run this from the
 same tagged checkout:
 
