@@ -282,7 +282,9 @@ and an Ubuntu 22.04 environment. Install the candidate toolchain, CI build tools
 `llvm-tools-preview`, and Python 3.11+ (set `PYTHON` if needed). Use absolute
 paths. For `v8_dir`, supply the archive, bindings, checksum file, and
 `release.json` from the release used by
-[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml).
+[`setup-rusty-v8`](../.github/actions/setup-rusty-v8/action.yml). The build uses
+only tracked Cargo configuration and a private Cargo cache in `output`.
+It ignores host compiler flags and uses the tag's Bubblewrap source.
 
 ```bash
 just build-release-v3 "$tag" "$output" "$v8_dir"
@@ -292,12 +294,14 @@ Keep the archive and its `.provenance` file together. Run the release-source
 live check before uploading. Before the first v3 upload, update and validate
 `tngo-workflow`: its verification and rollback assume the portable directory.
 
-After the base release is complete, get approval to upload. Use Docker and an
-authorized `GH_TOKEN`. Run this from the same tagged checkout:
+After the base release is complete, get approval to upload. Use Docker and a
+`GH_TOKEN` with Actions read and Contents write access. Set `base_run_id` to
+the successful release or resume run for this exact tag. Run this from the
+same tagged checkout:
 
 ```bash
 GITHUB_REPOSITORY=trungnt13/asm RELEASE_TAG="$tag" RELEASE_SHA="$(git rev-parse HEAD)" \
-  python3 .github/scripts/publish-fork-release.py publish-v3 \
+  python3 .github/scripts/publish-fork-release.py publish-v3 --base-run-id "$base_run_id" \
     --archive "$output/codex-x86_64-unknown-linux-gnu-v3.tar.gz"
 ```
 
@@ -309,14 +313,17 @@ verification, stop. Install the variants in separate directories.
 
 #### Train the PGO profile
 
-Use Python 3.11+, authorized Codex sign-in, and an instrumented CLI with its
-matching helper. Set `CODEX_HOME` to the source home and `PGO_INSTRUMENTED_BIN`
-to the CLI. Set `PGO_TRAINING_DIR` to a new private directory outside tracked
-sources. Run `python3 scripts/pgo/train.py`. Do not run it in release CI.
+Use Linux with working Bubblewrap mount and PID namespaces. Use Python 3.11+,
+authorized Codex sign-in, and an instrumented CLI with its matching helper.
+Set `CODEX_HOME` to the source home and `PGO_INSTRUMENTED_BIN` to the CLI.
+Set `PGO_TRAINING_DIR` to an empty, private directory outside tracked sources.
+Run `python3 scripts/pgo/train.py`. Do not run it in release CI.
 
-The harness copies feature settings to private homes and disables System1. It
-uses full-access mode in disposable directories, not OS-enforced isolation.
-The monitor checks these limits: 890 completions, 19.9M input
+The harness copies feature settings and disables System1. Bubblewrap makes
+host files read-only and permits writes to private session and profile paths.
+It does not restrict host reads or network access. The harness checks the
+effective SQLite and log paths before starting a turn. If managed settings
+change either path, stop. The monitor checks these limits: 890 completions, 19.9M input
 tokens, 245K output tokens, 60 minutes, or $4.90 API-equivalent. Actual charges
 are unknown. Never publish training homes, histories, or credentials.
 

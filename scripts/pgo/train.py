@@ -2,13 +2,17 @@ import asyncio
 import json
 import os
 import shutil
+import subprocess
 import time
 import tomllib
 from pathlib import Path
 
 R = Path(os.environ["PGO_TRAINING_DIR"]).resolve()
 R.mkdir(mode=0o700, parents=True, exist_ok=True)
-assert R.stat().st_mode & 0o077 == 0, "Training directory must be private (0700)"
+if R.stat().st_mode & 0o077:
+    raise PermissionError("Training directory must be private (0700)")
+if any(R.iterdir()):
+    raise ValueError("Training directory must be empty")
 source_home = Path(os.environ["CODEX_HOME"]).resolve()
 config = (source_home / "config.toml").read_text()
 (R / "requested-features.json").write_text(
@@ -19,11 +23,13 @@ luna = next(m for m in cache["models"] if m["slug"] == "gpt-6-luna")
 (R / "cheap-model-catalog.json").write_text(json.dumps({"models": [luna]}))
 
 
-async def session(index, turns, children):
+async def session(index, turns, children, sandbox, raw):
     d = R / f"session-{index}"
     d.mkdir(mode=0o700)
     h = d / "home"
     h.mkdir(mode=0o700)
+    tmp = d / "tmp"
+    tmp.mkdir(mode=0o700)
     w = d / "work"
     shutil.copytree(Path(__file__).resolve().parent / "fixture", w)
     (w / "checks.py.in").rename(w / "test_eventlog.py")
@@ -44,24 +50,36 @@ async def session(index, turns, children):
         "subagent_model_list": ["gpt-6-luna"],
         "notify": [],
         "diagnostic_log_capture": True,
+        "sqlite_home": str(h / "sqlite"),
+        "log_dir": str(h / "log"),
         "model_providers.codex-validation.name": "OpenAI",
         "model_providers.codex-validation.requires_openai_auth": True,
         "model_providers.codex-validation.supports_websockets": True,
         "model_providers.codex-validation.request_max_retries": 0,
         "model_providers.codex-validation.stream_max_retries": 0,
     }
-    args = [str(Path(os.environ["PGO_INSTRUMENTED_BIN"]).resolve()), "--no-daemon"]
+    args = [
+        *sandbox,
+        "--bind",
+        str(d),
+        str(d),
+        "--bind",
+        str(raw),
+        str(raw),
+        "--",
+        str(Path(os.environ["PGO_INSTRUMENTED_BIN"]).resolve()),
+        "--no-daemon",
+    ]
     for k, v in flags.items():
         args += ["-c", f"{k}={json.dumps(v)}"]
     args += ["app-server", "--listen", "stdio://"]
-    raw = R / "profiles"
-    raw.mkdir(exist_ok=True)
     env = dict(
         os.environ,
         CODEX_HOME=str(h),
+        TMPDIR=str(tmp),
         LLVM_PROFILE_FILE=str(raw / f"s{index}-%m-%p.profraw"),
     )
-    for k in ["JEV_API_KEY", "DECISION_API_KEY"]:
+    for k in ["CODEX_SQLITE_HOME", "JEV_API_KEY", "DECISION_API_KEY"]:
         env.pop(k, None)
     log = (d / "rpc.jsonl").open("w")
     err = (d / "stderr.log").open("w")
@@ -81,10 +99,13 @@ async def session(index, turns, children):
     async def read():
         while line := await p.stdout.readline():
             x = json.loads(line)
+            if x.get("id") in pending:
+                future, method = pending.pop(x["id"])
+                future.set_result(x)
+                if method == "config/read":
+                    continue  # The effective user config may contain credentials.
             log.write(json.dumps({"time": time.time(), "event": x}) + "\n")
             log.flush()
-            if x.get("id") in pending:
-                pending.pop(x["id"]).set_result(x)
             if x.get("method") == "turn/completed":
                 key = x["params"]["threadId"]
                 done.setdefault(key, asyncio.Queue()).put_nowait(x)
@@ -93,7 +114,7 @@ async def session(index, turns, children):
         nonlocal counter
         counter += 1
         f = asyncio.get_running_loop().create_future()
-        pending[counter] = f
+        pending[counter] = (f, method)
         p.stdin.write(
             (
                 json.dumps({"id": counter, "method": method, "params": params}) + "\n"
@@ -102,6 +123,8 @@ async def session(index, turns, children):
         await p.stdin.drain()
         x = await asyncio.wait_for(f, 90)
         if "error" in x:
+            if method == "config/read":
+                raise RuntimeError("Unable to verify isolated SQLite and log paths")
             raise RuntimeError(x)
         return x["result"]
 
@@ -115,6 +138,12 @@ async def session(index, turns, children):
             },
         )
         p.stdin.write(b'{"method":"initialized"}\n')
+        effective = (await rpc("config/read", {"cwd": str(w)}))["config"]
+        for key in ("sqlite_home", "log_dir"):
+            if effective.get(key) != flags[key]:
+                raise RuntimeError(
+                    f"Training requires the session-local {key}; check managed settings"
+                )
         thread = (
             await rpc(
                 "thread/start",
@@ -151,7 +180,11 @@ async def session(index, turns, children):
                 event = await asyncio.wait_for(
                     done.setdefault(current, asyncio.Queue()).get(), 900
                 )
-                assert event["params"]["turn"]["status"] == "completed", event
+                status = event["params"]["turn"]["status"]
+                if status != "completed":
+                    raise RuntimeError(
+                        f"Session {index} turn {turn} ended with status {status}"
+                    )
             (d / "progress.json").write_text(
                 json.dumps(
                     {
@@ -215,18 +248,43 @@ async def monitor():
                 }
             )
         )
-        assert (
-            count < 890
-            and inputs < 19900000
-            and outputs < 245000
-            and inputs * 0.1 / 1e6 + outputs * 0.5 / 1e6 < 4.9
-            and time.monotonic() - started < 3600
-        ), "Budget/time boundary; stop all sessions"
+        if (
+            count >= 890
+            or inputs >= 19_900_000
+            or outputs >= 245_000
+            or inputs * 0.1 / 1e6 + outputs * 0.5 / 1e6 >= 4.9
+            or time.monotonic() - started >= 3600
+        ):
+            raise RuntimeError("Budget/time boundary; stop all sessions")
 
 
 async def main():
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
+        raise RuntimeError("PGO training requires bubblewrap (bwrap) on Linux")
+    # Managed paths can override -c before app-server accepts config/read.
+    sandbox = [
+        bwrap,
+        "--die-with-parent",
+        "--unshare-pid",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+    ]
+    try:
+        subprocess.run([*sandbox, "--", "/bin/true"], check=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError(
+            "PGO training requires working bubblewrap mount and PID namespaces"
+        ) from error
+    raw = R / "profiles"
+    raw.mkdir(mode=0o700)
     tasks = [
-        asyncio.create_task(session(i, *v))
+        asyncio.create_task(session(i, *v, sandbox, raw))
         for i, v in enumerate([(10, 4), (15, 3), (20, 2)], 1)
     ]
     m = asyncio.create_task(monitor())

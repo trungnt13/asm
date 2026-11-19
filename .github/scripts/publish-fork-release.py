@@ -300,7 +300,7 @@ def publish_target(repository, tag, sha, release, installer, target):
     print(f"Published verified {target} for {tag}; existing assets preserved")
 
 
-def publish_v3(repository, tag, sha, release, installer, archive):
+def publish_v3(repository, tag, sha, release, installer, archive, base_run_id):
     if (
         release is None
         or release.get("draft") is not False
@@ -329,6 +329,18 @@ def publish_v3(repository, tag, sha, release, installer, archive):
         raise ValueError(
             "tracked checkout changes must not affect release verification"
         )
+    subprocess.run(
+        [
+            sys.executable,
+            ROOT / ".github/scripts/prepare-fork-release.py",
+            "verify-base",
+            base_run_id,
+            tag,
+            sha,
+        ],
+        cwd=ROOT,
+        check=True,
+    )
 
     if V3_MANIFEST not in assets and release.get("immutable"):
         raise ValueError("cannot append Linux v3 assets to an immutable GitHub release")
@@ -454,9 +466,17 @@ def main():
     parser.add_argument(
         "--archive", type=Path, help="Archive for publish-v3 (with neighboring .provenance)"
     )
+    parser.add_argument(
+        "--base-run-id", help="Successful release workflow run for the exact tag and commit"
+    )
     arguments = parser.parse_args()
-    if (arguments.command == "publish-v3") != (arguments.archive is not None):
-        parser.error("publish-v3 requires --archive; other commands do not accept it")
+    if arguments.command == "publish-v3":
+        if arguments.archive is None or not re.fullmatch(
+            r"[1-9][0-9]*", arguments.base_run_id or ""
+        ):
+            parser.error("publish-v3 requires --archive and a positive --base-run-id")
+    elif arguments.archive is not None or arguments.base_run_id is not None:
+        parser.error("--archive and --base-run-id are only for publish-v3")
     if not os.environ.get("GH_TOKEN"):
         raise ValueError("GH_TOKEN is required")
     repository = os.environ["GITHUB_REPOSITORY"]
@@ -483,7 +503,15 @@ def main():
     )
     release = release_for_tag(repository, tag)
     if arguments.command == "publish-v3":
-        publish_v3(repository, tag, sha, release, installer, arguments.archive)
+        publish_v3(
+            repository,
+            tag,
+            sha,
+            release,
+            installer,
+            arguments.archive,
+            arguments.base_run_id,
+        )
         return
     if arguments.command == "initialize":
         initialize(repository, tag, sha, release, installer)
