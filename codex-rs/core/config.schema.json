@@ -5508,14 +5508,6 @@
           "minimum": 1.0,
           "type": "integer"
         },
-        "decision_model": {
-          "default": null,
-          "type": "string"
-        },
-        "decision_model_api_env": {
-          "default": null,
-          "type": "string"
-        },
         "decision_timeout_ms": {
           "default": 200,
           "format": "uint64",
@@ -5530,11 +5522,6 @@
         "high_effort_description": {
           "default": "Substantive work within the model’s normal range, including implementation or interpretation that requires care.",
           "type": "string"
-        },
-        "include_images": {
-          "default": false,
-          "description": "Allow the legacy OpenAI connection to receive current-turn user images.",
-          "type": "boolean"
         },
         "low_effort_description": {
           "default": "Straightforward coding, focused searches, and bounded analysis.",

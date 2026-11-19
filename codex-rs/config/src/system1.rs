@@ -40,8 +40,6 @@ pub struct System1Profile {
 #[serde(default, deny_unknown_fields)]
 pub struct System1Config {
     pub enabled: bool,
-    /// Allow the legacy OpenAI connection to receive current-turn user images.
-    pub include_images: bool,
     /// Adapt turns 1, 1 + N, 1 + 2N, ... independently in each agent.
     #[schemars(range(min = 1))]
     pub decision_every_n_turns: u64,
@@ -52,8 +50,6 @@ pub struct System1Config {
     pub decision_every_n_steps: u64,
     pub profile: Option<String>,
     pub profiles: BTreeMap<String, System1Profile>,
-    pub decision_model: Option<String>,
-    pub decision_model_api_env: Option<String>,
     pub min_effort: ReasoningEffort,
     pub max_effort: ReasoningEffort,
     #[schemars(range(min = 1, max = 5000))]
@@ -73,13 +69,10 @@ impl Default for System1Config {
     fn default() -> Self {
         Self {
             enabled: false,
-            include_images: false,
             decision_every_n_turns: 1,
             decision_every_n_steps: 1,
             profile: None,
             profiles: BTreeMap::new(),
-            decision_model: None,
-            decision_model_api_env: None,
             min_effort: ReasoningEffort::Low,
             max_effort: ReasoningEffort::Max,
             decision_timeout_ms: 200,
@@ -116,32 +109,15 @@ impl System1Config {
         }
     }
 
-    pub fn resolved_profile(&self) -> Result<System1Profile, String> {
-        let profile = if let Some(name) = &self.profile {
-            if self.decision_model.is_some() || self.decision_model_api_env.is_some() {
-                return Err("system1.profile cannot be combined with decision_model or decision_model_api_env".to_string());
-            }
-            self.profiles
-                .get(name)
-                .cloned()
-                .ok_or_else(|| format!("system1.profile references unknown profile {name:?}"))?
-        } else {
-            System1Profile {
-                include_images: self.include_images,
-                backend: System1Backend::Openai,
-                endpoint: None,
-                model: self
-                    .decision_model
-                    .clone()
-                    .unwrap_or_else(|| "gpt-6-luna".to_string()),
-                api_key_env: self
-                    .decision_model_api_env
-                    .clone()
-                    .unwrap_or_else(|| "DECISION_API_KEY".to_string()),
-            }
-        };
-        profile.validate()?;
-        Ok(profile)
+    pub fn selected_profile(&self) -> Result<(&str, &System1Profile), String> {
+        let name = self.profile.as_deref().ok_or_else(|| {
+            "System1 requires system1.profile to select a named entry in system1.profiles"
+                .to_string()
+        })?;
+        self.profiles
+            .get(name)
+            .map(|profile| (name, profile))
+            .ok_or_else(|| format!("system1.profile references unknown profile {name:?}"))
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -169,7 +145,9 @@ impl System1Config {
         if min > max {
             return Err("system1.min_effort must not exceed max_effort".to_string());
         }
-        self.resolved_profile()?;
+        if self.enabled || self.profile.is_some() {
+            self.selected_profile()?;
+        }
         for (name, profile) in &self.profiles {
             if name.trim().is_empty() {
                 return Err("system1 profile names must not be blank".to_string());

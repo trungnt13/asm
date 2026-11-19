@@ -626,11 +626,9 @@ Accept former `[adaptive_reasoning]` config, including deny-only roles, and form
 | Setting | Default | Validation |
 | --- | --- | --- |
 | `enabled` | `false` | Opt-in only |
-| `profile` | Absent: legacy OpenAI configuration | Name in `profiles`; cannot mix with legacy model/key settings |
+| `profile` | Absent | Must select a named entry in `profiles` before enabling System1 |
 | `profiles.<name>` | Empty map | Explicit `protocol` (`openai` or `typesafe`), nonblank `model`, ASCII identifier `api_key_env`; optional full `endpoint` URL |
-| `include_images` | `false` | Legacy OpenAI connection only. Named profiles opt in separately via `profiles.<name>.include_images`. |
-| `decision_model` | `"gpt-6-luna"` | Nonblank |
-| `decision_model_api_env` | `"DECISION_API_KEY"` | ASCII environment-variable identifier, not a secret |
+| `profiles.<name>.include_images` | `false` | Allow this endpoint to receive current-turn user images. |
 | `min_effort` / `max_effort` | `"low"` / `"max"` | Ordinary levels; `min_effort <= max_effort` |
 | `decision_timeout_ms` | `200` | 1–5000 ms |
 | `max_context_bytes` | `8192` | 128–32768 UTF-8 bytes across all Decisions input items |
@@ -639,13 +637,25 @@ Accept former `[adaptive_reasoning]` config, including deny-only roles, and form
 | `low_effort_description` / `medium_effort_description` / `high_effort_description` / `xhigh_effort_description` / `max_effort_description` | Built-in text below | Nonblank; each at most 4096 UTF-8 bytes |
 | `rubric_instructions` | Built-in rubric | Nonblank; at most 4096 UTF-8 bytes |
 
-**Connections.** Profiles select connection settings, not adaptation policies. Share bounds, cadence, evidence limits, timeout, and rubric. Profile names have no built-in meaning. Do not infer protocol from names, endpoints, or credentials. Accept `backend` as an alias for `protocol`; reject both together. Validate every profile. Reject unknown profiles/protocols without fallback. Without `profile`, retain legacy OpenAI defaults and explicit overrides. Reject a selected profile with either legacy model/key setting, even when it equals its default.
+**Connections.** Profiles select connection settings, not adaptation policies. Share bounds, cadence, evidence limits, timeout, and rubric. Profile names have no built-in meaning. Do not infer protocol from names, endpoints, or credentials. Accept `backend` as an alias for `protocol`; reject both together. Validate every profile. Reject unknown profiles/protocols without fallback. With System1 disabled, the selection can be omitted; neither startup nor runtime activation may infer a connection.
+
+For example, an explicit OpenAI Decisions connection is:
+
+```toml
+[system1]
+profile = "decision_api"
+
+[system1.profiles.decision_api]
+protocol = "openai"
+model = "gpt-6-luna"
+api_key_env = "DECISION_API_KEY"
+```
 
 Resolve the connection once per session on first use, including failed credential attempts. Keep protocol/endpoint/model fixed across warmup, decisions, and config reloads. Both adapters share cancellation, deadline, allowed-choice validation, and recovery. Do not use automatic failover or adapter-internal retries.
 
 Without `endpoint`, use the protocol's official HTTPS endpoint. Overrides are full destination URLs, not format selectors; append no path. Require HTTPS except loopback HTTP. Reject URL credentials and fragments. Reject blank endpoints during config validation. Reject other invalid URLs during client construction without exposing them in errors.
 
-The endpoint receives bounded conversation evidence and the `api_key_env` credential. A custom endpoint need not belong to OpenAI or TypeSafe. Choose it deliberately. Keep authentication separate from the main model and sanitize diagnostics. Read only the profile's `api_key_env` or legacy named variable, default `DECISION_API_KEY`. Retain explicit variable-name overrides. Never fall back to `OPENAI_API_KEY`, provision credentials, or log keys/evidence. Do not route Decisions through Guardian.
+The endpoint receives bounded conversation evidence and the `api_key_env` credential. A custom endpoint need not belong to OpenAI or TypeSafe. Choose it deliberately. Keep authentication separate from the main model and sanitize diagnostics. Read only the profile's `api_key_env`. Never fall back to `OPENAI_API_KEY`, provision credentials, or log keys/evidence. Do not route Decisions through Guardian.
 
 **Choices.** Adapt ordinary roots and spawned subagents, not internal workers. Use the selected backend to choose supported effort within bounds. Keep Ultra/Persistent, models, service tiers, execution modes, permissions, and saved defaults unchanged. With fewer than two efforts, skip Decisions and warmup; retain current effort.
 
@@ -669,7 +679,7 @@ If configured, replace the built-in rubric with unchanged `rubric_instructions`.
 - For each allowed choice, send labeled `Model meaning` and `Selection guidance` sections. Trim catalog meaning to 1024 UTF-8 bytes; use `unavailable` for missing, blank, or fallback metadata. Preserve full configured guidance, capped at 4096 bytes. The API caps each combined description at 8192 UTF-8 bytes.
 - Reassess the whole next response against the task baseline. Use the nearest offered level if the anchor is out of range; when absent, select the lowest sufficient offered effort. Use the model’s capabilities for this work, without a fixed adjustment by name. Enforce allowed choices and runtime limits in code. Keep classifier instructions/results outside the main conversation.
 
-**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, and encrypted reasoning. Never borrow another turn’s prompt as the current task. By default Decisions receives no images. To send a current-turn user attachment to a named endpoint, set `include_images = true` in that profile. This permission belongs to the session-fixed connection; the legacy top-level flag does not opt in any named profile. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
+**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, and encrypted reasoning. Never borrow another turn’s prompt as the current task. By default Decisions receives no images. To send a current-turn user attachment to a named endpoint, set `include_images = true` in that profile. This permission belongs to the session-fixed connection. No top-level image permission is accepted. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
 
 With opt-in, allow at most one accepted inline PNG or JPEG per decision, including resolved local images, bounded to a 4 MiB encoded data URL separately from the text evidence limit. Do not fetch URLs or forward file IDs, tool images, previous-turn attachments, or images rejected by input hooks. Skip an image-only decision if no eligible image is available; keep main-model input unchanged. Sanitize the classifier copy, strip metadata, and reduce oversized dimensions. For JEV, pad short sides without stretching the image to meet its 280–1568 pixel limits. Malformed media does not block subsequent decisions. OpenAI uses a low-detail image content part; TypeSafe uses its experimental image header and multipart asset format. Never log the attachment in Decisions diagnostics. Image requests can increase cost and exceed the default 200 ms deadline. To allow up to five seconds for visual decisions, set `decision_timeout_ms = 5000` under `[system1]`; that deadline also applies to text decisions.
 
@@ -691,7 +701,7 @@ Report mode/revision at attachment and transitions; ignore older revisions. Repo
 
 Keep captured effort/turn identity in live TUI snapshots, outside saved history. Restore on view switches without stale history settings. Clear on a new turn or manual change. Send transient effort notifications directly to clients, without rollout persistence before the main request.
 
-**Status.** `/system1 status` reads current mode, selected/last captured effort, health, and session-fixed connection identity. Show backend/protocol, model, captured profile name or legacy config, and client initialization. Do not present reloaded config as the active connection. Before resolution, show unresolved identity. Initialization does not prove a successful request. Do not change settings, send a turn, resolve profiles, inspect credentials, or start warmup.
+**Status.** `/system1 status` reads current mode, selected/last captured effort, health, and session-fixed connection identity. Show backend/protocol, model, captured profile name, and client initialization. Do not present reloaded config as the active connection. Before resolution, show unresolved identity. Initialization does not prove a successful request. Do not change settings, send a turn, resolve profiles, inspect credentials, or start warmup.
 
 Read fixed-size in-memory totals only for the loaded runtime. Exclude warmup, cadence/backoff skips, and incomplete tasks. Accepted includes unchanged decisions; effort changes count only applied changes. Count client setup failures separately. Show total/last completed-decision wall time, not estimated net overhead, cost, or savings. Totals reset on unload/restart; children have separate totals. Do not scan rollouts, persist totals, add per-step notifications, expose credentials/endpoints, or resume unloaded threads. Older servers show unavailable stats.
 

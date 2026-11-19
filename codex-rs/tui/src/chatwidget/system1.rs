@@ -67,10 +67,7 @@ impl ChatWidget {
         );
         if let Some(response) = response {
             if let Some(connection) = response.decision_connection {
-                let profile = connection
-                    .profile
-                    .as_deref()
-                    .unwrap_or("legacy configuration");
+                let profile = connection.profile.as_deref().unwrap_or("not reported");
                 let client = if connection.client_initialized {
                     "client initialized"
                 } else {

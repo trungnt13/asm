@@ -90,7 +90,7 @@ struct System1Session {
 }
 
 struct ResolvedSystem1Profile {
-    name: Option<String>,
+    name: String,
     settings: System1Profile,
 }
 
@@ -176,12 +176,10 @@ impl Drop for System1Probe {
 impl System1Session {
     fn include_images(&self, config: &System1Config) -> bool {
         self.profile.get().map_or_else(
-            || match &config.profile {
-                Some(name) => config
-                    .profiles
-                    .get(name)
-                    .is_some_and(|profile| profile.include_images),
-                None => config.include_images,
+            || {
+                config
+                    .selected_profile()
+                    .is_ok_and(|(_, profile)| profile.include_images)
             },
             |profile| profile.settings.include_images,
         )
@@ -191,13 +189,13 @@ impl System1Session {
         let profile = if let Some(profile) = self.profile.get() {
             profile
         } else {
-            let profile = config
+            let (name, profile) = config
                 .system1
-                .resolved_profile()
+                .selected_profile()
                 .map_err(|_| DecisionsError::InvalidRequest)?;
             self.profile.get_or_init(|| ResolvedSystem1Profile {
-                name: config.system1.profile.clone(),
-                settings: profile,
+                name: name.to_owned(),
+                settings: profile.clone(),
             })
         };
         let profile = &profile.settings;
