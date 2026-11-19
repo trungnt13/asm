@@ -20,6 +20,7 @@ use codex_message_board::MessageBoardTool;
 use codex_prompts::ResolvedModelMessages;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ImageReference;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::NativeRuntime;
@@ -646,33 +647,70 @@ async fn invoke_message_tool(
                 codex_code_mode::PUBLIC_TOOL_NAME | codex_code_mode::WAIT_TOOL_NAME
             )
         });
-        let Some(selected) = params["arguments"]["name"].as_str() else {
-            let specs = tools
-                .iter()
-                .map(|tool| tool.spec.clone())
-                .collect::<Vec<_>>();
-            let catalog = json!({
-                "execution": {
-                    "model": step.settings.model_info.slug,
-                    "reasoning_effort": step.settings.effective_reasoning_effort(),
-                    "spawn_guidance": "Omit model and reasoning_effort to inherit the current execution settings. When specifying model, use its canonical ASM slug, not a backend-only alias."
-                },
-                "tools": specs
-            });
-            return bounded_claude_response(
-                json!({"isError":false,"content":[{"type":"text","text":serde_json::to_string(&catalog)?}]}),
-            );
+        let arguments = &params["arguments"];
+        let local_result = match arguments["name"].as_str() {
+            None => {
+                let catalog = json!({
+                    "execution": {
+                        "model": step.settings.model_info.slug,
+                        "reasoning_effort": step.settings.effective_reasoning_effort(),
+                        "spawn_guidance": "Omit model and reasoning_effort to inherit the current execution settings. When specifying model, use its canonical ASM slug, not a backend-only alias."
+                    },
+                    "tools": tools.iter().map(|tool| &tool.spec).collect::<Vec<_>>()
+                });
+                Some((serde_json::to_string(&catalog)?, true))
+            }
+            Some(selected) if direct.into_iter().any(|tool| tool.spec["name"] == selected) => {
+                name = selected.to_owned();
+                params = json!({"arguments":arguments.get("arguments").cloned().unwrap_or_else(|| json!({}))});
+                None
+            }
+            Some(_) => Some(("No tool was dispatched: this name is not a current direct tool. Call direct_tool with {} to discover current direct-tool names and schemas. ALL_TOOLS and tool_search cover only tools nested inside Code Mode exec.".to_owned(), false)),
         };
-        if !direct
-            .into_iter()
-            .any(|tool| tool.spec["name"].as_str() == Some(selected))
-        {
-            return bounded_claude_response(
-                json!({"isError":true,"notDispatched":true,"content":[{"type":"text","text":"No tool was dispatched: this name is not a current direct tool. Call direct_tool with {} to discover current direct-tool names and schemas. ALL_TOOLS and tool_search cover only tools nested inside Code Mode exec."}]}),
-            );
+        if let Some((mut text, mut success)) = local_result {
+            let to_response = |text: &str, success: bool| {
+                bounded_claude_response(
+                    json!({"isError":!success,"notDispatched":!success,"content":[{"type":"text","text":text}]}),
+                )
+            };
+            let response = match to_response(&text, success) {
+                Ok(response) => response,
+                Err(error) => {
+                    text = format!("No tool was dispatched: {error}");
+                    success = false;
+                    to_response(&text, success)?
+                }
+            };
+            let call_id = format!("claude-{}", Uuid::new_v4());
+            let items = [
+                ResponseItem::FunctionCall {
+                    status: None,
+                    encrypted_content: None,
+                    id: None,
+                    name,
+                    namespace: None,
+                    arguments: params["arguments"].to_string(),
+                    encrypted_function_args: None,
+                    call_id: call_id.clone(),
+                    internal_chat_message_metadata_passthrough: None,
+                },
+                ResponseItem::FunctionCallOutput {
+                    id: None,
+                    call_id: Some(call_id),
+                    name: None,
+                    namespace: None,
+                    output: FunctionCallOutputPayload {
+                        body: FunctionCallOutputBody::Text(text),
+                        success: Some(success),
+                    },
+                    internal_chat_message_metadata_passthrough: None,
+                },
+            ];
+            session
+                .record_conversation_items(&step.turn, &step.settings.model_info, &items)
+                .await;
+            return Ok(response);
         }
-        name = selected.to_owned();
-        params = json!({"arguments":params["arguments"].get("arguments").cloned().unwrap_or_else(|| json!({}))});
     }
     let tool = tools
         .iter()
