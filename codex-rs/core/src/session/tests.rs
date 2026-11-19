@@ -317,6 +317,7 @@ impl StepContext {
                 settings.model_info.as_ref(),
             ),
             settings: Arc::new(settings),
+            settings_before_tier_inheritance: None,
             session_telemetry: turn.session_telemetry.clone(),
             realtime: RealtimeConversationSnapshot {
                 active: turn.realtime_active,

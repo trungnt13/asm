@@ -472,13 +472,17 @@ pub(crate) async fn run_turn(
     let first_step_context = if input.is_empty() {
         first_step_context
     } else {
-        let before = turn_context.next_step_settings.load_full();
         sess.adapt_reasoning(
             &turn_context,
             codex_config::System1Trigger::TurnStart,
             &cancellation_token,
         )
         .await;
+        // A settings update may have landed during the hooks, before System1 ran.
+        let captured = first_step_context
+            .settings_before_tier_inheritance
+            .as_ref()
+            .unwrap_or(&first_step_context.settings);
         let current = turn_context.next_step_settings.load_full();
         let mode = sess.system1_state(
             turn_context.config.system1.enabled,
@@ -497,7 +501,7 @@ pub(crate) async fn run_turn(
         } else {
             false
         };
-        if !Arc::ptr_eq(&before, &current) || needs_fallback {
+        if !Arc::ptr_eq(captured, &current) || needs_fallback {
             sess.capture_step_context_with_required_mcp_servers(
                 Arc::clone(&turn_context),
                 &cancellation_token,

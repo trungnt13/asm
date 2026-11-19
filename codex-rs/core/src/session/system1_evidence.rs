@@ -18,12 +18,18 @@ use codex_utils_image::load_data_url_for_prompt_uncached;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio_util::task::AbortOnDropHandle;
 
 const MAX_IMAGE_DATA_URL_BYTES: usize = 4 * 1024 * 1024;
 const MAX_LOCAL_IMAGE_BYTES: usize =
     (MAX_IMAGE_DATA_URL_BYTES - "data:image/jpeg;base64,".len()) / 4 * 3;
+const MAX_IMAGE_CANDIDATE_BYTES: usize = 2 * MAX_IMAGE_DATA_URL_BYTES;
 
 pub(super) struct System1Image {
+    candidates: Vec<ImageCandidate>,
+}
+
+struct ImageCandidate {
     source: ImageSource,
     // The connection is fixed for the session, including its target image dimensions.
     prepared: OnceLock<Option<String>>,
@@ -43,24 +49,27 @@ impl System1Image {
         self: &Arc<Self>,
         minimum_side: u32,
     ) -> Result<&[String], tokio::task::JoinError> {
-        if let Some(prepared) = self.prepared.get() {
-            return Ok(prepared.as_slice());
+        for (index, candidate) in self.candidates.iter().enumerate() {
+            if candidate.prepared.get().is_none() {
+                let image = Arc::clone(self);
+                AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+                    let candidate = &image.candidates[index];
+                    candidate
+                        .prepared
+                        .get_or_init(|| candidate.prepare(minimum_side));
+                }))
+                .await?;
+            }
+            if let Some(prepared) = candidate.prepared.get().and_then(Option::as_ref) {
+                return Ok(std::slice::from_ref(prepared));
+            }
         }
-        let image = Arc::clone(self);
-        tokio::task::spawn_blocking(move || {
-            image
-                .prepared
-                .get_or_init(|| image.prepare_uncached(minimum_side));
-        })
-        .await?;
-        Ok(self
-            .prepared
-            .get()
-            .expect("image preparation completed")
-            .as_slice())
+        Ok(&[])
     }
+}
 
-    fn prepare_uncached(&self, minimum_side: u32) -> Option<String> {
+impl ImageCandidate {
+    fn prepare(&self, minimum_side: u32) -> Option<String> {
         let source = match &self.source {
             ImageSource::Inline(image) => {
                 let ImageReference::Inline { image_url } = image.as_ref() else {
@@ -109,6 +118,7 @@ struct EvidenceMessage {
 pub(super) struct System1Evidence {
     original: Option<EvidenceMessage>,
     latest_user: Option<EvidenceMessage>,
+    agent_assignment: String,
     agent_steer: String,
     pub(super) encrypted_task_unavailable: bool,
     pub(super) image: Option<Arc<System1Image>>,
@@ -121,7 +131,8 @@ impl System1Evidence {
             TurnInput::UserInput {
                 content, metadata, ..
             } => {
-                let mut image = None;
+                let mut candidates = Vec::new();
+                let mut image_bytes_left = MAX_IMAGE_CANDIDATE_BYTES;
                 let mut has_media = false;
                 for item in content
                     .iter()
@@ -131,32 +142,45 @@ impl System1Evidence {
                         append_text(&mut text, part, limit / 3);
                     } else if item.is_image() {
                         has_media = true;
-                        if include_images && metadata.origin.is_user() && image.is_none() {
-                            image = decision_image(item);
+                        if include_images
+                            && metadata.origin.is_user()
+                            && let Some((source, bytes)) = decision_image(item, image_bytes_left)
+                        {
+                            image_bytes_left -= bytes;
+                            candidates.push(ImageCandidate {
+                                source,
+                                prepared: OnceLock::new(),
+                            });
                         }
                     }
                 }
                 if metadata.origin.is_user() && (has_media || text.trim().is_empty()) {
-                    self.image = image.map(|source| {
-                        Arc::new(System1Image {
-                            source,
-                            prepared: OnceLock::new(),
-                        })
-                    });
+                    self.image =
+                        (!candidates.is_empty()).then(|| Arc::new(System1Image { candidates }));
                 }
                 (metadata.acceptance_order, metadata.origin.is_user())
             }
             TurnInput::InterAgentCommunication(message) => {
-                if message.encrypted_content.is_some() {
-                    self.encrypted_task_unavailable = true;
-                    return;
+                if message.trigger_turn {
+                    if message.encrypted_content.is_some() {
+                        self.agent_assignment.clear();
+                        self.encrypted_task_unavailable = true;
+                    } else {
+                        append_text(&mut text, &message.content, limit / 3);
+                        if !text.trim().is_empty() {
+                            self.agent_assignment = text;
+                            self.encrypted_task_unavailable = false;
+                        }
+                    }
+                } else if message.encrypted_content.is_none() {
+                    self.agent_steer.clear();
+                    append_text(&mut self.agent_steer, &message.content, limit / 3);
                 }
-                append_text(&mut text, &message.content, limit / 3);
-                (None, false)
+                return;
             }
             TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => return,
         };
-        if !text.trim().is_empty() || self.image.is_some() {
+        if user && (!text.trim().is_empty() || self.image.is_some()) {
             self.encrypted_task_unavailable = false;
         }
         let message = EvidenceMessage { text, order, user };
@@ -170,10 +194,15 @@ impl System1Evidence {
     }
 
     pub(super) fn has_task_text(&self) -> bool {
-        self.latest_user
-            .as_ref()
-            .or(self.original.as_ref())
-            .is_some_and(|m| !m.text.trim().is_empty())
+        !self.agent_assignment.trim().is_empty()
+            || self
+                .latest_user
+                .as_ref()
+                .or(self.original.as_ref())
+                .map_or_else(
+                    || !self.agent_steer.trim().is_empty(),
+                    |m| !m.text.trim().is_empty(),
+                )
     }
 
     pub(super) fn render(&self, history: &[ResponseItemEnvelope], limit: usize) -> String {
@@ -211,6 +240,13 @@ impl System1Evidence {
                 limit,
             );
         }
+        if !self.agent_assignment.is_empty() {
+            if !text.is_empty() {
+                append_text(&mut text, "\n", limit);
+            }
+            append_text(&mut text, "Agent assignment:\n", limit);
+            append_text(&mut text, &self.agent_assignment, limit);
+        }
         if !self.agent_steer.is_empty() {
             append_text(&mut text, "\nLatest task update:\n", limit);
             append_text(&mut text, &self.agent_steer, limit);
@@ -245,20 +281,21 @@ impl System1Evidence {
     }
 }
 
-fn decision_image(input: &ResolvedUserInput) -> Option<ImageSource> {
+fn decision_image(input: &ResolvedUserInput, bytes_left: usize) -> Option<(ImageSource, usize)> {
     match input {
         ResolvedUserInput::Image { image, .. } => {
             let ImageReference::Inline { image_url } = image.as_ref() else {
                 return None;
             };
-            (image_url.len() <= MAX_IMAGE_DATA_URL_BYTES
+            let len = image_url.len();
+            (len <= MAX_IMAGE_DATA_URL_BYTES.min(bytes_left)
                 && (image_url.starts_with("data:image/png;base64,iVBORw0KGgo")
                     || image_url.starts_with("data:image/jpeg;base64,/9j/")))
-            .then(|| ImageSource::Inline(Arc::clone(image)))
+            .then(|| (ImageSource::Inline(Arc::clone(image)), len))
         }
         ResolvedUserInput::LocalImage {
             bytes: Ok(bytes), ..
-        } if bytes.len() <= MAX_LOCAL_IMAGE_BYTES => {
+        } if bytes.len() <= MAX_LOCAL_IMAGE_BYTES.min(bytes_left) => {
             let mime = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
                 "image/png"
             } else if bytes.starts_with(b"\xff\xd8\xff") {
@@ -266,10 +303,13 @@ fn decision_image(input: &ResolvedUserInput) -> Option<ImageSource> {
             } else {
                 return None;
             };
-            Some(ImageSource::Local {
-                mime,
-                bytes: Arc::clone(bytes),
-            })
+            Some((
+                ImageSource::Local {
+                    mime,
+                    bytes: Arc::clone(bytes),
+                },
+                bytes.len(),
+            ))
         }
         _ => None,
     }

@@ -80,46 +80,42 @@ pub(super) async fn run_decision(
         span.record("thread.id", session.thread_id().to_string());
     }
     let started = Instant::now();
-    let images = if let Some(image) = &request.image {
-        let minimum_side = match client.backend_name() {
-            "typesafe" => 280,
-            _ => 0,
-        };
-        tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => return,
-            _ = guard.freshness.cancelled() => return,
-            result = tokio::time::timeout_at(guard.deadline,
-                image.prepare(minimum_side)) => match result {
-                    Ok(Ok(url)) => url,
-                    _ => return,
-                },
-        }
-    } else {
-        &[]
-    };
-    if images.is_empty() && request.requires_image {
-        return;
-    }
     let timeout = guard.deadline.saturating_duration_since(started);
-    tracing::debug!(
-        input_bytes = request.input.len(),
-        instructions_bytes = request.instructions.len(),
-        "System1 request started"
-    );
     let (api, disposition, selected, error) = tokio::select! {
         biased;
         _ = cancellation.cancelled() => (DecisionApiOutcome::Cancelled, DecisionDisposition::Cancelled, None, None),
         _ = guard.freshness.cancelled() => (DecisionApiOutcome::Cancelled, DecisionDisposition::Superseded, None, None),
         result = tokio::time::timeout_at(guard.deadline,
             async {
+                let images = if let Some(image) = &request.image {
+                    let minimum_side = match client.backend_name() {
+                        "typesafe" => 280,
+                        _ => 0,
+                    };
+                    image.prepare(minimum_side).await.map_err(|_| DecisionApiOutcome::ImagePreparationFailed)?
+                } else {
+                    &[]
+                };
+                // A ready preparation result can win the race with the timeout.
+                if Instant::now() >= guard.deadline {
+                    return Err(DecisionApiOutcome::Timeout);
+                }
+                if images.is_empty() && request.requires_image {
+                    return Err(DecisionApiOutcome::InvalidImage);
+                }
+                tracing::debug!(
+                    input_bytes = request.input.len(),
+                    instructions_bytes = request.instructions.len(),
+                    "System1 request started"
+                );
                 if let Some(attempt) = &mut attempt {
                     attempt.mark_http_attempted(client.backend_name());
                 }
                 client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices, images).await
+                    .map_err(DecisionApiOutcome::Error)
             }
         ) => match result {
-            Err(_) => {
+            Err(_) | Ok(Err(DecisionApiOutcome::Timeout)) => {
                 tracing::warn!(
                     backend = client.backend_name(),
                     model = %request.model,
@@ -129,7 +125,14 @@ pub(super) async fn run_decision(
                 );
                 (DecisionApiOutcome::Timeout, DecisionDisposition::TargetUnavailable, None, Some(System1Error::Timeout))
             },
-            Ok(Err(error)) => (DecisionApiOutcome::Error(error), DecisionDisposition::TargetUnavailable, None, Some(super::system1::health::classify_error(error))),
+            Ok(Err(api)) => {
+                let error = match &api {
+                    DecisionApiOutcome::Error(error) => Some(super::system1::health::classify_error(*error)),
+                    DecisionApiOutcome::InvalidImage | DecisionApiOutcome::ImagePreparationFailed => None,
+                    DecisionApiOutcome::Success | DecisionApiOutcome::Timeout | DecisionApiOutcome::Cancelled => unreachable!(),
+                };
+                (api, DecisionDisposition::TargetUnavailable, None, error)
+            },
             Ok(Ok(selected)) => {
                 tracing::debug!(selected_effort = %selected, latency_ms = started.elapsed().as_millis(),
                     "System1 request completed");
@@ -163,6 +166,7 @@ pub(super) async fn run_decision(
     };
     let error = error.filter(|_| !cancellation.is_cancelled() && !guard.freshness.is_cancelled());
     if matches!(target, DecisionTarget::System1 { .. })
+        && !matches!(api, DecisionApiOutcome::InvalidImage | DecisionApiOutcome::ImagePreparationFailed)
         && let Some(session) = session.upgrade()
     {
         session.record_system1_decision(disposition, error, started.elapsed());
