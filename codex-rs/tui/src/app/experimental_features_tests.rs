@@ -180,6 +180,7 @@ async fn statusline_uses_the_startup_flag_until_restart() -> Result<()> {
     app.refresh_in_memory_config_from_disk().await?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &mut server,
         started,
         ThreadAttachPresentation::Fresh,
         /*initial_user_message*/ None,
@@ -203,6 +204,7 @@ async fn statusline_uses_the_startup_flag_until_restart() -> Result<()> {
     let next = server.start_thread(&app.config).await?;
     app.replace_chat_widget_with_app_server_thread(
         &mut tui,
+        &mut server,
         next,
         ThreadAttachPresentation::Fresh,
         /*initial_user_message*/ None,

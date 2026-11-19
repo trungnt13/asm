@@ -821,7 +821,7 @@ async fn committed_handoff_retry_preserves_live_and_recovery_input_order() -> Re
         .items
         .iter()
         .filter_map(|item| match item {
-            RolloutItem::ResponseItem(envelope) => match &envelope.item {
+            RolloutItem::ResponseItem(envelope) => match envelope.item.as_ref() {
                 ResponseItem::Message { role, content, .. } if role == "user" => Some(content),
                 _ => None,
             },

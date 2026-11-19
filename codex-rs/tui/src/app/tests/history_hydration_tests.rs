@@ -429,16 +429,21 @@ async fn cloud_complete_transcript_includes_error_from_an_older_zero_item_turn()
         (turn_pages, item_pages)
     });
     let cells = load_session_transcript(&mut server, id, Hidden, /*config*/ None).await?;
-    let rendered = lines_to_single_string(&cells[0].display_lines(/*width*/ 80));
-    insta::assert_snapshot!(rendered, @"■ offline failure with no items");
-    assert_eq!(cells.len(), 5);
-    for (cell, expected) in cells[1..].iter().zip([
+    let rendered: Vec<_> = cells
+        .iter()
+        .map(|cell| cell.display_lines(/*width*/ 80))
+        .filter(|lines| !lines.is_empty())
+        .map(|lines| lines_to_single_string(&lines))
+        .collect();
+    assert_eq!(rendered.len(), 5);
+    insta::assert_snapshot!(rendered[0], @"■ offline failure with no items");
+    for (cell, expected) in rendered[1..].iter().zip([
         "first answer",
         "older answer",
         "exported answer",
         "recent failure",
     ]) {
-        assert!(lines_to_single_string(&cell.display_lines(/*width*/ 80)).contains(expected));
+        assert!(cell.contains(expected));
     }
     let exported = load_export_transcript(&mut server, id, Hidden, /*config*/ None, vec![])
         .await

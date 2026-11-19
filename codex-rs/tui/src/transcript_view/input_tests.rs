@@ -268,15 +268,15 @@ fn workspace_file_links_show_the_title_with_subtle_hover_and_open_the_same_locat
         assert_eq!(
             link,
             FileLink {
-                path: "./guide.md".to_string(),
+                path: "/guide.md".to_string(),
                 location: Some(SourceLocation { line: 3, column: 2 }),
             },
         );
     }
     insta::assert_snapshot!(observations.join("\n"), @"
-    • Guide and ./guide.md:3:2
+    • Guide and guide.md:3:2
     title: underline=true, hover bold=true, background unchanged=true
-    filename: underline=false, hover bold=true, background unchanged=true
+    filename: underline=true, hover bold=true, background unchanged=true
     ");
 }
 

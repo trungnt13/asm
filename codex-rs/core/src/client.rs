@@ -1654,10 +1654,10 @@ impl ModelClient {
     fn sampling_result_bodies(
         &self,
         metadata: &CodexResponsesMetadata,
-        owner: Option<AuthOwner>,
+        destination: Option<&ResultBodyDestination>,
         input: &[Arc<ResponseItem>],
     ) -> Vec<(usize, usize, Arc<ToolResultBody>)> {
-        if let Some(owner) = owner
+        if let Some(destination) = destination
             && matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))
             && let Some(turn_id) = metadata.turn_id.as_deref()
             && let Some(turn) = self
@@ -1665,7 +1665,7 @@ impl ModelClient {
                 .as_ref()
                 .and_then(|calls| calls.result_body_turn(turn_id))
         {
-            return turn.for_input(input.iter().map(Arc::as_ref), &owner);
+            return turn.for_input(input.iter().map(Arc::as_ref), &destination.owner);
         }
         Vec::new()
     }
@@ -2304,13 +2304,11 @@ impl ResponsesHttpExecutor<'_> {
             let responses_headers = self
                 .client
                 .responses_headers(client_setup.auth.as_ref(), &model_info.slug);
-            let result_body_owner = sampling_result_destination(
+            let result_body_destination = sampling_result_destination(
                 &client_setup,
                 include_internal && self.client.captures_result_bodies(),
                 &responses_headers,
-            )
-            // A candidate gateway must also have a verified thread grant before it can receive results.
-            .map(|destination| destination.owner);
+            );
             tracing::Span::current().record("api.path", "/responses");
             let transport = build_api_transport(
                 &client_setup,
@@ -2425,7 +2423,7 @@ impl ResponsesHttpExecutor<'_> {
                 .with_telemetry(Some(request_telemetry), Some(sse_telemetry));
             options.tool_results = self.client.sampling_result_bodies(
                 responses_metadata,
-                result_body_owner,
+                result_body_destination.as_ref(),
                 &request.input,
             );
             let stream_result = client
@@ -2552,6 +2550,11 @@ impl ModelClientSession {
             let responses_headers = self
                 .client
                 .responses_headers(client_setup.auth.as_ref(), &model_info.slug);
+            let result_body_destination = sampling_result_destination(
+                &client_setup,
+                include_internal && self.client.captures_result_bodies(),
+                &responses_headers,
+            );
             tracing::Span::current().record("api.path", "/responses");
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
@@ -2817,6 +2820,18 @@ impl ModelClientSession {
                         if after_prewarm { "true" } else { "false" },
                     ),
                 ],
+            );
+            // Prewarm selects the inference route but never carries private result bodies.
+            let result_body_destination = if warmup {
+                None
+            } else {
+                result_body_destination
+            };
+            let ResponsesWsRequest::ResponseCreate(payload) = &mut ws_request;
+            payload.tool_results = self.client.sampling_result_bodies(
+                responses_metadata,
+                result_body_destination.as_ref(),
+                payload.input,
             );
             let stream_result = websocket_connection
                 .stream_request_with_observer(

@@ -403,9 +403,11 @@ async fn injected_child_final_survives_parent_interrupt() -> Result<()> {
         .into_iter()
         .filter_map(|item| match item {
             RolloutItem::ResponseItem(envelope)
-                if matches!(envelope.item, ResponseItem::AgentMessage { .. }) =>
+                if matches!(envelope.item.as_ref(), ResponseItem::AgentMessage { .. }) =>
             {
-                Some(responses::strip_metadata(envelope.item))
+                Some(responses::strip_metadata(Arc::unwrap_or_clone(
+                    envelope.item,
+                )))
             }
             _ => None,
         })

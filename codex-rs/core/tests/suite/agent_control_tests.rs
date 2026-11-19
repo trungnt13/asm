@@ -690,7 +690,7 @@ async fn hosted_child_persists_inherited_session_id(
             root.codex
                 .append_rollout_items(&[
                     RolloutItem::ResponseItem(ResponseItemEnvelope {
-                        item: responses::user_message_item("ancestor instructions"),
+                        item: Arc::new(responses::user_message_item("ancestor instructions")),
                         metadata: Some(CodexHarnessMetadata {
                             user_input_order: Some(42),
                             sender_user_messages: Some(Box::new(SenderUserMessages {

@@ -163,16 +163,16 @@ async fn direct_result_body_budget_reopens_when_the_output_is_lost(available: us
     let mut first = [attach("first", json!({"argument": "x".repeat(1024)}))];
     if available == MAX_RETAINED_DIRECT_METADATA_BYTES {
         recorder.attach_to_compaction_prompt(&mut []);
-        recorder.attach_to_prompt(&mut first, &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut first, &mut HashMap::new());
         assert!(matches!(bodies(&first).as_slice(), [(0, 0, _)]));
-        recorder.attach_to_prompt(&mut [], &mut HashMap::new());
+        recorder.attach_owned_prompt(&mut [], &mut HashMap::new());
     } else {
         assert!(first[0].executed_tool_call_metadata().is_none());
     }
 
     let [first] = first;
     let mut retry = [first, attach("second", json!({}))];
-    recorder.attach_to_prompt(&mut retry, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut retry, &mut HashMap::new());
     assert!(matches!(bodies(&retry).as_slice(), [(1, 0, _)]));
 }
 
@@ -262,7 +262,7 @@ async fn direct_result_bodies_require_the_originating_output_turn_and_owner(
         recorder.lock_state().as_ref().unwrap().direct_calls.len(),
         history.len().min(MAX_PENDING_EXECUTED_TOOL_CALLS)
     );
-    recorder.attach_to_prompt(&mut history, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut history, &mut HashMap::new());
     let selected = bodies(&history[..capacity]);
     assert_eq!(selected.len(), capacity);
     assert_eq!(
@@ -281,7 +281,7 @@ async fn direct_result_bodies_require_the_originating_output_turn_and_owner(
         }])
     );
 
-    recorder.attach_to_prompt(&mut history[1..], &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut history[1..], &mut HashMap::new());
     let history = [
         history[0].clone(),
         attach("replacement"),
@@ -290,7 +290,7 @@ async fn direct_result_bodies_require_the_originating_output_turn_and_owner(
     assert!(matches!(bodies(&history).as_slice(), [(1, 0, _)]));
     let mut foreign = [output("replacement")];
     foreign[0].set_id(history[1].id().cloned());
-    recorder.attach_to_prompt(&mut foreign, &mut HashMap::new());
+    recorder.attach_owned_prompt(&mut foreign, &mut HashMap::new());
     assert!(bodies(&foreign).is_empty());
     assert!(matches!(bodies(&history).as_slice(), [(1, 0, _)]));
 
