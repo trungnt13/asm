@@ -523,6 +523,14 @@ impl ConfigManager {
         let effective = updated_layers.effective_config();
         validate_config(&effective)
             .and_then(|()| {
+                let config = ConfigToml::try_from(effective.clone())?;
+                config
+                    .system1
+                    .unwrap_or_default()
+                    .validate()
+                    .map_err(anyhow::Error::msg)
+            })
+            .and_then(|()| {
                 credential_provider_edits.validate_remapping(
                     &user_layer.config,
                     &user_config,

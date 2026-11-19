@@ -10,6 +10,7 @@ use codex_user_input::ResolvedUserInput;
 pub(super) struct System1Evidence {
     pub(super) task: String,
     pub(super) encrypted_task_unavailable: bool,
+    nontext_task: bool,
     steer: String,
 }
 
@@ -25,9 +26,11 @@ impl System1Evidence {
         let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
         let mut incoming = String::new();
         let mut encrypted_input = false;
+        let mut user_input = false;
         for item in input.iter().take(item_limit) {
             match item {
                 TurnInput::UserInput { content, .. } => {
+                    user_input = true;
                     for item in content.iter().take(part_limit) {
                         if let ResolvedUserInput::Text { text, .. } = item {
                             append_text(&mut incoming, text, limit / 3);
@@ -46,6 +49,9 @@ impl System1Evidence {
                 TurnInput::FunctionCallOutput(_) | TurnInput::ResponseItem(_) => {}
             }
         }
+        if self.task.is_empty() && user_input {
+            self.nontext_task = incoming.is_empty();
+        }
         if !incoming.is_empty() {
             if !encrypted_input {
                 self.encrypted_task_unavailable = false;
@@ -60,7 +66,7 @@ impl System1Evidence {
                 };
             }
         }
-        if self.task.is_empty() {
+        if self.task.is_empty() && !self.nontext_task {
             for envelope in history.iter().rev().take(item_limit) {
                 if !envelope.metadata.as_ref().is_some_and(|metadata| {
                     metadata.user_input_order.is_some() && !metadata.compaction_output
