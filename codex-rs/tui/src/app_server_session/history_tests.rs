@@ -148,6 +148,7 @@ async fn saved_fork_preserves_daybreak_and_legacy_history_on_resume() -> color_e
         .fork_side_thread(
             &settings,
             temporary_config,
+            /*workspace_roots*/ None,
             parent,
             /*selected_profile*/ None,
             crate::app_server_session::SideChatStorage::Temporary,

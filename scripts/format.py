@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+LOCKED_PYTHON_RUNNER = "codex-rs/scripts/run_locked_python_tool.py"
 
 
 @dataclass(frozen=True)
@@ -137,9 +138,8 @@ def python_sdk_formatter_group(
 ) -> FormatterGroup:
     # Each `--project` retains its local dependency and Ruff configuration context.
     uv_run_args = [
-        "uv",
-        "run",
-        "--frozen",
+        sys.executable,
+        LOCKED_PYTHON_RUNNER,
         "--project",
         "sdk/python",
         "--only-group",
@@ -176,7 +176,14 @@ def python_sdk_formatter_group(
 def python_scripts_formatter_group(
     *, check: bool, files: tuple[str, ...] = ()
 ) -> FormatterGroup:
-    args = ["uv", "run", "--frozen", "--project", "scripts", "ruff", "format"]
+    args = [
+        sys.executable,
+        LOCKED_PYTHON_RUNNER,
+        "--project",
+        "scripts",
+        "ruff",
+        "format",
+    ]
     if check:
         args.append("--check")
     args.extend(("--force-exclude", "--", *files) if files else (".",))

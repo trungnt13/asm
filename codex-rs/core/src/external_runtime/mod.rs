@@ -636,7 +636,7 @@ async fn run_conversation(
                 Vec::new(),
                 codex_thread_store::PersistContext::TurnStart,
             )
-            .await;
+            .await?;
         }
         let history = session.clone_history().await;
         let messages = input_messages(history.raw_items())?;
@@ -734,7 +734,7 @@ async fn run_conversation(
                             }
                             for item in pending {
                                 record_pending_input(session, turn, &settings.model_info, item, Vec::new(),
-                                    codex_thread_store::PersistContext::TurnStart).await;
+                                    codex_thread_store::PersistContext::TurnStart).await?;
                             }
                         }
                         let messages = input_messages(session.clone_history().await.raw_items())?;

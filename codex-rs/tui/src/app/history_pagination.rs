@@ -94,7 +94,8 @@ impl App {
                 store
                     .session
                     .as_ref()
-                    .map_or_else(|| self.config.cwd.clone(), |session| session.cwd.clone()),
+                    .map(|session| session.cwd.to_path_buf())
+                    .unwrap_or_else(|| self.config.cwd.to_path_buf()),
                 store.turns.clone(),
             )
         };
@@ -203,7 +204,7 @@ impl App {
         turns: &[Turn],
         hidden_item_ids: &HashSet<(&str, &str)>,
         thread_id: ThreadId,
-        cwd: &AbsolutePathBuf,
+        cwd: &std::path::Path,
         visibility: RawReasoningVisibility,
     ) {
         if hidden_item_ids.is_empty() {
@@ -294,13 +295,44 @@ impl App {
         turns: &[Turn],
         hidden_item_ids: &HashSet<(&str, &str)>,
         thread_id: ThreadId,
-        cwd: &AbsolutePathBuf,
+        cwd: &std::path::Path,
         visibility: RawReasoningVisibility,
         relocate_split_images: bool,
     ) -> (TranscriptCells, TranscriptCells) {
         self.turn_agent_counts.record_native_turns(thread_id, turns);
-        let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
+        let cloud = matches!(self.app_server_target, AppServerTarget::Cloud)
+            && self.chat_widget.thread_id() == Some(thread_id);
+        let mut unfinished = HashSet::new();
+        if cloud {
+            for (turn_id, item) in items.iter().rev().filter(|(turn, item)| {
+                matches!(item, ThreadItemPayload::AgentMessage { .. })
+                    && !hidden_item_ids.contains(&(turn.as_str(), item.id()))
+            }) {
+                if let Some(turn) = turns.iter().find(|turn| turn.id == *turn_id)
+                    && let Some(entry) = turn.items.iter().find(|entry| entry.id() == item.id())
+                    && let Some(key) =
+                        self.chat_widget
+                            .remember_older_cloud_reply(turn_id, entry, &turn.status)
+                {
+                    unfinished.insert(key);
+                }
+            }
+        }
+        let mut cells = TranscriptCells::new();
         let mut split_images = Vec::new();
+        let show_communication = self.agent_navigation.is_parent_owned(thread_id);
+        let agent_role = self.chat_widget.collab_agent_metadata(thread_id).agent_role;
+        let project = |items: &[(String, ThreadItemPayload)]| {
+            thread_items_to_transcript_cells(
+                Some(thread_id),
+                cwd,
+                items.iter().map(|(_, item)| item.clone()),
+                visibility,
+                Some(&self.config),
+                show_communication,
+                agent_role.as_deref(),
+            )
+        };
         for (range, turn_end) in completion::group_turn_items(&items, turns) {
             let start = cells.len();
             if let Some(turn) = turns.iter().find(|turn| {
@@ -316,18 +348,44 @@ impl App {
             for visible in items[range]
                 .split(|(turn_id, item)| hidden_item_ids.contains(&(turn_id.as_str(), item.id())))
             {
-                cells.extend(thread_items_to_transcript_cells(
-                    Some(thread_id),
-                    cwd,
-                    visible.iter().map(|(_, item)| item.clone()),
-                    visibility,
-                    Some(&self.config),
-                    self.agent_navigation.is_parent_owned(thread_id),
-                    self.chat_widget
-                        .collab_agent_metadata(thread_id)
-                        .agent_role
-                        .as_deref(),
-                ));
+                for chunk in visible.split_inclusive(|(turn, item)| {
+                    unfinished.contains(&(turn.clone(), item.id().to_owned()))
+                }) {
+                    let anchor = chunk.last().and_then(|(turn, item)| {
+                        let key = (turn.clone(), item.id().to_owned());
+                        unfinished.get(&key).cloned()
+                    });
+                    let split = chunk.len() - usize::from(anchor.is_some());
+                    cells.extend(project(&chunk[..split]));
+                    if let Some(key) = anchor {
+                        let mut reply = project(&chunk[split..]);
+                        if let Some(markdown) = reply.iter_mut().find_map(|cell| {
+                            Arc::get_mut(cell)?
+                                .as_any_mut()
+                                .downcast_mut::<history_cell::AgentMarkdownCell>()
+                        }) {
+                            markdown.interrupted_item = Some(key);
+                        } else {
+                            let answer_index = reply
+                                .iter()
+                                .position(|cell| {
+                                    matches!(
+                                        cell.as_any()
+                                            .downcast_ref::<history_cell::TurnActivityBoundary>(),
+                                        Some(
+                                            history_cell::TurnActivityBoundary::LegacyAnswer { .. }
+                                        )
+                                    )
+                                })
+                                .unwrap_or(reply.len());
+                            reply.insert(
+                                answer_index,
+                                Arc::new(history_cell::PendingAgentMessageCell(key)),
+                            );
+                        }
+                        cells.extend(reply);
+                    }
+                }
             }
             for end in start + 1..=cells.len() {
                 history_cell::TurnActivityBoundary::position_header(&mut cells[start..end]);

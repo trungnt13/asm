@@ -2021,3 +2021,21 @@ async fn unshared_apps_catalog_across_turns() -> Result<()> {
     insta::assert_snapshot!("unshared_apps_catalog_across_turns", snapshot);
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn realtime_handoff_preserves_accepted_context() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let requests = super::realtime_conversation::realtime_handoff_history_scenario(
+        /*block_prompt*/ false,
+    )
+    .await?;
+    insta::assert_snapshot!(
+        "realtime_turn_input_accepted_context",
+        context_snapshot::format_request_history_snapshot(
+            "A realtime handoff consumes the exact sealed transcript referenced by its durable acceptance.",
+            &requests,
+            &ContextSnapshotOptions::default().rewrite_known_segments(),
+        )
+    );
+    Ok(())
+}

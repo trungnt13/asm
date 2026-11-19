@@ -117,6 +117,14 @@ The PR owner must complete cleanup after an authorized merge, before reporting i
 
 Before syncs or targeted ports, use [asm-upstream-sync](../.agents/skills/asm-upstream-sync/SKILL.md). Follow its conflict-reuse and evidence procedure.
 
+### Built-in instruction changes
+
+- Review the full upstream diff and ASM's resolution. Check inline text, bundled prompts and skills, tool descriptions, and review rubrics.
+- In each rebase report and sync PR, list changes to text, selection, assembly, and delivery. If nothing changed, say so.
+- For each change, link the source. State who receives the text, when it applies, and what ASM kept or changed.
+- Separate built-in text from user overrides and provider additions. Do not treat source review as proof of delivery.
+- If a new model-visible item can exceed 1,000 tokens, flag it for P0 manual review.
+
 ### Shared compatibility gate
 
 For syncs or saved-cache/wire-format changes, apply this gate even after conflict-free rebases. Follow narrow validation and real-session rules; this gate grants no new provider, paid-matrix, broader-check, or test-authoring authority.
@@ -131,6 +139,8 @@ For syncs or saved-cache/wire-format changes, apply this gate even after conflic
 8. For stock-cache contamination by older ASM, recover manually only. Verify host, actual reader executable/version/hash, and home. Stop all writers. Back up the derived database and WAL/SHM. Quarantine/rebuild only that cache; preserve canonical history/shared state. Never reuse the older writer against the recovered home.
 
 #### Known upstream cold-history limitation
+
+For PR #224, the owner accepted the stock cold-history limitation through `39c29c3bb620f91e84a3bb266bb496dfb697c101` only. ASM passed cold search, timeline, turn, and item reads. Stock alpha.11 found the thread but needed one resume to read both saved items. Warm reopening preserved the items and original rollout bytes. This exception does not cover voice history or waive other checks.
 
 For the sync through `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`, the owner accepted the unchanged stock cold-history limitation for this target only. ASM cold timeline, search, turn and item reads passed. Independent stock finds the thread through search but cannot read its cold history; resume and reopening restore exact items and permissions without changing canonical bytes.
 
@@ -184,7 +194,7 @@ Every upstream rebase/sync must fetch the live authenticated backend catalog. So
 
 Fork (`origin`): [`trungnt13/asm`](https://github.com/trungnt13/asm). Parent (`upstream`): [`openai/codex`](https://github.com/openai/codex).
 
-Last incorporated commit: `ca21fe65d18a9b6326759fb4263c65dfbb645aa5`, 2026-11-18. Subject: Tag Guardian review counts with turn origin (#62225).
+Last incorporated commit: `39c29c3bb620f91e84a3bb266bb496dfb697c101`, 2026-11-19. Subject: Add Statsig counters for `exec_command` latency (#62507).
 
 - Before fetching, verify the upstream URL. Sync on a task branch and submit a PR. Use the requested method. Otherwise, merge to preserve published history; rebase only unpublished branches. Follow push permissions for authorized rewrites. Use `git cherry-pick -x` for targeted ports.
 
