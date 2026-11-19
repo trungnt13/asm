@@ -5508,14 +5508,6 @@
           "minimum": 1.0,
           "type": "integer"
         },
-        "decision_model": {
-          "default": null,
-          "type": "string"
-        },
-        "decision_model_api_env": {
-          "default": null,
-          "type": "string"
-        },
         "decision_timeout_ms": {
           "default": 200,
           "format": "uint64",
@@ -5528,11 +5520,11 @@
           "type": "boolean"
         },
         "high_effort_description": {
-          "default": "Difficult debugging, multiple interacting constraints, conflicting evidence, or substantial uncertainty. Use max only for exceptionally difficult problems.",
+          "default": "Substantive work within the model’s normal range, including implementation or interpretation that requires care.",
           "type": "string"
         },
         "low_effort_description": {
-          "default": "Straightforward coding, focused searches, and bounded analysis.",
+          "default": "Direct execution or reporting a verified result when no judgment remains.",
           "type": "string"
         },
         "max_context_bytes": {
@@ -5555,7 +5547,7 @@
           "type": "string"
         },
         "medium_effort_description": {
-          "default": "Ordinary substantive work, including moderately complex coding.",
+          "default": "Settled work that still needs care: make a scoped edit or verify a result.",
           "type": "string"
         },
         "min_effort": {
@@ -5592,7 +5584,7 @@
           "type": "array"
         },
         "xhigh_effort_description": {
-          "default": "Extensive reasoning for exceptionally difficult problems, deep investigations, and demanding long-horizon planning.",
+          "default": "Distinguishing plausible causes, reconciling interacting constraints, or catching subtle, consequential errors.",
           "type": "string"
         }
       },
@@ -5608,6 +5600,11 @@
         "endpoint": {
           "default": null,
           "type": "string"
+        },
+        "include_images": {
+          "default": false,
+          "description": "Allow this endpoint to receive current-turn user images.",
+          "type": "boolean"
         },
         "model": {
           "type": "string"

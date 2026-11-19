@@ -17,6 +17,8 @@ use codex_config::McpServerValueMatcher;
 use codex_config::ProfileV2Name;
 use codex_config::RequirementSource;
 use codex_config::Sourced;
+use codex_config::System1Backend;
+use codex_config::System1Profile;
 use codex_config::config_toml::AgentRoleToml;
 use codex_config::config_toml::AgentsToml;
 use codex_config::config_toml::AutoReviewToml;
@@ -435,7 +437,23 @@ consolidation_service_tier = "fast"
         }
     );
 
-    let system1 = "[features]\nreasoning_effort_override = true\nstep_model_switching = true\n[system1]\nenabled = true\ndecision_model_api_env = 'CUSTOM_DECISION_KEY'\nmin_effort = 'minimal'\nmax_effort = 'high'\nupdate_on = ['tool_result']\nrubric_instructions = 'Select effort using my policy.'\nlow_effort_description = 'Custom routine effort.'\n";
+    let system1 = r#"
+[features]
+reasoning_effort_override = true
+step_model_switching = true
+[system1]
+enabled = true
+profile = "decisions"
+min_effort = "minimal"
+max_effort = "high"
+update_on = ["tool_result"]
+rubric_instructions = "Select effort using my policy."
+low_effort_description = "Custom routine effort."
+[system1.profiles.decisions]
+protocol = "openai"
+model = "gpt-6-luna"
+api_key_env = "CUSTOM_DECISION_KEY"
+"#;
     let system1_config = Config::load_from_base_config_with_overrides(
         toml::from_str(system1).expect("system1 settings should parse"),
         ConfigOverrides::default(),
@@ -447,7 +465,18 @@ consolidation_service_tier = "fast"
         system1_config.system1,
         codex_config::System1Config {
             enabled: true,
-            decision_model_api_env: Some("CUSTOM_DECISION_KEY".to_string()),
+            profile: Some("decisions".to_string()),
+            profiles: [(
+                "decisions".to_string(),
+                System1Profile {
+                    include_images: false,
+                    backend: System1Backend::Openai,
+                    endpoint: None,
+                    model: "gpt-6-luna".to_string(),
+                    api_key_env: "CUSTOM_DECISION_KEY".to_string(),
+                },
+            )]
+            .into(),
             min_effort: ReasoningEffort::Minimal,
             max_effort: ReasoningEffort::High,
             update_on: vec![codex_config::System1Trigger::ToolResult],
@@ -460,8 +489,14 @@ consolidation_service_tier = "fast"
         ("min_effort = 'ultra'", "ordinary levels"),
         ("max_effort = 'persistent'", "ordinary levels"),
         ("min_effort = 'high'\nmax_effort = 'low'", "must not exceed"),
-        ("decision_model = ' '", "must not be blank"),
-        ("decision_model_api_env = 'KEY-SECRET'", "ASCII environment"),
+        (
+            "profiles.decisions = { protocol = 'openai', model = ' ', api_key_env = 'KEY' }",
+            "must not be blank",
+        ),
+        (
+            "profiles.decisions = { protocol = 'openai', model = 'gpt-6-luna', api_key_env = 'KEY-SECRET' }",
+            "ASCII environment",
+        ),
         ("decision_every_n_turns = 0", "positive integers"),
         ("decision_every_n_steps = 0", "positive integers"),
         ("decision_timeout_ms = 5001", "between 1 and 5000"),

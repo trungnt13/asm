@@ -437,10 +437,10 @@ pub(crate) fn validate_explicit_feature_settings_in_config_toml(
     Ok(())
 }
 
-pub(crate) fn validate_feature_requirements_in_config_toml(
+pub(super) fn resolve_managed_features_for_config_toml(
     cfg: &ConfigToml,
     feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
-) -> std::io::Result<()> {
+) -> std::io::Result<ManagedFeatures> {
     let configured_features = Features::from_sources(
         FeatureConfigSource {
             features: cfg.features.as_ref(),
@@ -449,5 +449,5 @@ pub(crate) fn validate_feature_requirements_in_config_toml(
         FeatureConfigSource::default(),
         FeatureOverrides::default(),
     );
-    ManagedFeatures::from_configured(configured_features, feature_requirements.cloned()).map(|_| ())
+    ManagedFeatures::from_configured(configured_features, feature_requirements.cloned())
 }

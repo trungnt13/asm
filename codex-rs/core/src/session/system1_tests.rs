@@ -185,6 +185,18 @@ async fn system1_fixture(
             config.model_catalog = Some(codex_models_manager::bundled_models_response().unwrap());
             config.model_reasoning_effort = Some(ReasoningEffort::Low);
             config.system1.enabled = true;
+            let profile = "decisions".to_string();
+            config.system1.profile = Some(profile.clone());
+            config.system1.profiles.insert(
+                profile,
+                System1Profile {
+                    include_images: false,
+                    backend: System1Backend::Openai,
+                    endpoint: None,
+                    model: "gpt-6-luna".to_string(),
+                    api_key_env: "CODEX_TEST_ADAPTIVE_REASONING_NO_KEY".to_string(),
+                },
+            );
             config.system1.decision_every_n_steps = 1;
             config.system1.decision_timeout_ms = 5_000;
             config.system1.min_effort = ReasoningEffort::Low;

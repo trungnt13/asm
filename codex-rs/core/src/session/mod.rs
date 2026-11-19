@@ -4732,6 +4732,7 @@ impl Session {
                     .then(|| self.services.turn_environments.configured_snapshot_now()),
             )
         };
+        let mut settings_before_tier_inheritance = None;
         if self.inherits_root_service_tier(&turn_context.session_source)
             || matches!(
                 &turn_context.session_source,
@@ -4760,7 +4761,10 @@ impl Session {
                 );
                 inherited_settings.mcp_approvals_reviewer_override =
                     settings.mcp_approvals_reviewer_override;
-                settings = Arc::new(inherited_settings);
+                settings_before_tier_inheritance = Some(std::mem::replace(
+                    &mut settings,
+                    Arc::new(inherited_settings),
+                ));
             }
         }
         let dynamic_tools = self.dynamic_tools().await;
@@ -5043,6 +5047,7 @@ impl Session {
                 .then(CancellationToken::new),
             realtime: self.conversation.snapshot().await,
             settings,
+            settings_before_tier_inheritance,
             token_budget,
             session_telemetry,
             turn: turn_context,

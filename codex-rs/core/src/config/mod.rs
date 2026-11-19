@@ -26,6 +26,7 @@ use codex_config::ProfileV2Name;
 use codex_config::ResidencyRequirement;
 use codex_config::SandboxModeRequirement;
 use codex_config::Sourced;
+use codex_config::System1Config;
 use codex_config::ThreadConfigLoader;
 use codex_config::apply_default_gcp_auth;
 use codex_config::config_toml::CircuitBreakAction;
@@ -2451,7 +2452,37 @@ pub fn validate_feature_requirements_for_config_toml(
     feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
 ) -> std::io::Result<()> {
     managed_features::validate_explicit_feature_settings_in_config_toml(cfg, feature_requirements)?;
-    managed_features::validate_feature_requirements_in_config_toml(cfg, feature_requirements)
+    managed_features::resolve_managed_features_for_config_toml(cfg, feature_requirements)?;
+    Ok(())
+}
+
+/// Validate System1 against the merged settings and effective managed features.
+pub fn validate_system1_for_config_toml(
+    cfg: &ConfigToml,
+    feature_requirements: Option<&Sourced<FeatureRequirementsToml>>,
+) -> std::io::Result<()> {
+    let Some(system1) = &cfg.system1 else {
+        return Ok(());
+    };
+    let features =
+        managed_features::resolve_managed_features_for_config_toml(cfg, feature_requirements)?;
+    validate_system1(system1, &features)
+}
+
+fn validate_system1(system1: &System1Config, features: &ManagedFeatures) -> std::io::Result<()> {
+    system1
+        .validate()
+        .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
+    if system1.enabled
+        && (!features.enabled(Feature::ReasoningEffortOverride)
+            || !features.enabled(Feature::StepModelSwitching))
+    {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
+        ));
+    }
+    Ok(())
 }
 
 fn load_catalog_json(path: &AbsolutePathBuf) -> std::io::Result<ModelsResponse> {
@@ -3790,18 +3821,7 @@ impl Config {
             &mut startup_warnings,
         )?;
         let system1 = cfg.system1.clone().unwrap_or_default();
-        system1
-            .validate()
-            .map_err(|error| std::io::Error::new(ErrorKind::InvalidInput, error))?;
-        if system1.enabled
-            && (!features.enabled(Feature::ReasoningEffortOverride)
-                || !features.enabled(Feature::StepModelSwitching))
-        {
-            return Err(std::io::Error::new(
-                ErrorKind::InvalidInput,
-                "system1.enabled requires features.reasoning_effort_override and features.step_model_switching",
-            ));
-        }
+        validate_system1(&system1, &features)?;
         if let Some(FeatureToml::Config(guardian)) = cfg
             .features
             .as_ref()
