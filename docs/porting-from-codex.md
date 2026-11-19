@@ -388,7 +388,7 @@ Shared process, framing, authentication, checkpoint, and cleanup rules also appl
 
 **Recovery and cleanup**
 
-- Keep one CLI process per loaded Claude session, private native linkage, and unfinished-turn state. Support resume for known-clean sessions created under ASM-owned execution. Old native-owned Claude sessions need not resume or reload: reject incompatible linkage clearly and preserve their saved histories without migration. Never automatically replay uncertain submitted input or completed tools. Other execution errors require explicit recovery; error text cannot clear older unfinished checkpoints.
+- Keep one CLI process per loaded Claude session, private native linkage, and unfinished-turn state. Support resume for known-clean sessions created under ASM-owned execution. Reject pre-bridge Claude linkage. Do not migrate or replay it. Never automatically replay uncertain submitted input or completed tools. Other execution errors require explicit recovery; error text cannot clear older unfinished checkpoints.
 - Separate foreground completion and warm input eligibility from durable recovery safety. Keep native linkage uncertain while background work can generate continuations, protocol activity is unresolved, or native output is not yet persisted. Mark recovery clean only after confirmed reconciliation and rollout flush. Never replay input to recover uncertain state.
 - UUID-stamp native input. After an ASM interrupt, retain the process only with matching successful acknowledgement, explicit empty queued-input receipt, explicit idle, and stopped observed native children. Persist clean linkage before another turn. Otherwise, on missing confirmation, timeout, disconnect, or forced abort, kill the owned group and keep linkage dirty. Give only external tasks bounded cleanup grace.
 - Track native tasks by ID/latest run ID. Resumes retain task IDs with later-sorting run IDs. Older-run/run-less starts or terminals cannot replace/clear a known newer run.
@@ -411,12 +411,10 @@ Shared process, framing, authentication, checkpoint, and cleanup rules also appl
 **ASM-only Claude launch configuration**
 
 `[native_runtimes.claude_code]` applies only to Claude processes launched by ASM,
-including roots, children, Side and cold resume. These controls must not re-enable native tools or skills.
+including roots, children, Side and cold resume. The ASM bridge is mandatory for every Claude launch.
 Never modify Claude user/project settings, skill files, installation or authentication.
 Native managed policy and ASM's mandatory child/Side restrictions remain authoritative.
 
-- `disallowed_tools` adds restrictions to the isolated launch; it cannot restore native tools.
-- `skill_overrides` remains readable configuration but cannot enable native skills; ASM skill discovery owns the available skill context.
 - `page_context` is `inherit` (default), `when_present` or `off`. Filter only queued
   Page snapshot/instruction blocks, never actual user messages or unrelated context.
   `when_present` omits Page context only when the queued snapshots explicitly show no

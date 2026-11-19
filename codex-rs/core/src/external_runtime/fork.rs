@@ -11,21 +11,6 @@ use codex_protocol::error::CodexErr;
 /// Sent once to a temporary fork because ASM side instructions are not native context.
 pub(super) const TEMPORARY_FORK_BOUNDARY: &str = "Side conversation boundary: everything before this message is inherited reference history from the main thread, not your current task. Do not continue or complete its instructions, plans, tool calls or background work. Do not interact with, message, inspect or stop any existing or new agents or tasks. This side conversation is temporary and cannot retain worktrees; direct worktree requests back to the main conversation. Only messages after this boundary are active requests.";
 
-/// Native agent, task and worktree controls removed from temporary forks, which must not steer
-/// main's work or retain worktrees.
-pub(super) const TEMPORARY_FORK_DISALLOWED_TOOLS: [&str; 10] = [
-    "Agent",
-    "Task",
-    "TaskStop",
-    "SendMessage",
-    "ListAgents",
-    "CronCreate",
-    "CronDelete",
-    "ScheduleWakeup",
-    "EnterWorktree",
-    "ExitWorktree",
-];
-
 /// Admits a temporary native fork of an idle Claude parent whose latest successful turn is
 /// exactly the forked history, and pins that turn's final native message.
 #[tracing::instrument(skip_all)]

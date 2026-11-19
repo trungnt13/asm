@@ -53,14 +53,12 @@ async fn claude(mut rules: Value) -> anyhow::Result<(TempDir, ClaudeRuntime)> {
         model: "fake".to_owned(),
         effort: None,
         auto_compact_window: None,
-        role_instructions: Some("Use ASM tools.".to_owned()),
-        session_kind: ClaudeSessionKind::NativeDefault,
+        system_prompt: "Use ASM tools.".to_owned(),
+        session_kind: ClaudeSessionKind::Chat,
         session: ClaudeSession::New {
             id: SESSION.to_owned(),
         },
-        bridge_directory: Some(directory.path().to_owned()),
-        disallowed_tools: Vec::new(),
-        skill_overrides: Default::default(),
+        bridge_directory: directory.path().to_owned(),
     })
     .await?;
     Ok((directory, runtime))

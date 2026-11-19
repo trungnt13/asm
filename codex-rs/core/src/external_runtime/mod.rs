@@ -20,7 +20,6 @@ pub(crate) use deletion::delete_thread_data;
 pub(crate) use deletion::ensure_no_runtime_owner;
 use events::record_assistant_frame;
 use fork::TEMPORARY_FORK_BOUNDARY;
-use fork::TEMPORARY_FORK_DISALLOWED_TOOLS;
 pub(crate) use fork::prepare_temporary_fork;
 pub(crate) use input::context_item;
 use messages::input_messages;
@@ -550,33 +549,20 @@ async fn run_conversation(
                 SessionStart::New { .. } => Some(Default::default()),
                 SessionStart::Resume { .. } | SessionStart::Fork { .. } => None,
             };
-            let mut disallowed_tools = Vec::new();
-            // Spawned children run headless: nobody can answer their native questions.
-            if thread_spawn_child {
-                disallowed_tools.push("AskUserQuestion".to_owned());
-            }
-            // A side conversation answers questions; it must not start or steer native agents.
             if matches!(linkage, Linkage::Temporary) {
-                disallowed_tools.extend(TEMPORARY_FORK_DISALLOWED_TOOLS.map(str::to_owned));
                 fork_boundary = Some(TEMPORARY_FORK_BOUNDARY);
             }
             let mut runtime = ExternalSession::spawn_runtime(
                 bridge.as_ref(),
-                disallowed_tools,
-                &turn.config.native_runtimes.claude_code,
                 if native_runtime == NativeRuntime::ClaudeCode {
                     Some(session.get_prompt_base_instructions().await.text)
                 } else {
                     role_instructions.or(restored_role)
                 },
                 if thread_spawn_child {
-                    codex_external_runtime::ClaudeSessionKind::ManagedChild
-                } else if !turn.session_source.is_non_root_agent()
-                    && !matches!(linkage, Linkage::Temporary)
-                {
-                    codex_external_runtime::ClaudeSessionKind::ManagedRoot
+                    codex_external_runtime::ClaudeSessionKind::Child
                 } else {
-                    codex_external_runtime::ClaudeSessionKind::NativeDefault
+                    codex_external_runtime::ClaudeSessionKind::Chat
                 },
                 Arc::clone(&session.external_runtime.queued_input_count),
                 &mut checkpoint,

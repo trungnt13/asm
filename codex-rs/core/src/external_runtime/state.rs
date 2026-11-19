@@ -224,8 +224,6 @@ impl ExternalSession {
     #[tracing::instrument(skip_all)]
     pub(super) async fn spawn_runtime(
         bridge: Option<&ExternalMessageBridge>,
-        mut disallowed_tools: Vec<String>,
-        claude_config: &codex_config::ClaudeCodeConfig,
         role_instructions: Option<String>,
         session_kind: codex_external_runtime::ClaudeSessionKind,
         queued_input_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -271,11 +269,7 @@ impl ExternalSession {
                 codex_external_runtime::ClaudeSession::Fork { parent, at, id }
             }
         };
-        disallowed_tools.extend(claude_config.disallowed_tools.iter().cloned());
-        let skill_overrides = serde_json::to_value(&claude_config.skill_overrides)?
-            .as_object()
-            .context("Claude skill overrides must be an object")?
-            .clone();
+        let bridge = bridge.context("Claude requires the ASM tool bridge")?;
         let mut runtime = ClaudeRuntime::spawn(codex_external_runtime::ClaudeOptions {
             executable: PathBuf::from("claude"),
             cwd: checkpoint.cwd.clone(),
@@ -283,17 +277,13 @@ impl ExternalSession {
             effort: checkpoint.effort.clone(),
             auto_compact_window: checkpoint.auto_compact_window,
             session_kind,
-            role_instructions,
+            system_prompt: role_instructions.context("Claude requires ASM system instructions")?,
             session,
-            disallowed_tools,
-            skill_overrides,
-            bridge_directory: bridge.map(|bridge| bridge.directory().to_owned()),
+            bridge_directory: bridge.directory().to_owned(),
             queued_input_count,
         })
         .await?;
-        if let Some(bridge) = bridge
-            && let Err(error) = bridge.wait_ready().await
-        {
+        if let Err(error) = bridge.wait_ready().await {
             if let Err(shutdown_error) = runtime.shutdown().await {
                 tracing::warn!(%shutdown_error, "Claude startup cleanup also failed");
             }

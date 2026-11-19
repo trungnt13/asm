@@ -41,11 +41,10 @@ pub enum ClaudeSession {
     },
 }
 
-/// Selects ASM root or child startup policy while preserving native side sessions.
+/// Selects Claude startup policy for a chat or a spawned child.
 pub enum ClaudeSessionKind {
-    NativeDefault,
-    ManagedRoot,
-    ManagedChild,
+    Chat,
+    Child,
 }
 
 pub struct ClaudeOptions {
@@ -58,14 +57,10 @@ pub struct ClaudeOptions {
     pub effort: Option<String>,
     /// Native compaction window, not the model's maximum context capacity.
     pub auto_compact_window: Option<i64>,
-    /// ASM system instructions, including the selected role, restored on resume.
-    pub role_instructions: Option<String>,
+    pub system_prompt: String,
     pub session_kind: ClaudeSessionKind,
     pub session: ClaudeSession,
-    pub bridge_directory: Option<PathBuf>,
-    /// Native tool names removed from this session, such as questions for headless children.
-    pub disallowed_tools: Vec<String>,
-    pub skill_overrides: serde_json::Map<String, Value>,
+    pub bridge_directory: PathBuf,
 }
 
 pub(crate) struct ClaudeDriver {
@@ -166,9 +161,7 @@ impl ClaudeDriver {
             .arg(options.model)
             .arg(session_flag)
             .arg(&session_id);
-        let directory = options
-            .bridge_directory
-            .context("Claude requires the ASM tool bridge")?;
+        let directory = options.bridge_directory;
         command
             // An empty --tools also rejects plugin tools. Select, then deny, one built-in.
             .args([
@@ -215,19 +208,16 @@ impl ClaudeDriver {
             },
             "attribution": {"commit": "", "pr": ""},
         });
-        if matches!(options.session_kind, ClaudeSessionKind::ManagedChild) {
+        if matches!(options.session_kind, ClaudeSessionKind::Child) {
             command
                 .args(["--system-prompt-snapshot", "off"])
                 .env("FORCE_PROMPT_CACHING_5M", "1");
             flag_env.insert("FORCE_PROMPT_CACHING_5M".to_owned(), json!("1"));
         }
-        let system_prompt = options
-            .role_instructions
-            .context("Claude requires ASM system instructions")?;
         let mut system_prompt_file = tempfile::NamedTempFile::new_in(&directory)
             .context("creating Claude system prompt file")?;
         system_prompt_file
-            .write_all(system_prompt.as_bytes())
+            .write_all(options.system_prompt.as_bytes())
             .context("writing Claude system prompt file")?;
         command
             .arg("--system-prompt-file")
@@ -243,11 +233,7 @@ impl ClaudeDriver {
         if let Some(effort) = options.effort {
             command.arg("--effort").arg(effort);
         }
-        let mut disallowed_tools = options.disallowed_tools;
-        disallowed_tools.push("ToolSearch".to_owned());
-        command
-            .arg("--disallowedTools")
-            .arg(disallowed_tools.join(","));
+        command.args(["--disallowedTools", "ToolSearch"]);
         options
             .queued_input_count
             .store(/*val*/ 0, std::sync::atomic::Ordering::SeqCst);
