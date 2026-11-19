@@ -423,16 +423,27 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
         return (StatusCode::CONFLICT, "ASM turn cancelled").into_response();
     }
     // Calls survive client disconnect until ASM cancels or drains the active turn.
-    let result = match tokio::spawn(invoke_message_tool(turn, params))
+    match tokio::spawn(invoke_message_tool(turn, params, state.runtime))
         .await
         .unwrap_or_else(|error| Err(error.into()))
     {
-        Ok(result) => result,
-        Err(error) => json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}),
-    };
-    if state.runtime != NativeRuntime::ClaudeCode {
-        return Json(result).into_response();
+        Ok(response) => response,
+        Err(error) => {
+            let result =
+                json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]});
+            if state.runtime == NativeRuntime::ClaudeCode {
+                bounded_claude_response(result).unwrap_or_else(|error| {
+                    Json(json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}))
+                        .into_response()
+                })
+            } else {
+                Json(result).into_response()
+            }
+        }
     }
+}
+
+fn bounded_claude_response(result: Value) -> anyhow::Result<Response> {
     let has_image = result["content"]
         .as_array()
         .is_some_and(|content| content.iter().any(|item| item["type"] == "image"));
@@ -442,16 +453,15 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
         MAX_CLAUDE_TEXT_RESULT_BYTES
     };
     let response = Json(result).into_response();
-    if response
-        .body()
-        .size_hint()
-        .upper()
-        .is_none_or(|size| size > limit)
-    {
-        return Json(json!({"isError":true,"content":[{"type":"text","text":"Native tool result exceeds the transport budget"}]}))
-            .into_response();
-    }
-    response
+    anyhow::ensure!(
+        response
+            .body()
+            .size_hint()
+            .upper()
+            .is_some_and(|size| size <= limit),
+        "Native tool result exceeds the transport budget"
+    );
+    Ok(response)
 }
 
 fn bridge_tools(specs: &[ToolSpec]) -> anyhow::Result<Vec<MessageTool>> {
@@ -587,7 +597,11 @@ fn build_message_tools(
 }
 
 #[tracing::instrument(level = "trace", skip_all, err)]
-async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow::Result<Value> {
+async fn invoke_message_tool(
+    turn: Arc<BridgeTurn>,
+    mut params: Value,
+    native_runtime: NativeRuntime,
+) -> anyhow::Result<Response> {
     let _execution = tokio::select! {
         permit = turn.execution.acquire() => permit?,
         _ = turn.cancel.cancelled() => bail!("ASM turn cancelled"),
@@ -640,7 +654,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
                 },
                 "tools": specs
             });
-            return Ok(
+            return bounded_claude_response(
                 json!({"isError":false,"content":[{"type":"text","text":serde_json::to_string(&catalog)?}]}),
             );
         };
@@ -648,7 +662,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
             .into_iter()
             .any(|tool| tool.spec["name"].as_str() == Some(selected))
         {
-            return Ok(
+            return bounded_claude_response(
                 json!({"isError":true,"notDispatched":true,"content":[{"type":"text","text":"No tool was dispatched: this name is not a current direct tool. Call direct_tool with {} to discover current direct-tool names and schemas. ALL_TOOLS and tool_search cover only tools nested inside Code Mode exec."}]}),
             );
         }
@@ -740,21 +754,45 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
         }
         result = &mut dispatch => result?,
     };
-    let result = convert_output(&output.item);
+    let mut item = Arc::unwrap_or_clone(output.item);
+    let result = convert_output(&item);
+    if native_runtime == NativeRuntime::ClaudeCode {
+        let response = match result.and_then(bounded_claude_response) {
+            Ok(response) => response,
+            Err(error) => {
+                let payload = match &mut item {
+                    ResponseItem::FunctionCallOutput { output, .. }
+                    | ResponseItem::CustomToolCallOutput { output, .. } => output,
+                    _ => return Err(error),
+                };
+                let execution = match payload.success {
+                    Some(true) => "ASM tool succeeded",
+                    Some(false) => "ASM tool failed",
+                    None => "ASM tool returned",
+                };
+                let text = format!(
+                    "{execution}, but its output was not delivered: {error}. Do not rerun the tool just to recover the output."
+                );
+                payload.body = FunctionCallOutputBody::Text(text.clone());
+                bounded_claude_response(json!({
+                    "isError": payload.success == Some(false),
+                    "content": [{"type":"text","text":text}]
+                }))?
+            }
+        };
+        session
+            .record_conversation_items(&step.turn, &step.settings.model_info, &[item])
+            .await;
+        return Ok(response);
+    }
     session
-        .record_conversation_items(
-            &step.turn,
-            &step.settings.model_info,
-            &[std::sync::Arc::unwrap_or_clone(output.item)],
-        )
+        .record_conversation_items(&step.turn, &step.settings.model_info, &[item])
         .await;
     let mut result = result?;
-    if !managed {
-        anyhow::ensure!(
-            serde_json::to_vec(&result)?.len() <= MAX_IMAGE_RESULT_BYTES,
-            "Native tool result exceeds the image transport budget"
-        );
-    }
+    anyhow::ensure!(
+        serde_json::to_vec(&result)?.len() <= MAX_IMAGE_RESULT_BYTES,
+        "Native tool result exceeds the image transport budget"
+    );
     if tool.name.name == "wait_agent"
         && step.settings.model_info.slug.starts_with("cursor-agent/")
         && result["isError"] == false
@@ -779,7 +817,7 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
                 .push(json!({"type":"text","text":text}));
         }
     }
-    Ok(result)
+    Ok(Json(result).into_response())
 }
 
 fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
@@ -804,7 +842,7 @@ fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
     };
     anyhow::ensure!(
         encoded_bytes <= MAX_IMAGE_RESULT_BYTES,
-        "Native tool result exceeds the image transport budget"
+        "Native tool result exceeds the transport budget"
     );
     let content = match &output.body {
         FunctionCallOutputBody::Text(text) => vec![json!({"type":"text","text":text})],
