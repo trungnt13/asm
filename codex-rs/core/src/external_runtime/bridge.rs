@@ -8,6 +8,7 @@ use anyhow::Context;
 use anyhow::bail;
 use axum::Json;
 use axum::Router;
+use axum::body::HttpBody;
 use axum::body::to_bytes;
 use axum::extract::Request;
 use axum::extract::State;
@@ -50,6 +51,9 @@ use crate::tools::spec_plan::register_multi_agent_v2_communication_tools;
 use crate::turn_diff_tracker::TurnDiffTracker;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+// Claude can echo text in both message content and structured tool output.
+// Leave room for both copies and their envelope below the 1 MiB frame limit.
+const MAX_CLAUDE_TEXT_RESULT_BYTES: u64 = 480 * 1024;
 // Reserve native metadata space below the 32 MiB image frame limit.
 const MAX_IMAGE_RESULT_BYTES: usize = 31 * 1024 * 1024;
 /// Concurrent HTTP requests admitted; their tool calls run one at a time per turn.
@@ -67,6 +71,7 @@ pub(super) struct ExternalMessageBridge {
 }
 
 struct BridgeState {
+    runtime: NativeRuntime,
     ready: tokio::sync::watch::Sender<Option<bool>>,
     authority: String,
     token: String,
@@ -107,6 +112,7 @@ impl ExternalMessageBridge {
             .prefix("asm-native-tools-")
             .tempdir()?;
         let state = Arc::new(BridgeState {
+            runtime,
             ready: tokio::sync::watch::channel(/*init*/ None).0,
             mail_delivery: mail_tx,
             authority,
@@ -417,16 +423,35 @@ async fn serve_json(State(state): State<Arc<BridgeState>>, request: Request) -> 
         return (StatusCode::CONFLICT, "ASM turn cancelled").into_response();
     }
     // Calls survive client disconnect until ASM cancels or drains the active turn.
-    let result = tokio::spawn(invoke_message_tool(turn, params))
+    let result = match tokio::spawn(invoke_message_tool(turn, params))
         .await
-        .unwrap_or_else(|error| Err(error.into()));
-    match result {
-        Ok(result) => Json(result).into_response(),
-        Err(error) => {
-            Json(json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}))
-                .into_response()
-        }
+        .unwrap_or_else(|error| Err(error.into()))
+    {
+        Ok(result) => result,
+        Err(error) => json!({"isError":true,"content":[{"type":"text","text":error.to_string()}]}),
+    };
+    if state.runtime != NativeRuntime::ClaudeCode {
+        return Json(result).into_response();
     }
+    let has_image = result["content"]
+        .as_array()
+        .is_some_and(|content| content.iter().any(|item| item["type"] == "image"));
+    let limit = if has_image {
+        MAX_IMAGE_RESULT_BYTES as u64
+    } else {
+        MAX_CLAUDE_TEXT_RESULT_BYTES
+    };
+    let response = Json(result).into_response();
+    if response
+        .body()
+        .size_hint()
+        .upper()
+        .is_none_or(|size| size > limit)
+    {
+        return Json(json!({"isError":true,"content":[{"type":"text","text":"Native tool result exceeds the transport budget"}]}))
+            .into_response();
+    }
+    response
 }
 
 fn bridge_tools(specs: &[ToolSpec]) -> anyhow::Result<Vec<MessageTool>> {
@@ -724,6 +749,12 @@ async fn invoke_message_tool(turn: Arc<BridgeTurn>, mut params: Value) -> anyhow
         )
         .await;
     let mut result = result?;
+    if !managed {
+        anyhow::ensure!(
+            serde_json::to_vec(&result)?.len() <= MAX_IMAGE_RESULT_BYTES,
+            "Native tool result exceeds the image transport budget"
+        );
+    }
     if tool.name.name == "wait_agent"
         && step.settings.model_info.slug.starts_with("cursor-agent/")
         && result["isError"] == false
@@ -806,10 +837,5 @@ fn convert_output(item: &ResponseItem) -> anyhow::Result<Value> {
             })
             .collect::<anyhow::Result<Vec<_>>>()?,
     };
-    let result = json!({"isError":output.success == Some(false), "content":content});
-    anyhow::ensure!(
-        serde_json::to_vec(&result)?.len() <= MAX_IMAGE_RESULT_BYTES,
-        "Native tool result exceeds the image transport budget"
-    );
-    Ok(result)
+    Ok(json!({"isError":output.success == Some(false), "content":content}))
 }

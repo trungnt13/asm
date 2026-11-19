@@ -13,6 +13,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::process::Command;
@@ -69,6 +70,7 @@ pub struct ClaudeOptions {
 
 pub(crate) struct ClaudeDriver {
     pub(super) process: ExternalProcess,
+    _system_prompt_file: tempfile::NamedTempFile,
     session_id: String,
     usable: bool,
     failure_result: Option<Value>,
@@ -219,11 +221,17 @@ impl ClaudeDriver {
                 .env("FORCE_PROMPT_CACHING_5M", "1");
             flag_env.insert("FORCE_PROMPT_CACHING_5M".to_owned(), json!("1"));
         }
-        command.arg("--system-prompt").arg(
-            options
-                .role_instructions
-                .context("Claude requires ASM system instructions")?,
-        );
+        let system_prompt = options
+            .role_instructions
+            .context("Claude requires ASM system instructions")?;
+        let mut system_prompt_file = tempfile::NamedTempFile::new_in(&directory)
+            .context("creating Claude system prompt file")?;
+        system_prompt_file
+            .write_all(system_prompt.as_bytes())
+            .context("writing Claude system prompt file")?;
+        command
+            .arg("--system-prompt-file")
+            .arg(system_prompt_file.path());
         if let Some(window) = options.auto_compact_window {
             let window = window.to_string();
             command.env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", &window);
@@ -246,6 +254,7 @@ impl ClaudeDriver {
         let mut driver = Self {
             process: ExternalProcess::spawn(command, frames::FramePolicy::ClaudeImages)
                 .context("starting official Claude CLI")?,
+            _system_prompt_file: system_prompt_file,
             session_id,
             usable: true,
             failure_result: None,

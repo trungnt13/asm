@@ -375,12 +375,12 @@ async fn run_conversation(
         let mut fork_boundary = None;
         let mut prepared_context = None;
         if lease.runtime.is_none() {
-            let mut role_instructions = if thread_spawn_child {
+            let role_instructions = if thread_spawn_child {
                 turn.config.role_developer_instructions.clone()
             } else {
                 None
             };
-            if thread_spawn_child
+            let restored_role = if thread_spawn_child
                 && turn.multi_agent_version == MultiAgentVersion::V1
                 && role_instructions.is_none()
             {
@@ -392,8 +392,10 @@ async fn run_conversation(
                 )
                 .await
                 .map_err(anyhow::Error::msg)?;
-                role_instructions = role_config.role_developer_instructions;
-            }
+                role_config.role_developer_instructions
+            } else {
+                None
+            };
             let directory = turn.config.codex_home.join("claude-runtime");
             std::fs::create_dir_all(&directory)?;
             let checkpoint_path = directory
@@ -496,8 +498,14 @@ async fn run_conversation(
             }
             let bridge = if messaging {
                 let step = if native_runtime == NativeRuntime::ClaudeCode {
-                    let prepared =
-                        context::capture(session, Arc::clone(turn), input, cancellation).await?;
+                    let prepared = context::capture(
+                        session,
+                        Arc::clone(turn),
+                        input,
+                        restored_role.as_deref(),
+                        cancellation,
+                    )
+                    .await?;
                     let step = Arc::clone(&prepared.step);
                     prepared_context = Some(prepared);
                     step
@@ -559,7 +567,7 @@ async fn run_conversation(
                 if native_runtime == NativeRuntime::ClaudeCode {
                     Some(session.get_prompt_base_instructions().await.text)
                 } else {
-                    role_instructions
+                    role_instructions.or(restored_role)
                 },
                 if thread_spawn_child {
                     codex_external_runtime::ClaudeSessionKind::ManagedChild
@@ -608,8 +616,16 @@ async fn run_conversation(
             });
         }
         if needs_binding && native_runtime == NativeRuntime::ClaudeCode {
-            prepared_context =
-                Some(context::capture(session, Arc::clone(turn), input, cancellation).await?);
+            prepared_context = Some(
+                context::capture(
+                    session,
+                    Arc::clone(turn),
+                    input,
+                    /*restored_role*/ None,
+                    cancellation,
+                )
+                .await?,
+            );
         }
         if native_runtime == NativeRuntime::ClaudeCode {
             input::normalize_selections(input);
@@ -625,73 +641,80 @@ async fn run_conversation(
                 )
                 .await;
         }
-        // Release the shared history vector before recording input to avoid a deep copy.
         drop(original_history);
-        let messages = if native_runtime == NativeRuntime::ClaudeCode {
-            input_messages(session.clone_history().await.raw_items(), native_runtime)?
-        } else {
-            messages
-        };
+        drop(messages);
         let runtime = lease
             .runtime
             .as_mut()
             .context("native session was not initialized")?;
-        runtime.checkpoint.validate_live(
-            &settings.model_info.slug,
-            bound_auto_compact_window(thread_spawn_child, auto_compact_window, &runtime.checkpoint),
-            &cwd,
-            messaging,
-            &messages,
-        )?;
-        validate_pending_prompt(
-            session,
-            &messages[runtime.checkpoint.input_count..],
-            input,
-            fork_boundary,
-            |prompt| match &runtime.runtime {
-                RuntimeProcess::Claude(_) => codex_external_runtime::validate_claude_prompt(prompt),
-                RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
-            },
-            native_runtime,
-        )?;
-        drop(messages);
-        if runtime.checkpoint.effort != effort {
-            match &mut runtime.runtime {
-                RuntimeProcess::Claude(process) => {
-                    runtime.checkpoint.in_flight = true;
-                    runtime
-                        .linkage
-                        .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-                    process.set_effort(effort.as_deref()).await?;
-                }
-                RuntimeProcess::Cursor(process) => process.set_effort(effort.as_deref()).await?,
-            }
-            runtime.checkpoint.effort = effort.clone();
-            runtime
-                .linkage
-                .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
-        }
         let prepared_step = prepared_context
             .as_ref()
             .map(|prepared| Arc::clone(&prepared.step));
-        if let Some(prepared) = prepared_context {
-            context::record(session, prepared).await?;
+        {
+            let runtime = &mut *runtime;
+            let input = input.as_slice();
+            let effort = &effort;
+            let cwd = &cwd;
+            let model = &settings.model_info.slug;
+            let admit = move |context_items: &[ResponseItem], injections: &[ResponseItem]| {
+                let generated =
+                    input_messages(context_items.iter().chain(injections), native_runtime);
+                async move {
+                    let generated = generated?;
+                    let mut messages =
+                        input_messages(session.clone_history().await.raw_items(), native_runtime)?;
+                    runtime.checkpoint.validate_live(
+                        model,
+                        bound_auto_compact_window(
+                            thread_spawn_child,
+                            auto_compact_window,
+                            &runtime.checkpoint,
+                        ),
+                        cwd,
+                        messaging,
+                        &messages,
+                    )?;
+                    messages.extend(generated);
+                    validate_pending_prompt(
+                        session,
+                        &messages[runtime.checkpoint.input_count..],
+                        input,
+                        fork_boundary,
+                        |prompt| match &runtime.runtime {
+                            RuntimeProcess::Claude(_) => {
+                                codex_external_runtime::validate_claude_prompt(prompt)
+                            }
+                            RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
+                        },
+                        native_runtime,
+                    )?;
+                    drop(messages);
+                    if &runtime.checkpoint.effort != effort {
+                        match &mut runtime.runtime {
+                            RuntimeProcess::Claude(process) => {
+                                runtime.checkpoint.in_flight = true;
+                                runtime
+                                    .linkage
+                                    .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                                process.set_effort(effort.as_deref()).await?;
+                            }
+                            RuntimeProcess::Cursor(process) => {
+                                process.set_effort(effort.as_deref()).await?;
+                            }
+                        }
+                        runtime.checkpoint.effort.clone_from(effort);
+                        runtime
+                            .linkage
+                            .save(&runtime.checkpoint, &runtime.checkpoint_path)?;
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }
+            };
+            match prepared_context {
+                Some(prepared) => Box::pin(context::record(session, prepared, admit)).await?,
+                None => admit(/*context_items*/ &[], /*injections*/ &[]).await?,
+            }
         }
-        let history = session.clone_history().await;
-        let projected = input_messages(history.raw_items(), native_runtime)?;
-        drop(history);
-        validate_pending_prompt(
-            session,
-            &projected[runtime.checkpoint.input_count..],
-            input,
-            fork_boundary,
-            |prompt| match &runtime.runtime {
-                RuntimeProcess::Claude(_) => codex_external_runtime::validate_claude_prompt(prompt),
-                RuntimeProcess::Cursor(process) => process.validate_prompt(prompt),
-            },
-            native_runtime,
-        )?;
-        drop(projected);
         for item in input.drain(..) {
             // Reject native setup or effort changes before recording input for later delivery.
             record_pending_input(

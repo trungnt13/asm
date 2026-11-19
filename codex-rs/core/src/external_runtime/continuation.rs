@@ -12,6 +12,7 @@ use anyhow::Context;
 use codex_external_runtime::ClaudeContinuation;
 use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::NativeRuntime;
+use codex_user_input::ResolvedUserInput;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
@@ -304,8 +305,8 @@ pub(super) async fn submit_steering(
     if pending.iter().any(|item| {
         matches!(item,
             TurnInput::UserInput { content, .. } if content.iter().any(|part| matches!(part,
-                codex_protocol::user_input::UserInput::Skill { .. }
-                    | codex_protocol::user_input::UserInput::Mention { .. }
+                ResolvedUserInput::Skill { .. }
+                    | ResolvedUserInput::Mention { .. }
             ))
         )
     }) {

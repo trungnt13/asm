@@ -1285,7 +1285,7 @@ fn unsupported_uploaded_audio_error() -> CodexErr {
 }
 
 /// Extensions and telemetry consume the protocol view, including the original mention and path labels.
-fn input_for_extensions(input: &[TurnInput]) -> Vec<UserInput> {
+pub(crate) fn input_for_extensions(input: &[TurnInput]) -> Vec<UserInput> {
     input
         .iter()
         .filter_map(|item| match item {

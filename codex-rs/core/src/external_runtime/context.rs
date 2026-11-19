@@ -6,6 +6,8 @@ use anyhow::Context;
 use codex_async_utils::OrCancelExt;
 use tokio_util::sync::CancellationToken;
 
+use crate::context::ContextualUserFragment;
+use crate::context::DeveloperInstructions;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
@@ -23,9 +25,10 @@ pub(super) async fn capture(
     session: &Arc<Session>,
     turn: Arc<TurnContext>,
     input: &[TurnInput],
+    restored_role: Option<&str>,
     cancellation: &CancellationToken,
 ) -> anyhow::Result<PreparedContext> {
-    let user_input = turn::turn_user_input(input);
+    let user_input = turn::input_for_extensions(input);
     let (required_servers, mentioned_plugins) =
         turn::required_mcp_servers_for_input(session, &turn, &user_input)
             .or_cancel(cancellation)
@@ -40,7 +43,7 @@ pub(super) async fn capture(
             &required_plugins,
         )
         .await?;
-    let (injections, connectors) = turn::build_skills_and_plugins(
+    let (mut injections, connectors) = turn::build_skills_and_plugins(
         session,
         &step,
         &user_input,
@@ -49,6 +52,12 @@ pub(super) async fn capture(
     )
     .await
     .context("ASM skill and plugin preparation was cancelled")?;
+    if let Some(restored_role) = restored_role {
+        injections.insert(
+            /*index*/ 0,
+            ContextualUserFragment::into(DeveloperInstructions::new(restored_role)),
+        );
+    }
     Ok(PreparedContext {
         step,
         injections,
@@ -57,14 +66,21 @@ pub(super) async fn capture(
 }
 
 #[tracing::instrument(level = "trace", skip_all, err)]
-pub(super) async fn record(session: &Session, prepared: PreparedContext) -> anyhow::Result<()> {
+pub(super) async fn record<F>(
+    session: &Session,
+    prepared: PreparedContext,
+    admit: impl FnOnce(&[ResponseItem], &[ResponseItem]) -> F + Send,
+) -> anyhow::Result<()>
+where
+    F: std::future::Future<Output = anyhow::Result<()>> + Send,
+{
     let PreparedContext {
         step,
         injections,
         connectors,
     } = prepared;
     session
-        .record_context_updates_and_set_reference_context_item(&step)
+        .record_context_updates_after(&step, |items| admit(items, &injections))
         .await?;
     session.merge_connector_selection(connectors).await;
     if !injections.is_empty() {

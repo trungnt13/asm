@@ -110,15 +110,15 @@ pub(super) fn normalize_selections(input: &mut [TurnInput]) {
         };
         for part in content {
             let text = match part {
-                UserInput::Skill { name, path } => {
+                ResolvedUserInput::Skill { name, path } => {
                     format!("Selected ASM skill {name}: {}", path.display())
                 }
-                UserInput::Mention { name, path } => {
+                ResolvedUserInput::Mention { name, path } => {
                     format!("Selected ASM capability {name}: {path}")
                 }
                 _ => continue,
             };
-            *part = UserInput::Text {
+            *part = ResolvedUserInput::Text {
                 text,
                 text_elements: Vec::new(),
             };
