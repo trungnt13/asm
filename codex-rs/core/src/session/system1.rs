@@ -51,9 +51,9 @@ pub(super) struct System1Baseline(pub(super) Option<ReasoningEffort>);
 
 const RUBRIC: &str = "Start from task_baseline_effort, not last_effort. Keep the baseline unless concrete evidence warrants a change. Judge the whole next response: what must this model decide, produce, or verify?
 
-Lower effort when the judgment is settled. Drop directly to Medium for an exact command, a known check, or a verified report. Drop from XHigh to High when the design is settled but implementation or interpretation still requires care.
+Lower effort when the judgment is settled. For direct execution or a verified report, use the lowest offered level that suffices. For implementation or interpretation that still needs care, use the matching choice description.
 
-Raise effort when deeper reasoning could change the outcome. Use High for substantive work within the model’s normal range. Use XHigh when the model must distinguish plausible causes, reconcile interacting constraints, or catch a subtle, consequential error.
+Raise effort when deeper reasoning is likely to materially improve the outcome. Consider whether the model must distinguish plausible causes, reconcile interacting constraints, or catch a subtle, consequential error. Move directly to the offered level that fits; do not escalate just because a higher level exists.
 
 Separate missing information from difficult reasoning. Retrieving a known fact may be easy; deciding what to retrieve or what it proves may be hard. A clear instruction does not imply an easy response.
 

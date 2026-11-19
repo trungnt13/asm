@@ -5524,7 +5524,7 @@
           "type": "string"
         },
         "low_effort_description": {
-          "default": "Straightforward coding, focused searches, and bounded analysis.",
+          "default": "Direct execution or reporting a verified result when no judgment remains.",
           "type": "string"
         },
         "max_context_bytes": {
@@ -5547,7 +5547,7 @@
           "type": "string"
         },
         "medium_effort_description": {
-          "default": "Settled work: execute a known command, make a scoped edit, or verify a result.",
+          "default": "Settled work that still needs care: make a scoped edit or verify a result.",
           "type": "string"
         },
         "min_effort": {

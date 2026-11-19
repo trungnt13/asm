@@ -661,12 +661,12 @@ The endpoint receives bounded conversation evidence and the `api_key_env` creden
 
 Match each allowed effort to its named selection guidance without shifting descriptions by model default. Keep catalog meanings and supported choices model-specific; retain fixed direct-execution descriptions for `none` and `minimal`.
 
-Keep choice descriptions separate from the selection/safety rubric. Send only allowed main choices; warmup retains its synthetic low/medium pair. A replacement rubric must not remove or duplicate descriptions. Default description text:
+Keep choice descriptions separate from the selection/safety rubric. The built-in rubric refers to the offered range rather than naming tiers that may be unavailable. Send only allowed main choices; warmup retains its synthetic low/medium pair. A replacement rubric must not remove or duplicate descriptions. Default description text:
 
 ```toml
 [system1]
-low_effort_description = "Straightforward coding, focused searches, and bounded analysis."
-medium_effort_description = "Settled work: execute a known command, make a scoped edit, or verify a result."
+low_effort_description = "Direct execution or reporting a verified result when no judgment remains."
+medium_effort_description = "Settled work that still needs care: make a scoped edit or verify a result."
 high_effort_description = "Substantive work within the model’s normal range, including implementation or interpretation that requires care."
 xhigh_effort_description = "Distinguishing plausible causes, reconciling interacting constraints, or catching subtle, consequential errors."
 max_effort_description = "Exceptionally difficult problems requiring the maximum supported reasoning budget."
@@ -679,7 +679,7 @@ If configured, replace the built-in rubric with unchanged `rubric_instructions`.
 - For each allowed choice, send labeled `Model meaning` and `Selection guidance` sections. Trim catalog meaning to 1024 UTF-8 bytes; use `unavailable` for missing, blank, or fallback metadata. Preserve full configured guidance, capped at 4096 bytes. The API caps each combined description at 8192 UTF-8 bytes.
 - Reassess the whole next response against the task baseline. Use the nearest offered level if the anchor is out of range; when absent, select the lowest sufficient offered effort. Use the model’s capabilities for this work, without a fixed adjustment by name. Enforce allowed choices and runtime limits in code. Keep classifier instructions/results outside the main conversation.
 
-**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, and encrypted reasoning. Never borrow another turn’s prompt as the current task. By default Decisions receives no images. To send a current-turn user attachment to a named endpoint, set `include_images = true` in that profile. This permission belongs to the session-fixed connection. No top-level image permission is accepted. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
+**Evidence.** Collect genuine user, assistant, and tool evidence, newest first. Exclude injected user instructions, compaction output, and encrypted reasoning. Never borrow another turn’s prompt as the current task. By default Decisions receives no images. To send a current-turn user attachment to a named endpoint, set `include_images = true` in that profile. This permission belongs to the session-fixed connection. Model capability is not permission to send attachments to a second endpoint. No top-level image permission is accepted. Scale scan limits with the budget: at least 128 history/input items and 32 content parts, up to 512 items and 128 parts at 32768 bytes. Older history can remain omitted; do not promise a complete transcript.
 
 With opt-in, allow at most one accepted inline PNG or JPEG per decision, including resolved local images, bounded to a 4 MiB encoded data URL separately from the text evidence limit. Do not fetch URLs or forward file IDs, tool images, previous-turn attachments, or images rejected by input hooks. Skip an image-only decision if no eligible image is available; keep main-model input unchanged. Sanitize the classifier copy, strip metadata, and reduce oversized dimensions. For JEV, pad short sides without stretching the image to meet its 280–1568 pixel limits. Malformed media does not block subsequent decisions. OpenAI uses a low-detail image content part; TypeSafe uses its experimental image header and multipart asset format. Never log the attachment in Decisions diagnostics. Image requests can increase cost and exceed the default 200 ms deadline. To allow up to five seconds for visual decisions, set `decision_timeout_ms = 5000` under `[system1]`; that deadline also applies to text decisions.
 
