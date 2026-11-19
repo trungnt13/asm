@@ -80,7 +80,7 @@ pub(super) async fn run_decision(
         span.record("thread.id", session.thread_id().to_string());
     }
     let started = Instant::now();
-    let image = if let Some(image) = request.image {
+    let images = if let Some(image) = &request.image {
         let minimum_side = match client.backend_name() {
             "typesafe" => 280,
             _ => 0,
@@ -90,15 +90,15 @@ pub(super) async fn run_decision(
             _ = cancellation.cancelled() => return,
             _ = guard.freshness.cancelled() => return,
             result = tokio::time::timeout_at(guard.deadline,
-                tokio::task::spawn_blocking(move || image.prepare(minimum_side))) => match result {
+                image.prepare(minimum_side)) => match result {
                     Ok(Ok(url)) => url,
                     _ => return,
                 },
         }
     } else {
-        None
+        &[]
     };
-    if image.is_none() && request.requires_image {
+    if images.is_empty() && request.requires_image {
         return;
     }
     let timeout = guard.deadline.saturating_duration_since(started);
@@ -116,7 +116,7 @@ pub(super) async fn run_decision(
                 if let Some(attempt) = &mut attempt {
                     attempt.mark_http_attempted(client.backend_name());
                 }
-                client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices, image.as_slice()).await
+                client.choose_effort(&request.model, &request.input, &request.instructions, &request.choices, images).await
             }
         ) => match result {
             Err(_) => {

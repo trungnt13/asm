@@ -1233,13 +1233,6 @@ pub(crate) async fn run_hooks_and_record_inputs(
     let mut blocked_input = false;
     let mut accepted_user_input = false;
     let mut input_error = None;
-    let mut decision_input = Vec::new();
-    let decision_item_limit = turn_context
-        .config
-        .system1
-        .max_context_bytes
-        .div_ceil(/*rhs*/ 64)
-        .max(/*other*/ 128);
     for input_item in recordable_inputs(sess, model_info, input) {
         let input_item = input_item?;
         let hook_outcome = inspect_pending_input(sess, turn_context, &input_item).await;
@@ -1254,19 +1247,6 @@ pub(crate) async fn run_hooks_and_record_inputs(
             blocked_input = true;
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {
-            // Copy-on-write inputs were stripped of unsupported audio. Such a batch exits with
-            // an error below before a subsequent System1 decision can be made.
-            if decision_input.len() < decision_item_limit
-                && let Cow::Borrowed(
-                    item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_)),
-                ) = &input_item
-            {
-                decision_input.push(*item);
-            }
-            if matches!(input_item.as_ref(), TurnInput::UserInput { content, .. } if !content.is_empty())
-            {
-                accepted_user_input = true;
-            }
             // Tool outputs retain their durability barrier, including in mixed input batches.
             let input_persist_context = if persist_context == PersistContext::SteeredUserInput
                 && matches!(input_item.as_ref(), TurnInput::FunctionCallOutput(_))
@@ -1276,6 +1256,11 @@ pub(crate) async fn run_hooks_and_record_inputs(
                 persist_context
             };
             let is_user_input = matches!(input_item.as_ref(), TurnInput::UserInput { content, .. } if !content.is_empty());
+            // Owned inputs were stripped of unsupported audio and cannot lead to a model step.
+            let decision_input = match &input_item {
+                Cow::Borrowed(item @ (TurnInput::UserInput { .. } | TurnInput::InterAgentCommunication(_))) => Some(*item),
+                _ => None,
+            };
             if let Err(error) = record_pending_input(
                 sess,
                 turn_context,
@@ -1288,13 +1273,13 @@ pub(crate) async fn run_hooks_and_record_inputs(
             {
                 // The batch has left the queue. Persist its unrelated siblings before failing.
                 input_error.get_or_insert(error);
-            } else if is_user_input {
-                accepted_user_input = true;
+            } else {
+                accepted_user_input |= is_user_input;
+                if let Some(item) = decision_input {
+                    sess.record_system1_input(turn_context, item);
+                }
             }
         }
-    }
-    if !decision_input.is_empty() {
-        sess.record_system1_input(turn_context, decision_input);
     }
     // The batch has left the input queue. Persist every accepted item before the
     // optional lookup can suspend this task long enough for an interrupt to abort it.

@@ -505,11 +505,7 @@ impl Session {
             .store(/*val*/ false, Ordering::Release);
     }
 
-    pub(super) fn record_system1_input<'a>(
-        &self,
-        turn: &TurnContext,
-        input: impl IntoIterator<Item = &'a TurnInput>,
-    ) {
+    pub(super) fn record_system1_input(&self, turn: &TurnContext, input: &TurnInput) {
         let config = &turn.config.system1;
         if turn
             .extension_data
@@ -638,7 +634,7 @@ impl Session {
                 return;
             }
             if evidence.encrypted_task_unavailable
-                || (evidence.task.trim().is_empty()
+                || (!evidence.has_task_text()
                     && !(session.include_images(config) && evidence.image.is_some()))
             {
                 if evidence.encrypted_task_unavailable {
@@ -692,7 +688,7 @@ impl Session {
             });
             match session.client(&turn.config) {
                 Ok((client, model))
-                    if !evidence.task.trim().is_empty()
+                    if evidence.has_task_text()
                         || (session.include_images(config) && evidence.image.is_some()) =>
                 {
                     Ok((
@@ -705,7 +701,7 @@ impl Session {
                                 .as_ref()
                                 .filter(|_| session.include_images(config))
                                 .map(Arc::clone),
-                            requires_image: evidence.task.trim().is_empty(),
+                            requires_image: !evidence.has_task_text(),
                             instructions: {
                                 let baseline = turn
                                     .extension_data

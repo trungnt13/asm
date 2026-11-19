@@ -38,10 +38,26 @@ enum ImageSource {
 }
 
 impl System1Image {
-    pub(super) fn prepare(&self, minimum_side: u32) -> Option<String> {
-        self.prepared
-            .get_or_init(|| self.prepare_uncached(minimum_side))
-            .clone()
+    #[tracing::instrument(skip_all)]
+    pub(super) async fn prepare(
+        self: &Arc<Self>,
+        minimum_side: u32,
+    ) -> Result<&[String], tokio::task::JoinError> {
+        if let Some(prepared) = self.prepared.get() {
+            return Ok(prepared.as_slice());
+        }
+        let image = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            image
+                .prepared
+                .get_or_init(|| image.prepare_uncached(minimum_side));
+        })
+        .await?;
+        Ok(self
+            .prepared
+            .get()
+            .expect("image preparation completed")
+            .as_slice())
     }
 
     fn prepare_uncached(&self, minimum_side: u32) -> Option<String> {
@@ -83,105 +99,146 @@ impl System1Image {
     }
 }
 
+struct EvidenceMessage {
+    text: String,
+    order: Option<u64>,
+    user: bool,
+}
+
 #[derive(Default)]
 pub(super) struct System1Evidence {
-    pub(super) task: String,
+    original: Option<EvidenceMessage>,
+    latest_user: Option<EvidenceMessage>,
+    agent_steer: String,
     pub(super) encrypted_task_unavailable: bool,
     pub(super) image: Option<Arc<System1Image>>,
-    steer: String,
 }
 
 impl System1Evidence {
-    pub(super) fn ingest<'a>(
-        &mut self,
-        input: impl IntoIterator<Item = &'a TurnInput>,
-        limit: usize,
-        include_images: bool,
-    ) {
-        // Keep scan work bounded, but let larger byte budgets reach more history and parts.
-        let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
-        let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
-        let mut incoming = String::new();
-        let mut encrypted_input = false;
-        let mut image = None;
-        for item in input.into_iter().take(item_limit) {
-            match item {
-                TurnInput::UserInput {
-                    content, metadata, ..
-                } => {
-                    for item in content.iter().take(part_limit) {
-                        if let ResolvedUserInput::Text { text, .. } = item {
-                            append_text(&mut incoming, text, limit / 3);
-                        } else if include_images && image.is_none() && metadata.origin.is_user() {
+    pub(super) fn ingest(&mut self, input: &TurnInput, limit: usize, include_images: bool) {
+        let mut text = String::new();
+        let (order, user) = match input {
+            TurnInput::UserInput {
+                content, metadata, ..
+            } => {
+                let mut image = None;
+                let mut has_media = false;
+                for item in content
+                    .iter()
+                    .take(limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32))
+                {
+                    if let ResolvedUserInput::Text { text: part, .. } = item {
+                        append_text(&mut text, part, limit / 3);
+                    } else if item.is_image() {
+                        has_media = true;
+                        if include_images && metadata.origin.is_user() && image.is_none() {
                             image = decision_image(item);
                         }
                     }
                 }
-                TurnInput::InterAgentCommunication(communication) => {
-                    // Assigned tasks and steering are untrusted text, not message metadata.
-                    if communication.encrypted_content.is_none() {
-                        append_text(&mut incoming, &communication.content, limit / 3);
-                    } else {
-                        encrypted_input = true;
-                        self.encrypted_task_unavailable = true;
-                    }
+                if metadata.origin.is_user() && (has_media || text.trim().is_empty()) {
+                    self.image = image.map(|source| {
+                        Arc::new(System1Image {
+                            source,
+                            prepared: OnceLock::new(),
+                        })
+                    });
                 }
-                TurnInput::FunctionCallOutput(_) | TurnInput::ResponseItem(_) => {}
+                (metadata.acceptance_order, metadata.origin.is_user())
             }
-        }
-        if (!incoming.is_empty() || image.is_some()) && !encrypted_input {
+            TurnInput::InterAgentCommunication(message) => {
+                if message.encrypted_content.is_some() {
+                    self.encrypted_task_unavailable = true;
+                    return;
+                }
+                append_text(&mut text, &message.content, limit / 3);
+                (None, false)
+            }
+            TurnInput::ResponseItem(_) | TurnInput::FunctionCallOutput(_) => return,
+        };
+        if !text.trim().is_empty() || self.image.is_some() {
             self.encrypted_task_unavailable = false;
         }
-        if image.is_some() {
-            self.image = image.map(|source| {
-                Arc::new(System1Image {
-                    source,
-                    prepared: OnceLock::new(),
-                })
-            });
+        let message = EvidenceMessage { text, order, user };
+        if self.original.is_none() {
+            self.original = Some(message);
+        } else if user {
+            self.latest_user = Some(message);
+        } else {
+            self.agent_steer = message.text;
         }
-        if !incoming.is_empty() {
-            if self.task.is_empty() {
-                self.task = incoming;
-            } else {
-                self.steer = if incoming == self.task {
-                    String::new()
-                } else {
-                    incoming
-                };
-            }
-        }
+    }
+
+    pub(super) fn has_task_text(&self) -> bool {
+        self.latest_user
+            .as_ref()
+            .or(self.original.as_ref())
+            .is_some_and(|m| !m.text.trim().is_empty())
     }
 
     pub(super) fn render(&self, history: &[ResponseItemEnvelope], limit: usize) -> String {
         let item_limit = limit.div_ceil(/*rhs*/ 64).max(/*other*/ 128);
         let part_limit = limit.div_ceil(/*rhs*/ 256).max(/*other*/ 32);
         let mut text = String::new();
-        append_text(&mut text, "Current user task:\n", limit);
-        append_text(
-            &mut text,
-            if self.task.trim().is_empty() {
-                "[Attached image; no text task provided.]"
-            } else {
-                &self.task
-            },
-            limit,
-        );
-        if !self.steer.is_empty() {
-            append_text(&mut text, "\nLatest user steer:\n", limit);
-            append_text(&mut text, &self.steer, limit * 2 / 3);
+        let original = self.original.as_ref();
+        let latest = self.latest_user.as_ref().or(original.filter(|m| m.user));
+        if let Some(message) = latest {
+            append_text(&mut text, "Latest user message:\n", limit);
+            append_text(
+                &mut text,
+                if message.text.trim().is_empty() {
+                    "[Attachment; no text.]"
+                } else {
+                    &message.text
+                },
+                limit,
+            );
+        }
+        if let Some(message) =
+            original.filter(|m| latest.is_none_or(|latest| latest.text != m.text))
+        {
+            if !text.is_empty() {
+                append_text(&mut text, "\n", limit);
+            }
+            append_text(&mut text, "Original task:\n", limit);
+            append_text(
+                &mut text,
+                if message.text.trim().is_empty() {
+                    "[Attachment; no text.]"
+                } else {
+                    &message.text
+                },
+                limit,
+            );
+        }
+        if !self.agent_steer.is_empty() {
+            append_text(&mut text, "\nLatest task update:\n", limit);
+            append_text(&mut text, &self.agent_steer, limit);
         }
         append_text(&mut text, "\nRecent evidence (newest first):\n", limit);
         for envelope in history.iter().rev().take(item_limit) {
             if text.len() >= limit {
                 break;
             }
-            if !envelope
-                .metadata
-                .as_ref()
-                .is_some_and(|metadata| metadata.compaction_output)
-            {
+            if !envelope.metadata.as_ref().is_some_and(|metadata| {
+                metadata.compaction_output
+                    || metadata.user_input_order.is_some_and(|order| {
+                        [original, latest]
+                            .into_iter()
+                            .flatten()
+                            .any(|m| m.order == Some(order))
+                    })
+            }) {
+                let start = text.len();
                 append_item(&mut text, envelope, limit, part_limit);
+                if let Some(user_text) = text[start..].strip_prefix("\nuser: ")
+                    && [original, latest]
+                        .into_iter()
+                        .flatten()
+                        .any(|m| m.text == user_text)
+                {
+                    text.truncate(start);
+                }
             }
         }
         text

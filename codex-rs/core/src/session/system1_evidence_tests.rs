@@ -66,29 +66,32 @@ fn basic_evidence_includes_task_and_conversation_history() {
     ];
     let mut evidence = System1Evidence::default();
     evidence.ingest(
-        &[input("Review performance.")],
+        &input("Review performance."),
         /*limit*/ 8192,
         /*include_images*/ false,
     );
     evidence.ingest(
-        &[input("Review documentation only.")],
+        &input("Review documentation only."),
         /*limit*/ 8192,
         /*include_images*/ false,
     );
     assert_eq!(
         evidence.render(&history, /*limit*/ 8192),
-        "Current user task:\nReview performance.\nLatest user steer:\nReview documentation only.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.\nuser: Review performance.",
+        "Latest user message:\nReview documentation only.\nOriginal task:\nReview performance.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.",
     );
     evidence.ingest(
-        &[input("Review performance.")],
+        &input("Review performance."),
         /*limit*/ 8192,
         /*include_images*/ false,
     );
     assert_eq!(
         evidence.render(&history, /*limit*/ 8192),
-        "Current user task:\nReview performance.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.\nuser: Review performance.",
+        "Latest user message:\nReview performance.\nRecent evidence (newest first):\n\ntool: Latency: 100 ms.\nassistant: I will check the measurements.",
     );
-    assert_eq!(evidence.task, "Review performance.");
+    assert_eq!(
+        evidence.original.as_ref().unwrap().text,
+        "Review performance."
+    );
     assert!(!evidence.encrypted_task_unavailable);
 }
 
@@ -113,14 +116,10 @@ fn basic_evidence_respects_configured_context_budget() {
         /*metadata*/ None,
     )];
     let mut evidence = System1Evidence::default();
-    evidence.ingest(
-        &[input],
-        /*limit*/ 32768,
-        /*include_images*/ false,
-    );
+    evidence.ingest(&input, /*limit*/ 32768, /*include_images*/ false);
     let text = evidence.render(&history, /*limit*/ 32768);
     assert!(text.len() <= 32768);
-    assert!(text.starts_with("Current user task:\n界"));
+    assert!(text.starts_with("Latest user message:\n界"));
     assert!(text.contains("\nassistant: é"));
 
     let user_metadata = Some(CodexHarnessMetadata {
@@ -178,7 +177,11 @@ fn basic_evidence_respects_configured_context_budget() {
         }),
     ));
     let evidence = System1Evidence {
-        task: "Current task.".to_string(),
+        original: Some(EvidenceMessage {
+            text: "Current task.".to_string(),
+            order: None,
+            user: true,
+        }),
         ..Default::default()
     };
     let default_text = evidence.render(&history, /*limit*/ 8192);
