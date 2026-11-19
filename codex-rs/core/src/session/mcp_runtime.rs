@@ -145,6 +145,7 @@ impl Session {
     ) -> BoxFuture<'a, McpRuntimeProjection> {
         Box::pin(async move {
             if self.isolation == codex_extension_api::SessionIsolation::Isolated
+                || config.subagent_mcp_disabled
                 || self
                     .services
                     .mcp_thread_init

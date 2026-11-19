@@ -35,6 +35,7 @@ use codex_config::config_toml::ProjectConfig;
 use codex_config::config_toml::RealtimeAudioConfig;
 use codex_config::config_toml::RealtimeConfig;
 use codex_config::config_toml::ResponseProcessMode;
+use codex_config::config_toml::SubagentToolsToml;
 use codex_config::config_toml::ThreadStoreToml;
 use codex_config::config_toml::validate_model_providers;
 use codex_config::loader::load_config_layers_state;
@@ -675,6 +676,10 @@ pub struct Config {
     /// Model-specific defaults replace inherited reasoning for V2 spawned children.
     /// Explicit spawn efforts and role efforts take precedence.
     pub subagent_default_reasoning: HashMap<String, ReasoningEffort>,
+
+    pub(crate) subagent_tools: SubagentToolsToml,
+    // Unlike the policy table, this flag applies to the current thread only.
+    pub(crate) subagent_mcp_disabled: bool,
 
     /// Model used specifically for review sessions.
     pub review_model: Option<String>,
@@ -4882,6 +4887,8 @@ impl Config {
             service_tier,
             subagent_service_tiers: cfg.subagent_service_tiers,
             subagent_default_reasoning: cfg.subagent_default_reasoning,
+            subagent_tools: cfg.subagent_tools,
+            subagent_mcp_disabled: false,
             review_model,
             model_context_window: cfg.model_context_window,
             role_model_context_window: None,

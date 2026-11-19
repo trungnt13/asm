@@ -32,6 +32,7 @@ use crate::types::ToolSuggestConfig;
 use crate::types::Tui;
 use crate::types::UriBasedFileOpener;
 use crate::types::WindowsToml;
+use codex_features::Feature;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
@@ -169,6 +170,50 @@ pub struct RolloutTraceToml {
     pub max_payload_bytes: Option<usize>,
     /// Maximum bytes for the manifest, event log, and compressed payload shards. Defaults to 256 MiB.
     pub max_bytes: Option<u64>,
+}
+
+/// Tool restrictions for native spawned agents.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SubagentToolsToml {
+    /// Do not connect to MCP servers or expose their tools.
+    pub disable_mcp: bool,
+    /// Turn off these features in subagents without changing the parent.
+    pub disabled_features: Vec<SubagentToolFeature>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentToolFeature {
+    Apps,
+    Plugins,
+    RemotePlugin,
+    PluginSharing,
+    BrowserUse,
+    BrowserUseExternal,
+    ComputerUse,
+    ImageGeneration,
+    InAppBrowser,
+    SkillSearch,
+    SkillMcpDependencyInstall,
+}
+
+impl From<SubagentToolFeature> for Feature {
+    fn from(feature: SubagentToolFeature) -> Self {
+        match feature {
+            SubagentToolFeature::Apps => Self::Apps,
+            SubagentToolFeature::Plugins => Self::Plugins,
+            SubagentToolFeature::RemotePlugin => Self::RemotePlugin,
+            SubagentToolFeature::PluginSharing => Self::PluginSharing,
+            SubagentToolFeature::BrowserUse => Self::BrowserUse,
+            SubagentToolFeature::BrowserUseExternal => Self::BrowserUseExternal,
+            SubagentToolFeature::ComputerUse => Self::ComputerUse,
+            SubagentToolFeature::ImageGeneration => Self::ImageGeneration,
+            SubagentToolFeature::InAppBrowser => Self::InAppBrowser,
+            SubagentToolFeature::SkillSearch => Self::SkillSearch,
+            SubagentToolFeature::SkillMcpDependencyInstall => Self::SkillMcpDependencyInstall,
+        }
+    }
 }
 
 /// Base config deserialized from ~/.codex/config.toml.
@@ -489,6 +534,10 @@ pub struct ConfigToml {
     /// Explicit spawn efforts and role efforts take precedence.
     #[serde(default)]
     pub subagent_default_reasoning: HashMap<String, ReasoningEffort>,
+
+    /// Disable selected tool capabilities in native spawned agents.
+    #[serde(default)]
+    pub subagent_tools: SubagentToolsToml,
 
     /// Base URL for requests to ChatGPT (as opposed to the OpenAI API).
     pub chatgpt_base_url: Option<String>,

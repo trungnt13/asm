@@ -2826,6 +2826,36 @@ impl ThreadManagerState {
                 thread.session.services.mcp_runtime.revoke_ema();
             }
         }
+        if matches!(
+            &session_source,
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. })
+        ) {
+            if !config.subagent_tools.disabled_features.is_empty() {
+                let disabled_features = config
+                    .subagent_tools
+                    .disabled_features
+                    .iter()
+                    .copied()
+                    .map(Feature::from);
+                let mut features = config.features.get().clone();
+                for feature in disabled_features.clone() {
+                    features.disable(feature);
+                }
+                config.features.set(features).map_err(|err| {
+                    CodexErr::InvalidRequest(format!("invalid subagent_tools policy: {err}"))
+                })?;
+                if let Some(feature) = disabled_features
+                    .into_iter()
+                    .find(|&feature| config.features.enabled(feature))
+                {
+                    return Err(CodexErr::InvalidRequest(format!(
+                        "subagent_tools cannot disable {} under the current feature requirements",
+                        feature.key()
+                    )));
+                }
+            }
+            config.subagent_mcp_disabled = config.subagent_tools.disable_mcp;
+        }
         if !session_source.is_internal()
             && let Err(error) = runtime
                 .shutdown

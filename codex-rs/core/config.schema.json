@@ -5415,6 +5415,42 @@
       ],
       "description": "An explicit default overrides an MCP provider from a lower configuration layer."
     },
+    "SubagentToolFeature": {
+      "enum": [
+        "apps",
+        "plugins",
+        "remote_plugin",
+        "plugin_sharing",
+        "browser_use",
+        "browser_use_external",
+        "computer_use",
+        "image_generation",
+        "in_app_browser",
+        "skill_search",
+        "skill_mcp_dependency_install"
+      ],
+      "type": "string"
+    },
+    "SubagentToolsToml": {
+      "additionalProperties": false,
+      "description": "Tool restrictions for native spawned agents.",
+      "properties": {
+        "disable_mcp": {
+          "default": false,
+          "description": "Do not connect to MCP servers or expose their tools.",
+          "type": "boolean"
+        },
+        "disabled_features": {
+          "default": [],
+          "description": "Turn off these features in subagents without changing the parent.",
+          "items": {
+            "$ref": "#/definitions/SubagentToolFeature"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "System1Backend": {
       "enum": [
         "openai",
@@ -9806,6 +9842,18 @@
       "default": {},
       "description": "Child-only routing overrides, keyed by model and reasoning effort.",
       "type": "object"
+    },
+    "subagent_tools": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/SubagentToolsToml"
+        }
+      ],
+      "default": {
+        "disable_mcp": false,
+        "disabled_features": []
+      },
+      "description": "Disable selected tool capabilities in native spawned agents."
     },
     "suppress_unstable_features_warning": {
       "description": "Suppress warnings about unstable (under development) features.",
